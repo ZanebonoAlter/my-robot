@@ -86,6 +86,10 @@ export function useTagMergePreviewApi() {
       })
     },
 
+    async getMergePreviewStatus() {
+      return apiClient.get<{ scan_running: boolean; eval_running: boolean }>('/topic-tags/merge-preview/status')
+    },
+
     async searchTags(query: string) {
       return apiClient.get<Array<{ id: number; label: string; slug: string; category: string; feed_count: number }>>(
         `/topic-tags/search?q=${encodeURIComponent(query)}&limit=20`,

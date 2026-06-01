@@ -435,11 +435,21 @@ func AddToGroupHandler(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"success": true})
 }
 
+// MergePreviewStatusHandler returns whether scan and eval are currently running.
+// GET /api/topic-tags/merge-preview/status
+func MergePreviewStatusHandler(c *gin.Context) {
+	c.JSON(http.StatusOK, gin.H{
+		"scan_running": IsScanRunning(),
+		"eval_running": IsEvaluateRunning(),
+	})
+}
+
 // RegisterTagMergePreviewRoutes registers the preview and custom-name merge endpoints.
 func RegisterTagMergePreviewRoutes(rg *gin.RouterGroup) {
 	tags := rg.Group("/topic-tags")
 	{
 		tags.GET("/merge-preview", ScanMergePreviewHandler)
+		tags.GET("/merge-preview/status", MergePreviewStatusHandler)
 		tags.POST("/merge-with-name", MergeTagsWithCustomNameHandler)
 		tags.POST("/merge-preview/dismiss", DismissSuggestionHandler)
 		tags.POST("/merge-preview/scan", TriggerScanHandler)

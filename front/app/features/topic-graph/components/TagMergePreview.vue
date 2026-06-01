@@ -42,6 +42,7 @@ let scanEs: EventSource | null = null
 const selectedKeys = ref<Set<string>>(new Set())
 const merging = ref(false)
 const mergedCount = ref(0)
+const mergeProgress = ref<{ done: number; total: number } | null>(null)
 
 // Search (add tag to group)
 const searchingGroupId = ref<number | null>(null)
@@ -105,6 +106,15 @@ function clearSelection() {
 }
 
 const selectedCount = computed(() => selectedKeys.value.size)
+
+const hasMergeableSuggestions = computed(() => {
+  return groups.value?.some(g =>
+    g.suggestions?.some(s => {
+      const verdict = parseVerdict(s.llm_verdict)
+      return !verdict || verdict.should_merge
+    })
+  ) ?? false
+})
 
 // --- Load groups ---
 async function loadGroups() {
@@ -194,31 +204,41 @@ function cancelScan() {
 async function mergeSelected() {
   if (selectedKeys.value.size === 0) return
   merging.value = true
+  mergeProgress.value = { done: 0, total: selectedKeys.value.size }
   let count = 0
 
-  for (const key of selectedKeys.value) {
-    const [targetStr, newStr] = key.split(':')
-    const targetTagId = Number(targetStr)
-    const newTagId = Number(newStr)
+  try {
+    for (const key of selectedKeys.value) {
+      const [targetStr, newStr] = key.split(':')
+      const targetTagId = Number(targetStr)
+      const newTagId = Number(newStr)
 
-    // Find the group and suggestion
-    const group = groups.value.find(g => g.target_tag_id === targetTagId)
-    const sug = group?.suggestions.find(s => s.new_tag_id === newTagId)
-    if (!group || !sug) continue
+      // Find the group and suggestion
+      const group = groups.value.find(g => g.target_tag_id === targetTagId)
+      const sug = group?.suggestions.find(s => s.new_tag_id === newTagId)
+      if (!group || !sug) {
+        mergeProgress.value!.done++
+        continue
+      }
 
-    const verdict = parseVerdict(sug.llm_verdict)
-    const newName = verdict?.suggested_name || group.target_label
+      const verdict = parseVerdict(sug.llm_verdict)
+      const newName = verdict?.suggested_name || group.target_label
 
-    try {
-      await api.mergeTagsWithCustomName({
-        sourceTagId: newTagId,
-        targetTagId,
-        newName,
-      })
-      count++
-    } catch (err) {
-      console.error(`Failed to merge ${sug.new_label} → ${group.target_label}:`, err)
+      try {
+        await api.mergeTagsWithCustomName({
+          sourceTagId: newTagId,
+          targetTagId,
+          newName,
+        })
+        count++
+      } catch (err) {
+        console.error(`Failed to merge ${sug.new_label} → ${group.target_label}:`, err)
+      }
+
+      mergeProgress.value!.done++
     }
+  } finally {
+    mergeProgress.value = null
   }
 
   mergedCount.value += count
@@ -353,6 +373,15 @@ function handleClose() {
               <span>{{ evaluating ? '评估中...' : 'AI 评估' }}</span>
             </button>
             <button
+              type="button"
+              class="tm-btn tm-btn--accent"
+              :disabled="!hasMergeableSuggestions"
+              @click="selectAllMergeable()"
+            >
+              <Icon icon="mdi:check-all" width="16" />
+              <span>按 AI 建议全选</span>
+            </button>
+            <button
               v-if="!scanning"
               type="button"
               class="tm-btn"
@@ -386,7 +415,7 @@ function handleClose() {
             >
               <Icon v-if="merging" icon="mdi:loading" width="14" class="animate-spin" />
               <Icon v-else icon="mdi:call-merge" width="14" />
-              <span>合并选中 ({{ selectedCount }})</span>
+              <span>{{ mergeProgress ? `${mergeProgress.done}/${mergeProgress.total} 已合并` : `合并选中 (${selectedCount})` }}</span>
             </button>
           </div>
         </div>

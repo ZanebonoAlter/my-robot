@@ -417,5 +417,86 @@ func postgresMigrations() []Migration {
 				return nil
 			},
 		},
+
+		// ── FK cascade: remove duplicate NO ACTION constraints on topic_tags children ──
+		{
+			Version:     "20260601_0001",
+			Description: "Remove duplicate NO ACTION foreign keys on topic_tags child tables, ensure all are ON DELETE CASCADE.",
+			Up: func(db *gorm.DB) error {
+				stmts := []string{
+					// embedding_queues
+					`DO $$ BEGIN
+						IF EXISTS (SELECT 1 FROM information_schema.table_constraints WHERE constraint_name = 'fk_embedding_queues_tag' AND table_name = 'embedding_queues') THEN
+							ALTER TABLE embedding_queues DROP CONSTRAINT fk_embedding_queues_tag;
+						END IF;
+					END $$`,
+
+					// merge_reembedding_queues
+					`DO $$ BEGIN
+						IF EXISTS (SELECT 1 FROM information_schema.table_constraints WHERE constraint_name = 'fk_merge_reembedding_queues_target_tag' AND table_name = 'merge_reembedding_queues') THEN
+							ALTER TABLE merge_reembedding_queues DROP CONSTRAINT fk_merge_reembedding_queues_target_tag;
+						END IF;
+					END $$`,
+					`DO $$ BEGIN
+						IF EXISTS (SELECT 1 FROM information_schema.table_constraints WHERE constraint_name = 'fk_merge_reembedding_queues_source_tag' AND table_name = 'merge_reembedding_queues') THEN
+							ALTER TABLE merge_reembedding_queues DROP CONSTRAINT fk_merge_reembedding_queues_source_tag;
+						END IF;
+					END $$`,
+
+					// topic_tag_embeddings
+					`DO $$ BEGIN
+						IF EXISTS (SELECT 1 FROM information_schema.table_constraints WHERE constraint_name = 'fk_topic_tags_embedding' AND table_name = 'topic_tag_embeddings') THEN
+							ALTER TABLE topic_tag_embeddings DROP CONSTRAINT fk_topic_tags_embedding;
+						END IF;
+					END $$`,
+					`DO $$ BEGIN
+						IF EXISTS (SELECT 1 FROM information_schema.table_constraints WHERE constraint_name = 'fk_topic_tags_embeddings' AND table_name = 'topic_tag_embeddings') THEN
+							ALTER TABLE topic_tag_embeddings DROP CONSTRAINT fk_topic_tags_embeddings;
+						END IF;
+					END $$`,
+
+					// topic_tag_relations
+					`DO $$ BEGIN
+						IF EXISTS (SELECT 1 FROM information_schema.table_constraints WHERE constraint_name = 'fk_topic_tag_relations_child' AND table_name = 'topic_tag_relations') THEN
+							ALTER TABLE topic_tag_relations DROP CONSTRAINT fk_topic_tag_relations_child;
+						END IF;
+					END $$`,
+					`DO $$ BEGIN
+						IF EXISTS (SELECT 1 FROM information_schema.table_constraints WHERE constraint_name = 'fk_topic_tag_relations_parent' AND table_name = 'topic_tag_relations') THEN
+							ALTER TABLE topic_tag_relations DROP CONSTRAINT fk_topic_tag_relations_parent;
+						END IF;
+					END $$`,
+
+					// topic_tags self-ref (merged_into): drop old NO ACTION, add CASCADE
+					`DO $$ BEGIN
+						IF EXISTS (SELECT 1 FROM information_schema.table_constraints WHERE constraint_name = 'fk_topic_tags_merged_into' AND table_name = 'topic_tags') THEN
+							ALTER TABLE topic_tags DROP CONSTRAINT fk_topic_tags_merged_into;
+						END IF;
+					END $$`,
+					`DO $$ BEGIN
+						IF EXISTS (SELECT 1 FROM information_schema.table_constraints WHERE constraint_name = 'topic_tags_merged_into_id_fkey' AND table_name = 'topic_tags') THEN
+							ALTER TABLE topic_tags DROP CONSTRAINT topic_tags_merged_into_id_fkey;
+						END IF;
+					END $$`,
+					`ALTER TABLE topic_tags ADD CONSTRAINT topic_tags_merged_into_id_fkey
+						FOREIGN KEY (merged_into_id) REFERENCES topic_tags(id) ON DELETE CASCADE`,
+				}
+				for _, s := range stmts {
+					if err := db.Exec(s).Error; err != nil {
+						return fmt.Errorf("topic_tags FK cascade migration: %w", err)
+					}
+				}
+				return nil
+			},
+		},
+
+		// ── Drop deprecated vector text column ────────────────────
+		{
+			Version:     "20260601_0001",
+			Description: "Drop deprecated vector text column from topic_tag_embeddings.",
+			Up: func(db *gorm.DB) error {
+				return db.Exec("ALTER TABLE topic_tag_embeddings DROP COLUMN IF EXISTS vector").Error
+			},
+		},
 	}
 }

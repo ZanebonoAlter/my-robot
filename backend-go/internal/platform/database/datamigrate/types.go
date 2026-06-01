@@ -52,8 +52,6 @@ type SampleCheck struct {
 type EmbeddingVectorCheck struct {
 	Table        string
 	PrimaryKey   any
-	SourceVector string
-	LegacyVector string
 	TargetVector string
 }
 
@@ -83,7 +81,7 @@ func DefaultTableSpecs() []TableSpec {
 		{Name: "reading_behaviors", PrimaryKey: "id", SampleColumns: []string{"article_id", "feed_id", "event_type"}},
 		{Name: "user_preferences", PrimaryKey: "id", SampleColumns: []string{"feed_id", "category_id", "preference_score"}},
 		{Name: "topic_tags", PrimaryKey: "id", SampleColumns: []string{"slug", "label", "category"}},
-		{Name: "topic_tag_embeddings", PrimaryKey: "id", SampleColumns: []string{"topic_tag_id", "dimension", "model", "text_hash", "vector"}, AllowedMissingTargetColumns: []string{"vector"}},
+		{Name: "topic_tag_embeddings", PrimaryKey: "id", SampleColumns: []string{"topic_tag_id", "dimension", "model", "text_hash"}},
 		{Name: "topic_tag_analyses", PrimaryKey: "id", SampleColumns: []string{"topic_tag_id", "analysis_type", "window_type"}},
 		{Name: "topic_analysis_cursors", PrimaryKey: "id", SampleColumns: []string{"topic_tag_id", "analysis_type", "window_type"}},
 

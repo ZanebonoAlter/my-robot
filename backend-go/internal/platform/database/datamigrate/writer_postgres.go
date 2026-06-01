@@ -109,7 +109,7 @@ func (w *PostgresWriter) ImportTable(ctx context.Context, spec TableSpec, source
 		return 0, err
 	}
 
-	sharedColumns, includeEmbeddingVector, err := validateImportColumns(spec, sourceColumns, targetColumns)
+	sharedColumns, err := validateImportColumns(spec, sourceColumns, targetColumns)
 	if err != nil {
 		return 0, err
 	}
@@ -119,16 +119,11 @@ func (w *PostgresWriter) ImportTable(ctx context.Context, spec TableSpec, source
 		return 0, err
 	}
 
-	insertColumns := make([]string, 0, len(sharedColumns)+1)
-	valueExprs := make([]string, 0, len(sharedColumns)+1)
+	insertColumns := make([]string, 0, len(sharedColumns))
+	valueExprs := make([]string, 0, len(sharedColumns))
 	for _, column := range sharedColumns {
 		insertColumns = append(insertColumns, column)
 		valueExprs = append(valueExprs, "?")
-	}
-
-	if includeEmbeddingVector {
-		insertColumns = append(insertColumns, "embedding")
-		valueExprs = append(valueExprs, "CAST(? AS vector)")
 	}
 
 	if len(insertColumns) == 0 {
@@ -152,10 +147,6 @@ func (w *PostgresWriter) ImportTable(ctx context.Context, spec TableSpec, source
 			}
 			args = append(args, normalized)
 		}
-		if includeEmbeddingVector {
-			args = append(args, row["vector"])
-		}
-
 		if err := w.db.WithContext(ctx).Exec(statement, args...).Error; err != nil {
 			return fmt.Errorf("insert into %s: %w", spec.Name, err)
 		}
@@ -169,7 +160,7 @@ func (w *PostgresWriter) ImportTable(ctx context.Context, spec TableSpec, source
 	return imported, nil
 }
 
-func validateImportColumns(spec TableSpec, sourceColumns []string, targetColumns []string) ([]string, bool, error) {
+func validateImportColumns(spec TableSpec, sourceColumns []string, targetColumns []string) ([]string, error) {
 	targetSet := make(map[string]bool, len(targetColumns))
 	for _, column := range targetColumns {
 		targetSet[column] = true
@@ -193,15 +184,14 @@ func validateImportColumns(spec TableSpec, sourceColumns []string, targetColumns
 		missing = append(missing, column)
 	}
 
-	includeEmbeddingVector := spec.Name == "topic_tag_embeddings" && targetSet["embedding"] && contains(sourceColumns, "vector")
 	if len(missing) > 0 {
-		return nil, false, fmt.Errorf("target schema drift for %s: missing target columns for source fields %s", spec.Name, strings.Join(missing, ", "))
+		return nil, fmt.Errorf("target schema drift for %s: missing target columns for source fields %s", spec.Name, strings.Join(missing, ", "))
 	}
 	if len(shared) == 0 {
-		return nil, false, fmt.Errorf("no shared columns found for table %s", spec.Name)
+		return nil, fmt.Errorf("no shared columns found for table %s", spec.Name)
 	}
 
-	return shared, includeEmbeddingVector, nil
+	return shared, nil
 }
 
 func (w *PostgresWriter) CountRows(ctx context.Context, table string) (int64, error) {
@@ -346,18 +336,13 @@ func (w *PostgresWriter) LoadEmbeddingChecks(ctx context.Context, spec TableSpec
 		targetSet[column] = true
 	}
 
-	legacyVectorExpr := "''"
-	if targetSet["vector"] {
-		legacyVectorExpr = "COALESCE(vector, '')"
-	}
 	embeddingExpr := "''"
 	if targetSet["embedding"] {
 		embeddingExpr = "COALESCE(embedding::text, '')"
 	}
 
-	query := fmt.Sprintf("SELECT %s, %s, %s FROM %s ORDER BY %s LIMIT %d",
+	query := fmt.Sprintf("SELECT %s, %s FROM %s ORDER BY %s LIMIT %d",
 		quoteIdentifier(spec.PrimaryKey),
-		legacyVectorExpr,
 		embeddingExpr,
 		quoteIdentifier(spec.Name),
 		quoteIdentifier(spec.PrimaryKey),
@@ -373,12 +358,11 @@ func (w *PostgresWriter) LoadEmbeddingChecks(ctx context.Context, spec TableSpec
 	checks := make([]EmbeddingVectorCheck, 0, limit)
 	for rows.Next() {
 		var primaryKey any
-		var legacyVector string
 		var targetVector string
-		if err := rows.Scan(&primaryKey, &legacyVector, &targetVector); err != nil {
+		if err := rows.Scan(&primaryKey, &targetVector); err != nil {
 			return nil, fmt.Errorf("scan embedding check for %s: %w", spec.Name, err)
 		}
-		checks = append(checks, EmbeddingVectorCheck{Table: spec.Name, PrimaryKey: primaryKey, LegacyVector: legacyVector, TargetVector: targetVector})
+		checks = append(checks, EmbeddingVectorCheck{Table: spec.Name, PrimaryKey: primaryKey, TargetVector: targetVector})
 	}
 
 	if err := rows.Err(); err != nil {

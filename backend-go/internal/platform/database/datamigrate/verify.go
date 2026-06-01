@@ -128,26 +128,8 @@ func (v *Verifier) Verify(ctx context.Context, specs []TableSpec) (*Verification
 func VerifyEmbeddingVectorValuesPresent(checks []EmbeddingVectorCheck) error {
 	problems := make([]string, 0)
 	for _, check := range checks {
-		if strings.TrimSpace(check.SourceVector) == "" {
-			continue
-		}
 		if strings.TrimSpace(check.TargetVector) == "" {
 			problems = append(problems, fmt.Sprintf("%s[%v] missing target embedding vector", check.Table, check.PrimaryKey))
-			continue
-		}
-
-		sourceNormalized, err := normalizeVectorLiteral(check.SourceVector)
-		if err != nil {
-			problems = append(problems, fmt.Sprintf("%s[%v] invalid source vector: %v", check.Table, check.PrimaryKey, err))
-			continue
-		}
-		targetNormalized, err := normalizeVectorLiteral(check.TargetVector)
-		if err != nil {
-			problems = append(problems, fmt.Sprintf("%s[%v] invalid target vector: %v", check.Table, check.PrimaryKey, err))
-			continue
-		}
-		if sourceNormalized != targetNormalized {
-			problems = append(problems, fmt.Sprintf("%s[%v] target embedding mismatch", check.Table, check.PrimaryKey))
 		}
 	}
 
@@ -313,33 +295,10 @@ func (v *Verifier) compareEmbeddingVectors(ctx context.Context, spec TableSpec, 
 		check := byPrimaryKey[key]
 		check.Table = spec.Name
 		check.PrimaryKey = primaryKey
-		check.SourceVector = fmt.Sprintf("%v", sourceRow["vector"])
 		checks = append(checks, check)
 	}
 
 	return checks, nil
-}
-
-func normalizeVectorLiteral(value string) (string, error) {
-	trimmed := strings.TrimSpace(value)
-	trimmed = strings.TrimPrefix(trimmed, "[")
-	trimmed = strings.TrimSuffix(trimmed, "]")
-	trimmed = strings.TrimSpace(trimmed)
-	if trimmed == "" {
-		return "", nil
-	}
-
-	parts := strings.Split(trimmed, ",")
-	normalized := make([]string, 0, len(parts))
-	for _, part := range parts {
-		clean := strings.TrimSpace(part)
-		if clean == "" {
-			return "", fmt.Errorf("empty vector element")
-		}
-		normalized = append(normalized, clean)
-	}
-
-	return strings.Join(normalized, ","), nil
 }
 
 func comparableValue(value any) string {

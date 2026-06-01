@@ -134,13 +134,9 @@ async function loadGroups() {
   }
 }
 
-// --- Evaluate ---
-async function triggerEvaluate() {
+// --- SSE helpers ---
+function createEvalSSE() {
   evaluating.value = true
-  evalProgress.value = null
-  error.value = null
-
-  // 先建立 SSE 连接，再 POST 触发（避免竞态）
   evalEs = api.createEvaluateEventSource((progress: EvaluateProgress) => {
     evalProgress.value = progress
     if (progress.status === 'done' || progress.status === 'error') {
@@ -152,6 +148,31 @@ async function triggerEvaluate() {
       }
     }
   })
+}
+
+function createScanSSE() {
+  scanning.value = true
+  scanEs = api.createScanEventSource((progress: ScanProgress) => {
+    scanProgress.value = progress
+    if (progress.status === 'done' || progress.status === 'error') {
+      scanEs?.close()
+      scanEs = null
+      scanning.value = false
+      if (progress.status === 'done') {
+        void loadGroups()
+      }
+    }
+  })
+}
+
+// --- Evaluate ---
+async function triggerEvaluate() {
+  evaluating.value = true
+  evalProgress.value = null
+  error.value = null
+
+  // 先建立 SSE 连接，再 POST 触发（避免竞态）
+  createEvalSSE()
 
   const response = await api.triggerEvaluate()
   if (!response.success) {
@@ -181,17 +202,7 @@ async function triggerFullScan() {
   error.value = null
 
   // 先建立 SSE 连接，再 POST 触发（避免竞态）
-  scanEs = api.createScanEventSource((progress: ScanProgress) => {
-    scanProgress.value = progress
-    if (progress.status === 'done' || progress.status === 'error') {
-      scanEs?.close()
-      scanEs = null
-      scanning.value = false
-      if (progress.status === 'done') {
-        void loadGroups()
-      }
-    }
-  })
+  createScanSSE()
 
   const response = await api.triggerFullScan()
   if (!response.success) {
@@ -341,9 +352,27 @@ function formatSimilarity(similarity: number) {
   return `${Math.round(similarity * 100)}%`
 }
 
+// --- Recover running state ---
+async function recoverRunningState() {
+  try {
+    const response = await api.getMergePreviewStatus()
+    if (response.success && response.data) {
+      if (response.data.eval_running) {
+        createEvalSSE()
+      }
+      if (response.data.scan_running) {
+        createScanSSE()
+      }
+    }
+  } catch (err) {
+    console.error('查询合并预览状态失败:', err)
+  }
+}
+
 // --- Lifecycle ---
 watch(() => props.visible, (isVisible) => {
   if (isVisible) {
+    void recoverRunningState()
     void loadGroups()
   }
 }, { immediate: true })

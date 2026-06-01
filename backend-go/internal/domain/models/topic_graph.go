@@ -120,7 +120,6 @@ type TopicTagEmbedding struct {
 	ID            uint      `gorm:"primaryKey" json:"id"`
 	TopicTagID    uint      `gorm:"not null;uniqueIndex:idx_topic_tag_embeddings_tag_type_hash" json:"topic_tag_id"`
 	EmbeddingType string    `gorm:"size:20;not null;default:identity;uniqueIndex:idx_topic_tag_embeddings_tag_type_hash" json:"embedding_type"`
-	Vector        string    `gorm:"type:text;not null" json:"vector"` // Deprecated: legacy JSON text payload. Use EmbeddingVec for pgvector.
 	EmbeddingVec  string    `gorm:"type:vector;column:embedding" json:"-"`
 	Dimension     int       `gorm:"not null" json:"dimension"`                                                   // Vector dimension (e.g., 2048 for text-embedding-3-large)
 	Model         string    `gorm:"size:50;not null" json:"model"`                                               // Model used: "text-embedding-ada-002"

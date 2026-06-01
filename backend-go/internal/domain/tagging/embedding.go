@@ -108,7 +108,7 @@ func (s *EmbeddingService) GetThresholds() EmbeddingMatchThresholds {
 }
 
 // GenerateEmbedding generates an embedding for a tag's text representation
-func (s *EmbeddingService) GenerateEmbedding(ctx context.Context, tag *models.TopicTag, embeddingType string, opts ...EmbeddingTextOptions) (*models.TopicTagEmbedding, error) {
+func (s *EmbeddingService) GenerateEmbedding(ctx context.Context, tag *models.TopicTag, embeddingType string, opts ...EmbeddingTextOptions) (*models.TopicTagEmbedding, []float64, error) {
 	text := buildTagEmbeddingText(tag, embeddingType, opts...)
 	textHash := hashText(embeddingType + "\n" + text)
 
@@ -123,36 +123,28 @@ func (s *EmbeddingService) GenerateEmbedding(ctx context.Context, tag *models.To
 	}
 	result, err := s.router.Embed(ctx, req, airouter.CapabilityEmbedding)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrEmbeddingFailed, err)
+		return nil, nil, fmt.Errorf("%w: %v", ErrEmbeddingFailed, err)
 	}
 
 	if len(result.Embeddings) == 0 || len(result.Embeddings[0]) == 0 {
-		return nil, ErrEmbeddingFailed
+		return nil, nil, ErrEmbeddingFailed
 	}
 
-	// Store embedding as JSON (legacy) and as pgvector format
-	vectorJSON, err := json.Marshal(result.Embeddings[0])
-	if err != nil {
-		return nil, fmt.Errorf("failed to marshal embedding: %w", err)
-	}
-
-	// Build pgvector format string: [0.1,0.2,0.3,...]
 	pgVecStr := floatsToPgVector(result.Embeddings[0])
 
 	embedding := &models.TopicTagEmbedding{
 		TopicTagID:    tag.ID,
 		EmbeddingType: embeddingType,
-		Vector:        string(vectorJSON),
 		EmbeddingVec:  pgVecStr,
 		Dimension:     result.Dimensions,
 		Model:         result.Model,
 		TextHash:      textHash,
 	}
 
-	return embedding, nil
+	return embedding, result.Embeddings[0], nil
 }
 
-func (s *EmbeddingService) GenerateEmbeddingForText(ctx context.Context, tagID uint, embeddingType string, text string) (*models.TopicTagEmbedding, error) {
+func (s *EmbeddingService) GenerateEmbeddingForText(ctx context.Context, tagID uint, embeddingType string, text string) (*models.TopicTagEmbedding, []float64, error) {
 	textHash := hashText(embeddingType + "\n" + text)
 
 	req := airouter.EmbeddingRequest{
@@ -161,16 +153,11 @@ func (s *EmbeddingService) GenerateEmbeddingForText(ctx context.Context, tagID u
 	}
 	result, err := s.router.Embed(ctx, req, airouter.CapabilityEmbedding)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrEmbeddingFailed, err)
+		return nil, nil, fmt.Errorf("%w: %v", ErrEmbeddingFailed, err)
 	}
 
 	if len(result.Embeddings) == 0 || len(result.Embeddings[0]) == 0 {
-		return nil, ErrEmbeddingFailed
-	}
-
-	vectorJSON, err := json.Marshal(result.Embeddings[0])
-	if err != nil {
-		return nil, fmt.Errorf("failed to marshal embedding: %w", err)
+		return nil, nil, ErrEmbeddingFailed
 	}
 
 	pgVecStr := floatsToPgVector(result.Embeddings[0])
@@ -178,14 +165,13 @@ func (s *EmbeddingService) GenerateEmbeddingForText(ctx context.Context, tagID u
 	embedding := &models.TopicTagEmbedding{
 		TopicTagID:    tagID,
 		EmbeddingType: embeddingType,
-		Vector:        string(vectorJSON),
 		EmbeddingVec:  pgVecStr,
 		Dimension:     result.Dimensions,
 		Model:         result.Model,
 		TextHash:      textHash,
 	}
 
-	return embedding, nil
+	return embedding, result.Embeddings[0], nil
 }
 
 func getEventKeywords(tag *models.TopicTag) []string {
@@ -212,17 +198,12 @@ func getEventKeywords(tag *models.TopicTag) []string {
 }
 
 func (s *EmbeddingService) FindSimilarTags(ctx context.Context, tag *models.TopicTag, category string, limit int, embeddingType string) ([]TagCandidate, error) {
-	embedding, err := s.GenerateEmbedding(ctx, tag, embeddingType)
+	_, rawFloats, err := s.GenerateEmbedding(ctx, tag, embeddingType)
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate embedding: %w", err)
 	}
 
-	// Build pgvector format for the query vector
-	var vector []float64
-	if err := json.Unmarshal([]byte(embedding.Vector), &vector); err != nil {
-		return nil, fmt.Errorf("failed to parse embedding vector: %w", err)
-	}
-	pgVecStr := floatsToPgVector(vector)
+	pgVecStr := floatsToPgVector(rawFloats)
 
 	// Use pgvector SQL cosine distance (<=>) for similarity search
 	// Filter out merged tags (only match active tags)

@@ -140,13 +140,7 @@ async function triggerEvaluate() {
   evalProgress.value = null
   error.value = null
 
-  const response = await api.triggerEvaluate()
-  if (!response.success) {
-    error.value = response.error || '评估已在进行中'
-    evaluating.value = false
-    return
-  }
-
+  // 先建立 SSE 连接，再 POST 触发（避免竞态）
   evalEs = api.createEvaluateEventSource((progress: EvaluateProgress) => {
     evalProgress.value = progress
     if (progress.status === 'done' || progress.status === 'error') {
@@ -158,6 +152,19 @@ async function triggerEvaluate() {
       }
     }
   })
+
+  const response = await api.triggerEvaluate()
+  if (!response.success) {
+    // 已有评估运行中 → SSE 连接可继续接收进度
+    if (response.error?.includes('already in progress')) {
+      return
+    }
+    // 其他错误 → 关闭 SSE，重置状态
+    evalEs?.close()
+    evalEs = null
+    evaluating.value = false
+    error.value = response.error || '评估失败'
+  }
 }
 
 function cancelEvaluate() {
@@ -173,13 +180,7 @@ async function triggerFullScan() {
   scanProgress.value = null
   error.value = null
 
-  const response = await api.triggerFullScan()
-  if (!response.success) {
-    error.value = response.error || '扫描已在进行中'
-    scanning.value = false
-    return
-  }
-
+  // 先建立 SSE 连接，再 POST 触发（避免竞态）
   scanEs = api.createScanEventSource((progress: ScanProgress) => {
     scanProgress.value = progress
     if (progress.status === 'done' || progress.status === 'error') {
@@ -191,6 +192,19 @@ async function triggerFullScan() {
       }
     }
   })
+
+  const response = await api.triggerFullScan()
+  if (!response.success) {
+    // 已有扫描运行中 → SSE 连接可继续接收进度
+    if (response.error?.includes('already in progress')) {
+      return
+    }
+    // 其他错误 → 关闭 SSE，重置状态
+    scanEs?.close()
+    scanEs = null
+    scanning.value = false
+    error.value = response.error || '扫描失败'
+  }
 }
 
 function cancelScan() {

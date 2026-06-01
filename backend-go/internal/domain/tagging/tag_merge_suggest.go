@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"syntopica-backend/internal/domain/models"
 	airouter "syntopica-backend/internal/platform/airouter"
@@ -57,6 +58,26 @@ func StartFullScan() bool {
 	go runFullScan(ctx)
 
 	return true
+}
+
+// WaitForScanChannel polls until scan channel exists, with timeout.
+// Returns nil on timeout or context cancellation.
+func WaitForScanChannel(ctx context.Context) <-chan ScanProgress {
+	const maxWait = 30 * time.Second
+	const pollInterval = 200 * time.Millisecond
+	deadline := time.Now().Add(maxWait)
+	for time.Now().Before(deadline) {
+		select {
+		case <-ctx.Done():
+			return nil
+		default:
+		}
+		if ch := GetScanProgressChannel(); ch != nil {
+			return ch
+		}
+		time.Sleep(pollInterval)
+	}
+	return nil
 }
 
 // GetScanProgressChannel returns the channel for SSE streaming.
@@ -206,6 +227,26 @@ func StartEvaluation() bool {
 	go runEvaluation(ctx)
 
 	return true
+}
+
+// WaitForEvaluateChannel polls until eval channel exists, with timeout.
+// Returns nil on timeout or context cancellation.
+func WaitForEvaluateChannel(ctx context.Context) <-chan EvaluateProgress {
+	const maxWait = 30 * time.Second
+	const pollInterval = 200 * time.Millisecond
+	deadline := time.Now().Add(maxWait)
+	for time.Now().Before(deadline) {
+		select {
+		case <-ctx.Done():
+			return nil
+		default:
+		}
+		if ch := GetEvaluateProgressChannel(); ch != nil {
+			return ch
+		}
+		time.Sleep(pollInterval)
+	}
+	return nil
 }
 
 // GetEvaluateProgressChannel returns the channel for SSE streaming.

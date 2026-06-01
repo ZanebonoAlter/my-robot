@@ -324,9 +324,9 @@ func ScanStreamHandler(c *gin.Context) {
 	c.Header("Cache-Control", "no-cache")
 	c.Header("Connection", "keep-alive")
 
-	ch := GetScanProgressChannel()
+	ch := WaitForScanChannel(c.Request.Context())
 	if ch == nil {
-		// No scan running — send idle status and close
+		// Timed out or context cancelled — send idle status and close
 		c.SSEvent("progress", ScanProgress{Status: "idle"})
 		return
 	}
@@ -364,7 +364,7 @@ func EvaluateStreamHandler(c *gin.Context) {
 	c.Header("Cache-Control", "no-cache")
 	c.Header("Connection", "keep-alive")
 
-	ch := GetEvaluateProgressChannel()
+	ch := WaitForEvaluateChannel(c.Request.Context())
 	if ch == nil {
 		c.SSEvent("progress", EvaluateProgress{Status: "idle"})
 		return

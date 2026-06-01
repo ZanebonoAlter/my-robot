@@ -288,7 +288,6 @@ func TestEmbeddingDimensionMismatch2560(t *testing.T) {
 func TestGenerateEmbeddingBuildsCorrectDimension(t *testing.T) {
 	emb := &models.TopicTagEmbedding{
 		TopicTagID:   1,
-		Vector:       "[0.1,0.2,0.3]",
 		EmbeddingVec: "[0.100000,0.200000,0.300000]",
 		Dimension:    2560,
 		Model:        "qwen3-embedding:4b",
@@ -330,7 +329,6 @@ func TestSaveEmbeddingReturnsTagNotFoundWhenParentDeleted(t *testing.T) {
 	err := service.SaveEmbedding(&models.TopicTagEmbedding{
 		TopicTagID:    tag.ID,
 		EmbeddingType: EmbeddingTypeIdentity,
-		Vector:        "[0.1,0.2]",
 		Model:         "test-model",
 		TextHash:      "abc123",
 	})
@@ -493,7 +491,6 @@ func TestSaveEmbeddingCleansUpStaleRecords(t *testing.T) {
 		if err := db.Create(&models.TopicTagEmbedding{
 			TopicTagID:    tag.ID,
 			EmbeddingType: EmbeddingTypeIdentity,
-			Vector:        fmt.Sprintf("[0.%d]", i),
 			Model:         "test-model",
 			TextHash:      hash,
 		}).Error; err != nil {
@@ -512,7 +509,6 @@ func TestSaveEmbeddingCleansUpStaleRecords(t *testing.T) {
 	if err := service.SaveEmbedding(&models.TopicTagEmbedding{
 		TopicTagID:    tag.ID,
 		EmbeddingType: EmbeddingTypeIdentity,
-		Vector:        "[0.9]",
 		Model:         "test-model",
 		TextHash:      newHash,
 	}); err != nil {

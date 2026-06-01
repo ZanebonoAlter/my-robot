@@ -610,7 +610,7 @@ func createUpgradeTopicTag(t *testing.T, db *gorm.DB, label string, category str
 func createUpgradeTopicEmbedding(t *testing.T, db *gorm.DB, topicTagID uint, vector []float64) {
 	t.Helper()
 	pgVector := floatsToPgVector(vector)
-	require.NoError(t, db.Create(&models.TopicTagEmbedding{TopicTagID: topicTagID, EmbeddingType: "semantic", Vector: "[]", EmbeddingVec: pgVector, Dimension: len(vector), Model: "test", TextHash: fmt.Sprintf("hash-%d", topicTagID)}).Error)
+	require.NoError(t, db.Create(&models.TopicTagEmbedding{TopicTagID: topicTagID, EmbeddingType: "semantic", EmbeddingVec: pgVector, Dimension: len(vector), Model: "test", TextHash: fmt.Sprintf("hash-%d", topicTagID)}).Error)
 }
 
 func createUpgradeArticleWithTags(t *testing.T, db *gorm.DB, topicTagIDs ...uint) {

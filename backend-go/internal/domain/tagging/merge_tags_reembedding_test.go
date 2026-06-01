@@ -21,7 +21,7 @@ func TestMergeTagsEnqueuesReembeddingAfterSuccess(t *testing.T) {
 	if err := db.Create(&models.ArticleTopicTag{ArticleID: article.ID, TopicTagID: source.ID}).Error; err != nil {
 		t.Fatalf("create article topic tag: %v", err)
 	}
-	if err := db.Create(&models.TopicTagEmbedding{TopicTagID: source.ID, Vector: "[0.1]", EmbeddingVec: "[0.100000]", Dimension: 1, Model: "test", TextHash: "source"}).Error; err != nil {
+	if err := db.Create(&models.TopicTagEmbedding{TopicTagID: source.ID, EmbeddingVec: "[0.100000]", Dimension: 1, Model: "test", TextHash: "source"}).Error; err != nil {
 		t.Fatalf("create source embedding: %v", err)
 	}
 

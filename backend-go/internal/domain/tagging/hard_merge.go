@@ -1,6 +1,7 @@
 package tagging
 
 import (
+	"context"
 	"fmt"
 
 	"syntopica-backend/internal/domain/models"
@@ -49,6 +50,15 @@ func HardMergeTags(db *gorm.DB, sourceID, targetID uint) error {
 			return fmt.Errorf("delete source tag embeddings: %w", err)
 		}
 
+		// Collect aux label IDs before CASCADE deletes topic_tag_semantic_labels
+		var affectedAuxLabelIDs []uint
+		if err := tx.Model(&models.TopicTagSemanticLabel{}).
+			Where("topic_tag_id = ?", sourceID).
+			Distinct("semantic_label_id").
+			Pluck("semantic_label_id", &affectedAuxLabelIDs).Error; err != nil {
+			return fmt.Errorf("collect affected aux label ids: %w", err)
+		}
+
 		// Clean up queue records that reference the source tag before deletion
 		// to avoid foreign key constraint violations.
 		if err := tx.Where("tag_id = ?", sourceID).Delete(&models.EmbeddingQueue{}).Error; err != nil {
@@ -60,6 +70,14 @@ func HardMergeTags(db *gorm.DB, sourceID, targetID uint) error {
 
 		if err := tx.Delete(&models.TopicTag{}, sourceID).Error; err != nil {
 			return fmt.Errorf("delete source tag %d: %w", sourceID, err)
+		}
+
+		// Recount refs for affected auxiliary labels after CASCADE
+		if len(affectedAuxLabelIDs) > 0 {
+			auxService := NewAuxiliaryLabelService(tx, nil)
+			if err := auxService.RecountRefs(context.Background(), affectedAuxLabelIDs); err != nil {
+				return fmt.Errorf("recount refs after hard merge: %w", err)
+			}
 		}
 
 		if err := tx.Model(&models.TopicTag{}).

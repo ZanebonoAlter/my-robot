@@ -1,11 +1,14 @@
 package daily_report
 
 import (
+	"context"
 	"fmt"
 	"sort"
+	"strings"
 	"time"
 
 	"syntopica-backend/internal/domain/models"
+	"syntopica-backend/internal/platform/airouter"
 	"syntopica-backend/internal/platform/database"
 	"syntopica-backend/internal/platform/logging"
 
@@ -19,12 +22,12 @@ func SaveReport(report *BoardDailyReport, sections []DailyReportSection, threadB
 	return database.DB.Transaction(func(tx *gorm.DB) error {
 		// Upsert report: find existing by (semantic_board_id, period_date)
 		var existing BoardDailyReport
-		err := tx.Where("semantic_board_id = ? AND period_date = ?",
+		findErr := tx.Where("semantic_board_id = ? AND period_date = ?",
 			report.SemanticBoardID,
 			report.PeriodDate.Format("2006-01-02")).
 			First(&existing).Error
 
-		if err == nil {
+		if findErr == nil {
 			// Update existing report
 			report.ID = existing.ID
 			if err := tx.Model(&existing).Updates(map[string]interface{}{
@@ -42,6 +45,25 @@ func SaveReport(report *BoardDailyReport, sections []DailyReportSection, threadB
 			}).Error; err != nil {
 				return fmt.Errorf("update report: %w", err)
 			}
+		} else {
+			// Create new report
+			if err := tx.Create(report).Error; err != nil {
+				return fmt.Errorf("create report: %w", err)
+			}
+		}
+
+		// Embedding matching: find prev_section_id BEFORE deleting old data.
+		// Old sections are still in DB at this point, so new sections can
+		// match against them (critical for upsert scenarios).
+		matches := MatchSectionsByEmbedding(tx, report.SemanticBoardID, sections)
+		for i, m := range matches {
+			if m.PrevSectionID > 0 {
+				sections[i].PrevSectionID = &m.PrevSectionID
+				sections[i].Status = "continuing"
+			}
+		}
+
+		if findErr == nil {
 			// Nullify downstream prev_thread_id references before deleting old threads
 			if err := tx.Model(&DailyReportThread{}).
 				Where("prev_thread_id IN (SELECT id FROM daily_report_threads WHERE report_id = ?)", existing.ID).
@@ -62,14 +84,9 @@ func SaveReport(report *BoardDailyReport, sections []DailyReportSection, threadB
 			if err := tx.Where("report_id = ?", existing.ID).Delete(&DailyReportSection{}).Error; err != nil {
 				return fmt.Errorf("delete old sections: %w", err)
 			}
-		} else {
-			// Create new report
-			if err := tx.Create(report).Error; err != nil {
-				return fmt.Errorf("create report: %w", err)
-			}
 		}
 
-		// Insert new sections
+		// Insert new sections (with embedding + prev_section_id)
 		for i := range sections {
 			sections[i].ReportID = report.ID
 		}
@@ -418,6 +435,44 @@ func isSameDay(a, b time.Time) bool {
 	return a.Year() == b.Year() && a.YearDay() == b.YearDay()
 }
 
+// SectionEmbeddingMatch represents a match result for section embedding lookup.
+type SectionEmbeddingMatch struct {
+	PrevSectionID uint
+	Distance      float64
+}
+
+// MatchSectionsByEmbedding finds the nearest existing section for each new section
+// using pgvector cosine distance. Runs within SaveReport() transaction BEFORE
+// old sections are deleted.
+func MatchSectionsByEmbedding(tx *gorm.DB, boardID uint, sections []DailyReportSection) []SectionEmbeddingMatch {
+	results := make([]SectionEmbeddingMatch, len(sections))
+
+	for i, sec := range sections {
+		if strings.TrimSpace(sec.Embedding) == "" {
+			continue
+		}
+		var match SectionEmbeddingMatch
+		err := tx.Raw(`
+			SELECT s.id AS prev_section_id, s.embedding <=> ?::vector AS distance
+			FROM daily_report_sections s
+			JOIN board_daily_reports r ON r.id = s.report_id
+			WHERE r.semantic_board_id = ?
+			  AND r.status = 'completed'
+			  AND s.embedding IS NOT NULL
+			ORDER BY s.embedding <=> ?::vector
+			LIMIT 1
+		`, sec.Embedding, boardID, sec.Embedding).Scan(&match).Error
+		if err != nil {
+			continue
+		}
+		if match.Distance < 0.3 {
+			results[i] = match
+		}
+	}
+
+	return results
+}
+
 // GetSectionLifecycle fetches the full lifecycle chain for a section using recursive CTE.
 func GetSectionLifecycle(sectionID uint) ([]SectionTimelineNode, error) {
 	var nodes []SectionTimelineNode
@@ -489,7 +544,7 @@ func GetSectionLifecycle(sectionID uint) ([]SectionTimelineNode, error) {
 				if !existing[d.ID] {
 					nodes = append(nodes, d)
 					existing[d.ID] = true
-			}
+				}
 			}
 			sort.Slice(nodes, func(i, j int) bool {
 				return nodes[i].PeriodDate.Before(nodes[j].PeriodDate)
@@ -501,4 +556,110 @@ func GetSectionLifecycle(sectionID uint) ([]SectionTimelineNode, error) {
 		nodes = []SectionTimelineNode{}
 	}
 	return nodes, nil
+}
+
+// BackfillSectionEmbeddings generates embeddings for sections that don't have one,
+// then runs pgvector matching to set prev_section_id for all sections.
+// It overwrites all prev_section_id values (including those from the old tag Jaccard matching).
+func BackfillSectionEmbeddings(ctx context.Context) (embedded int, matched int, err error) {
+	// Phase 1: Generate embeddings for sections without them
+	batchSize := 50
+	for {
+		var sections []DailyReportSection
+		if err := database.DB.Where("embedding IS NULL").
+			Where("cluster_label != '' AND cluster_label IS NOT NULL").
+			Order("id ASC").
+			Limit(batchSize).
+			Find(&sections).Error; err != nil {
+			return embedded, matched, fmt.Errorf("query sections without embedding: %w", err)
+		}
+		if len(sections) == 0 {
+			break
+		}
+
+		var texts []string
+		for _, sec := range sections {
+			texts = append(texts, sec.ClusterLabel)
+		}
+
+		result, embedErr := airouter.NewRouter().Embed(ctx, airouter.EmbeddingRequest{
+			Input: texts,
+			Metadata: map[string]any{
+				"operation": "daily_report_section_backfill",
+			},
+		}, airouter.CapabilityEmbedding)
+		if embedErr != nil {
+			return embedded, matched, fmt.Errorf("backfill embedding batch: %w", embedErr)
+		}
+
+		for i, sec := range sections {
+			if i >= len(result.Embeddings) {
+				break
+			}
+			pgVec := floatsToPgVector(result.Embeddings[i])
+			if err := database.DB.Model(&DailyReportSection{}).Where("id = ?", sec.ID).
+				Update("embedding", pgVec).Error; err != nil {
+				logging.Warnf("backfill: failed to update embedding for section %d: %v", sec.ID, err)
+				continue
+			}
+			embedded++
+		}
+	}
+
+	// Phase 2: Run pgvector matching for ALL sections (overwrite unreliable tag Jaccard results)
+	type boardGroup struct {
+		BoardID uint
+	}
+	var boards []boardGroup
+	database.DB.Raw(`
+		SELECT DISTINCT r.semantic_board_id AS board_id
+		FROM daily_report_sections s
+		JOIN board_daily_reports r ON r.id = s.report_id
+		WHERE s.embedding IS NOT NULL
+	`).Scan(&boards)
+
+	for _, b := range boards {
+		var sections []DailyReportSection
+		if err := database.DB.Raw(`
+			SELECT s.id, s.embedding
+			FROM daily_report_sections s
+			JOIN board_daily_reports r ON r.id = s.report_id
+			WHERE r.semantic_board_id = ?
+			  AND s.embedding IS NOT NULL
+			ORDER BY r.period_date ASC, s.id ASC
+		`, b.BoardID).Scan(&sections).Error; err != nil {
+			continue
+		}
+
+		for _, sec := range sections {
+			var match struct {
+				PrevSectionID uint
+				Distance      float64
+			}
+			err := database.DB.Raw(`
+				SELECT s2.id AS prev_section_id, s2.embedding <=> ?::vector AS distance
+				FROM daily_report_sections s2
+				JOIN board_daily_reports r2 ON r2.id = s2.report_id
+				WHERE r2.semantic_board_id = ?
+				  AND s2.id != ?
+				  AND s2.embedding IS NOT NULL
+				ORDER BY s2.embedding <=> ?::vector
+				LIMIT 1
+			`, sec.Embedding, b.BoardID, sec.ID, sec.Embedding).Scan(&match).Error
+			if err != nil || match.PrevSectionID == 0 {
+				continue
+			}
+			if match.Distance < 0.3 {
+				status := "continuing"
+				database.DB.Model(&DailyReportSection{}).Where("id = ?", sec.ID).
+					Updates(map[string]interface{}{
+						"prev_section_id": match.PrevSectionID,
+						"status":          status,
+					})
+				matched++
+			}
+		}
+	}
+
+	return embedded, matched, nil
 }

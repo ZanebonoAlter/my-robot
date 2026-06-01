@@ -48,6 +48,6 @@
 
 ## 9. 数据修复
 
-- [ ] 9.1 清理 tag 94712 的冗余 embedding 记录（保留最新一对 identity+semantic）
-- [ ] 9.2 清理 tag 94712 的 article_topic_tags 关联：移除与"共产党员"无关的文章关联
-- [ ] 9.3 排查其他 embedding 数量异常的 tag（>10 条），确认是否存在类似污染
+- [x] 9.1 清理 tag 94712 的冗余 embedding 记录（保留最新一对 identity+semantic）
+- [x] 9.2 清理 tag 94712 的 article_topic_tags 关联：移除全部 67 条错误关联（tag label 已被黑洞效应改为"心理学"，所有关联文章均不相关）
+- [x] 9.3 排查其他 embedding 数量异常的 tag（>10 条）：确认无其他污染，仅 tag 94712 存在异常

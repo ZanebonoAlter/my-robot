@@ -20,15 +20,17 @@
 **Goals:**
 - topic_tag 删除时自动递减相关 auxiliary label 的 ref_count
 - 提供 GC 机制清理无活跃引用的辅助标签
+- GC disable 时同步清理关联的 `board_composition` 行
 - 定时自动执行 GC（每小时，mode=disable）
-- 支持手动触发 GC（dry_run / disable / delete）
-- 存量 ref_count 数据校准
+- 支持手动触发 GC（dry_run / disable / delete / recalculate）
+- 通过 GC API 完成存量 ref_count 数据校准（无需独立脚本）
 
 **Non-Goals:**
 - 不做 delete 模式的自动 GC（仅手动可选，避免误删）
 - 不修改 `AttachAuxiliaryLabels` 的核心匹配逻辑
 - 不清理 disabled 状态但仍有嵌入向量的历史数据（本次只处理 active → disabled）
 - 不优化 `loadActiveAuxiliaryLabels` 的全量加载策略（那是另一个性能优化话题）
+- 不在 HardMergeTags 中迁移 source tag 的 aux label 关联到 target tag（现有行为，source 的 aux label 随 CASCADE 删除，GC 会清理无引用的 aux label）
 
 ## Decisions
 
@@ -79,26 +81,35 @@ WHERE label_type = 'auxiliary'
   AND protected = false
   AND created_at < NOW() - INTERVAL '1 day'
   AND id NOT IN (
-    SELECT DISTINCT tsl.semantic_label_id
-    FROM topic_tag_semantic_labels tsl
-    JOIN topic_tags tt ON tt.id = tsl.topic_tag_id
-    WHERE tt.status = 'active'
+    SELECT DISTINCT semantic_label_id
+    FROM topic_tag_semantic_labels
   )
 ```
 
-**理由**：NOT IN 子查询利用了 `topic_tags.status` 索引，一条 SQL 完成判断，无需多次 round-trip。
+**理由**：系统中不存在 `status='merged'` 的 TopicTag（`HardMergeTags` 直接硬删除，无软删除），因此只需检查 `topic_tag_semantic_labels` 中是否存在关联即可，无需 JOIN `topic_tags`。TopicTag 删除时 CASCADE 已清理其 `topic_tag_semantic_labels` 行，不会留下悬挂关联。
+
+### D7: GC disable 同步清理 board_composition
+
+**选择**：GC disable 时，除了将 aux label 的 status 改为 disabled，同时删除 `board_composition` 中引用该 aux label 的行。
+
+**理由**：`getBoardComposition`（semantic_board_handler.go:924）未过滤 `status='active'`，如果不清理 `board_composition`，board composition 前端仍会显示已 disabled 的 aux label。GC delete 时 CASCADE 会自动清理，但 disable 不会。
+
+### D8: 存量校准通过 API 而非独立脚本
+
+**选择**：在 GC API 中增加 `mode=recalculate` 模式，对所有 `label_type='auxiliary'` 的 semantic_labels 执行 ref_count 全量重算。部署后通过 `curl POST /api/auxiliary-labels/gc -d '{"mode":"recalculate"}'` 即可完成校准，无需维护独立的 Go 脚本。
+
+**理由**：`RecountRefs` 逻辑已在 Phase 1 实现，recalculate mode 只是全表调用。减少一个需要单独编译和部署的脚本。
 
 ## Risks / Trade-offs
 
-- **[风险] GC 误禁用仍被引用的标签**：如果 topic_tag 的状态从 active 变为 merged，其 aux labels 可能仍有价值。→ 缓解：GC 只检查 `tt.status = 'active'`，merged 状态的 tag 的 aux labels 也会被清理。用户可通过 disable 回滚。
-- **[风险] 存量 ref_count 可能为负数**（如果已经调用过 CASCADE 删除但 ref_count > 0）：→ 缓解：`RecountRefs` 使用 `COUNT(*)` 直接计算，不会出现负数。一次性脚本也可安全执行。
+- **[风险] 存量 ref_count 可能为负数**（如果已经调用过 CASCADE 删除但 ref_count > 0）：→ 缓解：`RecountRefs` 使用 `COUNT(*)` 直接计算，不会出现负数。recalculate API 可安全执行。
 - **[风险] GC 执行期间与 AttachAuxiliaryLabels 并发**：可能 GC 刚查出 label 无引用，AttachAuxiliaryLabels 同时为其创建了新引用。→ 缓解：GC 默认用 disable（软删除），即使并发也不会丢数据；1 天 grace_days 已大幅降低窗口；极端情况下可手动恢复。
 - **[取舍] 不删除 disabled 标签的 embedding 向量**：disabled 后 embedding 数据仍占磁盘空间。→ 手动 delete GC 可彻底清理，后续可考虑定期硬删除 disabled 标签。
 
 ## Migration Plan
 
-1. 部署新代码（包含 Phase A ref_count 修正 + Phase C GC 调度器）
-2. 执行一次性存量校准脚本，修正所有 auxiliary label 的 ref_count
+1. 部署新代码（包含 Phase 1 ref_count 修正 + Phase 3 GC 调度器）
+2. 调用 `POST /api/auxiliary-labels/gc -d '{"mode":"recalculate"}'` 完成存量 ref_count 校准
 3. GC 调度器自动启动（startup delay 10 分钟），开始定期清理
 4. 观察 GC 调度器首次执行结果（日志输出清理数量），确认无异常
 5. 如需回滚：停止 GC 调度器即可，disabled 标签可手动恢复；ref_count 修正无破坏性影响

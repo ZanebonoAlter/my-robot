@@ -8,3 +8,4 @@ var TagQualityScoreSchedulerInterface interface{}
 var NarrativeSummarySchedulerInterface interface{}
 var LogCleanupSchedulerInterface interface{}
 var DailyReportSchedulerInterface interface{}
+var AuxLabelCleanupSchedulerInterface interface{}

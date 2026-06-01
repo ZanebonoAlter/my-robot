@@ -39,6 +39,9 @@ func RegisterDailyReportRoutes(api *gin.RouterGroup) {
 
 	// GET /api/daily-reports/sections/:id/lifecycle
 	api.GET("/daily-reports/sections/:id/lifecycle", getSectionLifecycle)
+
+	// POST /api/daily-reports/backfill-embeddings
+	api.POST("/daily-reports/backfill-embeddings", triggerBackfillEmbeddings)
 }
 
 // triggerGenerateDailyReport handles POST /api/daily-reports/generate
@@ -324,6 +327,28 @@ func buildDoneMessage(jobID string, totalSaved int, totalBoards int) map[string]
 		"total_boards": totalBoards,
 		"timestamp":    time.Now().Format(time.RFC3339),
 	}
+}
+
+// triggerBackfillEmbeddings handles POST /api/daily-reports/backfill-embeddings
+func triggerBackfillEmbeddings(c *gin.Context) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+	defer cancel()
+
+	go func() {
+		embedded, matched, err := BackfillSectionEmbeddings(ctx)
+		if err != nil {
+			logging.Errorf("daily-report: backfill failed: %v", err)
+			return
+		}
+		logging.Infof("daily-report: backfill complete: %d sections embedded, %d sections matched", embedded, matched)
+	}()
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data": gin.H{
+			"status": "processing",
+		},
+	})
 }
 
 func dailyReportBoardName(boardID uint) string {

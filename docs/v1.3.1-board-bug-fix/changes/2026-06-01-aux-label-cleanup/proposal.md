@@ -20,8 +20,8 @@
 
 ## Impact
 
-- **后端**：`CleanupOrphanedTags`、`HardMergeTags` 增加 ref_count 重算调用；`AuxiliaryLabelService` 新增 `RecountRefs`、`GC` 方法；新增 `AuxLabelCleanupScheduler` 定时任务
+- **后端**：`CleanupOrphanedTags`、`HardMergeTags` 增加 ref_count 重算调用；`AuxiliaryLabelService` 新增 `RecountRefs`、`GC` 方法（含 board_composition 同步清理）；新增 `AuxLabelCleanupScheduler` 定时任务
 - **前端**：`schedulerMeta.ts` 新增 aux_label_cleanup 的展示配置；`auxiliaryLabels.ts` 新增 GC API 调用
 - **API**：新增 `POST /api/auxiliary-labels/gc`
 - **数据库**：无 schema 变更，仅数据修正
-- **存量数据**：需手动执行一次性校准脚本
+- **存量数据**：部署后调用 GC API `mode=recalculate` 完成存量 ref_count 校准

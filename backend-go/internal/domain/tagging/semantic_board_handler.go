@@ -177,6 +177,7 @@ func RegisterSemanticBoardRoutes(rg *gin.RouterGroup) {
 		auxiliary.GET("", handler.listAuxiliaryLabels)
 		auxiliary.GET("/clusters", handler.clusterAuxiliaryLabels)
 		auxiliary.POST("/merge-alias", handler.mergeAuxiliaryAlias)
+		auxiliary.POST("/gc", handler.gcAuxiliaryLabels)
 		auxiliary.POST("/:id/disable", handler.disableAuxiliaryLabel)
 	}
 
@@ -1153,6 +1154,38 @@ func (h *semanticBoardHandler) disableAuxiliaryLabel(c *gin.Context) {
 		return
 	}
 	respondOK(c, gin.H{"id": id})
+}
+
+func (h *semanticBoardHandler) gcAuxiliaryLabels(c *gin.Context) {
+	var req struct {
+		Mode      string `json:"mode" binding:"required"`
+		GraceDays int    `json:"grace_days"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "mode is required"})
+		return
+	}
+
+	mode := AuxLabelGCMode(req.Mode)
+	if mode != AuxLabelGCModeDryRun && mode != AuxLabelGCModeDisable &&
+		mode != AuxLabelGCModeDelete && mode != AuxLabelGCModeRecalculate {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"error":   "invalid mode, must be one of: dry_run, disable, delete, recalculate",
+		})
+		return
+	}
+
+	result, err := h.auxiliary.GC(c.Request.Context(), AuxLabelGCRequest{
+		Mode:      mode,
+		GraceDays: req.GraceDays,
+	})
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": result})
 }
 
 func (h *semanticBoardHandler) mergeAuxiliaryAlias(c *gin.Context) {

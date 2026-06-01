@@ -10,7 +10,7 @@ Additionally, **section-level lineage matching via `cluster_tag_ids` Jaccard sim
 - **BREAKING**: `daily_report_sections.threads` JSONB column will be removed after data migration. All thread data moves to the new table.
 - **BREAKING**: `GenerateDailyReport` return signature changes to `(*BoardDailyReport, []DailyReportSection, [][]DailyReportThread, error)` to carry thread data for persistence.
 - **BREAKING**: `matchPreviousSections()` replaced with embedding-based semantic matching via pgvector
-- **Section embedding generation**: `GenerateDailyReport` pipeline now batch-embeds each section's `cluster_label` using the existing embedding model (2560-dim). Embeddings stored in `daily_report_sections.embedding vector(2560)` column.
+- **Section embedding generation**: `GenerateDailyReport` pipeline now batch-embeds each section's `cluster_label` using the existing embedding model. Embeddings stored in `daily_report_sections.embedding` vector column. 维度由运行时配置决定，不硬编码。
 - **DB-side matching**: `SaveReport()` uses pgvector `<=>` cosine distance to find the nearest section across all existing sections in the same board. Distance < 0.3 → set `prev_section_id` and `status='continuing'`.
 - **Historical data backfill**: All existing 315 sections get embeddings generated and `prev_section_id` populated via the same pgvector matching.
 - Populate `prev_thread_id`: `matchPreviousThreads()` in `generator.go` will now assign `prev_thread_id` using the matched previous thread's DB ID from the `daily_report_threads` table.
@@ -27,7 +27,7 @@ Additionally, **section-level lineage matching via `cluster_tag_ids` Jaccard sim
 - `thread-lineage`: Population of `prev_thread_id` in `matchPreviousThreads()` using DB IDs, API endpoints for thread chain traversal and board-level thread timeline, and frontend views for thread detail timeline (newspaper modal side panel) and board-level Gantt-chart thread browser.
 
 ### Modified Capabilities
-- `daily-report-system`: Section lineage matching switches from tag Jaccard to embedding-based pgvector cosine distance; `daily_report_sections` gains `embedding vector(2560)` column; `SaveReport()` performs DB-side matching; thread generation pipeline changes from JSON embedding to independent table writes; report detail API response shape changes (threads become top-level objects with IDs instead of inline JSON); `matchPreviousThreads()` now assigns `prev_thread_id`; historical section embedding backfill.
+- `daily-report-system`: Section lineage matching switches from tag Jaccard to embedding-based pgvector cosine distance; `daily_report_sections` gains `embedding` vector column (维度由模型输出决定); `SaveReport()` performs DB-side matching (先匹配再删除旧数据); thread generation pipeline changes from JSON embedding to independent table writes; report detail API response shape changes (threads become top-level objects with IDs instead of inline JSON); `matchPreviousThreads()` now assigns `prev_thread_id`; historical section embedding backfill.
 
 ## Impact
 

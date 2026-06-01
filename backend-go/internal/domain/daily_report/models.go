@@ -3,27 +3,28 @@ package daily_report
 import (
 	"database/sql/driver"
 	"fmt"
+	"strings"
 	"time"
 )
 
 // BoardDailyReport — one report per board per day
 type BoardDailyReport struct {
-	ID                      uint           `gorm:"primarykey" json:"id"`
-	SemanticBoardID         uint           `gorm:"index;not null" json:"semantic_board_id"`
-	PeriodDate              time.Time      `gorm:"type:date;not null" json:"period_date"`
-	Title                   string         `json:"title"`
-	Summary                 string         `json:"summary"`
-	Highlights              JSON           `gorm:"type:jsonb" json:"highlights"`
-	Dynamics                string         `gorm:"type:text" json:"dynamics"`
-	ArticleCount            int            `json:"article_count"`
-	EventTagCount           int            `json:"event_tag_count"`
-	ClusterCount            int            `json:"cluster_count"`
-	Status                  string         `gorm:"size:20;default:generating" json:"status"`
-	RawClusters             JSON           `gorm:"type:jsonb" json:"raw_clusters,omitempty"`
-	PrevReportID            *uint          `json:"prev_report_id,omitempty"`
-	GenerationPromptVersion string         `gorm:"size:20" json:"generation_prompt_version,omitempty"`
-	CreatedAt               time.Time      `json:"created_at"`
-	UpdatedAt               time.Time      `json:"updated_at"`
+	ID                      uint      `gorm:"primarykey" json:"id"`
+	SemanticBoardID         uint      `gorm:"index;not null" json:"semantic_board_id"`
+	PeriodDate              time.Time `gorm:"type:date;not null" json:"period_date"`
+	Title                   string    `json:"title"`
+	Summary                 string    `json:"summary"`
+	Highlights              JSON      `gorm:"type:jsonb" json:"highlights"`
+	Dynamics                string    `gorm:"type:text" json:"dynamics"`
+	ArticleCount            int       `json:"article_count"`
+	EventTagCount           int       `json:"event_tag_count"`
+	ClusterCount            int       `json:"cluster_count"`
+	Status                  string    `gorm:"size:20;default:generating" json:"status"`
+	RawClusters             JSON      `gorm:"type:jsonb" json:"raw_clusters,omitempty"`
+	PrevReportID            *uint     `json:"prev_report_id,omitempty"`
+	GenerationPromptVersion string    `gorm:"size:20" json:"generation_prompt_version,omitempty"`
+	CreatedAt               time.Time `json:"created_at"`
+	UpdatedAt               time.Time `json:"updated_at"`
 
 	Sections []DailyReportSection `gorm:"foreignKey:ReportID" json:"sections,omitempty"`
 }
@@ -34,18 +35,19 @@ func (BoardDailyReport) TableName() string {
 
 // DailyReportSection — one section per cluster
 type DailyReportSection struct {
-	ID            uint      `gorm:"primarykey" json:"id"`
-	ReportID      uint      `gorm:"index;not null" json:"report_id"`
-	ClusterIndex  int       `json:"cluster_index"`
-	ClusterLabel  string    `gorm:"size:200" json:"cluster_label"`
-	ClusterTagIDs JSON      `gorm:"type:jsonb" json:"cluster_tag_ids"`
+	ID            uint                `gorm:"primarykey" json:"id"`
+	ReportID      uint                `gorm:"index;not null" json:"report_id"`
+	ClusterIndex  int                 `json:"cluster_index"`
+	ClusterLabel  string              `gorm:"size:200" json:"cluster_label"`
+	ClusterTagIDs JSON                `gorm:"type:jsonb" json:"cluster_tag_ids"`
 	Threads       []DailyReportThread `gorm:"foreignKey:SectionID" json:"threads,omitempty"`
-	ArticleCount  int       `json:"article_count"`
-	BestTier      int       `gorm:"default:0" json:"best_tier"`
-	AvgScore      float64   `gorm:"default:0" json:"avg_score"`
-	Status        string    `gorm:"size:20;default:emerging" json:"status"`
-	PrevSectionID *uint     `json:"prev_section_id,omitempty"`
-	CreatedAt     time.Time `json:"created_at"`
+	ArticleCount  int                 `json:"article_count"`
+	BestTier      int                 `gorm:"default:0" json:"best_tier"`
+	AvgScore      float64             `gorm:"default:0" json:"avg_score"`
+	Status        string              `gorm:"size:20;default:emerging" json:"status"`
+	Embedding     string              `gorm:"type:vector" json:"-"`
+	PrevSectionID *uint               `json:"prev_section_id,omitempty"`
+	CreatedAt     time.Time           `json:"created_at"`
 }
 
 func (DailyReportSection) TableName() string {
@@ -109,6 +111,15 @@ func (j JSON) MarshalJSON() ([]byte, error) {
 func (j *JSON) UnmarshalJSON(data []byte) error {
 	*j = append((*j)[0:0], data...)
 	return nil
+}
+
+// floatsToPgVector converts a float64 slice to pgvector string format: [0.1,0.2,0.3]
+func floatsToPgVector(v []float64) string {
+	parts := make([]string, len(v))
+	for i, f := range v {
+		parts[i] = fmt.Sprintf("%f", f)
+	}
+	return "[" + strings.Join(parts, ",") + "]"
 }
 
 // TagInput mirrors narrative.TagInput for use in the daily report pipeline.

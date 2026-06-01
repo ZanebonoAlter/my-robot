@@ -25,6 +25,7 @@ type Runtime struct {
 	NarrativeSummary       *jobs.NarrativeSummaryScheduler
 	DailyReport            *jobs.DailyReportScheduler
 	LogCleanup             *jobs.LogCleanupScheduler
+	AuxLabelCleanup        *jobs.AuxLabelCleanupScheduler
 }
 
 func resetStaleStates() {
@@ -162,6 +163,13 @@ func StartRuntime() *Runtime {
 		logging.Infoln("Daily report scheduler started successfully")
 	}
 
+	runtime.AuxLabelCleanup = jobs.NewAuxLabelCleanupScheduler(3600)
+	if err := runtime.AuxLabelCleanup.Start(); err != nil {
+		logging.Warnf("Failed to start aux label cleanup scheduler: %v", err)
+	} else {
+		logging.Infoln("Aux label cleanup scheduler started successfully")
+	}
+
 	runtimeinfo.AutoRefreshSchedulerInterface = runtime.AutoRefresh
 	runtimeinfo.PreferenceUpdateSchedulerInterface = runtime.PreferenceUpdate
 	runtimeinfo.ContentCompletionSchedulerInterface = runtime.ContentCompletion
@@ -170,6 +178,7 @@ func StartRuntime() *Runtime {
 	runtimeinfo.NarrativeSummarySchedulerInterface = runtime.NarrativeSummary
 	runtimeinfo.LogCleanupSchedulerInterface = runtime.LogCleanup
 	runtimeinfo.DailyReportSchedulerInterface = runtime.DailyReport
+	runtimeinfo.AuxLabelCleanupSchedulerInterface = runtime.AuxLabelCleanup
 
 	return runtime
 }
@@ -229,6 +238,11 @@ func SetupGracefulShutdown(runtime *Runtime) {
 			if runtime.DailyReport != nil {
 				logging.Infoln("Stopping daily report scheduler...")
 				runtime.DailyReport.Stop()
+			}
+
+			if runtime.AuxLabelCleanup != nil {
+				logging.Infoln("Stopping aux label cleanup scheduler...")
+				runtime.AuxLabelCleanup.Stop()
 			}
 
 			close(done)

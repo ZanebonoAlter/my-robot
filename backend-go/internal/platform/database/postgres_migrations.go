@@ -492,10 +492,22 @@ func postgresMigrations() []Migration {
 
 		// ── Drop deprecated vector text column ────────────────────
 		{
-			Version:     "20260601_0001",
+			Version:     "20260601_0001b",
 			Description: "Drop deprecated vector text column from topic_tag_embeddings.",
 			Up: func(db *gorm.DB) error {
 				return db.Exec("ALTER TABLE topic_tag_embeddings DROP COLUMN IF EXISTS vector").Error
+			},
+		},
+
+		// ── Section embedding column ────────────────────────────────────
+		{
+			Version:     "20260601_0002",
+			Description: "Add embedding vector column to daily_report_sections (dimension set at runtime).",
+			Up: func(db *gorm.DB) error {
+				if err := db.Exec(`ALTER TABLE daily_report_sections ADD COLUMN IF NOT EXISTS embedding vector`).Error; err != nil {
+					return fmt.Errorf("add daily_report_sections.embedding column: %w", err)
+				}
+				return nil
 			},
 		},
 	}

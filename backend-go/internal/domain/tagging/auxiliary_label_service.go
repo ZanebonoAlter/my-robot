@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"syntopica-backend/internal/domain/models"
 	"syntopica-backend/internal/platform/airouter"
@@ -15,6 +16,35 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
+
+type AuxLabelGCMode string
+
+const (
+	AuxLabelGCModeDryRun      AuxLabelGCMode = "dry_run"
+	AuxLabelGCModeDisable     AuxLabelGCMode = "disable"
+	AuxLabelGCModeDelete      AuxLabelGCMode = "delete"
+	AuxLabelGCModeRecalculate AuxLabelGCMode = "recalculate"
+)
+
+type AuxLabelGCRequest struct {
+	Mode      AuxLabelGCMode `json:"mode"`
+	GraceDays int            `json:"grace_days"`
+}
+
+type AuxLabelGCResult struct {
+	EligibleCount  int                     `json:"eligible_count"`
+	AffectedCount  int                     `json:"affected_count"`
+	CorrectedCount int                     `json:"corrected_count,omitempty"`
+	TotalCount     int                     `json:"total_count,omitempty"`
+	Preview        []AuxLabelGCPreviewItem `json:"preview,omitempty"`
+}
+
+type AuxLabelGCPreviewItem struct {
+	ID        uint   `json:"id"`
+	Label     string `json:"label"`
+	RefCount  int    `json:"ref_count"`
+	CreatedAt string `json:"created_at"`
+}
 
 const auxiliaryLabelMergeThreshold = 0.95
 
@@ -47,9 +77,19 @@ func NewAuxiliaryLabelService(db *gorm.DB, embedder auxiliaryLabelEmbedder) *Aux
 	return &AuxiliaryLabelService{db: db, embedder: embedder, mergeMatcher: sqlMergeMatcher}
 }
 
-// EnsureVectorDimensionOnce ensures the semantic_labels.embedding and merge_embedding
-// column dimensions match the embedder output. Called once on first label creation.
-// Uses the global DB to avoid calling DDL inside a transaction.
+// vectorDimEnsurers holds callbacks registered by other packages to ensure their
+// vector columns have the correct dimension. Called once at startup after the
+// embedding dimension is determined.
+var vectorDimEnsurers []func(dim int)
+
+// RegisterVectorDimEnsurer registers a callback to be invoked at startup with the
+// detected embedding dimension. Call from init() in domain packages that own vector columns.
+func RegisterVectorDimEnsurer(fn func(dim int)) {
+	vectorDimEnsurers = append(vectorDimEnsurers, fn)
+}
+
+// EnsureVectorDimensionOnce ensures all vector column dimensions match the embedder output.
+// Called once at startup. Uses the global DB to avoid calling DDL inside a transaction.
 func EnsureVectorDimensionOnce(ctx context.Context) {
 	ensureVectorDimOnce.Do(func() {
 		_, vector, err := defaultAuxiliaryLabelEmbedder(ctx, "dimension-check", auxiliaryLabelEmbeddingModeStorage)
@@ -63,6 +103,9 @@ func EnsureVectorDimensionOnce(ctx context.Context) {
 		}
 		if err := EnsureSemanticLabelMergeVectorDimension(dim); err != nil {
 			logging.Warnf("Failed to ensure merge_embedding vector dimension: %v", err)
+		}
+		for _, fn := range vectorDimEnsurers {
+			fn(dim)
 		}
 	})
 }
@@ -262,6 +305,154 @@ func (s *AuxiliaryLabelService) RemoveBoardComposition(ctx context.Context, boar
 		}
 		return nil
 	})
+}
+
+// RecountRefs recalculates ref_count for the given auxiliary label IDs by counting
+// actual topic_tag_semantic_labels rows. This is self-healing: it corrects any
+// accumulated drift in ref_count values.
+func (s *AuxiliaryLabelService) RecountRefs(ctx context.Context, ids []uint) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	for _, id := range ids {
+		var count int64
+		if err := s.db.WithContext(ctx).Model(&models.TopicTagSemanticLabel{}).
+			Where("semantic_label_id = ?", id).Count(&count).Error; err != nil {
+			return fmt.Errorf("recount refs for semantic_label %d: %w", id, err)
+		}
+		if err := s.db.WithContext(ctx).Model(&models.SemanticLabel{}).
+			Where("id = ?", id).Update("ref_count", int(count)).Error; err != nil {
+			return fmt.Errorf("update ref_count for semantic_label %d: %w", id, err)
+		}
+	}
+	return nil
+}
+
+// GC performs garbage collection on auxiliary labels based on the requested mode.
+func (s *AuxiliaryLabelService) GC(ctx context.Context, req AuxLabelGCRequest) (*AuxLabelGCResult, error) {
+	switch req.Mode {
+	case AuxLabelGCModeRecalculate:
+		return s.gcRecalculate(ctx)
+	case AuxLabelGCModeDryRun, AuxLabelGCModeDisable, AuxLabelGCModeDelete:
+		return s.gcCleanup(ctx, req)
+	default:
+		return nil, fmt.Errorf("invalid mode %q, must be one of: dry_run, disable, delete, recalculate", req.Mode)
+	}
+}
+
+func (s *AuxiliaryLabelService) gcRecalculate(ctx context.Context) (*AuxLabelGCResult, error) {
+	var ids []uint
+	if err := s.db.WithContext(ctx).Model(&models.SemanticLabel{}).
+		Where("label_type = ?", "auxiliary").
+		Pluck("id", &ids).Error; err != nil {
+		return nil, fmt.Errorf("query auxiliary labels: %w", err)
+	}
+
+	if len(ids) == 0 {
+		return &AuxLabelGCResult{TotalCount: 0, CorrectedCount: 0}, nil
+	}
+
+	// Collect before-state for diff
+	type refRow struct {
+		ID       uint
+		RefCount int
+	}
+	var before []refRow
+	s.db.WithContext(ctx).Model(&models.SemanticLabel{}).
+		Select("id, ref_count").
+		Where("id IN ?", ids).
+		Find(&before)
+	beforeCounts := make(map[uint]int, len(before))
+	for _, r := range before {
+		beforeCounts[r.ID] = r.RefCount
+	}
+
+	if err := s.RecountRefs(ctx, ids); err != nil {
+		return nil, fmt.Errorf("recount refs: %w", err)
+	}
+
+	// Count how many actually changed
+	var after []refRow
+	s.db.WithContext(ctx).Model(&models.SemanticLabel{}).
+		Select("id, ref_count").
+		Where("id IN ?", ids).
+		Find(&after)
+	corrected := 0
+	for _, r := range after {
+		if beforeCounts[r.ID] != r.RefCount {
+			corrected++
+		}
+	}
+
+	return &AuxLabelGCResult{TotalCount: len(ids), CorrectedCount: corrected}, nil
+}
+
+func (s *AuxiliaryLabelService) gcCleanup(ctx context.Context, req AuxLabelGCRequest) (*AuxLabelGCResult, error) {
+	if req.GraceDays <= 0 {
+		req.GraceDays = 1
+	}
+
+	cutoff := time.Now().AddDate(0, 0, -req.GraceDays)
+
+	// Find eligible labels: active, unprotected, past grace period, no topic_tag_semantic_labels
+	var eligible []models.SemanticLabel
+	err := s.db.WithContext(ctx).
+		Where("label_type = ? AND status = ? AND protected = false", "auxiliary", "active").
+		Where("created_at < ?", cutoff).
+		Where("id NOT IN (SELECT DISTINCT semantic_label_id FROM topic_tag_semantic_labels)").
+		Find(&eligible).Error
+	if err != nil {
+		return nil, fmt.Errorf("query eligible labels: %w", err)
+	}
+
+	result := &AuxLabelGCResult{EligibleCount: len(eligible)}
+
+	// Preview (first 20)
+	previewLimit := 20
+	if len(eligible) < previewLimit {
+		previewLimit = len(eligible)
+	}
+	result.Preview = make([]AuxLabelGCPreviewItem, previewLimit)
+	for i := 0; i < previewLimit; i++ {
+		result.Preview[i] = AuxLabelGCPreviewItem{
+			ID:        eligible[i].ID,
+			Label:     eligible[i].Label,
+			RefCount:  eligible[i].RefCount,
+			CreatedAt: eligible[i].CreatedAt.Format(time.RFC3339),
+		}
+	}
+
+	if req.Mode == AuxLabelGCModeDryRun || len(eligible) == 0 {
+		return result, nil
+	}
+
+	ids := make([]uint, len(eligible))
+	for i, l := range eligible {
+		ids[i] = l.ID
+	}
+
+	if req.Mode == AuxLabelGCModeDisable {
+		// Delete board_composition rows referencing these labels
+		if err := s.db.WithContext(ctx).Where("auxiliary_label_id IN ?", ids).
+			Delete(&models.BoardComposition{}).Error; err != nil {
+			return nil, fmt.Errorf("delete board_composition: %w", err)
+		}
+		// Soft-delete: update status to disabled
+		if err := s.db.WithContext(ctx).Model(&models.SemanticLabel{}).
+			Where("id IN ?", ids).
+			Update("status", "disabled").Error; err != nil {
+			return nil, fmt.Errorf("disable labels: %w", err)
+		}
+		result.AffectedCount = len(ids)
+	} else { // delete
+		if err := s.db.WithContext(ctx).Where("id IN ?", ids).
+			Delete(&models.SemanticLabel{}).Error; err != nil {
+			return nil, fmt.Errorf("delete labels: %w", err)
+		}
+		result.AffectedCount = len(ids)
+	}
+
+	return result, nil
 }
 
 func (s *AuxiliaryLabelService) loadActiveAuxiliaryLabels(ctx context.Context) ([]models.SemanticLabel, error) {

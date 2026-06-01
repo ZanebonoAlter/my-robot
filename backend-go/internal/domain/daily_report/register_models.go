@@ -1,6 +1,12 @@
 package daily_report
 
-import "syntopica-backend/internal/platform/database"
+import (
+	"fmt"
+
+	"syntopica-backend/internal/domain/tagging"
+	"syntopica-backend/internal/platform/database"
+	"syntopica-backend/internal/platform/logging"
+)
 
 func init() {
 	database.RegisterModels(
@@ -8,4 +14,5 @@ func init() {
 		&DailyReportSection{},
 		&DailyReportThread{},
 	)
+	tagging.RegisterVectorDimEnsurer(ensureSectionEmbeddingDimension)
 }

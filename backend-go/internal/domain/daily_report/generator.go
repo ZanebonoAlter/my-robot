@@ -473,9 +473,31 @@ func GenerateDailyReport(ctx context.Context, boardID uint, date time.Time) (*Bo
 		threadBatches = append(threadBatches, batch)
 	}
 
-	// Section lifecycle matching (must run after all sections are assembled)
-	prevSections := findPreviousSections(boardID, startOfDay)
-	matchPreviousSections(sections, prevSections)
+	// Generate section embeddings from cluster_label texts
+	var embedTexts []string
+	var embedIndices []int
+	for i, sec := range sections {
+		if strings.TrimSpace(sec.ClusterLabel) != "" {
+			embedTexts = append(embedTexts, sec.ClusterLabel)
+			embedIndices = append(embedIndices, i)
+		}
+	}
+	if len(embedTexts) > 0 {
+		embedResult, embedErr := airouter.NewRouter().Embed(ctx, airouter.EmbeddingRequest{
+			Input: embedTexts,
+			Metadata: map[string]any{
+				"operation": "daily_report_section_embedding",
+				"board_id":  boardID,
+			},
+		}, airouter.CapabilityEmbedding)
+		if embedErr != nil {
+			logging.Warnf("daily-report: section embedding failed for board %d: %v", boardID, embedErr)
+		} else if len(embedResult.Embeddings) >= len(embedTexts) {
+			for j, idx := range embedIndices {
+				sections[idx].Embedding = floatsToPgVector(embedResult.Embeddings[j])
+			}
+		}
+	}
 
 	return report, sections, threadBatches, nil
 }
@@ -527,69 +549,6 @@ func matchPreviousThreads(threads []Thread, prevThreads []DailyReportThread, clu
 				th.Status = "continuing"
 			}
 		}
-	}
-}
-
-// matchPreviousSections matches each today's section against yesterday's sections
-// using cluster_tag_ids Jaccard similarity. Sets PrevSectionID and Status.
-// Threshold: intersection >= 2 OR Jaccard >= 0.3.
-// Many-to-one is allowed (topic "splitting" is expected).
-func matchPreviousSections(sections []DailyReportSection, prevSections []DailyReportSection) {
-	if len(sections) == 0 || len(prevSections) == 0 {
-		return
-	}
-
-	type prevEntry struct {
-		id            uint
-		clusterTagIDs []uint
-	}
-	var prevList []prevEntry
-	for i := range prevSections {
-		ps := &prevSections[i]
-		var tagIDs []uint
-		if ps.ClusterTagIDs != nil {
-			_ = json.Unmarshal(ps.ClusterTagIDs, &tagIDs)
-		}
-		prevList = append(prevList, prevEntry{id: ps.ID, clusterTagIDs: tagIDs})
-	}
-
-	for i := range sections {
-		sec := &sections[i]
-		var curTagIDs []uint
-		if sec.ClusterTagIDs != nil {
-			_ = json.Unmarshal(sec.ClusterTagIDs, &curTagIDs)
-		}
-		if len(curTagIDs) == 0 {
-			continue
-		}
-
-		bestIdx := -1
-		bestScore := 0.0
-
-		for j, prev := range prevList {
-			if len(prev.clusterTagIDs) == 0 {
-				continue
-			}
-			intersection := countTagOverlap(curTagIDs, prev.clusterTagIDs)
-			if intersection == 0 {
-				continue
-			}
-			union := len(curTagIDs) + len(prev.clusterTagIDs) - intersection
-			jaccard := float64(intersection) / float64(union)
-
-			if intersection >= 2 || jaccard >= 0.3 {
-				if jaccard > bestScore {
-					bestScore = jaccard
-					bestIdx = j
-				}
-			}
-		}
-
-		if bestIdx >= 0 {
-			sec.PrevSectionID = &prevList[bestIdx].id
-			sec.Status = "continuing"
-		}
-		// else: keeps default "emerging" from DB default
 	}
 }
 
@@ -777,22 +736,6 @@ func findPreviousReport(boardID uint, date time.Time) (*BoardDailyReport, []Dail
 		allThreads = append(allThreads, sec.Threads...)
 	}
 	return &report, allThreads
-}
-
-// findPreviousSections loads all sections (with ClusterTagIDs) from the most recent
-// report before the given date. Used for section-level lifecycle matching.
-func findPreviousSections(boardID uint, date time.Time) []DailyReportSection {
-	var report BoardDailyReport
-	err := database.DB.Where(
-		"semantic_board_id = ? AND period_date < ? AND status = ?",
-		boardID, normalizeReportDate(date).Format("2006-01-02"), "completed",
-	).Order("period_date DESC").
-		Preload("Sections").
-		First(&report).Error
-	if err != nil {
-		return nil
-	}
-	return report.Sections
 }
 
 // getPrevThreadSummaries extracts thread summaries from previous threads

@@ -29,35 +29,9 @@ var (
 	ErrTopicTagNotFound    = errors.New("topic tag not found")
 )
 
-// EmbeddingMatchThresholds defines similarity thresholds for tag matching
-type EmbeddingMatchThresholds struct {
-	// High similarity - include as candidate (no longer auto-reuse)
-	HighSimilarity float64
-	// Low similarity - auto-create new tag
-	LowSimilarity float64
-	// Middle band - requires AI judgment
-	// Tags with similarity between LowSimilarity and HighSimilarity need AI decision
-}
-
-// DefaultThresholds provides sensible defaults for matching
-var DefaultThresholds = EmbeddingMatchThresholds{
-	HighSimilarity: 0.97, // Auto-reuse if similarity >= 0.97
-	LowSimilarity:  0.78, // Auto-create if similarity < 0.78
-}
-
-// CategoryThresholdOverrides defines per-category threshold adjustments.
-// Keys are category names; the corresponding HighSimilarity overrides the default
-// when TagMatch processes a tag of that category.
-var CategoryThresholdOverrides = map[string]EmbeddingMatchThresholds{}
-
-// ThresholdsForCategory returns the effective thresholds for a given category,
-// falling back to DefaultThresholds when no override is configured.
-func ThresholdsForCategory(category string) EmbeddingMatchThresholds {
-	if override, ok := CategoryThresholdOverrides[category]; ok {
-		return override
-	}
-	return DefaultThresholds
-}
+// MatchThreshold is the minimum cosine similarity for a tag pair to be
+// considered a merge candidate. Pairs below this threshold are ignored.
+var MatchThreshold = 0.92
 
 // TagMatchResult represents a tag match result
 type TagMatchResult struct {
@@ -76,35 +50,14 @@ type TagCandidate struct {
 
 // EmbeddingService handles embedding generation and similarity matching
 type EmbeddingService struct {
-	router     *airouter.Router
-	thresholds EmbeddingMatchThresholds
+	router *airouter.Router
 }
 
 // NewEmbeddingService creates a new embedding service
 func NewEmbeddingService() *EmbeddingService {
-	thresholds := DefaultThresholds
-	configService := NewEmbeddingConfigService()
-	if loaded, err := configService.LoadThresholds(); err == nil {
-		thresholds = loaded
-	}
-
 	return &EmbeddingService{
-		router:     airouter.NewRouter(),
-		thresholds: thresholds,
+		router: airouter.NewRouter(),
 	}
-}
-
-// NewEmbeddingServiceWithThresholds creates a service with custom thresholds
-func NewEmbeddingServiceWithThresholds(thresholds EmbeddingMatchThresholds) *EmbeddingService {
-	return &EmbeddingService{
-		router:     airouter.NewRouter(),
-		thresholds: thresholds,
-	}
-}
-
-// GetThresholds returns the configured match thresholds for this service.
-func (s *EmbeddingService) GetThresholds() EmbeddingMatchThresholds {
-	return s.thresholds
 }
 
 // GenerateEmbedding generates an embedding for a tag's text representation
@@ -264,8 +217,7 @@ func (s *EmbeddingService) FindSimilarTags(ctx context.Context, tag *models.Topi
 // TagMatch decides how to handle a candidate tag
 func (s *EmbeddingService) TagMatch(ctx context.Context, label, category string, aliases string) (*TagMatchResult, error) {
 	slug := Slugify(label)
-	thresholds := ThresholdsForCategory(category)
-	logging.Infof("TagMatch: start label=%q slug=%q category=%s low=%.2f high=%.2f", label, slug, category, thresholds.LowSimilarity, thresholds.HighSimilarity)
+	logging.Infof("TagMatch: start label=%q slug=%q category=%s threshold=%.2f", label, slug, category, MatchThreshold)
 	var existingTag models.TopicTag
 	err := database.DB.Scopes(activeTagFilter).Where("slug = ? AND category = ?", slug, category).First(&existingTag).Error
 	if err == nil {
@@ -334,7 +286,7 @@ func (s *EmbeddingService) TagMatch(ctx context.Context, label, category string,
 
 	var validCandidates []TagCandidate
 	for _, c := range candidates {
-		if c.Similarity >= thresholds.LowSimilarity {
+		if c.Similarity >= MatchThreshold {
 			validCandidates = append(validCandidates, c)
 		}
 	}
@@ -344,16 +296,6 @@ func (s *EmbeddingService) TagMatch(ctx context.Context, label, category string,
 		return &TagMatchResult{
 			MatchType:  "no_match",
 			Similarity: bestSimilarity(candidates),
-		}, nil
-	}
-
-	if validCandidates[0].Similarity >= thresholds.HighSimilarity {
-		top := validCandidates[0]
-		logging.Infof("TagMatch: label=%q category=%s result=candidates reason=high_similarity_downgraded existingID=%d existingLabel=%q similarity=%.4f", label, category, top.Tag.ID, top.Tag.Label, top.Similarity)
-		return &TagMatchResult{
-			MatchType:  "candidates",
-			Similarity: top.Similarity,
-			Candidates: validCandidates,
 		}, nil
 	}
 

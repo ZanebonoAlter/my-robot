@@ -5,7 +5,7 @@
 
 **BoardDailyReport 字段**：id, semantic_board_id, period_date, title, summary, highlights(JSON), dynamics(TEXT), article_count, event_tag_count, cluster_count, status(generating/done/failed), raw_clusters(JSON), prev_report_id(可为空，指向前一日日报), generation_prompt_version, created_at, updated_at。
 
-**DailyReportSection 字段**：id, report_id, cluster_index, cluster_label, cluster_tag_ids(JSON), article_count, best_tier, avg_score, embedding(vector(2560) 用于语义匹配), prev_section_id(可为空，自引用), status(VARCHAR(20) 默认 'emerging'), created_at。~~threads(JSON)~~ — 线程数据已迁移至 `daily_report_threads` 表，通过 `section_id` 外键关联。
+**DailyReportSection 字段**：id, report_id, cluster_index, cluster_label, cluster_tag_ids(JSON), article_count, best_tier, avg_score, embedding(向量列，维度由模型输出决定, 用于语义匹配), prev_section_id(可为空，自引用), status(VARCHAR(20) 默认 'emerging'), created_at。~~threads(JSON)~~ — 线程数据已迁移至 `daily_report_threads` 表，通过 `section_id` 外键关联。
 
 **DailyReportThread 字段**：id, report_id, section_id, title, summary, status, tag_ids(JSONB), confidence, prev_thread_id(可为空，自引用), created_at。
 
@@ -30,14 +30,15 @@
 - **THEN** 每个聚类的叙事线程 SHALL 作为独立行存储在 `daily_report_threads` 表中，通过 `section_id` 关联到对应的 section
 
 ### Requirement: Section embedding 语义延续匹配
-系统 SHALL 为每个 `daily_report_section` 生成 embedding 向量（基于 `cluster_label` 文本），存储在 `embedding vector(2560)` 列中。匹配 SHALL 使用 pgvector 余弦距离（`<=>` 操作符）在数据库侧完成，匹配范围为同板块下所有已存在的 section（排除当前 report 的 section）。
+系统 SHALL 为每个 `daily_report_section` 生成 embedding 向量（基于 `cluster_label` 文本），存储在 `embedding` 列中。向量维度由 embedding 模型输出决定（`EmbeddingResult.Dimensions`），`ensureVectorDimension()` 仅确保 DB 列类型与模型输出匹配。GORM 模型 SHALL 声明 `gorm:"type:vector"`（不硬编码维度）。匹配 SHALL 使用 pgvector 余弦距离（`<=>` 操作符）在数据库侧完成，匹配范围为同板块下所有已存在的 section（排除当前 report 的 section）。
 
 生成流程：
-1. LLM 生成 sections 后，系统 SHALL 批量调用 Embedding API 为每个 section 的 `cluster_label` 生成 2560 维向量
-2. `SaveReport()` 存储 section 时 SHALL 同时写入 embedding
-3. 存储 SHALL 在同一事务内使用 pgvector 查询每个 section 在同板块内（排除当前 report）的最近邻 section
-4. 余弦距离 < 0.3 的最近邻 SHALL 被选为匹配，设置 `prev_section_id` 并将 status 更新为 `continuing`
-5. 无匹配 → status 保持 `emerging`，`prev_section_id` 为 NULL
+1. LLM 生成 sections 后，系统 SHALL 批量调用 Embedding API 为每个 section 的 `cluster_label` 生成向量。**`cluster_label` 为空的 section SHALL 被跳过**（不调用 API，embedding 和 prev_section_id 均保持 NULL）
+2. Embedding 维度从 `EmbeddingResult.Dimensions` 获取
+3. `SaveReport()` 存储 section 时 SHALL 同时写入 embedding
+4. **Upsert 匹配顺序**：`SaveReport()` 事务 SHALL **先匹配再删除旧数据**——在删除旧 section 之前，对每个新 section 用 pgvector 查询同板块内所有现有 section 的最近邻，确保 upsert 场景下不丢失与前一天的连续性
+5. 余弦距离 < 0.3 的最近邻 SHALL 被选为匹配，设置 `prev_section_id` 并将 status 更新为 `continuing`
+6. 无匹配 → status 保持 `emerging`，`prev_section_id` 为 NULL
 
 `matchPreviousSections()` 的原有 tag Jaccard 匹配逻辑 SHALL 被替换为上述 pgvector 匹配。`findPreviousSections()` SHALL 被废弃（不再只加载前一天的 section，改用 pgvector 全量查询）。
 
@@ -61,6 +62,14 @@
 #### Scenario: 完全无匹配
 - **WHEN** 今日聚类 #3 与同板块所有已有 section 的余弦距离均 ≥ 0.3
 - **THEN** 该 section SHALL 保持 status="emerging"，prev_section_id 为 NULL
+
+#### Scenario: Upsert 场景保持连续性
+- **WHEN** board #5 在 05-31 已有报告（section #100），重新生成 05-31 日报
+- **THEN** SaveReport() SHALL 在删除旧 section #100 **之前**，先用 pgvector 将新 section 与 #100 匹配，确保新 section 的 prev_section_id 正确指向 #100 的上一日链
+
+#### Scenario: 空 cluster_label 跳过
+- **WHEN** 某聚类 section 的 cluster_label 为空字符串
+- **THEN** 系统 SHALL 跳过该 section 的 embedding 生成，embedding 和 prev_section_id 均保持 NULL
 
 ### Requirement: Thread 级别连续性匹配（基于 tag 交集）
 Thread 级别 SHALL 继续使用现有的 tag 交集策略匹配昨日线索。如果今日线程与昨日线程有 tag ID 交集 → 续接，status 设为 continuing。匹配结果 SHALL 设置 `prev_thread_id` 指向匹配线程的数据库 ID。无匹配 → 标记为 emerging，prev_thread_id 为 NULL。

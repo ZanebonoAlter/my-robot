@@ -14,7 +14,7 @@ Despite visually obvious continuity ("山西沁源留神峪煤矿瓦斯爆炸事
 
 ### The Solution: Embedding-based Semantic Matching
 
-Using pgvector on `daily_report_sections.embedding` (2560-dim, same model as `topic_tag_embeddings`):
+Using pgvector on `daily_report_sections.embedding` (维度由运行时 `embedding_config` 配置决定，不硬编码):
 
 - Section embedding text: `cluster_label` (short, semantically dense)
 - Matching: `embedding <=> $current_embedding` cosine distance, threshold < 0.3
@@ -30,7 +30,7 @@ Verified on production data: distance < 0.3 correctly links "朗维尤市日资�
 - Give every thread a unique, persistent database identity via `daily_report_threads` table
 - Populate `prev_thread_id` during generation so threads form a linked list across days
 - **Replace tag Jaccard matching with embedding-based semantic matching for section lineage**
-- **Add `embedding vector(2560)` column to `daily_report_sections` and generate embeddings during report generation**
+- **Add `embedding` column to `daily_report_sections` (维度由模型输出决定) and generate embeddings during report generation**
 - **Backfill embeddings for all existing sections**
 - Provide API endpoints for thread lineage chain retrieval and board-level thread timeline
 - Build frontend views: (A) thread lineage timeline within newspaper modal, (B) board-level Gantt-chart thread browser
@@ -74,12 +74,16 @@ Verified on production data: distance < 0.3 correctly links "朗维尤市日资�
 **Rationale**: Tag-based matching is provably broken — tag IDs have zero cross-day overlap because daily clustering generates fresh tags, and older tags get deleted. Embedding matching directly captures semantic continuity regardless of tag identity. Verified on production data: distance < 0.3 correctly links same-event sections across days.
 
 **Implementation**:
-1. Add `embedding vector(2560)` column to `daily_report_sections` (migration)
-2. After LLM section generation, batch-embed all `cluster_label` texts in one API call
-3. Store sections with embeddings in `SaveReport()`
-4. Within same transaction, use pgvector `<=>` to find nearest neighbor for each new section among all existing sections in the board (excluding current report)
-5. If distance < 0.3, set `prev_section_id` and `status='continuing'`
-6. `findPreviousSections()` and `matchPreviousSections()` in Go are replaced by a single repository function `MatchSectionsByEmbedding()`
+1. Add `embedding vector` column to `daily_report_sections` (migration 声明 `type:vector`，不硬编码维度)。GORM 模型声明 `gorm:"type:vector"`，与 `TopicTagEmbedding.EmbeddingVec` 保持一致
+2. After LLM section generation, batch-embed all `cluster_label` texts in one API call. **Skip sections with empty `cluster_label`** — 不生成 embedding，`prev_section_id` 保持 NULL
+3. Embedding 维度由模型输出决定（`EmbeddingResult.Dimensions`），`ensureVectorDimension()` 仅确保 DB 列类型与模型输出匹配（在模型切换时 ALTER 列）
+4. Store sections with embeddings in `SaveReport()`
+5. **Upsert 匹配顺序（关键）**：在 `SaveReport()` 事务内，**先匹配再删除旧数据**：
+   - (a) 对每个新 section（带 embedding），用 pgvector `<=>` 查询同 board 内**所有现有 section**（此时旧 section 尚未删除）的最近邻
+   - (b) 如果余弦距离 < 0.3，设置 `prev_section_id` 和 `status='continuing'`
+   - (c) 然后才删除旧 sections + threads，插入新 sections + threads
+   - 这样避免 upsert 场景下丢失与前一天的连续性
+6. `findPreviousSections()` and `matchPreviousSections()` in Go are replaced — Go 侧不再做 section 匹配，完全由 DB 侧 pgvector 完成
 
 **Alternative considered**: Use existing `topic_tag_embeddings` to compute section similarity indirectly. Rejected because (a) old tags are deleted so their embeddings are gone, (b) new tags may not have embeddings yet, (c) tag embedding ≠ section semantic.
 
@@ -113,6 +117,9 @@ Verified on production data: distance < 0.3 correctly links "朗维尤市日资�
 
 - **[Risk] Migration data loss if threads JSON has unexpected shapes** → Mitigation: Migration uses `jsonb_array_elements` with error handling; column drop is in a separate migration that can be deferred. JSON field names (`related_tag_ids` not `tag_ids`) are correctly mapped in migration SQL.
 - **[Risk] Upsert invalidates downstream prev_thread_id references** → Mitigation: `SaveReport` sets `prev_thread_id=NULL` on any threads that reference the report's threads before deleting them. Report regeneration implies content has changed, so broken lineage is expected.
+- **[Risk] Upsert 时旧 section 被删导致 section 链断裂** → Mitigation: `SaveReport()` 事务内**先执行 pgvector 匹配（此时旧 section 还在），再删除旧 section 并插入新 section**。确保新 section 能匹配到被替换的旧 section。
+- **[Risk] `cluster_label` 为空时生成无效 embedding** → Mitigation: 跳过 `cluster_label` 为空的 section，不调用 Embedding API，`embedding` 和 `prev_section_id` 均保持 NULL。
+- **[Risk] 回填覆盖已有的错误 tag Jaccard 匹配** → 回填 SHALL 用 embedding 结果覆盖**所有** `prev_section_id`（不仅限于 NULL 的），因为现有 tag Jaccard 匹配结果不可靠。
 - **[Risk] Section embedding threshold may need tuning** → Mitigation: Verified threshold 0.3 on production data (same-event sections at 0.22-0.29, unrelated events at >0.4). Can be adjusted via constant. Historical sections with no embedding will be backfilled.
 - **[Risk] Embedding API cost increase** → Mitigation: ~9 sections per report average, minimal cost. Batch API reduces HTTP overhead. Max case (47 sections) still reasonable.
 - **[Risk] Thread matching quality — tag overlap may produce false lineage links** → Mitigation: Thread embedding is planned for a future change. Current tag-based matching is a known limitation.

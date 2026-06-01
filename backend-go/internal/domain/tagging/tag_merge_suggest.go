@@ -108,7 +108,6 @@ func runFullScan(ctx context.Context) {
 	}
 
 	total := len(tags)
-	thresholds := DefaultThresholds
 	newSuggestions := 0
 
 	for i, tag := range tags {
@@ -126,7 +125,7 @@ func runFullScan(ctx context.Context) {
 		}
 
 		for _, c := range candidates {
-			if c.Similarity < thresholds.LowSimilarity {
+			if c.Similarity < MatchThreshold {
 				continue
 			}
 			if c.Tag.ID == tag.ID {

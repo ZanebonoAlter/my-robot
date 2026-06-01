@@ -32,8 +32,8 @@ func DeduplicateTags(tags []TagInput, articleIDSets [][]uint) []TagInput {
 
 	// Map from article set signature to the "best" tag index.
 	// For single-article tags, also track by single article ID.
-	setSigToIdx := make(map[string]int)   // full set signature → best index
-	singleArtToIdx := make(map[uint]int)   // single article ID → best index
+	setSigToIdx := make(map[string]int)  // full set signature → best index
+	singleArtToIdx := make(map[uint]int) // single article ID → best index
 
 	for i, tag := range tags {
 		arts := dedupAndSort(articleIDSets[i])

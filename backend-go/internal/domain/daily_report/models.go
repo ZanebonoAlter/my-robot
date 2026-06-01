@@ -5,6 +5,9 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"syntopica-backend/internal/platform/database"
+	"syntopica-backend/internal/platform/logging"
 )
 
 // BoardDailyReport — one report per board per day
@@ -156,4 +159,55 @@ type Thread struct {
 	Confidence        float64 `json:"confidence"`
 	PrevThreadID      *uint   `json:"prev_thread_id,omitempty"`
 	RelatedArticleIDs []uint  `json:"related_article_ids,omitempty"`
+}
+
+// ensureSectionEmbeddingDimension sets the daily_report_sections.embedding column to
+// the correct vector dimension and creates the HNSW index if dimension ≤ 2000.
+// Called once at startup via tagging.RegisterVectorDimEnsurer.
+func ensureSectionEmbeddingDimension(dim int) {
+	db := database.DB
+	if db == nil {
+		return
+	}
+
+	if err := db.Exec("SET LOCAL lock_timeout = '5s'" /* #nosec G201 */ ).Error; err != nil {
+		logging.Warnf("Failed to set lock_timeout: %v", err)
+	}
+
+	var typeStr string
+	if err := db.Raw(`
+		SELECT format_type(a.atttypid, a.atttypmod)
+		FROM pg_attribute a
+		JOIN pg_class c ON c.oid = a.attrelid
+		WHERE c.relname = 'daily_report_sections' AND a.attname = 'embedding'
+	`).Row().Scan(&typeStr); err != nil {
+		return // column may not exist yet
+	}
+
+	expected := fmt.Sprintf("vector(%d)", dim)
+	needAlter := typeStr != expected
+	needIndex := true
+
+	if needAlter {
+		logging.Infof("Altering daily_report_sections.embedding from %s to %s", typeStr, expected)
+		_ = db.Exec("DROP INDEX IF EXISTS idx_daily_report_sections_embedding").Error
+		if err := db.Exec(fmt.Sprintf(
+			"ALTER TABLE daily_report_sections ALTER COLUMN embedding TYPE %s", expected,
+		)).Error; err != nil {
+			logging.Warnf("Failed to alter daily_report_sections.embedding to %s: %v", expected, err)
+			return
+		}
+	}
+
+	// pgvector HNSW supports up to 2000 dimensions.
+	if dim > 2000 {
+		logging.Infof("Skipping HNSW index on daily_report_sections.embedding: dimension %d > 2000 limit", dim)
+		needIndex = false
+	}
+
+	if needIndex {
+		if err := db.Exec(`CREATE INDEX IF NOT EXISTS idx_daily_report_sections_embedding ON daily_report_sections USING hnsw (embedding vector_cosine_ops)`).Error; err != nil {
+			logging.Warnf("Failed to create HNSW index on daily_report_sections.embedding: %v", err)
+		}
+	}
 }

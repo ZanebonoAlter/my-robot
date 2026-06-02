@@ -67,13 +67,19 @@ func SaveReport(report *BoardDailyReport, sections []DailyReportSection, threadB
 			// Nullify downstream prev_thread_id references before deleting old threads
 			if err := tx.Model(&DailyReportThread{}).
 				Where("prev_thread_id IN (SELECT id FROM daily_report_threads WHERE report_id = ?)", existing.ID).
-				Update("prev_thread_id", nil).Error; err != nil {
+				Updates(map[string]interface{}{
+					"prev_thread_id": nil,
+					"status":         "emerging",
+				}).Error; err != nil {
 				return fmt.Errorf("nullify downstream prev_thread_id: %w", err)
 			}
 			// Nullify downstream prev_section_id references before deleting old sections
 			if err := tx.Model(&DailyReportSection{}).
 				Where("prev_section_id IN (SELECT id FROM daily_report_sections WHERE report_id = ?)", existing.ID).
-				Update("prev_section_id", nil).Error; err != nil {
+				Updates(map[string]interface{}{
+					"prev_section_id": nil,
+					"status":          "emerging",
+				}).Error; err != nil {
 				return fmt.Errorf("nullify downstream prev_section_id: %w", err)
 			}
 			// Delete old threads

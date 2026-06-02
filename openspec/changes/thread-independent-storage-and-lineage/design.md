@@ -113,6 +113,86 @@ Verified on production data: distance < 0.3 correctly links "朗维尤市日资�
 
 **Rationale**: Keeps the daily report feature self-contained. No route changes needed.
 
+## 实现后发现的 Bug（2026-06-02 探索验证）
+
+对板块 3639（人工智能与大模型技术）数据库实际数据分析，发现以下问题：
+
+### 数据现状
+
+```
+日期         section数  有embedding  有prev_section_id  status分布
+─────────────────────────────────────────────────────────────────────
+05-26   25         ✗ (0/25)     全 NULL            全 emerging
+05-27    4         ✗ (0/4)      全 NULL            全 emerging
+05-28   47         ✗ (0/47)     全 NULL            全 emerging
+05-29   12         ✗ (0/12)     全 NULL            全 emerging
+05-30   18         ✗ (0/18)     全 NULL            全 emerging
+05-31   20         ✓ (20/20)   全 NULL            18 continuing + 2 emerging ← 矛盾！
+06-01   13         ✓ (13/13)   13/13 有值         全 continuing
+```
+
+06-01 的 prev_section_id 引用情况：
+- 3 个指向 05-31 存活的 section (755, 756, 765) ✓
+- 10 个指向已不存在的 section id (701-711) ✗ — 这些是 05-31 被 upsert 删掉的旧 section
+
+### Bug 1：nullify 只清 prev_section_id，不重置 status
+
+**位置**：`repository.go` `SaveReport()` 中 nullify downstream 逻辑
+
+**根因**：批量 upsert 场景下，交叉 nullify 清空了 `prev_section_id` 但没有同步重置 `status`。
+
+```
+时序（06-02 批量重新生成）：
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+1. 05-31 upsert (report 33, 06-02 11:11)
+   ├── MatchSectionsByEmbedding: 匹配到 06-01 旧 section
+   │   → prev_section_id = 指向 06-01 section
+   │   → status = "continuing" ✓
+   ├── Nullify downstream: 清理引用 05-31 旧 section 的外部引用
+   ├── 删除 05-31 旧 section (695-714)
+   └── 插入 05-31 新 section (755-774)
+       此时 prev_section_id 指向 06-01 旧 section
+
+2. 06-01 upsert (report 43, 06-02 11:13)
+   ├── Nullify downstream prev_section_id
+   │   → 05-31 新 section (755-774) 的 prev_section_id
+   │     指向了 06-01 旧 section → 被清为 NULL ✓
+   │   → 但 status="continuing" 没有被重置！✗ ← BUG
+   ├── 删除 06-01 旧 section
+   ├── MatchSectionsByEmbedding: 匹配到 05-31 新 section
+   └── 插入 06-01 新 section (775-787)
+```
+
+**后果**：05-31 section `status=continuing` 但 `prev_section_id=NULL`（逻辑矛盾）。
+
+**修复**：nullify downstream prev_section_id 时，同时将对应 section 的 status 重置为 `emerging`。
+
+### Bug 2：nullify 的 scope 不够精确
+
+**位置**：`repository.go` `SaveReport()` nullify downstream prev_section_id
+
+**根因**：nullify 只按 report_id 过滤被引用的旧 section，没有考虑同事务内新 section 可能已经获得了合法的 prev_section_id 指向。当 A 和 B 同批 upsert 时，A 匹配到 B 的旧 section → B upsert 清理时把 A 新 section 的合法引用也 nullify 了。
+
+**后果**：批量 upsert 时 section 链断裂。06-01 的 section 引用了 701-711（05-31 旧 section），这些 section 已被删但 prev_section_id 未被清理（因为 06-01 upsert 先于 05-31 nullify 执行，或者 nullify 时 06-01 的 section 还未指向它们）。
+
+**修复方案**：nullify 时增加条件——只 nullify `prev_section_id` 指向被删 section **且**该 section 确实属于当前 report 的引用。或者更根本地，在 nullify 后对被影响的 section 重新跑一次 embedding 匹配。
+
+### Bug 3：回填未执行
+
+**位置**：任务 10.3/10.4 未完成
+
+**根因**：`BackfillSectionEmbeddings()` 函数已实现但从未被调用。所有历史 section（05-26 到 05-30）没有 embedding，无法参与匹配。
+
+**后果**：139 个 section 中只有 33 个有 embedding（23.7%），历史 section 全部无法匹配。
+
+### Bug 4：prev_section_id 无 FK 约束
+
+**根因**：`prev_section_id` 列没有外键约束，可以指向已删除的 section。
+
+**后果**：06-01 的 10 个 section 的 `prev_section_id` 指向不存在的 section id (701-711)。前端 `buildChains` 通过 `nodeMap.has()` 容忍了这种情况，但数据不干净。
+
+**修复方案**：在 nullify 逻辑正确后（Bug 1+2 修复后），添加 FK 约束 `prev_section_id REFERENCES daily_report_sections(id) ON DELETE SET NULL`。或者保持无 FK 但确保 nullify 逻辑完整。
+
 ## Risks / Trade-offs
 
 - **[Risk] Migration data loss if threads JSON has unexpected shapes** → Mitigation: Migration uses `jsonb_array_elements` with error handling; column drop is in a separate migration that can be deferred. JSON field names (`related_tag_ids` not `tag_ids`) are correctly mapped in migration SQL.

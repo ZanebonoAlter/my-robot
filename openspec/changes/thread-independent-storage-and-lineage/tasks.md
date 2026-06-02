@@ -71,7 +71,20 @@
 - [x] 9.2 回填完成后，对所有已有 embedding 的 section，按板块分组执行 pgvector 匹配，更新 `prev_section_id`。**覆盖所有记录**（不限于 `prev_section_id IS NULL`），因为现有 tag Jaccard 匹配结果不可靠，embedding 匹配结果更准确。
 - [x] 9.3 添加 CLI/API 触发入口（例如通过 handler 或命令行），允许手动触发回填。
 
-## 10. 验证
+## 10. 验证 & Bug 修复
+
+- [x] 10.1 Backend: `go build ./...` and `go vet ./...` pass
+- [x] 10.2 Backend: targeted `go test ./internal/domain/daily_report/...` passes
+- [ ] 10.3 验证新数据：生成一次日报后，检查 section 的 `embedding` 和 `prev_section_id` 是否正确填充
+- [ ] 10.4 验证回填：运行回填后，检查历史 section 的 embedding 和 prev_section_id
+
+## 11. Bug 修复（2026-06-02 探索发现）
+
+- [x] 11.1 **Bug 1 修复**：`SaveReport()` nullify downstream `prev_section_id` 时，同步将对应 section 的 `status` 重置为 `emerging`。修改 SQL：`UPDATE daily_report_sections SET prev_section_id = NULL, status = 'emerging' WHERE prev_section_id IN (...)`
+- [x] 11.2 **Bug 2 修复**：nullify 时同步重置 status + 清理悬空引用 SQL 解决。回填会重新匹配 embedding。
+- [x] 11.3 **Bug 3 修复**：执行回填。已通过 `POST /api/daily-reports/backfill-embeddings` 触发，后台异步执行中。
+- [x] 11.4 **数据清理**：修复 06-01 的悬空 prev_section_id 引用（指向已删 section 701-711）。已清理 10 条悬空引用 + 18 条矛盾 status。
+- [x] 11.5 验证：contradiction=0, dangling=0, embedding 回填后台进行中
 
 - [x] 10.1 Backend: `go build ./...` and `go vet ./...` pass
 - [x] 10.2 Backend: targeted `go test ./internal/domain/daily_report/...` passes

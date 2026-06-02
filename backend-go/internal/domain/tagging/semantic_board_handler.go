@@ -1468,7 +1468,13 @@ func (airouterSemanticBoardUpgradeLLM) SuggestSemanticBoardUpgrades(ctx context.
 			Reason            string                       `json:"reason"`
 		} `json:"suggestions"`
 	}
-	if err := json.Unmarshal([]byte(jsonutil.SanitizeLLMJSON(result.Content)), &parsed); err != nil {
+	sanitized := jsonutil.SanitizeLLMJSON(result.Content)
+	if err := json.Unmarshal([]byte(sanitized), &parsed); err != nil {
+		rawPreview := sanitized
+		if len(rawPreview) > 500 {
+			rawPreview = rawPreview[:500] + "..."
+		}
+		logging.Warnf("[semantic-board-upgrade] LLM JSON parse failed: %v, raw=%d sanitized=%d preview=%s", err, len(result.Content), len(sanitized), rawPreview)
 		return nil, err
 	}
 	suggestions := make([]SemanticBoardUpgradeSuggestion, 0, len(parsed.Suggestions))

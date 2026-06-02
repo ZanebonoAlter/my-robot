@@ -465,7 +465,7 @@ async function handleSuggestUpgrade() {
   upgradeSuggesting.value = false
 }
 
-async function handleExecuteUpgrade(suggestion: UpgradeSuggestion) {
+async function handleExecuteUpgrade(suggestion: UpgradeSuggestion, index: number) {
   if (suggestion.decision === 'skip') return
   const res = await sbApi.executeUpgrade({
     decision: suggestion.decision,
@@ -475,7 +475,7 @@ async function handleExecuteUpgrade(suggestion: UpgradeSuggestion) {
     auxiliary_label_ids: suggestion.auxiliary_label_ids,
   })
   if (res.success) {
-    upgradeSuggestions.value = upgradeSuggestions.value.filter(item => item !== suggestion)
+    upgradeSuggestions.value.splice(index, 1)
     upgradeBackfillNotice.value = true
     void loadBoards()
   }

@@ -5,7 +5,7 @@
 ## What Changes
 
 - **修正 ref_count 递减逻辑**：topic_tag 被删除（CleanupOrphanedTags / HardMergeTags）时，自动重算受影响 auxiliary label 的 ref_count
-- **新增辅助标签 GC 机制**：定时扫描无活跃 topic_tag 引用的 auxiliary label，自动将其标记为 disabled
+- **新增辅助标签 GC 机制**：定时扫描无活跃 topic_tag 引用且未挂载在板块下的 auxiliary label，自动将其标记为 disabled
 - **新增手动 GC API**：`POST /api/auxiliary-labels/gc`，支持 dry_run / disable / delete 三种模式
 - **新增 AuxLabelCleanup 定时任务**：每小时执行一次 disable 模式的 GC，通过 GlobalSettings 定时任务面板展示和管理
 - **一次性存量校准脚本**：对现有数据执行 ref_count 全量重算

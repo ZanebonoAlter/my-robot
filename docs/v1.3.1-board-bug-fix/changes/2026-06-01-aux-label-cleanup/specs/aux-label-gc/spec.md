@@ -23,6 +23,10 @@
 - **WHEN** auxiliary label "AI" 在 topic_tag_semantic_labels 中有关联行
 - **THEN** 该标签 SHALL NOT 被 GC 清理
 
+#### Scenario: 跳过挂载在板块上的标签
+- **WHEN** auxiliary label "机器学习" 在 board_composition 中有关联行（挂载在某个板块下），但在 topic_tag_semantic_labels 中无关联行
+- **THEN** 该标签 SHALL NOT 被 GC 清理
+
 #### Scenario: 跳过 protected 标签
 - **WHEN** auxiliary label "AI" 的 protected=true，即使无任何 topic_tag 引用
 - **THEN** 该标签 SHALL NOT 被 GC 清理

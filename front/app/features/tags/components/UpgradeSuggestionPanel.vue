@@ -14,7 +14,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   suggest: []
-  execute: [suggestion: UpgradeSuggestion]
+  execute: [suggestion: UpgradeSuggestion, index: number]
   cancel: []
 }>()
 
@@ -24,12 +24,12 @@ function toggleMerge(index: number) {
   openMergeIndex.value = openMergeIndex.value === index ? null : index
 }
 
-function handleMerge(s: UpgradeSuggestion, boardId: number) {
+function handleMerge(s: UpgradeSuggestion, index: number, boardId: number) {
   emit('execute', {
     ...s,
     decision: 'merge_into_existing' as const,
     target_board_id: boardId,
-  })
+  }, index)
 }
 
 function decisionLabel(d: string): string {
@@ -148,11 +148,51 @@ function decisionStyle(d: string): { border: string; bg: string; color: string }
                 </span>
               </span>
             </div>
-            <div v-if="s.decision !== 'skip'" class="usp-item-actions">
+            <div class="usp-item-actions">
+              <!-- skip 类型的建议也支持手动操作：创建新板块或合并到已有板块 -->
+              <template v-if="s.decision === 'skip'">
+                <button
+                  type="button"
+                  class="usp-item-btn usp-item-btn--primary"
+                  @click="emit('execute', {
+                    ...s,
+                    decision: 'create_new' as const,
+                    board_label: s.board_label || (s.auxiliary_labels && s.auxiliary_labels.length > 0 ? s.auxiliary_labels[0]!.label : undefined),
+                  }, i)"
+                >
+                  <Icon icon="mdi:plus" width="12" />
+                  改为创建
+                </button>
+                <template v-if="s.board_affinities && s.board_affinities.length > 0">
+                  <div class="usp-merge-wrapper">
+                    <button
+                      type="button"
+                      class="usp-item-btn usp-item-btn--merge"
+                      @click="toggleMerge(i)"
+                    >
+                      <Icon icon="mdi:merge" width="12" />
+                      合并到...
+                    </button>
+                    <div v-if="openMergeIndex === i" class="usp-merge-dropdown">
+                      <button
+                        v-for="aff in s.board_affinities"
+                        :key="aff.board_id"
+                        type="button"
+                        class="usp-merge-option"
+                        @click="handleMerge(s, i, aff.board_id)"
+                      >
+                        {{ aff.board_label }}
+                        <span class="usp-merge-option-detail">({{ aff.matching_candidates }} matches)</span>
+                      </button>
+                    </div>
+                  </div>
+                </template>
+              </template>
+              <template v-else>
               <button
                 type="button"
                 class="usp-item-btn usp-item-btn--primary"
-                @click="emit('execute', s)"
+                @click="emit('execute', s, i)"
               >
                 <Icon icon="mdi:check" width="12" />
                 确认执行
@@ -173,13 +213,14 @@ function decisionStyle(d: string): { border: string; bg: string; color: string }
                       :key="aff.board_id"
                       type="button"
                       class="usp-merge-option"
-                      @click="handleMerge(s, aff.board_id)"
+                      @click="handleMerge(s, i, aff.board_id)"
                     >
                       {{ aff.board_label }}
                       <span class="usp-merge-option-detail">({{ aff.matching_candidates }} matches)</span>
                     </button>
                   </div>
                 </div>
+              </template>
               </template>
             </div>
           </div>

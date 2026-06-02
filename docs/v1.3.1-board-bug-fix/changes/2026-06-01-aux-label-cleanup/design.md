@@ -84,15 +84,23 @@ WHERE label_type = 'auxiliary'
     SELECT DISTINCT semantic_label_id
     FROM topic_tag_semantic_labels
   )
+  AND id NOT IN (
+    SELECT DISTINCT auxiliary_label_id
+    FROM board_composition
+  )
 ```
 
 **理由**：系统中不存在 `status='merged'` 的 TopicTag（`HardMergeTags` 直接硬删除，无软删除），因此只需检查 `topic_tag_semantic_labels` 中是否存在关联即可，无需 JOIN `topic_tags`。TopicTag 删除时 CASCADE 已清理其 `topic_tag_semantic_labels` 行，不会留下悬挂关联。
+
+**补充**：查询还需排除挂载在板块下的辅助标签（`board_composition` 中有引用的）。辅助标签可能被手动挂载到板块上作为描述性标签，即使它没有关联任何 topic_tag，也不应被 GC 清理。缺少此条件会导致板块上挂载的辅助标签被误删。
 
 ### D7: GC disable 同步清理 board_composition
 
 **选择**：GC disable 时，除了将 aux label 的 status 改为 disabled，同时删除 `board_composition` 中引用该 aux label 的行。
 
 **理由**：`getBoardComposition`（semantic_board_handler.go:924）未过滤 `status='active'`，如果不清理 `board_composition`，board composition 前端仍会显示已 disabled 的 aux label。GC delete 时 CASCADE 会自动清理，但 disable 不会。
+
+**注意**：由于 D6 查询已排除 `board_composition` 中有引用的标签，正常 GC 流程不会 disable 挂载在板块上的标签。D7 的 board_composition 清理是防御性措施，确保万无一失（例如标签在 GC 查询后被手动挂载到板块的极端竞态场景）。
 
 ### D8: 存量校准通过 API 而非独立脚本
 

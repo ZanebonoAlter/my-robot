@@ -394,12 +394,14 @@ func (s *AuxiliaryLabelService) gcCleanup(ctx context.Context, req AuxLabelGCReq
 
 	cutoff := time.Now().AddDate(0, 0, -req.GraceDays)
 
-	// Find eligible labels: active, unprotected, past grace period, no topic_tag_semantic_labels
+	// Find eligible labels: active, unprotected, past grace period,
+	// no topic_tag_semantic_labels AND not mounted on any board
 	var eligible []models.SemanticLabel
 	err := s.db.WithContext(ctx).
 		Where("label_type = ? AND status = ? AND protected = false", "auxiliary", "active").
 		Where("created_at < ?", cutoff).
 		Where("id NOT IN (SELECT DISTINCT semantic_label_id FROM topic_tag_semantic_labels)").
+		Where("id NOT IN (SELECT DISTINCT auxiliary_label_id FROM board_composition)").
 		Find(&eligible).Error
 	if err != nil {
 		return nil, fmt.Errorf("query eligible labels: %w", err)

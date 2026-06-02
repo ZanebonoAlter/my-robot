@@ -9,11 +9,13 @@
 
 **BoardDailyReport 字段**：id, semantic_board_id, period_date, title, summary, highlights(JSON), dynamics(TEXT), article_count, event_tag_count, cluster_count, status(generating/done/failed), raw_clusters(JSON), prev_report_id(可为空，指向前一日日报), generation_prompt_version, created_at, updated_at。
 
-**DailyReportSection 字段**：id, report_id, cluster_index, cluster_label, cluster_tag_ids(JSON), threads(JSON), article_count, created_at。
+**DailyReportSection 字段**：id, report_id, cluster_index, cluster_label, cluster_tag_ids(JSON), threads(JSON), article_count, best_tier INT, avg_score FLOAT8, **status VARCHAR(20) DEFAULT 'emerging'**, **prev_section_id UINT NULL**, created_at。`status` 取值为 `emerging` 或 `continuing`，由后端通过 `cluster_tag_ids` Jaccard 相似度匹配前一天 section 推导。`prev_section_id` 指向前一天同一话题的 section。
 
 `highlights` JSON 结构：`[{title: string, reason: string, tag_ids: uint[]}]`，2-3 个重点项。
 
 `threads` JSON 结构：`[{title: string, summary: string, status: string(emerging/continuing/splitting/merging/ending), related_tag_ids: uint[], related_article_ids: uint[], parent_thread_id: string(可为空)}]`。
+
+`related_article_ids` 在生成报告时根据 thread 的 `tag_ids` 从 `collectBoardTags` 已收集的 tag→article 映射中查关联文章 ID，去重后写入。前端浮窗使用该字段展示文章列表。
 
 `raw_clusters` JSON 结构：`[{group_name: string, tag_ids: uint[]}]`，LLM 分组原始结果，用于调试。
 
@@ -29,6 +31,10 @@
 - **WHEN** SemanticBoard #5 在 2026-05-24 有一条已完成日报 (id=42)
 - **THEN** 2026-05-25 的日报记录 SHALL 设置 prev_report_id=42
 
+#### Scenario: Section 生成时推导 status 和 prev_section_id
+- **WHEN** 日报生成器为 2026-05-25 的某个 section 保存到数据库
+- **THEN** 系统 SHALL 在保存前通过 cluster_tag_ids Jaccard 匹配前一天 section，设置 prev_section_id 和 status（emerging/continuing）
+
 ### Requirement: 事件标签去重
 系统 SHALL 在生成日报前对收集到的事件标签进行程序化精确去重，不使用 LLM。去重 SHALL 应用两条规则：(1) 关联文章集合完全相同的标签合并为一个；(2) article_count=1 且关联同一篇文章的标签合并为一个。去重 SHALL 不改变原始标签数据，仅在生成流程中使用去重后的列表。
 
@@ -43,6 +49,66 @@
 #### Scenario: 去重不影响原始数据
 - **WHEN** 去重流程执行后
 - **THEN** `topic_tags` 表中的原始标签记录 SHALL 保持不变，去重仅在内存中进行
+
+### Requirement: 日报质量筛选
+`collectBoardTags` 查询携带 `match_reason` 和 `score`（包括 fallback 路径产生的标签）。生成管线在聚类前增加筛选层：
+
+1. 过滤 `direction_mismatch = true`
+2. 保留 `match_reason ∈ {direct_hit, hit_rate, max_sim}`（含 downgraded）
+3. 过滤 `weighted`（最弱规则）
+4. 如果剩余 < 10 个标签，把 weighted 也拉回来（保底）
+5. 如果剩余 > 30 个标签，按 `(tier, score)` 排序后截断到 top-30
+
+Fallback 标签同等对待：fallback 路径产生的标签也携带 `match_reason`/`score`，筛选规则完全一致。
+
+#### Scenario: 质量筛选过滤 weighted
+- **WHEN** 收集到 20 个标签，其中 5 个 weighted
+- **THEN** 系统 SHALL 过滤掉 weighted 标签，15 个进入聚类
+
+#### Scenario: 保底机制
+- **WHEN** 收集到 12 个标签，过滤 weighted 后只剩 8 个 (< 10)
+- **THEN** 系统 SHALL 把 weighted 标签拉回，12 个全部进入聚类
+
+#### Scenario: 截断机制
+- **WHEN** 收集到 40 个标签，过滤后剩 35 个 (> 30)
+- **THEN** 系统 SHALL 按 (tier, score) 排序后截断到 top-30
+
+### Requirement: 聚类数限制
+
+`ClusterTags` prompt 按标签数量条件分支：
+- 标签数 ≤ 15：不限制组数
+- 标签数 16-25：分成 6-12 组
+- 标签数 > 25：分成 8-15 组
+
+在 `clusterSystemPrompt` 构建时根据 `len(tags)` 动态插入对应约束。
+
+#### Scenario: 小量标签不限组数
+- **WHEN** 去重后有 14 个标签
+- **THEN** LLM 分组不限制组数，自然分组即可
+
+#### Scenario: 中量标签约束分组
+- **WHEN** 去重后有 20 个标签
+- **THEN** prompt SHALL 约束为 6-12 组
+
+#### Scenario: 大量标签约束分组
+- **WHEN** 去重后有 30 个标签
+- **THEN** prompt SHALL 约束为 8-15 组
+
+### Requirement: 聚类排序字段
+
+生成报告时，系统 SHALL 为每个 DailyReportSection 计算：
+- `BestTier int`：该 section 中所有 tag 的最高 tier（match_reason + downgraded 映射）
+- `AvgScore float64`：该 section 中所有 tag 的 score 平均值
+
+前端用 `best_tier ASC, avg_score DESC` 排序聚类。
+
+#### Scenario: 计算 best_tier
+- **WHEN** section 的 tags 包含 direct_hit(tier=0) 和 weighted(tier=3)
+- **THEN** best_tier=0
+
+#### Scenario: 前端按质量排序聚类
+- **WHEN** 有 3 个 section，best_tier 分别为 0、2、1
+- **THEN** 前端按 0→1→2 顺序展示
 
 ### Requirement: LLM 语义分组
 系统 SHALL 使用单次 LLM call 对去重后的事件标签做语义分组。分组粒度 SHALL 为"同一核心事件"，每组 2-8 个标签，超过 8 个 SHALL 拆分为多组，单个标签可自成一组。LLM 调用 SHALL 使用 temperature=0.1，输出 SHALL 遵循 JSON schema 约束 `[{group_name: string, tag_ids: uint[]}]`。
@@ -60,16 +126,17 @@
 - **THEN** 分组结果 SHALL 存入 `BoardDailyReport.raw_clusters` JSON 字段，用于调试审计
 
 ### Requirement: 日报分段并行生成
-系统 SHALL 并行执行三类 LLM 生成调用：
+系统 SHALL 并行执行两类 LLM 生成调用：
 - **Call A（今日重点）**：输入全部标签(label+desc+article_count) + 昨日日报，输出 2-3 个重点项（含标题、选择理由、关联标签 ID）
-- **Call B（板块动态）**：输入全部标签 + 昨日日报，输出综合趋势描述文本
 - **Call C×K（聚类叙事线索）**：每个聚类一次调用，输入该聚类标签 + 关联文章(标题+压缩摘要) + 昨日匹配线索，输出 0-N 条线索（emerging/continuing/splitting/merging/ending）
 
 Call C 的文章摘要 SHALL 优先使用 `ai_content_summary`（平均 348 字），无则截取 `description` 前 200 字。
 
+prompt version 升级为 "2.0"。
+
 #### Scenario: 并行生成成功
 - **WHEN** 有 5 个聚类
-- **THEN** 系统 SHALL 同时发起 Call A + Call B + Call C×5，共 7 个并行 LLM 调用
+- **THEN** 系统 SHALL 同时发起 Call A + Call C×5，共 6 个并行 LLM 调用
 
 #### Scenario: 某个聚类无需线索
 - **WHEN** Call C 对某聚类判断无值得报告的线索
@@ -77,7 +144,7 @@ Call C 的文章摘要 SHALL 优先使用 `ai_content_summary`（平均 348 字�
 
 #### Scenario: 昨日日报不存在
 - **WHEN** 某板某日为首次生成日报（无 prev_report）
-- **THEN** Call A/B 的"昨日日报"输入 SHALL 为空，Call C 的"昨日匹配线索" SHALL 为空，所有线索标记为 emerging
+- **THEN** Call A 的"昨日日报"输入 SHALL 为空，Call C 的"昨日匹配线索" SHALL 为空，所有线索标记为 emerging
 
 ### Requirement: 叙事线索连续性匹配
 系统 SHALL 通过 tag 交集 + embedding 双重策略匹配昨日线索：(1) 如果今日聚类与昨日线索有 tag ID 交集 → 续接，status 设为 continuing/merging/splitting；(2) 否则取聚类内所有 tag 的 embedding 平均值 vs 昨日线索关联 tag 的 embedding 平均值，cosine_sim ≥ 0.7 → 续接；(3) 无匹配 → 标记为 emerging。匹配结果 SHALL 设置 `parent_thread_id` 指向昨日对应线索。
@@ -95,11 +162,11 @@ Call C 的文章摘要 SHALL 优先使用 `ai_content_summary`（平均 348 字�
 - **THEN** 该聚类的所有线索 SHALL 标记为 emerging，parent_thread_id 为空
 
 ### Requirement: 日报生成编排流水线
-系统 SHALL 提供 `GenerateDailyReport(ctx, boardID, date)` 编排函数，按顺序执行：收集板内事件标签 → 去重 → LLM 分组 → 查询昨日日报 → 并行生成(Call A + B + C×K) → 连续性匹配 → 组装 BoardDailyReport + DailyReportSection → 存储。生成 SHALL 通过 goroutine 异步执行。
+系统 SHALL 提供 `GenerateDailyReport(ctx, boardID, date)` 编排函数，按顺序执行：收集板内事件标签 → 质量筛选 → 去重 → LLM 分组(带组数限制) → 查询昨日日报 → 并行生成(Call A + C×K) → 连续性匹配 → **section 生命周期匹配（cluster_tag_ids Jaccard）** → 组装 BoardDailyReport + DailyReportSection(含 best_tier/avg_score/status/prev_section_id) → 存储。生成 SHALL 通过 goroutine 异步执行。
 
 #### Scenario: 完整流水线执行
 - **WHEN** 触发 SemanticBoard #5 在 2026-05-25 的日报生成
-- **THEN** 系统 SHALL 按序执行：收集标签(20个) → 去重(剩15个) → LLM分组(4个聚类) → 查询昨日日报(id=42) → 并行生成(1+1+4=6个LLM调用) → 连续性匹配 → 组装存储 → status="done"
+- **THEN** 系统 SHALL 按序执行：收集标签(20个) → 质量筛选(过滤后15个) → 去重(剩12个) → LLM分组(4个聚类) → 查询昨日日报(id=42) → 并行生成(1+4=5个LLM调用) → 连续性匹配 → section 生命周期匹配 → 组装存储(含best_tier/avg_score/status/prev_section_id) → status="done"
 
 #### Scenario: 生成失败
 - **WHEN** 流水线中任一步骤失败（如 LLM 调用超时）
@@ -157,8 +224,25 @@ Call C 的文章摘要 SHALL 优先使用 `ai_content_summary`（平均 348 字�
 - **WHEN** 请求 `GET /api/semantic-boards/5/daily-reports?days=7`，但该 board 无日报
 - **THEN** 系统 SHALL 返回空数组
 
-### Requirement: 日报时间线组件 BoardDailyReportTimeline
-前端 SHALL 提供 `BoardDailyReportTimeline.vue` 组件，替代 `BoardNarrativeTimeline.vue`。组件 SHALL 展示板块日报列表，每条日报以卡片形式展示：status 标签 + 日期 + 标题 + summary + 聚类数/文章数。点击卡片 SHALL 展开详情：今日重点列表（title + reason）、板块动态段落、聚类叙事线索卡片（cluster_label + 线程列表，每条线程含 status 色标 + 标题 + summary）。组件 SHALL 嵌入 TagsPage 的 "日报" Tab 中。
+### Requirement: 日报时间线组件 BoardDailyReportTimeline（报纸布局）
+前端 SHALL 提供 `BoardDailyReportTimeline.vue` 组件，替代 `BoardNarrativeTimeline.vue`。组件 SHALL 展示板块日报列表，采用长滚动报纸布局。
+
+**纸张尺寸**：`min(1100px, 92vw)` × `92vh`，单页长滚动（不分页）。
+
+**布局结构**（从上到下）：
+1. 报头：日期大标题
+2. 今日重点：highlights 展示（title + reason）
+3. **质量分区**：按 `best_tier` 将聚类分为区域
+   - 核心事件（Tier 0-1）：双列 CSS Grid
+   - 相关事件（Tier 2）：单列
+   - 其他动态（Tier 3+）：单列
+4. 每个分区显示区头标签 + 聚类数
+
+**每个聚类卡片**：默认折叠状态，显示聚类名称、文章数、section 级状态徽章（emerging=绿/continuing=蓝）、「N 条线索 ▸」文本。点击卡片或「N 条线索」文本 SHALL 展开显示所有线索（title + summary），线索不显示独立状态徽章。点击 section 的 header 区域（名称+状态） SHALL 打开右侧 SectionLifecyclePanel。
+
+**线索文章浮窗**：使用 `@floating-ui/vue`，展示 `related_article_ids` 对应的文章标题列表。首批加载 5 篇，支持"加载更多"。点选文章→emit `openArticle(articleId)`。
+
+`dynamics` 为空时前端不渲染"板块动态"区块。
 
 #### Scenario: 展示日报卡片列表
 - **WHEN** 选中 board "AI与机器学习"，该 board 有 3 天的日报
@@ -166,11 +250,27 @@ Call C 的文章摘要 SHALL 优先使用 `ai_content_summary`（平均 348 字�
 
 #### Scenario: 展开日报详情
 - **WHEN** 用户点击某日报卡片
-- **THEN** 组件 SHALL 展开显示：highlights 列表、dynamics 文本、按聚类分组的叙事线索
+- **THEN** 组件 SHALL 展开长滚动报纸布局：highlights 列表、质量分区（核心/相关/其他）
 
-#### Scenario: 叙事线索 status 颜色
-- **WHEN** 线索 status 为 emerging/continuing/splitting/merging/ending
-- **THEN** 对应颜色 SHALL 为 绿/蓝/橙/紫/灰（与旧叙事 status 色系一致）
+#### Scenario: Section 状态徽章颜色
+- **WHEN** section status 为 emerging/continuing/ending
+- **THEN** 对应颜色 SHALL 为 绿/蓝/灰
+
+#### Scenario: 核心事件双列布局
+- **WHEN** 有 3 个聚类分别属于 tier 0、tier 2、tier 3
+- **THEN** tier 0 聚类在"核心事件"双列区域，tier 2 在"相关事件"单列，tier 3 在"其他动态"单列
+
+#### Scenario: 线索默认折叠
+- **WHEN** 某聚类有 3 条线索
+- **THEN** 该聚类卡片 SHALL 默认只显示 section 状态徽章和「3 条线索 ▸」，不显示线索标题和摘要
+
+#### Scenario: 展开线索详情
+- **WHEN** 用户点击聚类卡片或「N 条线索 ▸」
+- **THEN** 卡片 SHALL 展开显示全部线索的 title + summary + 文章图标，线索不显示独立状态徽章
+
+#### Scenario: 点击 section header 打开 Lifecycle Panel
+- **WHEN** 用户点击聚类卡片的 header 区域（名称+状态）
+- **THEN** 系统 SHALL 在 viewport 右侧弹出 SectionLifecyclePanel，展示该 section 的跨天生命周期链
 
 #### Scenario: 空状态
 - **WHEN** 选中 board 但该 board 无日报

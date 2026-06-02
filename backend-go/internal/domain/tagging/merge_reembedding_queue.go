@@ -243,7 +243,7 @@ func (s *MergeReembeddingQueueService) processNext() {
 		return
 	}
 
-	identityEmb, err := s.embedding.GenerateEmbedding(context.Background(), &target, EmbeddingTypeIdentity)
+	identityEmb, _, err := s.embedding.GenerateEmbedding(context.Background(), &target, EmbeddingTypeIdentity)
 	if err != nil {
 		s.markFailed(task.ID, "failed to generate identity embedding: "+err.Error())
 		return
@@ -261,7 +261,7 @@ func (s *MergeReembeddingQueueService) processNext() {
 			semOpts = append(semOpts, EmbeddingTextOptions{ContextTitles: titles})
 		}
 	}
-	semanticEmb, semErr := s.embedding.GenerateEmbedding(context.Background(), &target, EmbeddingTypeSemantic, semOpts...)
+	semanticEmb, _, semErr := s.embedding.GenerateEmbedding(context.Background(), &target, EmbeddingTypeSemantic, semOpts...)
 	if semErr != nil {
 		s.markFailed(task.ID, "failed to generate semantic embedding: "+semErr.Error())
 		return

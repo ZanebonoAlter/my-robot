@@ -23,6 +23,48 @@
 - Gorilla WebSocket
 - robfig/cron
 
+## 实时通信基础设施
+
+### SSE（Server-Sent Events）
+
+项目使用 SSE 推送后台长任务的实时进度。适用场景：单向进度推送（不需要双向通信）。
+
+**后端实现模式（Gin）：**
+```go
+// Handler 示例
+c.Header("Content-Type", "text/event-stream")
+c.Header("Cache-Control", "no-cache")
+c.Header("Connection", "keep-alive")
+ch := getProgressChannel() // 全局单例 channel
+c.Stream(func(w io.Writer) bool {
+    if msg, ok := <-ch; ok {
+        c.SSEvent("progress", msg)
+        return true
+    }
+    return false
+})
+```
+
+**前端消费模式：**
+```ts
+const es = new EventSource('/api/topic-tags/merge-preview/scan/stream')
+es.onmessage = (e) => { progress.value = JSON.parse(e.data) }
+es.onerror = () => es.close() // 扫描完成或出错时自动断开
+```
+
+**使用约定：**
+- SSE 端点路径：`*/stream`，与触发任务的同级 `POST` 端点配对（如 `POST /scan` + `GET /scan/stream`）
+- 消息格式：JSON `{ status, ...progress_fields }`，status 取值 `scanning` / `done` / `error`
+- 连接管理：任务完成后服务端关闭 channel，客户端 `onerror` 时清理
+- 并发保护：同类型任务同时只允许一个（用 `atomic.Bool` 保护）
+
+**当前使用 SSE 的功能：**
+- 标签合并全量扫描进度（`GET /api/topic-tags/merge-preview/scan/stream`）
+
+### WebSocket
+
+项目已有 WebSocket 基础设施（`/ws`），用于推送文章处理等实时通知。SSE 用于单向进度推送场景，WebSocket 用于需要双向通信或广播的场景。
+
 ## 当前真实入口
 
 - 服务入口：`backend-go/cmd/server/main.go`
@@ -247,10 +289,10 @@ Tag 入库后，`semantic_board_matching.go` 执行 Tag → SemanticBoard 匹配
 `semantic_board_upgrade.go` 实现两阶段升级：
 
 1. 收集 ref_count ≥ 阈值的候选辅助标签
-2. embedding 预聚类（cosine 距离 < 0.7）
+2. embedding 预聚类（average-link greedy，默认 cosine 距离阈值 0.35；可通过 `cluster_method` 配置切换回 centroid 模式）
 3. 每簇补充 co-tag 事件上下文
-4. LLM 判断：create_new / merge_into_existing / skip
-5. 用户确认执行
+4. LLM 判断：create_new / skip
+5. 用户确认执行（支持前端 merge_into_existing 操作）
 
 #### 回填队列
 

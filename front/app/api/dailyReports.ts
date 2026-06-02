@@ -8,13 +8,47 @@ export interface DailyReportHighlight {
 }
 
 export interface DailyReportThread {
+  id: number
+  report_id: number
+  section_id: number
   title: string
   summary: string
   status: string
-  related_tag_ids: number[]
+  tag_ids: number[]
+  confidence: number
+  prev_thread_id: number | null
   related_article_ids: number[]
-  parent_thread_id: string
+  created_at: string
 }
+
+export interface ThreadLineageNode {
+  id: number
+  report_id: number
+  section_id: number
+  title: string
+  summary: string
+  status: string
+  tag_ids: number[]
+  confidence: number
+  prev_thread_id: number | null
+  period_date: string
+  cluster_label: string
+  created_at: string
+}
+
+export interface SectionTimelineNode {
+  id: number
+  report_id: number
+  period_date: string
+  cluster_label: string
+  status: string
+  article_count: number
+  thread_count: number
+  prev_section_id: number | null
+}
+
+// SectionLifecycleNode has the same shape as SectionTimelineNode
+export type SectionLifecycleNode = SectionTimelineNode
 
 export interface DailyReportSection {
   id: number
@@ -23,6 +57,10 @@ export interface DailyReportSection {
   cluster_tag_ids: number[]
   threads: DailyReportThread[]
   article_count: number
+  best_tier: number
+  avg_score: number
+  status: string                  // emerging / continuing / ending
+  prev_section_id: number | null  // links to previous day's section
 }
 
 export interface DailyReport {
@@ -68,9 +106,31 @@ export function useDailyReportsApi() {
     return apiClient.get(`/daily-reports/${id}`)
   }
 
+  async function getThreadLineage(threadId: number): Promise<ApiResponse<{ chain: ThreadLineageNode[] }>> {
+    return apiClient.get(`/daily-reports/threads/${threadId}/lineage`)
+  }
+
+  async function getBoardThreadTimeline(boardId: number, days?: number): Promise<ApiResponse<{ threads: ThreadLineageNode[] }>> {
+    const query = days ? apiClient.buildQueryParams({ days }) : ''
+    return apiClient.get(`/semantic-boards/${boardId}/thread-timeline${query ? `?${query}` : ''}`)
+  }
+
+  async function getBoardSectionTimeline(boardId: number, days?: number): Promise<ApiResponse<{ sections: SectionTimelineNode[] }>> {
+    const query = days ? `?days=${days}` : ''
+    return apiClient.get(`/semantic-boards/${boardId}/section-timeline${query}`)
+  }
+
+  async function getSectionLifecycle(sectionId: number): Promise<ApiResponse<{ chain: SectionLifecycleNode[] }>> {
+    return apiClient.get(`/daily-reports/sections/${sectionId}/lifecycle`)
+  }
+
   return {
     generateDailyReport,
     getBoardDailyReports,
     getDailyReportDetail,
+    getThreadLineage,
+    getBoardThreadTimeline,
+    getBoardSectionTimeline,
+    getSectionLifecycle,
   }
 }

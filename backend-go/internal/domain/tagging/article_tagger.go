@@ -427,13 +427,27 @@ func CleanupOrphanedTags(tagIDs []uint) {
 		return
 	}
 
-	if err := database.DB.Where("topic_tag_id IN ?", orphanIDs).Delete(&models.TopicTagEmbedding{}).Error; err != nil {
-		logging.Warnf("Failed to delete embeddings for orphaned topic tags: %v", err)
-	}
+	// Collect affected aux label IDs before CASCADE deletes them
+	var affectedAuxLabelIDs []uint
+	database.DB.Model(&models.TopicTagSemanticLabel{}).
+		Where("topic_tag_id IN ?", orphanIDs).
+		Distinct("semantic_label_id").
+		Pluck("semantic_label_id", &affectedAuxLabelIDs)
+
+	// All child tables have ON DELETE CASCADE, so deleting topic_tags
+	// automatically cleans up embeddings, queues, relations, labels, etc.
 	if err := database.DB.Where("id IN ?", orphanIDs).Delete(&models.TopicTag{}).Error; err != nil {
 		logging.Warnf("Failed to delete %d orphaned topic tags: %v", len(orphanIDs), err)
 	} else {
 		logging.Infof("Cleaned up %d orphaned topic tags", len(orphanIDs))
+	}
+
+	// Recount refs for affected auxiliary labels after CASCADE
+	if len(affectedAuxLabelIDs) > 0 {
+		auxService := NewAuxiliaryLabelService(database.DB, nil)
+		if err := auxService.RecountRefs(context.Background(), affectedAuxLabelIDs); err != nil {
+			logging.Warnf("Failed to recount refs after orphan cleanup: %v", err)
+		}
 	}
 }
 

@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"syntopica-backend/internal/domain/models"
 	"syntopica-backend/internal/platform/airouter"
@@ -15,6 +16,35 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
+
+type AuxLabelGCMode string
+
+const (
+	AuxLabelGCModeDryRun      AuxLabelGCMode = "dry_run"
+	AuxLabelGCModeDisable     AuxLabelGCMode = "disable"
+	AuxLabelGCModeDelete      AuxLabelGCMode = "delete"
+	AuxLabelGCModeRecalculate AuxLabelGCMode = "recalculate"
+)
+
+type AuxLabelGCRequest struct {
+	Mode      AuxLabelGCMode `json:"mode"`
+	GraceDays int            `json:"grace_days"`
+}
+
+type AuxLabelGCResult struct {
+	EligibleCount  int                     `json:"eligible_count"`
+	AffectedCount  int                     `json:"affected_count"`
+	CorrectedCount int                     `json:"corrected_count,omitempty"`
+	TotalCount     int                     `json:"total_count,omitempty"`
+	Preview        []AuxLabelGCPreviewItem `json:"preview,omitempty"`
+}
+
+type AuxLabelGCPreviewItem struct {
+	ID        uint   `json:"id"`
+	Label     string `json:"label"`
+	RefCount  int    `json:"ref_count"`
+	CreatedAt string `json:"created_at"`
+}
 
 const auxiliaryLabelMergeThreshold = 0.95
 
@@ -29,9 +59,12 @@ const (
 
 type auxiliaryLabelEmbedder func(ctx context.Context, input string, mode auxiliaryLabelEmbeddingMode) (string, []float64, error)
 
+type mergeMatcherFunc func(ctx context.Context, db *gorm.DB, labels []models.SemanticLabel, mergePgVector string, mergeVector []float64) (*models.SemanticLabel, error)
+
 type AuxiliaryLabelService struct {
-	db       *gorm.DB
-	embedder auxiliaryLabelEmbedder
+	db            *gorm.DB
+	embedder      auxiliaryLabelEmbedder
+	mergeMatcher  mergeMatcherFunc
 }
 
 func NewAuxiliaryLabelService(db *gorm.DB, embedder auxiliaryLabelEmbedder) *AuxiliaryLabelService {
@@ -41,12 +74,22 @@ func NewAuxiliaryLabelService(db *gorm.DB, embedder auxiliaryLabelEmbedder) *Aux
 	if embedder == nil {
 		embedder = defaultAuxiliaryLabelEmbedder
 	}
-	return &AuxiliaryLabelService{db: db, embedder: embedder}
+	return &AuxiliaryLabelService{db: db, embedder: embedder, mergeMatcher: sqlMergeMatcher}
 }
 
-// EnsureVectorDimensionOnce ensures the semantic_labels.embedding and merge_embedding
-// column dimensions match the embedder output. Called once on first label creation.
-// Uses the global DB to avoid calling DDL inside a transaction.
+// vectorDimEnsurers holds callbacks registered by other packages to ensure their
+// vector columns have the correct dimension. Called once at startup after the
+// embedding dimension is determined.
+var vectorDimEnsurers []func(dim int)
+
+// RegisterVectorDimEnsurer registers a callback to be invoked at startup with the
+// detected embedding dimension. Call from init() in domain packages that own vector columns.
+func RegisterVectorDimEnsurer(fn func(dim int)) {
+	vectorDimEnsurers = append(vectorDimEnsurers, fn)
+}
+
+// EnsureVectorDimensionOnce ensures all vector column dimensions match the embedder output.
+// Called once at startup. Uses the global DB to avoid calling DDL inside a transaction.
 func EnsureVectorDimensionOnce(ctx context.Context) {
 	ensureVectorDimOnce.Do(func() {
 		_, vector, err := defaultAuxiliaryLabelEmbedder(ctx, "dimension-check", auxiliaryLabelEmbeddingModeStorage)
@@ -60,6 +103,9 @@ func EnsureVectorDimensionOnce(ctx context.Context) {
 		}
 		if err := EnsureSemanticLabelMergeVectorDimension(dim); err != nil {
 			logging.Warnf("Failed to ensure merge_embedding vector dimension: %v", err)
+		}
+		for _, fn := range vectorDimEnsurers {
+			fn(dim)
 		}
 	})
 }
@@ -118,27 +164,15 @@ func (s *AuxiliaryLabelService) ResolveAuxiliaryLabel(ctx context.Context, rawLa
 		}
 	}
 
-	// L2: merge embedding comparison using label-only embedding vs MergeEmbedding
+	// L2: merge embedding comparison (SQL for pgvector, Go fallback for SQLite tests)
 	mergePgVector, mergeVector, err := s.embedder(ctx, label, auxiliaryLabelEmbeddingModeMerge)
 	if err != nil {
 		return nil, err
 	}
-	var bestMatch *models.SemanticLabel
-	for _, existing := range labels {
-		if existing.MergeEmbedding == nil || *existing.MergeEmbedding == "" {
-			continue
-		}
-		existingVec, err := parsePgVector(*existing.MergeEmbedding)
-		if err != nil {
-			continue
-		}
-		sim, err := airouter.CosineSimilarity(mergeVector, existingVec)
-		if err == nil && sim >= auxiliaryLabelMergeThreshold {
-			candidate := existing
-			if bestMatch == nil || candidate.RefCount > bestMatch.RefCount || (candidate.RefCount == bestMatch.RefCount && candidate.ID < bestMatch.ID) {
-				bestMatch = &candidate
-			}
-		}
+
+	bestMatch, err := s.mergeMatcher(ctx, s.db, labels, mergePgVector, mergeVector)
+	if err != nil {
+		return nil, err
 	}
 	if bestMatch != nil {
 		return s.addAlias(ctx, bestMatch, label)
@@ -273,12 +307,221 @@ func (s *AuxiliaryLabelService) RemoveBoardComposition(ctx context.Context, boar
 	})
 }
 
+// RecountRefs recalculates ref_count for the given auxiliary label IDs by counting
+// actual topic_tag_semantic_labels rows. This is self-healing: it corrects any
+// accumulated drift in ref_count values.
+func (s *AuxiliaryLabelService) RecountRefs(ctx context.Context, ids []uint) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	for _, id := range ids {
+		var count int64
+		if err := s.db.WithContext(ctx).Model(&models.TopicTagSemanticLabel{}).
+			Where("semantic_label_id = ?", id).Count(&count).Error; err != nil {
+			return fmt.Errorf("recount refs for semantic_label %d: %w", id, err)
+		}
+		if err := s.db.WithContext(ctx).Model(&models.SemanticLabel{}).
+			Where("id = ?", id).Update("ref_count", int(count)).Error; err != nil {
+			return fmt.Errorf("update ref_count for semantic_label %d: %w", id, err)
+		}
+	}
+	return nil
+}
+
+// GC performs garbage collection on auxiliary labels based on the requested mode.
+func (s *AuxiliaryLabelService) GC(ctx context.Context, req AuxLabelGCRequest) (*AuxLabelGCResult, error) {
+	switch req.Mode {
+	case AuxLabelGCModeRecalculate:
+		return s.gcRecalculate(ctx)
+	case AuxLabelGCModeDryRun, AuxLabelGCModeDisable, AuxLabelGCModeDelete:
+		return s.gcCleanup(ctx, req)
+	default:
+		return nil, fmt.Errorf("invalid mode %q, must be one of: dry_run, disable, delete, recalculate", req.Mode)
+	}
+}
+
+func (s *AuxiliaryLabelService) gcRecalculate(ctx context.Context) (*AuxLabelGCResult, error) {
+	var ids []uint
+	if err := s.db.WithContext(ctx).Model(&models.SemanticLabel{}).
+		Where("label_type = ?", "auxiliary").
+		Pluck("id", &ids).Error; err != nil {
+		return nil, fmt.Errorf("query auxiliary labels: %w", err)
+	}
+
+	if len(ids) == 0 {
+		return &AuxLabelGCResult{TotalCount: 0, CorrectedCount: 0}, nil
+	}
+
+	// Collect before-state for diff
+	type refRow struct {
+		ID       uint
+		RefCount int
+	}
+	var before []refRow
+	s.db.WithContext(ctx).Model(&models.SemanticLabel{}).
+		Select("id, ref_count").
+		Where("id IN ?", ids).
+		Find(&before)
+	beforeCounts := make(map[uint]int, len(before))
+	for _, r := range before {
+		beforeCounts[r.ID] = r.RefCount
+	}
+
+	if err := s.RecountRefs(ctx, ids); err != nil {
+		return nil, fmt.Errorf("recount refs: %w", err)
+	}
+
+	// Count how many actually changed
+	var after []refRow
+	s.db.WithContext(ctx).Model(&models.SemanticLabel{}).
+		Select("id, ref_count").
+		Where("id IN ?", ids).
+		Find(&after)
+	corrected := 0
+	for _, r := range after {
+		if beforeCounts[r.ID] != r.RefCount {
+			corrected++
+		}
+	}
+
+	return &AuxLabelGCResult{TotalCount: len(ids), CorrectedCount: corrected}, nil
+}
+
+func (s *AuxiliaryLabelService) gcCleanup(ctx context.Context, req AuxLabelGCRequest) (*AuxLabelGCResult, error) {
+	if req.GraceDays <= 0 {
+		req.GraceDays = 1
+	}
+
+	cutoff := time.Now().AddDate(0, 0, -req.GraceDays)
+
+	// Find eligible labels: active, unprotected, past grace period,
+	// no topic_tag_semantic_labels AND not mounted on any board
+	var eligible []models.SemanticLabel
+	err := s.db.WithContext(ctx).
+		Where("label_type = ? AND status = ? AND protected = false", "auxiliary", "active").
+		Where("created_at < ?", cutoff).
+		Where("id NOT IN (SELECT DISTINCT semantic_label_id FROM topic_tag_semantic_labels)").
+		Where("id NOT IN (SELECT DISTINCT auxiliary_label_id FROM board_composition)").
+		Find(&eligible).Error
+	if err != nil {
+		return nil, fmt.Errorf("query eligible labels: %w", err)
+	}
+
+	result := &AuxLabelGCResult{EligibleCount: len(eligible)}
+
+	// Preview (first 20)
+	previewLimit := 20
+	if len(eligible) < previewLimit {
+		previewLimit = len(eligible)
+	}
+	result.Preview = make([]AuxLabelGCPreviewItem, previewLimit)
+	for i := 0; i < previewLimit; i++ {
+		result.Preview[i] = AuxLabelGCPreviewItem{
+			ID:        eligible[i].ID,
+			Label:     eligible[i].Label,
+			RefCount:  eligible[i].RefCount,
+			CreatedAt: eligible[i].CreatedAt.Format(time.RFC3339),
+		}
+	}
+
+	if req.Mode == AuxLabelGCModeDryRun || len(eligible) == 0 {
+		return result, nil
+	}
+
+	ids := make([]uint, len(eligible))
+	for i, l := range eligible {
+		ids[i] = l.ID
+	}
+
+	if req.Mode == AuxLabelGCModeDisable {
+		// Delete board_composition rows referencing these labels
+		if err := s.db.WithContext(ctx).Where("auxiliary_label_id IN ?", ids).
+			Delete(&models.BoardComposition{}).Error; err != nil {
+			return nil, fmt.Errorf("delete board_composition: %w", err)
+		}
+		// Soft-delete: update status to disabled
+		if err := s.db.WithContext(ctx).Model(&models.SemanticLabel{}).
+			Where("id IN ?", ids).
+			Update("status", "disabled").Error; err != nil {
+			return nil, fmt.Errorf("disable labels: %w", err)
+		}
+		result.AffectedCount = len(ids)
+	} else { // delete
+		if err := s.db.WithContext(ctx).Where("id IN ?", ids).
+			Delete(&models.SemanticLabel{}).Error; err != nil {
+			return nil, fmt.Errorf("delete labels: %w", err)
+		}
+		result.AffectedCount = len(ids)
+	}
+
+	return result, nil
+}
+
 func (s *AuxiliaryLabelService) loadActiveAuxiliaryLabels(ctx context.Context) ([]models.SemanticLabel, error) {
 	var labels []models.SemanticLabel
 	err := s.db.WithContext(ctx).
+		Select("id, label, slug, label_type, aliases, ref_count, description, status, protected, source, display_order, created_at, updated_at").
 		Where("label_type = ? AND status = ?", "auxiliary", "active").
 		Find(&labels).Error
 	return labels, err
+}
+
+// sqlMergeMatcher loads only id + merge_embedding columns and computes cosine
+// similarity in Go. pgvector HNSW cannot index vector(2560) (>2000 dim limit),
+// and halfvec expression indexes are not recognized by the query planner, so
+// SQL-side ORDER BY <=> is equally slow (~3-5s full scan). Go-side computation
+// on the slim result set avoids the 345 MB payload of SELECT *.
+func sqlMergeMatcher(ctx context.Context, db *gorm.DB, labels []models.SemanticLabel, _ string, mergeVector []float64) (*models.SemanticLabel, error) {
+	// Collect IDs of active auxiliary labels
+	ids := make([]uint, 0, len(labels))
+	for _, l := range labels {
+		ids = append(ids, l.ID)
+	}
+
+	// Load only id + merge_embedding for candidates
+	type row struct {
+		ID             uint
+		MergeEmbedding *string
+	}
+	var rows []row
+	if err := db.WithContext(ctx).Model(&models.SemanticLabel{}).
+		Select("id, merge_embedding").
+		Where("id IN ?", ids).
+		Find(&rows).Error; err != nil {
+		return nil, err
+	}
+
+	// Compute cosine similarity and find best match
+	var best *models.SemanticLabel
+	idSimMap := make(map[uint]float64, len(rows))
+	for _, r := range rows {
+		if r.MergeEmbedding == nil || *r.MergeEmbedding == "" {
+			continue
+		}
+		existingVec, err := parsePgVector(*r.MergeEmbedding)
+		if err != nil {
+			continue
+		}
+		sim, err := airouter.CosineSimilarity(mergeVector, existingVec)
+		if err != nil || sim < auxiliaryLabelMergeThreshold {
+			continue
+		}
+		idSimMap[r.ID] = sim
+	}
+
+	// Pick best by RefCount DESC, ID ASC among threshold-passing matches
+	for i := range labels {
+		_, ok := idSimMap[labels[i].ID]
+		if !ok {
+			continue
+		}
+		candidate := labels[i]
+		if best == nil || candidate.RefCount > best.RefCount || (candidate.RefCount == best.RefCount && candidate.ID < best.ID) {
+			best = &candidate
+		}
+	}
+
+	return best, nil
 }
 
 func (s *AuxiliaryLabelService) addAlias(ctx context.Context, label *models.SemanticLabel, alias string) (*models.SemanticLabel, error) {
@@ -353,12 +596,10 @@ func uniqueSemanticLabelSlug(db *gorm.DB, base string) string {
 }
 
 // EnsureSemanticLabelVectorDimension checks if the semantic_labels.embedding column
-// matches the required dimension and alters it (plus recreates the index) if not.
-// For dimensions > 2000, skips HNSW index (HNSW limit is 2000).
+// matches the required dimension and alters it if not.
 // Should only be called at startup; DDL operations use a 5s lock timeout to avoid
 // blocking if other connections hold table locks.
 func EnsureSemanticLabelVectorDimension(dim int) error {
-	// Set lock timeout to prevent infinite blocking on DDL
 	if err := database.DB.Exec("SET LOCAL lock_timeout = '5s'").Error; err != nil {
 		logging.Warnf("Failed to set lock_timeout: %v", err)
 	}
@@ -380,7 +621,6 @@ func EnsureSemanticLabelVectorDimension(dim int) error {
 
 	logging.Infof("Altering semantic_labels.embedding column from %s to %s", typeStr, expected)
 
-	// Drop index first — it depends on the column type
 	_ = database.DB.Exec("DROP INDEX IF EXISTS idx_semantic_labels_embedding").Error
 
 	if err := database.DB.Exec(fmt.Sprintf(
@@ -389,22 +629,11 @@ func EnsureSemanticLabelVectorDimension(dim int) error {
 		return fmt.Errorf("alter semantic_labels.embedding column to %s: %w", expected, err)
 	}
 
-	// Recreate index — HNSW supports max 2000 dimensions
-	if dim <= 2000 {
-		if err := database.DB.Exec(
-			"CREATE INDEX idx_semantic_labels_embedding ON semantic_labels USING hnsw (embedding vector_cosine_ops)",
-		).Error; err != nil {
-			logging.Warnf("Failed to create HNSW index on semantic_labels.embedding: %v", err)
-		}
-	} else {
-		logging.Infof("Dimension %d exceeds HNSW limit (2000), skipping vector index on semantic_labels", dim)
-	}
-
 	return nil
 }
 
 // EnsureSemanticLabelMergeVectorDimension checks if the semantic_labels.merge_embedding
-// column matches the required dimension and alters it if not. Same HNSW limit as embedding.
+// column matches the required dimension and alters it if not.
 func EnsureSemanticLabelMergeVectorDimension(dim int) error {
 	if err := database.DB.Exec("SET LOCAL lock_timeout = '5s'").Error; err != nil {
 		logging.Warnf("Failed to set lock_timeout: %v", err)
@@ -433,16 +662,6 @@ func EnsureSemanticLabelMergeVectorDimension(dim int) error {
 		"ALTER TABLE semantic_labels ALTER COLUMN merge_embedding TYPE %s", expected,
 	)).Error; err != nil {
 		return fmt.Errorf("alter semantic_labels.merge_embedding column to %s: %w", expected, err)
-	}
-
-	if dim <= 2000 {
-		if err := database.DB.Exec(
-			"CREATE INDEX idx_semantic_labels_merge_embedding ON semantic_labels USING hnsw (merge_embedding vector_cosine_ops)",
-		).Error; err != nil {
-			logging.Warnf("Failed to create HNSW index on semantic_labels.merge_embedding: %v", err)
-		}
-	} else {
-		logging.Infof("Dimension %d exceeds HNSW limit (2000), skipping vector index on semantic_labels.merge_embedding", dim)
 	}
 
 	return nil

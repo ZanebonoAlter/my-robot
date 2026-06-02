@@ -48,19 +48,14 @@ func TestVerifyEmbeddingRowCountMatches(t *testing.T) {
 }
 
 func TestVerifyEmbeddingVectorValuesPresent(t *testing.T) {
-	valid := EmbeddingVectorCheck{Table: "topic_tag_embeddings", PrimaryKey: 1, SourceVector: "[0.1,0.2]", TargetVector: "[0.1,0.2]"}
+	valid := EmbeddingVectorCheck{Table: "topic_tag_embeddings", PrimaryKey: 1, TargetVector: "[0.1,0.2]"}
 	if err := VerifyEmbeddingVectorValuesPresent([]EmbeddingVectorCheck{valid}); err != nil {
 		t.Fatalf("expected vector check to pass: %v", err)
 	}
 
-	missing := EmbeddingVectorCheck{Table: "topic_tag_embeddings", PrimaryKey: 2, SourceVector: "[0.1,0.2]", TargetVector: ""}
+	missing := EmbeddingVectorCheck{Table: "topic_tag_embeddings", PrimaryKey: 2, TargetVector: ""}
 	if err := VerifyEmbeddingVectorValuesPresent([]EmbeddingVectorCheck{missing}); err == nil {
 		t.Fatal("expected missing vector error")
-	}
-
-	mismatch := EmbeddingVectorCheck{Table: "topic_tag_embeddings", PrimaryKey: 3, SourceVector: "[0.1, 0.2]", TargetVector: "[0.1,0.3]"}
-	if err := VerifyEmbeddingVectorValuesPresent([]EmbeddingVectorCheck{mismatch}); err == nil {
-		t.Fatal("expected mismatched vector error")
 	}
 }
 
@@ -71,10 +66,10 @@ func TestVerifierVerifyUsesExtendedSampleCoverageAndEmbeddingChecks(t *testing.T
 		counts: map[string]int64{"topic_tag_embeddings": 4},
 		samples: map[string][]map[string]any{
 			"topic_tag_embeddings": {
-				{"id": 1, "topic_tag_id": 10, "dimension": 2, "model": "m1", "text_hash": "a", "vector": "[0.1,0.2]"},
-				{"id": 2, "topic_tag_id": 11, "dimension": 2, "model": "m1", "text_hash": "b", "vector": "[0.2,0.3]"},
-				{"id": 3, "topic_tag_id": 12, "dimension": 2, "model": "m1", "text_hash": "c", "vector": "[0.3,0.4]"},
-				{"id": 4, "topic_tag_id": 13, "dimension": 2, "model": "m1", "text_hash": "d", "vector": "[0.4,0.5]"},
+				{"id": 1, "topic_tag_id": 10, "dimension": 2, "model": "m1", "text_hash": "a"},
+				{"id": 2, "topic_tag_id": 11, "dimension": 2, "model": "m1", "text_hash": "b"},
+				{"id": 3, "topic_tag_id": 12, "dimension": 2, "model": "m1", "text_hash": "c"},
+				{"id": 4, "topic_tag_id": 13, "dimension": 2, "model": "m1", "text_hash": "d"},
 			},
 		},
 	}
@@ -84,10 +79,10 @@ func TestVerifierVerifyUsesExtendedSampleCoverageAndEmbeddingChecks(t *testing.T
 		sequences: map[string]SequenceState{"topic_tag_embeddings": {Table: "topic_tag_embeddings", Sequence: "topic_tag_embeddings_id_seq", MaxID: 4, NextValue: 5}},
 		samples: map[string][]map[string]any{
 			"topic_tag_embeddings": {
-				{"id": 1, "topic_tag_id": 10, "dimension": 2, "model": "m1", "text_hash": "a", "vector": "[0.1,0.2]"},
-				{"id": 2, "topic_tag_id": 11, "dimension": 2, "model": "m1", "text_hash": "b", "vector": "[0.2,0.3]"},
-				{"id": 3, "topic_tag_id": 12, "dimension": 2, "model": "m1", "text_hash": "c", "vector": "[0.3,0.4]"},
-				{"id": 4, "topic_tag_id": 13, "dimension": 2, "model": "m1", "text_hash": "d", "vector": "[0.4,0.5]"},
+				{"id": 1, "topic_tag_id": 10, "dimension": 2, "model": "m1", "text_hash": "a"},
+				{"id": 2, "topic_tag_id": 11, "dimension": 2, "model": "m1", "text_hash": "b"},
+				{"id": 3, "topic_tag_id": 12, "dimension": 2, "model": "m1", "text_hash": "c"},
+				{"id": 4, "topic_tag_id": 13, "dimension": 2, "model": "m1", "text_hash": "d"},
 			},
 		},
 		embeddings: map[string][]EmbeddingVectorCheck{
@@ -104,7 +99,7 @@ func TestVerifierVerifyUsesExtendedSampleCoverageAndEmbeddingChecks(t *testing.T
 	report, err := verifier.Verify(context.Background(), []TableSpec{{
 		Name:          "topic_tag_embeddings",
 		PrimaryKey:    "id",
-		SampleColumns: []string{"topic_tag_id", "dimension", "model", "text_hash", "vector"},
+		SampleColumns: []string{"topic_tag_id", "dimension", "model", "text_hash"},
 	}})
 	if err != nil {
 		t.Fatalf("expected verifier to pass: %v", err)
@@ -130,7 +125,7 @@ func TestVerifierVerifyFailsWhenEmbeddingVectorMissing(t *testing.T) {
 			tables: map[string]bool{"topic_tag_embeddings": true},
 			counts: map[string]int64{"topic_tag_embeddings": 1},
 			samples: map[string][]map[string]any{
-				"topic_tag_embeddings": {{"id": 1, "vector": "[0.1,0.2]"}},
+				"topic_tag_embeddings": {{"id": 1}},
 			},
 		},
 		Target: &fakeWriter{
@@ -142,7 +137,7 @@ func TestVerifierVerifyFailsWhenEmbeddingVectorMissing(t *testing.T) {
 		Now: time.Now,
 	}
 
-	_, err := verifier.Verify(context.Background(), []TableSpec{{Name: "topic_tag_embeddings", PrimaryKey: "id", SampleColumns: []string{"vector"}}})
+	_, err := verifier.Verify(context.Background(), []TableSpec{{Name: "topic_tag_embeddings", PrimaryKey: "id"}})
 	if err == nil {
 		t.Fatal("expected verifier to fail on missing embedding vector")
 	}
@@ -154,7 +149,7 @@ func TestVerifierVerifyHandlesAllowedMissingTargetColumnsInSamples(t *testing.T)
 			tables: map[string]bool{"topic_tag_embeddings": true},
 			counts: map[string]int64{"topic_tag_embeddings": 1},
 			samples: map[string][]map[string]any{
-				"topic_tag_embeddings": {{"id": 1, "topic_tag_id": 10, "vector": "[0.1,0.2]"}},
+				"topic_tag_embeddings": {{"id": 1, "topic_tag_id": 10}},
 			},
 		},
 		Target: &fakeWriter{
@@ -170,10 +165,9 @@ func TestVerifierVerifyHandlesAllowedMissingTargetColumnsInSamples(t *testing.T)
 	}
 
 	_, err := verifier.Verify(context.Background(), []TableSpec{{
-		Name:                        "topic_tag_embeddings",
-		PrimaryKey:                  "id",
-		SampleColumns:               []string{"topic_tag_id", "vector"},
-		AllowedMissingTargetColumns: []string{"vector"},
+		Name:          "topic_tag_embeddings",
+		PrimaryKey:    "id",
+		SampleColumns: []string{"topic_tag_id"},
 	}})
 	if err != nil {
 		t.Fatalf("expected verifier to tolerate allowed missing target vector column: %v", err)

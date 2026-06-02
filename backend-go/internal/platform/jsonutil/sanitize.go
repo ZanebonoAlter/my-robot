@@ -127,9 +127,48 @@ func escapeInnerQuotes(content string) string {
 }
 
 func fixTruncatedJSONArray(content string) string {
-	if !strings.HasPrefix(content, "[") {
+	if !strings.HasPrefix(content, "[") && !strings.HasPrefix(content, "{") {
 		return content
 	}
+	if json.Valid([]byte(content)) {
+		return content
+	}
+
+	// Handle object-wrapped arrays like {"suggestions":[{...},{...}
+	if strings.HasPrefix(content, "{") {
+		lastBrace := strings.LastIndex(content, "}")
+		if lastBrace < 0 {
+			lastBrace = strings.LastIndex(content, "]")
+			if lastBrace < 0 {
+				return content
+			}
+		}
+		truncated := strings.TrimSpace(content[:lastBrace+1])
+		// Count unclosed brackets/braces and close them
+		openBrackets := 0
+		openBraces := 0
+		for _, c := range truncated {
+			switch c {
+			case '[':
+				openBrackets++
+			case ']':
+				openBrackets--
+			case '{':
+				openBraces++
+			case '}':
+				openBraces--
+			}
+		}
+		for i := 0; i < openBrackets; i++ {
+			truncated += "]"
+		}
+		for i := 0; i < openBraces; i++ {
+			truncated += "}"
+		}
+		return truncated
+	}
+
+	// Handle plain array [...]
 	if strings.HasSuffix(strings.TrimSpace(content), "]") {
 		return content
 	}

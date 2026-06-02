@@ -113,6 +113,14 @@ func schedulerDescriptors() []schedulerDescriptor {
 				return runtimeinfo.DailyReportSchedulerInterface
 			},
 		},
+		{
+			Name:        "aux_label_cleanup",
+			DisplayName: "Aux Label Cleanup",
+			Description: "Clean up auxiliary labels with no active topic_tag references",
+			Get: func() interface{} {
+				return runtimeinfo.AuxLabelCleanupSchedulerInterface
+			},
+		},
 	}
 }
 

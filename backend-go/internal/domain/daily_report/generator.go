@@ -4,17 +4,19 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
 	"syntopica-backend/internal/domain/models"
+	"syntopica-backend/internal/domain/tagging"
 	"syntopica-backend/internal/platform/airouter"
 	"syntopica-backend/internal/platform/database"
 	"syntopica-backend/internal/platform/jsonutil"
 	"syntopica-backend/internal/platform/logging"
 )
 
-const promptVersion = "1.0"
+const promptVersion = "2.0"
 
 // ---------------------------------------------------------------------------
 // LLM Call A: GenerateHighlights
@@ -129,95 +131,6 @@ func parseHighlightsResponse(content string, tags []TagInput) ([]Highlight, erro
 		result = append(result, h)
 	}
 	return result, nil
-}
-
-// ---------------------------------------------------------------------------
-// LLM Call B: GenerateDynamics
-// ---------------------------------------------------------------------------
-
-const dynamicsSystemPrompt = `你是一名专业的新闻分析师。你收到了一个看板当日的事件标签信息。
-
-你的任务是生成一段看板动态总结（dynamics），要求：
-1. 中文，200-500字
-2. 概括当日该看板下的主要动态和发展趋势
-3. 客观陈述事实，不添加主观判断
-4. 按重要性排序
-
-输出要求：
-1. 顶层 JSON 对象，只包含 dynamics 字段
-2. dynamics 是字符串
-3. 只返回合法 JSON，不要 Markdown 代码块或解释文字`
-
-// GenerateDynamics produces the dynamics text for the report.
-func GenerateDynamics(ctx context.Context, tags []TagInput, clusters []ClusterGroup) (string, error) {
-	if len(tags) == 0 {
-		return "", nil
-	}
-
-	prompt := buildDynamicsPrompt(tags, clusters)
-
-	temperature := 0.3
-	maxTokens := 2000
-	result, err := airouter.NewRouter().Chat(ctx, airouter.ChatRequest{
-		Capability: airouter.CapabilityTopicTagging,
-		Messages: []airouter.Message{
-			{Role: "system", Content: dynamicsSystemPrompt},
-			{Role: "user", Content: prompt},
-		},
-		Temperature: &temperature,
-		MaxTokens:   &maxTokens,
-		JSONMode:    true,
-		JSONSchema: &airouter.JSONSchema{
-			Type: "object",
-			Properties: map[string]airouter.SchemaProperty{
-				"dynamics": {Type: "string", Description: "看板动态总结，200-500字"},
-			},
-			Required: []string{"dynamics"},
-		},
-		Metadata: map[string]any{
-			"operation":     "daily_report_dynamics",
-			"tag_count":     len(tags),
-			"cluster_count": len(clusters),
-		},
-	})
-	if err != nil {
-		return "", fmt.Errorf("dynamics AI call failed: %w", err)
-	}
-
-	logging.Infof("daily-report: dynamics LLM response length=%d", len(result.Content))
-	return parseDynamicsResponse(result.Content)
-}
-
-func buildDynamicsPrompt(tags []TagInput, clusters []ClusterGroup) string {
-	var sb strings.Builder
-	sb.WriteString("## 事件标签\n\n")
-	for _, t := range tags {
-		fmt.Fprintf(&sb, "- [ID:%d] %s (文章数:%d", t.ID, t.Label, t.ArticleCount)
-		if t.Description != "" {
-			fmt.Fprintf(&sb, ", 描述:%s", t.Description)
-		}
-		sb.WriteString(")\n")
-	}
-	if len(clusters) > 0 {
-		sb.WriteString("\n## 聚类分组\n\n")
-		for i, c := range clusters {
-			fmt.Fprintf(&sb, "- 组%d: %s (%d个标签)\n", i+1, c.GroupName, len(c.TagIDs))
-		}
-	}
-	sb.WriteString("\n请生成该看板的当日动态总结。\n")
-	return sb.String()
-}
-
-func parseDynamicsResponse(content string) (string, error) {
-	content = jsonutil.SanitizeLLMJSON(content)
-
-	var raw struct {
-		Dynamics string `json:"dynamics"`
-	}
-	if err := json.Unmarshal([]byte(content), &raw); err != nil {
-		return "", fmt.Errorf("parse dynamics JSON: %w", err)
-	}
-	return raw.Dynamics, nil
 }
 
 // ---------------------------------------------------------------------------
@@ -358,37 +271,45 @@ func parseThreadsResponse(content string, tags []TagInput) ([]Thread, error) {
 // ---------------------------------------------------------------------------
 
 // GenerateDailyReport is the main pipeline that generates a daily report for a board.
-func GenerateDailyReport(ctx context.Context, boardID uint, date time.Time) (*BoardDailyReport, []DailyReportSection, error) {
+func GenerateDailyReport(ctx context.Context, boardID uint, date time.Time) (*BoardDailyReport, []DailyReportSection, [][]DailyReportThread, error) {
 	startOfDay := normalizeReportDate(date)
 
 	// Step 1: Collect board event tags
 	tags, articleCounts, err := collectBoardTags(boardID, date)
 	if err != nil {
-		return nil, nil, fmt.Errorf("collect board tags: %w", err)
+		return nil, nil, nil, fmt.Errorf("collect board tags: %w", err)
 	}
 	if len(tags) == 0 {
-		return nil, nil, nil
+		return nil, nil, nil, nil
+	}
+
+	// Build tag→articleIDs map (before dedup/filter changes the tag slice)
+	tagArticleMap := make(map[uint][]uint, len(tags))
+	for i, t := range tags {
+		tagArticleMap[t.ID] = articleCounts[i]
 	}
 
 	// Step 2: Deduplicate
 	tags = DeduplicateTags(tags, articleCounts)
 
+	// Step 2.5: Quality filter
+	tags = filterTagsByQuality(tags)
+	if len(tags) == 0 {
+		return nil, nil, nil, nil
+	}
+
 	// Step 3: Cluster via LLM
 	clusters, err := ClusterTags(ctx, tags)
 	if err != nil {
-		return nil, nil, fmt.Errorf("cluster tags: %w", err)
+		return nil, nil, nil, fmt.Errorf("cluster tags: %w", err)
 	}
 
 	// Step 4: Query yesterday's report for continuity
-	prevReport := findPreviousReport(boardID, startOfDay)
+	prevReport, prevThreads := findPreviousReport(boardID, startOfDay)
 
-	// Step 5: Generate in parallel (A + B + C×K)
+	// Step 5: Generate in parallel (A + C×K)
 	type highlightsResult struct {
 		data []Highlight
-		err  error
-	}
-	type dynamicsResult struct {
-		data string
 		err  error
 	}
 	type threadsResult struct {
@@ -398,7 +319,6 @@ func GenerateDailyReport(ctx context.Context, boardID uint, date time.Time) (*Bo
 	}
 
 	highlightsCh := make(chan highlightsResult, 1)
-	dynamicsCh := make(chan dynamicsResult, 1)
 	threadsCh := make(chan threadsResult, len(clusters))
 
 	// Call A: Highlights
@@ -407,18 +327,12 @@ func GenerateDailyReport(ctx context.Context, boardID uint, date time.Time) (*Bo
 		highlightsCh <- highlightsResult{data: data, err: err}
 	}()
 
-	// Call B: Dynamics
-	go func() {
-		data, err := GenerateDynamics(ctx, tags, clusters)
-		dynamicsCh <- dynamicsResult{data: data, err: err}
-	}()
-
 	// Call C×K: Threads per cluster
 	for i, cluster := range clusters {
 		go func(idx int, c ClusterGroup) {
 			var prevSummaries []string
 			if prevReport != nil {
-				prevSummaries = getPrevThreadSummaries(*prevReport, c)
+				prevSummaries = getPrevThreadSummaries(prevThreads, c)
 			}
 			data, err := GenerateClusterThreads(ctx, c, tags, prevSummaries)
 			threadsCh <- threadsResult{clusterIdx: idx, data: data, err: err}
@@ -428,13 +342,7 @@ func GenerateDailyReport(ctx context.Context, boardID uint, date time.Time) (*Bo
 	// Collect highlights
 	hr := <-highlightsCh
 	if hr.err != nil {
-		return nil, nil, fmt.Errorf("generate highlights: %w", hr.err)
-	}
-
-	// Collect dynamics
-	dr := <-dynamicsCh
-	if dr.err != nil {
-		return nil, nil, fmt.Errorf("generate dynamics: %w", dr.err)
+		return nil, nil, nil, fmt.Errorf("generate highlights: %w", hr.err)
 	}
 
 	// Collect threads
@@ -452,13 +360,12 @@ func GenerateDailyReport(ctx context.Context, boardID uint, date time.Time) (*Bo
 	for idx, cluster := range clusters {
 		threads := threadsByCluster[idx]
 		if prevReport != nil {
-			matchPreviousThreads(threads, *prevReport, cluster)
+			matchPreviousThreads(threads, prevThreads, cluster)
 		}
 	}
 
 	// Step 7: Assemble report
 	highlightsJSON, _ := json.Marshal(hr.data)
-	dynamics := dr.data
 
 	// Calculate article count
 	totalArticles := 0
@@ -472,10 +379,10 @@ func GenerateDailyReport(ctx context.Context, boardID uint, date time.Time) (*Bo
 		title = hr.data[0].Title
 	}
 
-	// Summary: use dynamics text (truncated by rune to avoid breaking multi-byte UTF-8)
-	summary := dynamics
-	if len([]rune(summary)) > 200 {
-		summary = string([]rune(summary)[:200])
+	// Summary: use first highlight reason as summary fallback
+	summary := ""
+	if len(hr.data) > 0 {
+		summary = hr.data[0].Reason
 	}
 
 	clustersJSON, _ := json.Marshal(clusters)
@@ -486,7 +393,7 @@ func GenerateDailyReport(ctx context.Context, boardID uint, date time.Time) (*Bo
 		Title:                   title,
 		Summary:                 summary,
 		Highlights:              highlightsJSON,
-		Dynamics:                dynamics,
+		Dynamics:                "",
 		ArticleCount:            totalArticles,
 		EventTagCount:           len(tags),
 		ClusterCount:            len(clusters),
@@ -502,6 +409,8 @@ func GenerateDailyReport(ctx context.Context, boardID uint, date time.Time) (*Bo
 	var sections []DailyReportSection
 	for i, cluster := range clusters {
 		threads := threadsByCluster[i]
+		// Populate related article IDs
+		populateThreadArticles(threads, tagArticleMap)
 		clusterTags := filterTagsByIDs(tags, cluster.TagIDs)
 		clusterArticleCount := 0
 		for _, t := range clusterTags {
@@ -509,18 +418,88 @@ func GenerateDailyReport(ctx context.Context, boardID uint, date time.Time) (*Bo
 		}
 
 		tagIDsJSON, _ := json.Marshal(cluster.TagIDs)
-		threadsJSON, _ := json.Marshal(threads)
+
+		// Calculate best_tier and avg_score
+		tagIDSet := make(map[uint]bool)
+		for _, tid := range cluster.TagIDs {
+			tagIDSet[tid] = true
+		}
+		bestTier := 4 // worst possible
+		totalScore := 0.0
+		matchCount := 0
+		for _, t := range tags {
+			if tagIDSet[t.ID] {
+				tier := tagging.MatchTier(t.MatchReason, false)
+				if tier < bestTier {
+					bestTier = tier
+				}
+				totalScore += t.Score
+				matchCount++
+			}
+		}
+		avgScore := 0.0
+		if matchCount > 0 {
+			avgScore = totalScore / float64(matchCount)
+		}
 
 		sections = append(sections, DailyReportSection{
 			ClusterIndex:  i,
 			ClusterLabel:  cluster.GroupName,
 			ClusterTagIDs: tagIDsJSON,
-			Threads:       threadsJSON,
 			ArticleCount:  clusterArticleCount,
+			BestTier:      bestTier,
+			AvgScore:      avgScore,
 		})
 	}
 
-	return report, sections, nil
+	// Build thread batches (convert []Thread → []DailyReportThread per cluster)
+	var threadBatches [][]DailyReportThread
+	for i := range clusters {
+		threads := threadsByCluster[i]
+		var batch []DailyReportThread
+		for _, th := range threads {
+			tagIDsJSON, _ := json.Marshal(th.TagIDs)
+			articleIDsJSON, _ := json.Marshal(th.RelatedArticleIDs)
+			batch = append(batch, DailyReportThread{
+				Title:             th.Title,
+				Summary:           th.Summary,
+				Status:            th.Status,
+				TagIDs:            tagIDsJSON,
+				Confidence:        th.Confidence,
+				PrevThreadID:      th.PrevThreadID,
+				RelatedArticleIDs: articleIDsJSON,
+			})
+		}
+		threadBatches = append(threadBatches, batch)
+	}
+
+	// Generate section embeddings from cluster_label texts
+	var embedTexts []string
+	var embedIndices []int
+	for i, sec := range sections {
+		if strings.TrimSpace(sec.ClusterLabel) != "" {
+			embedTexts = append(embedTexts, sec.ClusterLabel)
+			embedIndices = append(embedIndices, i)
+		}
+	}
+	if len(embedTexts) > 0 {
+		embedResult, embedErr := airouter.NewRouter().Embed(ctx, airouter.EmbeddingRequest{
+			Input: embedTexts,
+			Metadata: map[string]any{
+				"operation": "daily_report_section_embedding",
+				"board_id":  boardID,
+			},
+		}, airouter.CapabilityEmbedding)
+		if embedErr != nil {
+			logging.Warnf("daily-report: section embedding failed for board %d: %v", boardID, embedErr)
+		} else if len(embedResult.Embeddings) >= len(embedTexts) {
+			for j, idx := range embedIndices {
+				sections[idx].Embedding = floatsToPgVector(embedResult.Embeddings[j])
+			}
+		}
+	}
+
+	return report, sections, threadBatches, nil
 }
 
 // ---------------------------------------------------------------------------
@@ -529,26 +508,26 @@ func GenerateDailyReport(ctx context.Context, boardID uint, date time.Time) (*Bo
 
 // matchPreviousThreads sets PrevThreadID on threads that match yesterday's threads.
 // Strategy:
-// 1. Tag ID intersection → continuing
-// 2. No match → emerging
-func matchPreviousThreads(threads []Thread, prevReport BoardDailyReport, cluster ClusterGroup) {
-	if len(threads) == 0 {
+// 1. Tag ID intersection → continuing, set PrevThreadID to matched thread's DB ID
+// 2. No match → emerging (no PrevThreadID)
+func matchPreviousThreads(threads []Thread, prevThreads []DailyReportThread, cluster ClusterGroup) {
+	if len(threads) == 0 || len(prevThreads) == 0 {
 		return
 	}
 
-	// Extract previous threads from sections
-	var prevThreadList []Thread
-	for _, section := range prevReport.Sections {
-		if section.Threads != nil {
-			var secThreads []Thread
-			if err := json.Unmarshal(section.Threads, &secThreads); err == nil {
-				prevThreadList = append(prevThreadList, secThreads...)
-			}
+	// Build lightweight view of previous threads for matching
+	type prevEntry struct {
+		id     uint
+		tagIDs []uint
+	}
+	var prevList []prevEntry
+	for i := range prevThreads {
+		dt := &prevThreads[i]
+		var tagIDs []uint
+		if dt.TagIDs != nil {
+			_ = json.Unmarshal(dt.TagIDs, &tagIDs)
 		}
-	}
-
-	if len(prevThreadList) == 0 {
-		return
+		prevList = append(prevList, prevEntry{id: dt.ID, tagIDs: tagIDs})
 	}
 
 	for i := range threads {
@@ -556,8 +535,8 @@ func matchPreviousThreads(threads []Thread, prevReport BoardDailyReport, cluster
 		bestMatchIdx := -1
 		bestOverlap := 0
 
-		for j, prevTh := range prevThreadList {
-			overlap := countTagOverlap(th.TagIDs, prevTh.TagIDs)
+		for j, prev := range prevList {
+			overlap := countTagOverlap(th.TagIDs, prev.tagIDs)
 			if overlap > bestOverlap {
 				bestOverlap = overlap
 				bestMatchIdx = j
@@ -565,7 +544,7 @@ func matchPreviousThreads(threads []Thread, prevReport BoardDailyReport, cluster
 		}
 
 		if bestMatchIdx >= 0 && bestOverlap > 0 {
-			// Mark as continuing — the match was found via tag overlap
+			th.PrevThreadID = &prevList[bestMatchIdx].id
 			if th.Status == "emerging" {
 				th.Status = "continuing"
 			}
@@ -587,6 +566,23 @@ func countTagOverlap(a, b []uint) int {
 	return count
 }
 
+// populateThreadArticles fills RelatedArticleIDs for each thread based on tag→article mapping.
+func populateThreadArticles(threads []Thread, tagArticleMap map[uint][]uint) {
+	for i := range threads {
+		seen := make(map[uint]bool)
+		var articleIDs []uint
+		for _, tagID := range threads[i].TagIDs {
+			for _, artID := range tagArticleMap[tagID] {
+				if !seen[artID] {
+					seen[artID] = true
+					articleIDs = append(articleIDs, artID)
+				}
+			}
+		}
+		threads[i].RelatedArticleIDs = articleIDs
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -597,12 +593,14 @@ func collectBoardTags(boardID uint, date time.Time) ([]TagInput, [][]uint, error
 	endOfDay := startOfDay.Add(24 * time.Hour)
 
 	type tagRow struct {
-		ID           uint   `json:"id"`
-		Label        string `json:"label"`
-		Category     string `json:"category"`
-		Description  string `json:"description"`
-		Source       string `json:"source"`
-		ArticleCount int    `json:"article_count"`
+		ID           uint    `json:"id"`
+		Label        string  `json:"label"`
+		Category     string  `json:"category"`
+		Description  string  `json:"description"`
+		Source       string  `json:"source"`
+		MatchReason  string  `json:"match_reason"`
+		Score        float64 `json:"score"`
+		ArticleCount int     `json:"article_count"`
 	}
 
 	var rows []tagRow
@@ -612,14 +610,17 @@ func collectBoardTags(boardID uint, date time.Time) ([]TagInput, [][]uint, error
 			topic_tags.category AS category,
 			topic_tags.description AS description,
 			topic_tags.source AS source,
+			topic_tag_board_labels.match_reason AS match_reason,
+			topic_tag_board_labels.score AS score,
 			COUNT(DISTINCT articles.id) AS article_count`).
 		Joins("JOIN topic_tag_board_labels ON topic_tag_board_labels.topic_tag_id = topic_tags.id").
 		Joins("JOIN article_topic_tags ON article_topic_tags.topic_tag_id = topic_tags.id").
 		Joins("JOIN articles ON articles.id = article_topic_tags.article_id").
 		Where("topic_tag_board_labels.semantic_board_id = ?", boardID).
+		Where("NOT COALESCE(topic_tag_board_labels.direction_mismatch, false)").
 		Where("topic_tags.status = ? AND topic_tags.category = ?", "active", models.TagCategoryEvent).
 		Where("articles.pub_date >= ? AND articles.pub_date < ?", startOfDay, endOfDay).
-		Group("topic_tags.id, topic_tags.label, topic_tags.category, topic_tags.description, topic_tags.source").
+		Group("topic_tags.id, topic_tags.label, topic_tags.category, topic_tags.description, topic_tags.source, topic_tag_board_labels.match_reason, topic_tag_board_labels.score").
 		Order("article_count DESC, topic_tags.id ASC").
 		Scan(&rows).Error
 	if err != nil {
@@ -640,6 +641,8 @@ func collectBoardTags(boardID uint, date time.Time) ([]TagInput, [][]uint, error
 			Description:  row.Description,
 			ArticleCount: row.ArticleCount,
 			Source:       row.Source,
+			MatchReason:  row.MatchReason,
+			Score:        row.Score,
 		})
 
 		// Get article IDs for this tag on this date
@@ -653,49 +656,145 @@ func collectBoardTags(boardID uint, date time.Time) ([]TagInput, [][]uint, error
 		articleIDSets = append(articleIDSets, artIDs)
 	}
 
+	// Fallback: find event tags with auxiliaries but no board labels, compute matches
+	var unmatchedTagIDs []uint
+	database.DB.Model(&models.TopicTag{}).
+		Select("DISTINCT topic_tags.id").
+		Joins("JOIN article_topic_tags ON article_topic_tags.topic_tag_id = topic_tags.id").
+		Joins("JOIN articles ON articles.id = article_topic_tags.article_id").
+		Joins("JOIN topic_tag_semantic_labels ON topic_tag_semantic_labels.topic_tag_id = topic_tags.id").
+		Where("topic_tags.status = ? AND topic_tags.category = ?", "active", models.TagCategoryEvent).
+		Where("articles.pub_date >= ? AND articles.pub_date < ?", startOfDay, endOfDay).
+		Where("NOT EXISTS (SELECT 1 FROM topic_tag_board_labels WHERE topic_tag_board_labels.topic_tag_id = topic_tags.id)").
+		Limit(50).
+		Pluck("topic_tags.id", &unmatchedTagIDs)
+
+	if len(unmatchedTagIDs) > 0 {
+		logging.Infof("[daily-report] fallback: found %d unmatched event tags for board %d, computing matches", len(unmatchedTagIDs), boardID)
+		matcher := tagging.NewSemanticBoardMatchingService(database.DB)
+		for _, tid := range unmatchedTagIDs {
+			matches, matchErr := matcher.MatchTopicTag(context.Background(), tid)
+			if matchErr != nil {
+				logging.Warnf("[daily-report] fallback match failed for tag %d: %v", tid, matchErr)
+				continue
+			}
+			var boardMatch *tagging.SemanticBoardMatchResult
+			for i := range matches {
+				if matches[i].SemanticBoardID == boardID && !matches[i].DirectionMismatch {
+					boardMatch = &matches[i]
+					break
+				}
+			}
+			if boardMatch == nil {
+				continue
+			}
+
+			var t models.TopicTag
+			if err := database.DB.First(&t, tid).Error; err != nil {
+				continue
+			}
+			var artIDs []uint
+			database.DB.Model(&models.ArticleTopicTag{}).
+				Select("DISTINCT article_topic_tags.article_id").
+				Joins("JOIN articles ON articles.id = article_topic_tags.article_id").
+				Where("article_topic_tags.topic_tag_id = ? AND articles.pub_date >= ? AND articles.pub_date < ?", tid, startOfDay, endOfDay).
+				Pluck("article_topic_tags.article_id", &artIDs)
+
+			tags = append(tags, TagInput{
+				ID:           t.ID,
+				Label:        t.Label,
+				Category:     t.Category,
+				Description:  t.Description,
+				Source:       t.Source,
+				ArticleCount: len(artIDs),
+				MatchReason:  boardMatch.MatchReason,
+				Score:        boardMatch.Score,
+			})
+			articleIDSets = append(articleIDSets, artIDs)
+		}
+	}
+
 	return tags, articleIDSets, nil
 }
 
-// findPreviousReport finds the most recent report for the board before the given date.
-func findPreviousReport(boardID uint, date time.Time) *BoardDailyReport {
+// findPreviousReport finds the most recent report for the board before the given date,
+// returning both the report and all its threads preloaded with DB IDs.
+func findPreviousReport(boardID uint, date time.Time) (*BoardDailyReport, []DailyReportThread) {
 	var report BoardDailyReport
 	err := database.DB.Where("semantic_board_id = ? AND period_date < ? AND status = ?",
 		boardID, normalizeReportDate(date).Format("2006-01-02"), "completed").
 		Order("period_date DESC").
-		Preload("Sections").
+		Preload("Sections.Threads").
 		First(&report).Error
 	if err != nil {
-		return nil
+		return nil, nil
 	}
-	return &report
+
+	// Flatten all threads from all sections
+	var allThreads []DailyReportThread
+	for _, sec := range report.Sections {
+		allThreads = append(allThreads, sec.Threads...)
+	}
+	return &report, allThreads
 }
 
-// getPrevThreadSummaries extracts thread summaries from a previous report
+// getPrevThreadSummaries extracts thread summaries from previous threads
 // that are relevant to a given cluster.
-func getPrevThreadSummaries(prevReport BoardDailyReport, cluster ClusterGroup) []string {
+func getPrevThreadSummaries(prevThreads []DailyReportThread, cluster ClusterGroup) []string {
 	clusterTagSet := make(map[uint]bool, len(cluster.TagIDs))
 	for _, id := range cluster.TagIDs {
 		clusterTagSet[id] = true
 	}
 
 	var summaries []string
-	for _, section := range prevReport.Sections {
-		var threads []Thread
-		if section.Threads != nil {
-			if err := json.Unmarshal(section.Threads, &threads); err != nil {
-				continue
-			}
+	for i := range prevThreads {
+		dt := &prevThreads[i]
+		var tagIDs []uint
+		if dt.TagIDs != nil {
+			_ = json.Unmarshal(dt.TagIDs, &tagIDs)
 		}
-		for _, th := range threads {
-			for _, tagID := range th.TagIDs {
-				if clusterTagSet[tagID] {
-					summaries = append(summaries, fmt.Sprintf("%s: %s", th.Title, th.Summary))
-					break
-				}
+		for _, tagID := range tagIDs {
+			if clusterTagSet[tagID] {
+				summaries = append(summaries, fmt.Sprintf("%s: %s", dt.Title, dt.Summary))
+				break
 			}
 		}
 	}
 	return summaries
+}
+
+func filterTagsByQuality(tags []TagInput) []TagInput {
+	// Separate by match reason quality
+	var kept []TagInput
+	var weighted []TagInput
+	for _, t := range tags {
+		switch t.MatchReason {
+		case "direct_hit", "hit_rate", "max_sim":
+			kept = append(kept, t)
+		default: // "weighted" or unknown
+			weighted = append(weighted, t)
+		}
+	}
+
+	// If kept < 10, pull back weighted tags (保底)
+	if len(kept) < 10 {
+		kept = append(kept, weighted...)
+	}
+
+	// If kept > 30, truncate by quality (截断)
+	if len(kept) > 30 {
+		sort.SliceStable(kept, func(i, j int) bool {
+			ti := tagging.MatchTier(kept[i].MatchReason, false)
+			tj := tagging.MatchTier(kept[j].MatchReason, false)
+			if ti != tj {
+				return ti < tj
+			}
+			return kept[i].Score > kept[j].Score
+		})
+		kept = kept[:30]
+	}
+
+	return kept
 }
 
 func filterTagsByIDs(tags []TagInput, ids []uint) []TagInput {

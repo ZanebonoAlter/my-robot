@@ -6,23 +6,20 @@ import (
 
 func TestValidateImportColumnsRejectsUnexpectedSourceColumns(t *testing.T) {
 	spec := TableSpec{Name: "feeds", PrimaryKey: "id"}
-	_, _, err := validateImportColumns(spec, []string{"id", "title", "legacy_only"}, []string{"id", "title"})
+	_, err := validateImportColumns(spec, []string{"id", "title", "legacy_only"}, []string{"id", "title"})
 	if err == nil {
 		t.Fatal("expected schema drift error")
 	}
 }
 
 func TestValidateImportColumnsAllowsExplicitMissingTargetColumns(t *testing.T) {
-	spec := TableSpec{Name: "topic_tag_embeddings", PrimaryKey: "id", AllowedMissingTargetColumns: []string{"vector"}}
-	shared, includeEmbeddingVector, err := validateImportColumns(spec, []string{"id", "topic_tag_id", "vector"}, []string{"id", "topic_tag_id", "embedding"})
+	spec := TableSpec{Name: "topic_tag_embeddings", PrimaryKey: "id", AllowedMissingTargetColumns: []string{"legacy_col"}}
+	shared, err := validateImportColumns(spec, []string{"id", "topic_tag_id", "legacy_col"}, []string{"id", "topic_tag_id"})
 	if err != nil {
 		t.Fatalf("expected allowed column drift to pass: %v", err)
 	}
 	if len(shared) != 2 {
 		t.Fatalf("expected 2 shared columns, got %d", len(shared))
-	}
-	if !includeEmbeddingVector {
-		t.Fatal("expected vector cast to embedding to be enabled")
 	}
 }
 

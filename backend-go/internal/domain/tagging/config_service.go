@@ -30,34 +30,33 @@ func (s *EmbeddingConfigService) LoadConfig() (map[string]string, error) {
 	return m, nil
 }
 
-// LoadThresholds loads high/low similarity thresholds from config
-func (s *EmbeddingConfigService) LoadThresholds() (EmbeddingMatchThresholds, error) {
+// LoadMatchThreshold loads the match threshold from config.
+// Returns the default (0.92) if not configured.
+func (s *EmbeddingConfigService) LoadMatchThreshold() (float64, error) {
 	config, err := s.LoadConfig()
 	if err != nil {
-		return DefaultThresholds, err
+		return MatchThreshold, err
 	}
 
-	thresholds := DefaultThresholds
-
-	if v, ok := config["high_similarity_threshold"]; ok {
+	// Prefer new key; fall back to old keys for backward compat
+	if v, ok := config["match_threshold"]; ok {
 		if f, err := strconv.ParseFloat(v, 64); err == nil && f > 0 && f <= 1.0 {
-			thresholds.HighSimilarity = f
+			return f, nil
 		}
 	}
-
 	if v, ok := config["low_similarity_threshold"]; ok {
 		if f, err := strconv.ParseFloat(v, 64); err == nil && f > 0 && f <= 1.0 {
-			thresholds.LowSimilarity = f
+			return f, nil
 		}
 	}
 
-	return thresholds, nil
+	return MatchThreshold, nil
 }
 
 // UpdateConfig updates a single config value by key
 func (s *EmbeddingConfigService) UpdateConfig(key, value string) error {
 	// Validate threshold values
-	if key == "high_similarity_threshold" || key == "low_similarity_threshold" {
+	if key == "match_threshold" {
 		f, err := strconv.ParseFloat(value, 64)
 		if err != nil {
 			return fmt.Errorf("invalid threshold value %q: must be a number", value)

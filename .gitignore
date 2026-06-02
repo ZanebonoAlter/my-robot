@@ -29,3 +29,4 @@ front/node_modules/
 .code-review-graph/
 # Log files
 logs/
+.codegraph/.gitignore

@@ -113,17 +113,21 @@ const posById = computed(() => {
 interface EdgeLine {
   key: string
   d: string
+  fromId: number
+  toId: number
 }
 
 const edgePaths = computed<EdgeLine[]>(() => {
   return relations.value.map((r, i) => {
     const from = posById.value.get(r.from_id)
     const to = posById.value.get(r.to_id)
-    if (!from || !to) return { key: `edge-${i}`, d: '' }
+    if (!from || !to) return { key: `edge-${i}`, d: '', fromId: r.from_id, toId: r.to_id }
     const midX = (from.cx + to.cx) / 2
     return {
       key: `edge-${i}`,
       d: `M${from.cx},${from.cy} C${midX},${from.cy} ${midX},${to.cy} ${to.cx},${to.cy}`,
+      fromId: r.from_id,
+      toId: r.to_id,
     }
   }).filter(e => e.d !== '')
 })
@@ -147,6 +151,34 @@ const svgHeight = computed(() => {
 const currentSection = computed(() =>
   sections.value.find(s => s.id === props.sectionId),
 )
+
+// --- Hover highlight ---
+const hoveredId = ref<number | null>(null)
+
+const neighborsOf = computed(() => {
+  const map = new Map<number, Set<number>>()
+  for (const r of relations.value) {
+    let s = map.get(r.from_id)
+    if (!s) { s = new Set(); map.set(r.from_id, s) }
+    s.add(r.to_id)
+    s = map.get(r.to_id)
+    if (!s) { s = new Set(); map.set(r.to_id, s) }
+    s.add(r.from_id)
+  }
+  return map
+})
+
+function isEdgeHighlighted(r: { from_id: number; to_id: number }): boolean {
+  if (hoveredId.value === null) return false
+  return r.from_id === hoveredId.value || r.to_id === hoveredId.value
+}
+
+function isNodeHighlighted(nodeId: number): boolean {
+  if (hoveredId.value === null) return false
+  if (nodeId === hoveredId.value) return true
+  const nb = neighborsOf.value.get(hoveredId.value)
+  return nb ? nb.has(nodeId) : false
+}
 
 // --- Thread/article loading ---
 
@@ -287,8 +319,8 @@ function navigateToNode(node: SectionLifecycleNode) {
             :key="edge.key"
             :d="edge.d"
             fill="none"
-            stroke="rgba(80,60,30,0.2)"
-            stroke-width="1.5"
+            :stroke="isEdgeHighlighted(edge) ? 'rgba(80,60,30,0.5)' : 'rgba(80,60,30,0.12)'"
+            :stroke-width="isEdgeHighlighted(edge) ? 2.5 : 1.2"
           />
 
           <!-- Nodes -->
@@ -300,9 +332,13 @@ function navigateToNode(node: SectionLifecycleNode) {
               'slp-node--current': pn.data.id === sectionId,
               'slp-node--selected': selectedNodeId === pn.data.id,
               'slp-node--ending': pn.data.status === 'ending',
+              'slp-node--lineage': isNodeHighlighted(pn.data.id),
+              'slp-node--dimmed': hoveredId !== null && !isNodeHighlighted(pn.data.id),
             }"
             :transform="`translate(${pn.cx - NODE_W / 2}, ${pn.cy - NODE_H / 2})`"
             @click="handleNodeClick(pn.data)"
+            @mouseenter="hoveredId = pn.data.id"
+            @mouseleave="hoveredId = null"
           >
             <rect
               :width="NODE_W"
@@ -498,6 +534,17 @@ function navigateToNode(node: SectionLifecycleNode) {
 
 .slp-node--ending {
   opacity: 0.5;
+}
+
+.slp-node--lineage rect {
+  stroke: rgba(60, 40, 10, 0.35) !important;
+  stroke-width: 1.5;
+  fill: rgba(255, 255, 255, 0.75) !important;
+}
+
+.slp-node--dimmed {
+  opacity: 0.2;
+  filter: saturate(0.3) brightness(0.7);
 }
 
 /* Detail panel */

@@ -50,11 +50,16 @@
 - [x] 移除 `ThreadLineagePanel.vue` 组件文件
 - [x] 引入 `d3-dag` 依赖（`pnpm add d3-dag`）
 - [x] 新增 `useDagLayout` composable：封装 d3-dag Sugiyama 布局计算，泛型接口，返回 positioned nodes + edge paths
-- [x] `SectionLifecyclePanel.vue` 重写：垂直 DAG 渲染（rankdir=TB），SVG 渲染分叉/合并，保留节点点击跳转、当前话题高亮、skeleton loading 等交互
+- [x] `SectionLifecyclePanel.vue` 重写：水平时间线布局（日期分桶横排），SVG 贝塞尔曲线连线，羊皮纸配色
+- [x] `SectionLifecyclePanel.vue` 后端 BFS 限制为直接邻居（1跳），避免拉入整个连通分量
+- [x] `SectionLifecyclePanel.vue` 点击节点选中→下方展开线索列表，线索展开显示关联文章（页内预览）
+- [x] `SectionLifecyclePanel.vue` hover 高亮直接关联节点和边，无关节点淡出
+- [x] `SectionLifecyclePanel.vue` 节点 hover 显示导航箭头按钮，点击跳转到对应日期报告
+- [x] `SectionLifecyclePanel.vue` openArticle 事件通过 BoardDailyReportTimeline 冒泡至 TagsPage
 - [x] `BoardThreadBrowser.vue` 重写：简单时间线布局（按日期分桶→列，同日纵向排列），SVG 贝塞尔曲线连线
 - [x] 两个组件的 ended 节点视觉处理：降低透明度 + 灰色虚线边框
 - [x] `BoardThreadBrowser.vue` 增大间距（COL_W=120），默认显示截断的 cluster_label
-- [x] `BoardThreadBrowser.vue` hover 高亮话题连通分量：同线路节点发光+标签全亮，关联边加粗变亮，无关节点淡出
+- [x] `BoardThreadBrowser.vue` hover 高亮直接关联节点和边，无关节点淡出（修复 isEdgeHighlighted 参数名 bug）
 - [x] `BoardThreadBrowser.vue` 点击话题弹窗展示关联线索（threads）列表，含标题/摘要/文章数
 - [x] `BoardThreadBrowser.vue` 线索展开显示关联文章列表，点击文章触发页内 ArticleContentView 预览（emit 事件冒泡至 TagsPage）
 

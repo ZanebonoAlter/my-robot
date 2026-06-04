@@ -78,28 +78,16 @@ const neighborsOf = computed(() => {
   return map
 })
 
-function lineageOf(nodeId: number): Set<number> {
-  const visited = new Set<number>()
-  const stack = [nodeId]
-  while (stack.length > 0) {
-    const cur = stack.pop()!
-    if (visited.has(cur)) continue
-    visited.add(cur)
-    const nb = neighborsOf.value.get(cur)
-    if (nb) for (const n of nb) stack.push(n)
-  }
-  return visited
-}
-
 function isEdgeHighlighted(r: { fromId: number; toId: number }): boolean {
   if (hoveredId.value === null) return false
-  const lineage = lineageOf(hoveredId.value)
-  return lineage.has(r.fromId) && lineage.has(r.toId)
+  return r.fromId === hoveredId.value || r.toId === hoveredId.value
 }
 
 function isNodeHighlighted(nodeId: number): boolean {
   if (hoveredId.value === null) return false
-  return lineageOf(hoveredId.value).has(nodeId)
+  if (nodeId === hoveredId.value) return true
+  const nb = neighborsOf.value.get(hoveredId.value)
+  return nb ? nb.has(nodeId) : false
 }
 
 // --- Simple timeline layout ---

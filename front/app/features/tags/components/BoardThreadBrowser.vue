@@ -12,12 +12,14 @@ const loading = ref(false)
 const sections = ref<SectionTimelineNode[]>([])
 const relations = ref<SectionRelation[]>([])
 const selectedNode = ref<SectionTimelineNode | null>(null)
+const hoveredId = ref<number | null>(null)
 
 // --- Constants ---
-const COL_W = 40
-const ROW_H = 44
-const PAD = 20
-const NODE_R = 6
+const COL_W = 120
+const ROW_H = 48
+const PAD = 28
+const NODE_R = 7
+const LABEL_MAX = 8
 
 // --- Status styling ---
 const statusColorMap: Record<string, string> = {
@@ -45,6 +47,52 @@ function statusFill(status: string): string {
 function formatDateShort(dateStr: string): string {
   const d = new Date(dateStr)
   return `${d.getMonth() + 1}/${d.getDate()}`
+}
+
+function truncateLabel(label: string): string {
+  return label.length > LABEL_MAX ? label.slice(0, LABEL_MAX) + '…' : label
+}
+
+// --- Hover highlight graph ---
+
+/** node id → set of directly connected node ids */
+const neighborsOf = computed(() => {
+  const map = new Map<number, Set<number>>()
+  for (const r of relations.value) {
+    let s = map.get(r.from_id)
+    if (!s) { s = new Set(); map.set(r.from_id, s) }
+    s.add(r.to_id)
+    s = map.get(r.to_id)
+    if (!s) { s = new Set(); map.set(r.to_id, s) }
+    s.add(r.from_id)
+  }
+  return map
+})
+
+/** node ids in the full lineage (connected component) of a given node */
+function lineageOf(nodeId: number): Set<number> {
+  const visited = new Set<number>()
+  const stack = [nodeId]
+  while (stack.length > 0) {
+    const cur = stack.pop()!
+    if (visited.has(cur)) continue
+    visited.add(cur)
+    const nb = neighborsOf.value.get(cur)
+    if (nb) for (const n of nb) stack.push(n)
+  }
+  return visited
+}
+
+/** Is this edge related to the hovered node? */
+function isEdgeHighlighted(r: SectionRelation): boolean {
+  if (hoveredId.value === null) return false
+  return r.from_id === hoveredId.value || r.to_id === hoveredId.value
+}
+
+/** Is this node in the lineage of the hovered node? */
+function isNodeHighlighted(nodeId: number): boolean {
+  if (hoveredId.value === null) return false
+  return lineageOf(hoveredId.value).has(nodeId)
 }
 
 // --- Simple timeline layout: date → column, stack vertically within column ---
@@ -108,6 +156,8 @@ const posById = computed(() => {
 interface EdgeLine {
   key: string
   d: string
+  fromId: number
+  toId: number
 }
 
 /** Bezier edges between related sections */
@@ -115,11 +165,13 @@ const edgePaths = computed<EdgeLine[]>(() => {
   return relations.value.map((r, i) => {
     const from = posById.value.get(r.from_id)
     const to = posById.value.get(r.to_id)
-    if (!from || !to) return { key: `edge-${i}`, d: '' }
+    if (!from || !to) return { key: `edge-${i}`, d: '', fromId: r.from_id, toId: r.to_id }
     const midX = (from.cx + to.cx) / 2
     return {
       key: `edge-${i}`,
       d: `M${from.cx},${from.cy} C${midX},${from.cy} ${midX},${to.cy} ${to.cx},${to.cy}`,
+      fromId: r.from_id,
+      toId: r.to_id,
     }
   }).filter(e => e.d !== '')
 })
@@ -248,8 +300,8 @@ watch(
             :key="edge.key"
             :d="edge.d"
             fill="none"
-            stroke="rgba(255,255,255,0.12)"
-            stroke-width="1.5"
+            :stroke="isEdgeHighlighted({ from_id: edge.fromId, to_id: edge.toId, distance: 0 }) ? 'rgba(255,255,255,0.55)' : 'rgba(255,255,255,0.1)'"
+            :stroke-width="isEdgeHighlighted({ from_id: edge.fromId, to_id: edge.toId, distance: 0 }) ? 2 : 1.5"
           />
 
           <!-- Nodes -->
@@ -257,10 +309,16 @@ watch(
             v-for="pn in positionedNodes"
             :key="'node-' + pn.data.id"
             class="btb-dag-node"
-            :class="{ 'btb-dag-node--ending': pn.data.status === 'ending', 'btb-dag-node--selected': selectedNode?.id === pn.data.id }"
+            :class="{
+              'btb-dag-node--ending': pn.data.status === 'ending',
+              'btb-dag-node--selected': selectedNode?.id === pn.data.id,
+              'btb-dag-node--lineage': isNodeHighlighted(pn.data.id),
+              'btb-dag-node--dimmed': hoveredId !== null && !isNodeHighlighted(pn.data.id),
+            }"
             @click="selectNode(pn.data)"
+            @mouseenter="hoveredId = pn.data.id"
+            @mouseleave="hoveredId = null"
           >
-            <title>{{ pn.data.cluster_label }} ({{ statusLabels[pn.data.status] || pn.data.status }})</title>
             <circle
               :cx="pn.cx"
               :cy="pn.cy"
@@ -270,6 +328,15 @@ watch(
               stroke="rgba(255,255,255,0.15)"
               :stroke-width="selectedNode?.id === pn.data.id ? 2 : 1"
             />
+            <text
+              :x="pn.cx"
+              :y="pn.cy + NODE_R + 12"
+              text-anchor="middle"
+              class="btb-node-label"
+              :fill="statusFill(pn.data.status)"
+            >
+              {{ truncateLabel(pn.data.cluster_label) }}
+            </text>
           </g>
         </svg>
       </div>
@@ -410,8 +477,8 @@ watch(
 .btb-date-label {
   position: absolute;
   transform: translateX(-50%);
-  font-size: 0.55rem;
-  color: rgba(255, 255, 255, 0.25);
+  font-size: 0.6rem;
+  color: rgba(255, 255, 255, 0.3);
   white-space: nowrap;
 }
 
@@ -425,11 +492,18 @@ watch(
   display: block;
 }
 
+/* Node label */
+.btb-node-label {
+  font-size: 9px;
+  pointer-events: none;
+  opacity: 0.7;
+  transition: opacity 0.12s ease;
+}
+
 /* DAG nodes */
 .btb-dag-node {
   cursor: pointer;
-  opacity: 1;
-  transition: opacity 0.12s ease;
+  transition: opacity 0.15s ease;
 }
 
 .btb-dag-node circle {
@@ -437,10 +511,29 @@ watch(
 }
 
 .btb-dag-node:hover circle {
-  filter: drop-shadow(0 0 4px rgba(255, 255, 255, 0.25));
-  r: 8;
+  filter: drop-shadow(0 0 5px rgba(255, 255, 255, 0.3));
+  r: 9;
 }
 
+.btb-dag-node:hover .btb-node-label {
+  opacity: 1;
+}
+
+/* Lineage highlight: hovered node's entire connected component */
+.btb-dag-node--lineage circle {
+  filter: drop-shadow(0 0 4px rgba(255, 255, 255, 0.2));
+}
+
+.btb-dag-node--lineage .btb-node-label {
+  opacity: 1;
+}
+
+/* Dimmed: not in the hovered lineage */
+.btb-dag-node--dimmed {
+  opacity: 0.2;
+}
+
+/* Ending nodes */
 .btb-dag-node--ending {
   opacity: 0.45;
 }
@@ -449,6 +542,11 @@ watch(
   stroke: #9ca3af;
 }
 
+.btb-dag-node--ending.btb-dag-node--lineage {
+  opacity: 0.8;
+}
+
+/* Selected */
 .btb-dag-node--selected circle {
   filter: drop-shadow(0 0 6px rgba(255, 255, 255, 0.35));
   stroke: rgba(255, 255, 255, 0.5);

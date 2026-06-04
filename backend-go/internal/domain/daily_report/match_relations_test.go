@@ -1,6 +1,7 @@
 package daily_report
 
 import (
+	"sort"
 	"testing"
 	"time"
 
@@ -116,4 +117,65 @@ func TestShouldWriteRelation_MultipleAdjacentMatches_Split(t *testing.T) {
 	)
 	require.True(t, result1, "first adjacent match should be written")
 	require.True(t, result2, "second adjacent match should be written (split)")
+}
+
+func TestCompetitiveFilter_Empty(t *testing.T) {
+	result := competitiveFilter(nil)
+	require.Empty(t, result)
+}
+
+func TestCompetitiveFilter_SingleCandidate(t *testing.T) {
+	c := matchCandidate{FromID: 1, FromDate: parseDate("2026-06-01"), Distance: 0.15}
+	result := competitiveFilter([]matchCandidate{c})
+	require.Len(t, result, 1)
+	require.Equal(t, uint(1), result[0].FromID)
+}
+
+func TestCompetitiveFilter_GapAboveThreshold_KeepBest(t *testing.T) {
+	candidates := []matchCandidate{
+		{FromID: 1, FromDate: parseDate("2026-06-01"), Distance: 0.15},
+		{FromID: 2, FromDate: parseDate("2026-06-01"), Distance: 0.22},
+		{FromID: 3, FromDate: parseDate("2026-06-01"), Distance: 0.30},
+	}
+	result := competitiveFilter(candidates)
+	require.Len(t, result, 1)
+	require.Equal(t, uint(1), result[0].FromID)
+	require.Equal(t, 0.15, result[0].Distance)
+}
+
+func TestCompetitiveFilter_GapBelowThreshold_KeepCluster(t *testing.T) {
+	candidates := []matchCandidate{
+		{FromID: 1, FromDate: parseDate("2026-06-01"), Distance: 0.20},
+		{FromID: 2, FromDate: parseDate("2026-06-01"), Distance: 0.22},
+		{FromID: 3, FromDate: parseDate("2026-06-01"), Distance: 0.24},
+		{FromID: 4, FromDate: parseDate("2026-06-01"), Distance: 0.28},
+	}
+	result := competitiveFilter(candidates)
+	ids := make([]uint, len(result))
+	for i, c := range result {
+		ids[i] = c.FromID
+	}
+	sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
+	require.Equal(t, []uint{1, 2}, ids)
+}
+
+func TestCompetitiveFilter_ExactGapThreshold_KeepBest(t *testing.T) {
+	candidates := []matchCandidate{
+		{FromID: 1, FromDate: parseDate("2026-06-01"), Distance: 0.10},
+		{FromID: 2, FromDate: parseDate("2026-06-01"), Distance: 0.13},
+	}
+	result := competitiveFilter(candidates)
+	require.Len(t, result, 1)
+	require.Equal(t, uint(1), result[0].FromID)
+}
+
+func TestCompetitiveFilter_AllSimilarDistances_KeepAll(t *testing.T) {
+	candidates := []matchCandidate{
+		{FromID: 1, FromDate: parseDate("2026-06-01"), Distance: 0.298},
+		{FromID: 2, FromDate: parseDate("2026-06-01"), Distance: 0.300},
+		{FromID: 3, FromDate: parseDate("2026-06-01"), Distance: 0.300},
+		{FromID: 4, FromDate: parseDate("2026-06-01"), Distance: 0.303},
+	}
+	result := competitiveFilter(candidates)
+	require.Len(t, result, 4)
 }

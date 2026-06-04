@@ -3,6 +3,7 @@ package daily_report
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -534,6 +535,42 @@ func hasContinuationInIntermediateDays(
 		}
 	}
 	return false
+}
+
+type matchCandidate struct {
+	FromID   uint
+	FromDate time.Time
+	Distance  float64
+}
+
+func competitiveFilter(candidates []matchCandidate) []matchCandidate {
+	if len(candidates) <= 1 {
+		return candidates
+	}
+
+	slices.SortFunc(candidates, func(a, b matchCandidate) int {
+		if a.Distance < b.Distance {
+			return -1
+		}
+		if a.Distance > b.Distance {
+			return 1
+		}
+		return 0
+	})
+
+	best := candidates[0].Distance
+	gap := candidates[1].Distance - best
+
+	if gap >= 0.03 {
+		return candidates[:1]
+	}
+
+	threshold := best + 0.03
+	i := 1
+	for i < len(candidates) && candidates[i].Distance <= threshold {
+		i++
+	}
+	return candidates[:i]
 }
 
 // DeriveSectionStatuses computes status for each section based on its relation graph.

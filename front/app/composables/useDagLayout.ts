@@ -127,25 +127,67 @@ export function useDagLayout<
     }
   }
 
-  // Place orphan nodes in a row below / to the right
+  // Place orphan nodes (no edges), respecting rank when available
   if (orphanNodes.length > 0) {
-    const orphanStartX = 0
-    // For TB: place below the graph; for LR: also below (before swap)
-    const orphanStartY = layoutHeight > 0 ? layoutHeight + gap[1] + nodeSize[1] : 0
+    if (rankFn) {
+      // Build rank → y mapping from connected layout
+      const rankToY = new Map<number, number>()
+      for (const [id, pos] of positioned) {
+        const orig = nodeMap.get(id)
+        if (orig) {
+          const r = rankFn(orig)
+          if (r !== undefined && !rankToY.has(r)) rankToY.set(r, pos.y)
+        }
+      }
 
-    for (let i = 0; i < orphanNodes.length; i++) {
-      const id = String(orphanNodes[i].id)
-      positioned.set(id, {
-        x: orphanStartX + i * (nodeSize[0] + gap[0]),
-        y: orphanStartY,
-      })
+      // Compute layer spacing for ranks not present in connected layout
+      let spacing = nodeSize[1] + gap[1]
+      if (rankToY.size >= 2) {
+        const entries = [...rankToY.entries()].sort((a, b) => a[0] - b[0])
+        spacing = (entries[entries.length - 1][1] - entries[0][1])
+          / (entries[entries.length - 1][0] - entries[0][0])
+      }
+      const baseY = rankToY.size > 0
+        ? [...rankToY.values()].reduce((a, b) => Math.min(a, b))
+        : nodeSize[1] / 2
+
+      // Group orphans by rank, place each group at the correct layer y
+      const byRank = new Map<number, N[]>()
+      for (const n of orphanNodes) {
+        const r = rankFn(n) ?? 0
+        if (!byRank.has(r)) byRank.set(r, [])
+        byRank.get(r)!.push(n)
+      }
+
+      for (const [rank, orphans] of byRank) {
+        const targetY = rankToY.get(rank) ?? (baseY + rank * spacing)
+        // Find max x among nodes already at this y to avoid overlap
+        let maxX = -Infinity
+        for (const pos of positioned.values()) {
+          if (Math.abs(pos.y - targetY) < 0.01) maxX = Math.max(maxX, pos.x)
+        }
+        let cx = maxX > -Infinity ? maxX + nodeSize[0] + gap[0] : 0
+        for (const n of orphans) {
+          positioned.set(String(n.id), { x: cx, y: targetY })
+          cx += nodeSize[0] + gap[0]
+        }
+      }
+    } else {
+      // No rank info: place orphans in a row below the graph
+      const orphanStartY = layoutHeight > 0 ? layoutHeight + gap[1] + nodeSize[1] : 0
+      for (let i = 0; i < orphanNodes.length; i++) {
+        positioned.set(String(orphanNodes[i].id), {
+          x: i * (nodeSize[0] + gap[0]),
+          y: orphanStartY,
+        })
+      }
     }
 
-    // Expand bounding box to include orphans
-    const maxOrphanX = orphanStartX + (orphanNodes.length - 1) * (nodeSize[0] + gap[0]) + nodeSize[0]
-    const orphanRowY = orphanStartY + nodeSize[1]
-    layoutWidth = Math.max(layoutWidth, maxOrphanX)
-    layoutHeight = Math.max(layoutHeight, orphanRowY)
+    // Update bounding box
+    for (const pos of positioned.values()) {
+      layoutWidth = Math.max(layoutWidth, pos.x + nodeSize[0])
+      layoutHeight = Math.max(layoutHeight, pos.y + nodeSize[1])
+    }
   }
 
   // Swap x/y for LR direction

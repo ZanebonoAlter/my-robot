@@ -3,7 +3,6 @@ package daily_report
 import (
 	"context"
 	"fmt"
-	"sort"
 	"strings"
 	"time"
 
@@ -52,35 +51,12 @@ func SaveReport(report *BoardDailyReport, sections []DailyReportSection, threadB
 			}
 		}
 
-		// Embedding matching: find prev_section_id BEFORE deleting old data.
-		// Old sections are still in DB at this point, so new sections can
-		// match against them (critical for upsert scenarios).
-		matches := MatchSectionsByEmbedding(tx, report.SemanticBoardID, sections)
-		for i, m := range matches {
-			if m.PrevSectionID > 0 {
-				sections[i].PrevSectionID = &m.PrevSectionID
-				sections[i].Status = "continuing"
-			}
-		}
-
 		if findErr == nil {
-			// Nullify downstream prev_thread_id references before deleting old threads
-			if err := tx.Model(&DailyReportThread{}).
-				Where("prev_thread_id IN (SELECT id FROM daily_report_threads WHERE report_id = ?)", existing.ID).
-				Updates(map[string]interface{}{
-					"prev_thread_id": nil,
-					"status":         "emerging",
-				}).Error; err != nil {
-				return fmt.Errorf("nullify downstream prev_thread_id: %w", err)
-			}
-			// Nullify downstream prev_section_id references before deleting old sections
-			if err := tx.Model(&DailyReportSection{}).
-				Where("prev_section_id IN (SELECT id FROM daily_report_sections WHERE report_id = ?)", existing.ID).
-				Updates(map[string]interface{}{
-					"prev_section_id": nil,
-					"status":          "emerging",
-				}).Error; err != nil {
-				return fmt.Errorf("nullify downstream prev_section_id: %w", err)
+			// Delete old relations involving old section IDs
+			var oldSectionIDs []uint
+			tx.Model(&DailyReportSection{}).Where("report_id = ?", existing.ID).Pluck("id", &oldSectionIDs)
+			if len(oldSectionIDs) > 0 {
+				tx.Where("from_section_id IN ? OR to_section_id IN ?", oldSectionIDs, oldSectionIDs).Delete(&SectionRelation{})
 			}
 			// Delete old threads
 			if err := tx.Where("report_id = ?", existing.ID).Delete(&DailyReportThread{}).Error; err != nil {
@@ -92,7 +68,7 @@ func SaveReport(report *BoardDailyReport, sections []DailyReportSection, threadB
 			}
 		}
 
-		// Insert new sections (with embedding + prev_section_id)
+		// Insert new sections (with embedding)
 		for i := range sections {
 			sections[i].ReportID = report.ID
 		}
@@ -100,6 +76,11 @@ func SaveReport(report *BoardDailyReport, sections []DailyReportSection, threadB
 			if err := tx.CreateInBatches(sections, 20).Error; err != nil {
 				return fmt.Errorf("create sections: %w", err)
 			}
+		}
+
+		// Write relations for new sections
+		if err := MatchAndSaveRelations(tx, report.SemanticBoardID, report.PeriodDate, sections); err != nil {
+			logging.Warnf("SaveReport: relation matching failed: %v", err)
 		}
 
 		// Save threads for each section (sections now have IDs after insertion)
@@ -309,87 +290,19 @@ func DeleteThreadsByReport(reportID uint) error {
 	return database.DB.Where("report_id = ?", reportID).Delete(&DailyReportThread{}).Error
 }
 
-// ThreadLineageNode represents a thread in a lineage chain with its report date.
-type ThreadLineageNode struct {
-	DailyReportThread
-	PeriodDate   time.Time `json:"period_date"`
-	ClusterLabel string    `json:"cluster_label"`
-}
-
-// GetThreadLineage fetches the full lineage chain for a thread using recursive CTE.
-func GetThreadLineage(threadID uint) ([]ThreadLineageNode, error) {
-	var nodes []ThreadLineageNode
-	err := database.DB.Raw(`
-		WITH RECURSIVE chain AS (
-			-- Base: the target thread
-			SELECT t.id, t.report_id, t.section_id, t.title, t.summary, t.status,
-			       t.tag_ids, t.confidence, t.prev_thread_id, t.related_article_ids, t.created_at,
-			       bdr.period_date, ds.cluster_label
-			FROM daily_report_threads t
-			JOIN board_daily_reports bdr ON bdr.id = t.report_id
-			JOIN daily_report_sections ds ON ds.id = t.section_id
-			WHERE t.id = ?
-
-			UNION ALL
-
-			-- Walk up to ancestors via prev_thread_id
-			SELECT parent.id, parent.report_id, parent.section_id, parent.title, parent.summary, parent.status,
-			       parent.tag_ids, parent.confidence, parent.prev_thread_id, parent.related_article_ids, parent.created_at,
-			       bdr.period_date, ds.cluster_label
-			FROM daily_report_threads parent
-			JOIN chain c ON c.prev_thread_id = parent.id
-			JOIN board_daily_reports bdr ON bdr.id = parent.report_id
-			JOIN daily_report_sections ds ON ds.id = parent.section_id
-		)
-		SELECT * FROM chain ORDER BY period_date ASC
-	`, threadID).Scan(&nodes).Error
-	if err != nil {
-		return nil, fmt.Errorf("get thread lineage: %w", err)
-	}
-	return nodes, nil
-}
-
-// GetBoardThreadTimeline fetches all threads for a board within a date range.
-func GetBoardThreadTimeline(boardID uint, days int) ([]ThreadLineageNode, error) {
-	if days <= 0 {
-		days = 30
-	}
-	if days > 90 {
-		days = 90
-	}
-	var nodes []ThreadLineageNode
-	err := database.DB.Raw(`
-		SELECT t.id, t.report_id, t.section_id, t.title, t.summary, t.status,
-		       t.tag_ids, t.confidence, t.prev_thread_id, t.related_article_ids, t.created_at,
-		       bdr.period_date, ds.cluster_label
-		FROM daily_report_threads t
-		JOIN board_daily_reports bdr ON bdr.id = t.report_id
-		JOIN daily_report_sections ds ON ds.id = t.section_id
-		WHERE bdr.semantic_board_id = ?
-		  AND bdr.period_date >= CURRENT_DATE - ? * INTERVAL '1 day'
-		  AND bdr.status = 'completed'
-		ORDER BY t.prev_thread_id NULLS FIRST, bdr.period_date ASC, t.id ASC
-	`, boardID, days).Scan(&nodes).Error
-	if err != nil {
-		return nil, fmt.Errorf("get board thread timeline: %w", err)
-	}
-	return nodes, nil
-}
-
 // SectionTimelineNode represents a section in a timeline view.
 type SectionTimelineNode struct {
-	ID            uint      `json:"id"`
-	ReportID      uint      `json:"report_id"`
-	PeriodDate    time.Time `json:"period_date"`
-	ClusterLabel  string    `json:"cluster_label"`
-	Status        string    `json:"status"`
-	ArticleCount  int       `json:"article_count"`
-	ThreadCount   int       `json:"thread_count"`
-	PrevSectionID *uint     `json:"prev_section_id,omitempty"`
+	ID           uint      `json:"id"`
+	ReportID     uint      `json:"report_id"`
+	PeriodDate   time.Time `json:"period_date"`
+	ClusterLabel string    `json:"cluster_label"`
+	Status       string    `json:"status"`
+	ArticleCount int       `json:"article_count"`
+	ThreadCount  int       `json:"thread_count"`
 }
 
-// GetBoardSectionTimeline fetches all sections for a board within a date range.
-func GetBoardSectionTimeline(boardID uint, days int) ([]SectionTimelineNode, error) {
+// GetBoardSectionTimeline fetches all sections and their relations for a board within a date range.
+func GetBoardSectionTimeline(boardID uint, days int) (SectionTimelineResponse, error) {
 	if days <= 0 {
 		days = 30
 	}
@@ -399,10 +312,8 @@ func GetBoardSectionTimeline(boardID uint, days int) ([]SectionTimelineNode, err
 	var nodes []SectionTimelineNode
 	err := database.DB.Raw(`
 		SELECT ds.id, ds.report_id, bdr.period_date, ds.cluster_label,
-		       COALESCE(ds.status, 'emerging') AS status,
 		       ds.article_count,
-		       (SELECT COUNT(*) FROM daily_report_threads t WHERE t.section_id = ds.id) AS thread_count,
-		       ds.prev_section_id
+		       (SELECT COUNT(*) FROM daily_report_threads t WHERE t.section_id = ds.id) AS thread_count
 		FROM daily_report_sections ds
 		JOIN board_daily_reports bdr ON bdr.id = ds.report_id
 		WHERE bdr.semantic_board_id = ?
@@ -411,157 +322,249 @@ func GetBoardSectionTimeline(boardID uint, days int) ([]SectionTimelineNode, err
 		ORDER BY bdr.period_date DESC, ds.id ASC
 	`, boardID, days).Scan(&nodes).Error
 	if err != nil {
-		return nil, fmt.Errorf("get board section timeline: %w", err)
+		return SectionTimelineResponse{}, fmt.Errorf("get board section timeline: %w", err)
 	}
 
-	// Derive ending status: if a section is not pointed to by any other section
-	// and it's not on the latest date, mark it as ending.
-	if len(nodes) > 0 {
-		latestDate := nodes[0].PeriodDate // first node is latest (DESC order)
-		pointedIDs := make(map[uint]bool)
-		for _, n := range nodes {
-			if n.PrevSectionID != nil {
-				pointedIDs[*n.PrevSectionID] = true
-			}
-		}
-		for i := range nodes {
-			if nodes[i].Status != "emerging" && nodes[i].Status != "continuing" {
-				continue
-			}
-			if !pointedIDs[nodes[i].ID] && !isSameDay(nodes[i].PeriodDate, latestDate) {
-				nodes[i].Status = "ending"
-			}
+	if len(nodes) == 0 {
+		return SectionTimelineResponse{
+			Sections:  []SectionTimelineNode{},
+			Relations: []SectionRelationResult{},
+		}, nil
+	}
+
+	// Collect section IDs and find latest date
+	sectionIDs := make([]uint, len(nodes))
+	sectionDateMap := make(map[uint]time.Time, len(nodes))
+	var latestDate time.Time
+	for i, n := range nodes {
+		sectionIDs[i] = n.ID
+		sectionDateMap[n.ID] = n.PeriodDate
+		if n.PeriodDate.After(latestDate) {
+			latestDate = n.PeriodDate
 		}
 	}
 
-	return nodes, nil
+	// Query relations involving these sections
+	var relations []SectionRelationResult
+	if err := database.DB.Raw(`
+		SELECT from_section_id AS from_id, to_section_id AS to_id, distance
+		FROM daily_report_section_relations
+		WHERE from_section_id IN ? OR to_section_id IN ?
+	`, sectionIDs, sectionIDs).Scan(&relations).Error; err != nil {
+		logging.Warnf("GetBoardSectionTimeline: query relations failed: %v", err)
+	}
+
+	// Derive statuses
+	statuses := DeriveSectionStatuses(sectionIDs, relations, sectionDateMap, latestDate)
+	for i := range nodes {
+		if s, ok := statuses[nodes[i].ID]; ok {
+			nodes[i].Status = s
+		}
+	}
+
+	if relations == nil {
+		relations = []SectionRelationResult{}
+	}
+	return SectionTimelineResponse{Sections: nodes, Relations: relations}, nil
 }
 
-func isSameDay(a, b time.Time) bool {
-	return a.Year() == b.Year() && a.YearDay() == b.YearDay()
+// SectionRelationResult represents a relation record for API responses.
+type SectionRelationResult struct {
+	FromID   uint    `json:"from_id"`
+	ToID     uint    `json:"to_id"`
+	Distance float64 `json:"distance"`
 }
 
-// SectionEmbeddingMatch represents a match result for section embedding lookup.
-type SectionEmbeddingMatch struct {
-	PrevSectionID uint
-	Distance      float64
+// SectionTimelineResponse is the response for section timeline/lifecycle APIs.
+type SectionTimelineResponse struct {
+	Sections  []SectionTimelineNode   `json:"sections"`
+	Relations []SectionRelationResult `json:"relations"`
 }
 
-// MatchSectionsByEmbedding finds the nearest existing section for each new section
-// using pgvector cosine distance. Runs within SaveReport() transaction BEFORE
-// old sections are deleted.
-func MatchSectionsByEmbedding(tx *gorm.DB, boardID uint, sections []DailyReportSection) []SectionEmbeddingMatch {
-	results := make([]SectionEmbeddingMatch, len(sections))
-
-	for i, sec := range sections {
+// MatchAndSaveRelations finds and persists section relations based on embedding similarity.
+// For each section with a non-empty embedding, it queries ALL matching sections in the
+// same board with distance < 0.35, excluding same-day sections.
+func MatchAndSaveRelations(tx *gorm.DB, boardID uint, reportDate time.Time, sections []DailyReportSection) error {
+	for _, sec := range sections {
 		if strings.TrimSpace(sec.Embedding) == "" {
 			continue
 		}
-		var match SectionEmbeddingMatch
+		var matches []struct {
+			MatchID  uint
+			Distance float64
+		}
 		err := tx.Raw(`
-			SELECT s.id AS prev_section_id, s.embedding <=> ?::vector AS distance
+			SELECT s.id AS match_id, s.embedding <=> ?::vector AS distance
 			FROM daily_report_sections s
 			JOIN board_daily_reports r ON r.id = s.report_id
 			WHERE r.semantic_board_id = ?
 			  AND r.status = 'completed'
+			  AND r.period_date::date != ?
 			  AND s.embedding IS NOT NULL
+			  AND s.embedding <=> ?::vector < 0.35
 			ORDER BY s.embedding <=> ?::vector
-			LIMIT 1
-		`, sec.Embedding, boardID, sec.Embedding).Scan(&match).Error
+		`, sec.Embedding, boardID, reportDate.Format("2006-01-02"), sec.Embedding, sec.Embedding).Scan(&matches).Error
 		if err != nil {
+			logging.Warnf("MatchAndSaveRelations: query failed for section %d: %v", sec.ID, err)
 			continue
 		}
-		if match.Distance < 0.3 {
-			results[i] = match
+		for _, m := range matches {
+			if err := tx.Exec(`
+				INSERT INTO daily_report_section_relations (from_section_id, to_section_id, distance)
+				VALUES (?, ?, ?)
+				ON CONFLICT (from_section_id, to_section_id) DO UPDATE SET distance = EXCLUDED.distance
+			`, m.MatchID, sec.ID, m.Distance).Error; err != nil {
+				logging.Warnf("MatchAndSaveRelations: save relation failed: %v", err)
+			}
 		}
 	}
-
-	return results
+	return nil
 }
 
-// GetSectionLifecycle fetches the full lifecycle chain for a section using recursive CTE.
-func GetSectionLifecycle(sectionID uint) ([]SectionTimelineNode, error) {
-	var nodes []SectionTimelineNode
-	err := database.DB.Raw(`
-		WITH RECURSIVE chain AS (
-			SELECT ds.id, ds.report_id, bdr.period_date, ds.cluster_label,
-			       COALESCE(ds.status, 'emerging') AS status,
-			       ds.article_count,
-			       (SELECT COUNT(*) FROM daily_report_threads t WHERE t.section_id = ds.id) AS thread_count,
-			       ds.prev_section_id
-			FROM daily_report_sections ds
-			JOIN board_daily_reports bdr ON bdr.id = ds.report_id
-			WHERE ds.id = ?
+// DeriveSectionStatuses computes status for each section based on its relation graph.
+//
+// Priority: merge > split > continuing > ending > emerging
+func DeriveSectionStatuses(sectionIDs []uint, relations []SectionRelationResult, sectionDateMap map[uint]time.Time, latestDate time.Time) map[uint]string {
+	statuses := make(map[uint]string, len(sectionIDs))
 
-			UNION ALL
+	// Build degree maps
+	outDegree := make(map[uint]int) // from_section_id count
+	inDegree := make(map[uint]int)  // to_section_id count
+	hasIncoming := make(map[uint]bool)
+	hasOutgoing := make(map[uint]bool)
 
-			SELECT parent.id, parent.report_id, bdr.period_date, parent.cluster_label,
-			       COALESCE(parent.status, 'emerging') AS status,
-			       parent.article_count,
-			       (SELECT COUNT(*) FROM daily_report_threads t WHERE t.section_id = parent.id) AS thread_count,
-			       parent.prev_section_id
-			FROM daily_report_sections parent
-			JOIN chain c ON c.prev_section_id = parent.id
-			JOIN board_daily_reports bdr ON bdr.id = parent.report_id
-		)
-		SELECT * FROM chain ORDER BY period_date ASC
-	`, sectionID).Scan(&nodes).Error
-	if err != nil {
-		return nil, fmt.Errorf("get section lifecycle: %w", err)
+	for _, r := range relations {
+		outDegree[r.FromID]++
+		inDegree[r.ToID]++
+		hasOutgoing[r.FromID] = true
+		hasIncoming[r.ToID] = true
 	}
 
-	// Find descendants: sections whose prev_section_id points to any chain member
-	if len(nodes) > 0 {
-		chainIDs := make([]uint, len(nodes))
-		for i, n := range nodes {
-			chainIDs[i] = n.ID
-		}
-		var descendants []SectionTimelineNode
-		err = database.DB.Raw(`
-			WITH RECURSIVE kids AS (
-				SELECT ds.id, ds.report_id, bdr.period_date, ds.cluster_label,
-				       COALESCE(ds.status, 'emerging') AS status,
-				       ds.article_count,
-				       (SELECT COUNT(*) FROM daily_report_threads t WHERE t.section_id = ds.id) AS thread_count,
-				       ds.prev_section_id
-				FROM daily_report_sections ds
-				JOIN board_daily_reports bdr ON bdr.id = ds.report_id
-				WHERE ds.prev_section_id = ANY(?)
+	idSet := make(map[uint]bool, len(sectionIDs))
+	for _, id := range sectionIDs {
+		idSet[id] = true
+	}
 
-				UNION ALL
-
-				SELECT child.id, child.report_id, bdr.period_date, child.cluster_label,
-				       COALESCE(child.status, 'emerging') AS status,
-				       child.article_count,
-				       (SELECT COUNT(*) FROM daily_report_threads t WHERE t.section_id = child.id) AS thread_count,
-				       child.prev_section_id
-				FROM daily_report_sections child
-				JOIN kids k ON k.id = child.prev_section_id
-				JOIN board_daily_reports bdr ON bdr.id = child.report_id
-			)
-			SELECT * FROM kids ORDER BY period_date ASC
-		`, chainIDs).Scan(&descendants).Error
-		if err == nil {
-			existing := make(map[uint]bool)
-			for _, n := range nodes {
-				existing[n.ID] = true
-			}
-			for _, d := range descendants {
-				if !existing[d.ID] {
-					nodes = append(nodes, d)
-					existing[d.ID] = true
+	for _, id := range sectionIDs {
+		switch {
+		case !hasIncoming[id]:
+			statuses[id] = "emerging"
+		case inDegree[id] > 1:
+			statuses[id] = "merge"
+		default:
+			// Check if any of its from-sections has out-degree > 1 (split)
+			split := false
+			for _, r := range relations {
+				if r.ToID == id && outDegree[r.FromID] > 1 {
+					split = true
+					break
 				}
 			}
-			sort.Slice(nodes, func(i, j int) bool {
-				return nodes[i].PeriodDate.Before(nodes[j].PeriodDate)
-			})
+			if split {
+				statuses[id] = "split"
+			} else {
+				statuses[id] = "continuing"
+			}
+		}
+
+		// Override to ending if no outgoing relations and not on latest date
+		if !hasOutgoing[id] {
+			if d, ok := sectionDateMap[id]; ok && d.Before(latestDate) {
+				statuses[id] = "ending"
+			}
 		}
 	}
 
-	if nodes == nil {
-		nodes = []SectionTimelineNode{}
+	return statuses
+}
+
+// GetSectionLifecycle fetches the lifecycle for a section using BFS limited to 2 hops
+// on the relation table.
+func GetSectionLifecycle(sectionID uint) (SectionTimelineResponse, error) {
+	// BFS: collect connected section IDs, max 2 hops
+	visited := map[uint]bool{sectionID: true}
+	queue := []uint{sectionID}
+	const maxHops = 2
+
+	for hop := 0; hop < maxHops && len(queue) > 0; hop++ {
+		nextQueue := []uint{}
+		for _, current := range queue {
+			var connectedIDs []uint
+			if err := database.DB.Raw(`
+				SELECT from_section_id AS id FROM daily_report_section_relations WHERE to_section_id = ?
+				UNION
+				SELECT to_section_id AS id FROM daily_report_section_relations WHERE from_section_id = ?
+			`, current, current).Scan(&connectedIDs).Error; err != nil {
+				logging.Warnf("GetSectionLifecycle: BFS query failed for section %d: %v", current, err)
+				continue
+			}
+
+			for _, id := range connectedIDs {
+				if !visited[id] {
+					visited[id] = true
+					nextQueue = append(nextQueue, id)
+				}
+			}
+		}
+		queue = nextQueue
 	}
-	return nodes, nil
+
+	allIDs := make([]uint, 0, len(visited))
+	for id := range visited {
+		allIDs = append(allIDs, id)
+	}
+
+	if len(allIDs) == 0 {
+		return SectionTimelineResponse{
+			Sections:  []SectionTimelineNode{},
+			Relations: []SectionRelationResult{},
+		}, nil
+	}
+
+	// Query section details
+	var nodes []SectionTimelineNode
+	if err := database.DB.Raw(`
+		SELECT ds.id, ds.report_id, bdr.period_date, ds.cluster_label,
+		       ds.article_count,
+		       (SELECT COUNT(*) FROM daily_report_threads t WHERE t.section_id = ds.id) AS thread_count
+		FROM daily_report_sections ds
+		JOIN board_daily_reports bdr ON bdr.id = ds.report_id
+		WHERE ds.id IN ?
+		ORDER BY bdr.period_date ASC, ds.id ASC
+	`, allIDs).Scan(&nodes).Error; err != nil {
+		return SectionTimelineResponse{}, fmt.Errorf("get section lifecycle: %w", err)
+	}
+
+	// Query relations involving these sections
+	var relations []SectionRelationResult
+	if err := database.DB.Raw(`
+		SELECT from_section_id AS from_id, to_section_id AS to_id, distance
+		FROM daily_report_section_relations
+		WHERE from_section_id IN ? OR to_section_id IN ?
+	`, allIDs, allIDs).Scan(&relations).Error; err != nil {
+		logging.Warnf("GetSectionLifecycle: query relations failed: %v", err)
+	}
+
+	// Derive statuses
+	sectionDateMap := make(map[uint]time.Time, len(nodes))
+	var latestDate time.Time
+	for _, n := range nodes {
+		sectionDateMap[n.ID] = n.PeriodDate
+		if n.PeriodDate.After(latestDate) {
+			latestDate = n.PeriodDate
+		}
+	}
+	statuses := DeriveSectionStatuses(allIDs, relations, sectionDateMap, latestDate)
+	for i := range nodes {
+		if s, ok := statuses[nodes[i].ID]; ok {
+			nodes[i].Status = s
+		}
+	}
+
+	if relations == nil {
+		relations = []SectionRelationResult{}
+	}
+	return SectionTimelineResponse{Sections: nodes, Relations: relations}, nil
 }
 
 // BackfillSectionEmbeddings generates embeddings for sections that don't have one,
@@ -639,11 +642,11 @@ func BackfillSectionEmbeddings(ctx context.Context) (embedded int, matched int, 
 
 		for _, sec := range sections {
 			var match struct {
-				PrevSectionID uint
-				Distance      float64
+				MatchID  uint
+				Distance float64
 			}
 			err := database.DB.Raw(`
-				SELECT s2.id AS prev_section_id, s2.embedding <=> ?::vector AS distance
+				SELECT s2.id AS match_id, s2.embedding <=> ?::vector AS distance
 				FROM daily_report_sections s2
 				JOIN board_daily_reports r2 ON r2.id = s2.report_id
 				WHERE r2.semantic_board_id = ?
@@ -652,16 +655,15 @@ func BackfillSectionEmbeddings(ctx context.Context) (embedded int, matched int, 
 				ORDER BY s2.embedding <=> ?::vector
 				LIMIT 1
 			`, sec.Embedding, b.BoardID, sec.ID, sec.Embedding).Scan(&match).Error
-			if err != nil || match.PrevSectionID == 0 {
+			if err != nil || match.MatchID == 0 {
 				continue
 			}
-			if match.Distance < 0.3 {
-				status := "continuing"
-				database.DB.Model(&DailyReportSection{}).Where("id = ?", sec.ID).
-					Updates(map[string]interface{}{
-						"prev_section_id": match.PrevSectionID,
-						"status":          status,
-					})
+			if match.Distance < 0.35 {
+				database.DB.Exec(`
+					INSERT INTO daily_report_section_relations (from_section_id, to_section_id, distance)
+					VALUES (?, ?, ?)
+					ON CONFLICT (from_section_id, to_section_id) DO UPDATE SET distance = EXCLUDED.distance
+				`, match.MatchID, sec.ID, match.Distance)
 				matched++
 			}
 		}

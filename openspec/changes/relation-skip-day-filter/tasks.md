@@ -20,10 +20,25 @@
 - [x] 3.3 测试多匹配组合场景（split：一个 section 同时匹配相邻天多个旧 section）
 - [x] 3.4 测试 `BackfillRelations` 全量重建正确性
 
-## 4. 验证
+## 4. 竞争过滤（Competitive Matching）
 
-- [x] 4.1 对 board 2853 执行回刷，验证 6/3 section 入度从 13-14 降到 5-6
-- [ ] 4.2 验证 690→932 (dist=0.094) 真隔天续上关系被保留
-- [ ] 4.3 验证 692→932 (有 6/2 延续) 等冗余噪声 relation 被过滤
-- [ ] 4.4 验证回刷后 `DeriveSectionStatuses` 的 `ending` 覆盖逻辑在新 relation 拓扑下无异常
-- [x] 4.5 后端编译通过、lint 通过、受影响包测试通过
+- [x] 4.1 新增 `matchCandidate` 结构体和 `competitiveFilter(candidates []matchCandidate) []matchCandidate` 纯函数
+- [x] 4.2 在 `MatchAndSaveRelations` 中，对 `shouldWriteRelation` 过滤后的候选调用 `competitiveFilter`，只写入过滤后的结果
+- [x] 4.3 在 `BackfillRelations` 中同样加入 `competitiveFilter` 调用
+- [x] 4.4 为 `competitiveFilter` 编写单元测试：gap ≥ 0.03 只保留 best、gap < 0.03 保留多候选、单候选直通、空候选返回空
+
+## 5. 验证（回刷）
+
+- [x] 5.1 对 board 2853（伊朗局势）重新回刷，验证 section 状态分布变化：merge 占比下降，continuing/split 占比上升
+- [x] 5.2 对 board 3639（AI 技术）回刷，验证稠密版块的匹配收敛效果
+- [x] 5.3 验证 `DeriveSectionStatuses` 的 `ending` 覆盖逻辑在新 relation 拓扑下无异常
+- [x] 5.4 编译通过、受影响包测试通过
+
+## 6. 方向修正（已完成的前置工作）
+
+- [x] 6.1 改写 `MatchAndSaveRelations`：相邻天 < 0.35 进入候选、跨天需无中间延续 + < 0.25 进入候选
+- [x] 6.2 新增 `BackfillRelations(boardID)` + `BackfillAllRelations()` 回刷函数
+- [x] 6.3 重写 `BackfillSectionEmbeddings` Phase 2
+- [x] 6.4 新增 `POST /api/daily-reports/backfill-relations` 端点
+- [x] 6.5 修复匹配方向 bug（`!=` → `<` 确保只匹配更早日期）
+- [x] 6.6 `shouldWriteRelation` 纯逻辑单元测试（7 个场景全部通过）

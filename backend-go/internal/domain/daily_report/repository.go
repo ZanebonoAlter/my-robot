@@ -459,18 +459,32 @@ func MatchAndSaveRelations(tx *gorm.DB, boardID uint, reportDate time.Time, sect
 			continue
 		}
 
+		// Collect candidates that pass time-dimension filtering
+		var candidates []matchCandidate
 		for _, m := range matches {
 			if !shouldWriteRelation(m.MatchID, m.MatchDate, sec.ID, reportDate, m.Distance, adjacency, sectionDateMap, dateSet) {
 				continue
 			}
+			candidates = append(candidates, matchCandidate{
+				FromID:   m.MatchID,
+				FromDate: m.MatchDate,
+				Distance: m.Distance,
+			})
+		}
+
+		// Apply competitive filtering
+		survivors := competitiveFilter(candidates)
+
+		// Write surviving relations
+		for _, c := range survivors {
 			if err := tx.Exec(`
 				INSERT INTO daily_report_section_relations (from_section_id, to_section_id, distance)
 				VALUES (?, ?, ?)
 				ON CONFLICT (from_section_id, to_section_id) DO UPDATE SET distance = EXCLUDED.distance
-			`, m.MatchID, sec.ID, m.Distance).Error; err != nil {
+			`, c.FromID, sec.ID, c.Distance).Error; err != nil {
 				logging.Warnf("MatchAndSaveRelations: save relation failed: %v", err)
 			} else {
-				adjacency[m.MatchID] = append(adjacency[m.MatchID], sec.ID)
+				adjacency[c.FromID] = append(adjacency[c.FromID], sec.ID)
 				sectionDateMap[sec.ID] = reportDate
 			}
 		}

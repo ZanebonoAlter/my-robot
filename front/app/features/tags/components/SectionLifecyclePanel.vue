@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { ref, watch } from 'vue'
-import { useDailyReportsApi, type SectionLifecycleNode } from '~/api/dailyReports'
+import { ref, computed, watch } from 'vue'
+import { useDailyReportsApi, type SectionLifecycleNode, type SectionRelation } from '~/api/dailyReports'
+import { useDagLayout } from '~/composables/useDagLayout'
 
 const props = defineProps<{
   sectionId: number
@@ -14,25 +15,31 @@ const emit = defineEmits<{
 
 const { getSectionLifecycle } = useDailyReportsApi()
 
-const chain = ref<SectionLifecycleNode[]>([])
+const sections = ref<SectionLifecycleNode[]>([])
+const relations = ref<SectionRelation[]>([])
 const loading = ref(false)
 const error = ref(false)
 
-const statusColor: Record<string, string> = {
-  emerging: 'bg-emerald-500/20 text-emerald-400 ring-emerald-500/40',
-  continuing: 'bg-blue-500/20 text-blue-400 ring-blue-500/40',
-  ending: 'bg-gray-500/20 text-gray-400 ring-gray-500/40',
-}
+// Layout constants
+const NODE_W = 260
+const NODE_H = 56
+const GAP_X = 20
+const GAP_Y = 14
+const PADDING = 16
 
-const dotColor: Record<string, string> = {
-  emerging: 'bg-emerald-400',
-  continuing: 'bg-blue-400',
-  ending: 'bg-gray-400',
+const statusColorMap: Record<string, string> = {
+  emerging: '#34d399',
+  continuing: '#60a5fa',
+  split: '#fb923c',
+  merge: '#c084fc',
+  ending: '#9ca3af',
 }
 
 const statusLabel: Record<string, string> = {
   emerging: '新兴',
   continuing: '持续',
+  split: '分化',
+  merge: '合并',
   ending: '结束',
 }
 
@@ -46,6 +53,69 @@ function formatDate(dateStr: string): string {
   return `${month}月${day}日 周${weekDay}`
 }
 
+function truncateLabel(label: string, max = 20): string {
+  return label.length > max ? label.slice(0, max) + '...' : label
+}
+
+// Compute DAG layout
+const dagInputNodes = computed(() =>
+  sections.value.map(s => ({ id: s.id, ...s })),
+)
+
+const dagInputEdges = computed(() =>
+  relations.value.map(r => ({ from: r.from_id, to: r.to_id, ...r })),
+)
+
+const layout = computed(() => {
+  if (dagInputNodes.value.length === 0) return null
+  return useDagLayout(dagInputNodes.value, dagInputEdges.value, { direction: 'TB', nodeSize: [1, 1], gap: [1, 1] })
+})
+
+// Map layout nodes by id for quick lookup
+const layoutNodeMap = computed(() => {
+  const map = new Map<number, { x: number; y: number }>()
+  if (layout.value) {
+    for (const n of layout.value.nodes) {
+      map.set(n.data.id as number, { x: n.x, y: n.y })
+    }
+  }
+  return map
+})
+
+// SVG canvas dimensions
+const svgWidth = computed(() => {
+  if (!layout.value) return 320
+  const maxX = Math.max(0, ...layout.value.nodes.map(n => n.x))
+  return Math.max(320, (maxX + 1) * (NODE_W + GAP_X) + PADDING)
+})
+const svgHeight = computed(() => {
+  if (!layout.value) return 0
+  const maxY = Math.max(0, ...layout.value.nodes.map(n => n.y))
+  return (maxY + 1) * (NODE_H + GAP_Y) + PADDING * 2
+})
+
+// Coordinate scaling
+function scaleX(x: number): number {
+  return x * (NODE_W + GAP_X) + PADDING
+}
+
+function scaleY(y: number): number {
+  return y * (NODE_H + GAP_Y) + PADDING
+}
+
+// Edge path generator — cubic bezier, vertical-first, from node positions
+function edgePathFromLayout(fromId: string | number, toId: string | number): string {
+  const from = layoutNodeMap.value.get(Number(fromId))
+  const to = layoutNodeMap.value.get(Number(toId))
+  if (!from || !to) return ''
+  const x1 = scaleX(from.x) + NODE_W / 2
+  const y1 = scaleY(from.y) + NODE_H
+  const x2 = scaleX(to.x) + NODE_W / 2
+  const y2 = scaleY(to.y)
+  const midY = (y1 + y2) / 2
+  return `M${x1},${y1} C${x1},${midY} ${x2},${midY} ${x2},${y2}`
+}
+
 let fetchId = 0
 
 async function fetchLifecycle() {
@@ -56,7 +126,8 @@ async function fetchLifecycle() {
     const res = await getSectionLifecycle(props.sectionId)
     if (currentFetch !== fetchId) return
     if (res.success && res.data) {
-      chain.value = res.data.chain || []
+      sections.value = res.data.sections || []
+      relations.value = res.data.relations || []
     } else {
       error.value = true
     }
@@ -93,6 +164,7 @@ function handleNodeClick(node: SectionLifecycleNode) {
         <button type="button" class="slp-close" @click="$emit('close')">&#10005;</button>
       </div>
 
+      <!-- Loading skeleton -->
       <div v-if="loading" class="slp-body">
         <div v-for="i in 3" :key="i" class="slp-skeleton-node">
           <div class="slp-skeleton-dot" />
@@ -103,36 +175,131 @@ function handleNodeClick(node: SectionLifecycleNode) {
         </div>
       </div>
 
+      <!-- Error -->
       <div v-else-if="error" class="slp-body">
         <div class="slp-error">加载失败</div>
       </div>
 
-      <div v-else class="slp-body slp-timeline">
-        <div v-for="(node, i) in chain" :key="node.id" class="slp-node-wrapper">
-          <div
-            class="slp-node"
-            :class="{ 'slp-node-current': node.id === sectionId }"
-            @click="handleNodeClick(node)"
-          >
-            <div class="slp-node-dot" :class="dotColor[node.status] || 'bg-gray-400'" />
-            <div class="slp-node-content">
-              <div class="slp-node-date">{{ formatDate(node.period_date) }}</div>
-              <div class="slp-node-title-row">
-                <span class="slp-node-name">{{ node.cluster_label }}</span>
-                <span class="slp-node-status" :class="statusColor[node.status] || ''">
-                  {{ statusLabel[node.status] || node.status }}
-                </span>
-              </div>
-              <div class="slp-node-meta">
-                <span>{{ node.article_count }} 篇</span>
-                <span>{{ node.thread_count }} 条线索</span>
-              </div>
-            </div>
-          </div>
-          <div v-if="i < chain.length - 1" class="slp-connector" />
-        </div>
+      <!-- Empty state -->
+      <div v-else-if="sections.length === 0" class="slp-body">
+        <div class="slp-empty">独立话题</div>
+      </div>
 
-        <div v-if="chain.length === 0" class="slp-empty">独立话题</div>
+      <!-- DAG view -->
+      <div v-else class="slp-body slp-dag-scroll">
+        <svg
+          :width="svgWidth"
+          :height="svgHeight"
+          :viewBox="`0 0 ${svgWidth} ${svgHeight}`"
+          :style="{ minWidth: svgWidth + 'px' }"
+          xmlns="http://www.w3.org/2000/svg"
+          class="slp-dag-svg"
+        >
+          <!-- Edges -->
+          <g class="slp-edges">
+            <path
+              v-for="(edge, i) in (layout?.edges ?? [])"
+              :key="'e' + i"
+              :d="edgePathFromLayout(edge.from, edge.to)"
+              fill="none"
+              stroke="rgba(255,255,255,0.15)"
+              stroke-width="1.5"
+            />
+          </g>
+
+          <!-- Nodes -->
+          <g
+            v-for="posNode in (layout?.nodes ?? [])"
+            :key="'n' + posNode.data.id"
+            class="slp-dag-node"
+            :class="{
+              'slp-dag-node-current': posNode.data.id === sectionId,
+              'slp-dag-node-ending': posNode.data.status === 'ending',
+            }"
+            :transform="`translate(${scaleX(posNode.x)}, ${scaleY(posNode.y)})`"
+            @click="handleNodeClick(posNode.data)"
+          >
+            <!-- Background rect -->
+            <rect
+              :width="NODE_W"
+              :height="NODE_H"
+              rx="6"
+              :fill="posNode.data.id === sectionId ? 'rgba(255,255,255,0.08)' : 'rgba(255,255,255,0.03)'"
+              :stroke="posNode.data.status === 'ending' ? 'rgba(156,163,175,0.3)' : 'rgba(255,255,255,0.06)'"
+              :stroke-dasharray="posNode.data.status === 'ending' ? '4,3' : 'none'"
+              stroke-width="1"
+            />
+
+            <!-- Status dot -->
+            <circle
+              cx="14"
+              :cy="NODE_H / 2"
+              r="4"
+              :fill="statusColorMap[posNode.data.status] || '#9ca3af'"
+              :filter="posNode.data.id === sectionId ? 'url(#slp-glow)' : undefined"
+            />
+
+            <!-- Date -->
+            <text
+              x="26"
+              y="15"
+              fill="rgba(255,255,255,0.3)"
+              font-size="9"
+              font-family="system-ui, sans-serif"
+            >{{ formatDate(posNode.data.period_date) }}</text>
+
+            <!-- Cluster label -->
+            <text
+              x="26"
+              y="30"
+              fill="rgba(255,255,255,0.75)"
+              font-size="12"
+              font-weight="500"
+              font-family="system-ui, sans-serif"
+            >{{ truncateLabel(posNode.data.cluster_label) }}</text>
+
+            <!-- Meta -->
+            <text
+              x="26"
+              y="46"
+              fill="rgba(255,255,255,0.3)"
+              font-size="9"
+              font-family="system-ui, sans-serif"
+            >{{ posNode.data.article_count }} 篇 · {{ posNode.data.thread_count }} 条线索</text>
+
+            <!-- Status badge pill -->
+            <rect
+              :x="NODE_W - 44"
+              y="20"
+              width="36"
+              height="18"
+              rx="4"
+              :fill="statusColorMap[posNode.data.status] + '22'"
+              :stroke="statusColorMap[posNode.data.status] + '44'"
+              stroke-width="0.5"
+            />
+            <text
+              :x="NODE_W - 26"
+              y="32"
+              :fill="statusColorMap[posNode.data.status]"
+              font-size="8"
+              font-weight="500"
+              font-family="system-ui, sans-serif"
+              text-anchor="middle"
+            >{{ statusLabel[posNode.data.status] || posNode.data.status }}</text>
+          </g>
+
+          <!-- Glow filter definition -->
+          <defs>
+            <filter id="slp-glow" x="-50%" y="-50%" width="200%" height="200%">
+              <feGaussianBlur stdDeviation="3" result="blur" />
+              <feMerge>
+                <feMergeNode in="blur" />
+                <feMergeNode in="SourceGraphic" />
+              </feMerge>
+            </filter>
+          </defs>
+        </svg>
       </div>
     </div>
   </Transition>
@@ -194,107 +361,26 @@ function handleNodeClick(node: SectionLifecycleNode) {
   padding: 1rem;
 }
 
-.slp-timeline {
-  display: flex;
-  flex-direction: column;
-  gap: 0;
+.slp-dag-scroll {
+  padding: 0;
 }
 
-/* Node wrapper */
-.slp-node-wrapper {
-  display: flex;
-  flex-direction: column;
+.slp-dag-svg {
+  display: block;
 }
 
-/* Single node */
-.slp-node {
-  display: flex;
-  gap: 0.75rem;
-  padding: 0.6rem 0.4rem;
-  position: relative;
+/* DAG node interaction */
+.slp-dag-node {
   cursor: pointer;
-  border-radius: 6px;
-  transition: background 0.12s ease;
+  transition: opacity 0.12s ease;
 }
 
-.slp-node:hover {
-  background: rgba(255, 255, 255, 0.04);
+.slp-dag-node:hover rect {
+  fill: rgba(255, 255, 255, 0.06);
 }
 
-.slp-node-current {
-  background: rgba(255, 255, 255, 0.06);
-}
-
-/* Timeline dot */
-.slp-node-dot {
-  flex-shrink: 0;
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-  margin-top: 4px;
-  position: relative;
-  z-index: 1;
-}
-
-.slp-node-current .slp-node-dot {
-  box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.1);
-}
-
-/* Connector line */
-.slp-connector {
-  width: 2px;
-  height: 16px;
-  background: rgba(75, 85, 99, 0.6);
-  margin-left: 8.4px;
-}
-
-/* Node content */
-.slp-node-content {
-  flex: 1;
-  min-width: 0;
-}
-
-.slp-node-date {
-  font-size: 0.65rem;
-  color: rgba(255, 255, 255, 0.3);
-  margin-bottom: 0.2rem;
-}
-
-.slp-node-title-row {
-  display: flex;
-  align-items: center;
-  gap: 0.4rem;
-  margin-bottom: 0.2rem;
-}
-
-.slp-node-name {
-  font-size: 0.82rem;
-  font-weight: 500;
-  color: rgba(255, 255, 255, 0.75);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.slp-node-current .slp-node-name {
-  color: rgba(255, 255, 255, 0.95);
-}
-
-.slp-node-status {
-  display: inline-block;
-  font-size: 0.58rem;
-  padding: 0.06rem 0.35rem;
-  border-radius: 3px;
-  font-weight: 500;
-  line-height: 1.5;
-  flex-shrink: 0;
-}
-
-.slp-node-meta {
-  display: flex;
-  gap: 0.5rem;
-  font-size: 0.65rem;
-  color: rgba(255, 255, 255, 0.3);
+.slp-dag-node-ending {
+  opacity: 0.5;
 }
 
 /* Empty */

@@ -91,9 +91,10 @@ function lineageOf(nodeId: number): Set<number> {
   return visited
 }
 
-function isEdgeHighlighted(r: { from_id: number; to_id: number }): boolean {
+function isEdgeHighlighted(r: { fromId: number; toId: number }): boolean {
   if (hoveredId.value === null) return false
-  return r.from_id === hoveredId.value || r.to_id === hoveredId.value
+  const lineage = lineageOf(hoveredId.value)
+  return lineage.has(r.fromId) && lineage.has(r.toId)
 }
 
 function isNodeHighlighted(nodeId: number): boolean {
@@ -344,8 +345,8 @@ watch(
             :key="edge.key"
             :d="edge.d"
             fill="none"
-            :stroke="isEdgeHighlighted(edge) ? 'rgba(255,255,255,0.55)' : 'rgba(255,255,255,0.1)'"
-            :stroke-width="isEdgeHighlighted(edge) ? 2 : 1.5"
+            :stroke="isEdgeHighlighted(edge) ? 'rgba(255,255,255,0.65)' : 'rgba(255,255,255,0.08)'"
+            :stroke-width="isEdgeHighlighted(edge) ? 2.5 : 1"
           />
 
           <!-- Nodes -->
@@ -613,7 +614,10 @@ watch(
 }
 
 .btb-dag-node--lineage circle {
-  filter: drop-shadow(0 0 4px rgba(255, 255, 255, 0.2));
+  filter: drop-shadow(0 0 8px rgba(255, 255, 255, 0.45));
+  stroke: rgba(255, 255, 255, 0.5) !important;
+  stroke-width: 2 !important;
+  r: 9;
 }
 
 .btb-dag-node--lineage .btb-node-label {
@@ -621,7 +625,12 @@ watch(
 }
 
 .btb-dag-node--dimmed {
-  opacity: 0.2;
+  opacity: 0.15;
+  filter: saturate(0.3) brightness(0.6);
+}
+
+.btb-dag-node--dimmed .btb-node-label {
+  opacity: 0.3;
 }
 
 .btb-dag-node--ending {

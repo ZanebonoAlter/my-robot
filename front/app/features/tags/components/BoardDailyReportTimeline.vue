@@ -425,6 +425,17 @@ watch(() => props.boardId, () => {
 
           <!-- Paper content area -->
           <div class="np-content">
+            <!-- Lifecycle DAG view (replaces newspaper content) -->
+            <SectionLifecyclePanel
+              v-if="lifecycleSectionId !== null && lifecycleVisible"
+              :section-id="lifecycleSectionId"
+              :inline="true"
+              @close="closeSectionLifecycle"
+              @navigate="navigateToSectionReport"
+            />
+
+            <!-- Newspaper content (hidden when lifecycle is open) -->
+            <template v-else>
             <div v-if="detailLoading" class="np-loading">
               <div v-for="i in 3" :key="i" class="np-skeleton" />
             </div>
@@ -480,14 +491,7 @@ watch(() => props.boardId, () => {
                 </div>
               </template>
             </div>
-          <SectionLifecyclePanel
-            v-if="lifecycleSectionId !== null"
-            :section-id="lifecycleSectionId"
-            :visible="lifecycleVisible"
-            @close="closeSectionLifecycle"
-            @navigate="navigateToSectionReport"
-          />
-
+            </template>
           </div>
         </div>
       </div>

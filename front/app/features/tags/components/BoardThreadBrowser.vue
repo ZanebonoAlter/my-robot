@@ -645,7 +645,7 @@ watch(
 .btb-popup-overlay {
   position: fixed;
   inset: 0;
-  z-index: 300;
+  z-index: 200;
   display: flex;
   align-items: center;
   justify-content: center;

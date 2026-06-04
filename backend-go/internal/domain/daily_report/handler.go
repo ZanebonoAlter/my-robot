@@ -36,6 +36,9 @@ func RegisterDailyReportRoutes(api *gin.RouterGroup) {
 
 	// POST /api/daily-reports/backfill-embeddings
 	api.POST("/daily-reports/backfill-embeddings", triggerBackfillEmbeddings)
+
+	// POST /api/daily-reports/backfill-relations
+	api.POST("/daily-reports/backfill-relations", triggerBackfillRelations)
 }
 
 // triggerGenerateDailyReport handles POST /api/daily-reports/generate
@@ -310,6 +313,44 @@ func triggerBackfillEmbeddings(c *gin.Context) {
 			"status": "processing",
 		},
 	})
+}
+
+// triggerBackfillRelations handles POST /api/daily-reports/backfill-relations
+func triggerBackfillRelations(c *gin.Context) {
+	boardIDStr := c.Query("board_id")
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+	defer cancel()
+
+	if boardIDStr != "" {
+		boardID, err := strconv.ParseUint(boardIDStr, 10, 32)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid board_id"})
+			return
+		}
+		go func() {
+			<-ctx.Done() // wait for response to be sent
+			rebuilt, err := BackfillRelations(uint(boardID))
+			if err != nil {
+				logging.Errorf("daily-report: backfill relations for board %d failed: %v", boardID, err)
+				return
+			}
+			logging.Infof("daily-report: backfill relations for board %d complete: %d relations rebuilt", boardID, rebuilt)
+		}()
+	} else {
+		go func() {
+			<-ctx.Done()
+			results, err := BackfillAllRelations()
+			if err != nil {
+				logging.Errorf("daily-report: backfill all relations failed: %v", err)
+				return
+			}
+			for bid, cnt := range results {
+				logging.Infof("daily-report: board %d: %d relations rebuilt", bid, cnt)
+			}
+		}()
+	}
+
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": gin.H{"status": "processing"}})
 }
 
 func dailyReportBoardName(boardID uint) string {

@@ -448,7 +448,7 @@ func MatchAndSaveRelations(tx *gorm.DB, boardID uint, reportDate time.Time, sect
 			JOIN board_daily_reports r ON r.id = s.report_id
 			WHERE r.semantic_board_id = ?
 			  AND r.status = 'completed'
-			  AND r.period_date::date != ?
+			  AND r.period_date::date < ?
 			  AND s.embedding IS NOT NULL
 			  AND s.embedding <=> ?::vector < 0.35
 			ORDER BY s.embedding <=> ?::vector
@@ -818,7 +818,7 @@ func BackfillRelations(boardID uint) (rebuilt int, err error) {
 			JOIN board_daily_reports r ON r.id = s.report_id
 			WHERE r.semantic_board_id = ?
 			  AND r.status = 'completed'
-			  AND r.period_date::date != ?
+			  AND r.period_date::date < ?
 			  AND s.embedding IS NOT NULL
 			  AND s.embedding <=> ?::vector < 0.35
 			ORDER BY s.embedding <=> ?::vector

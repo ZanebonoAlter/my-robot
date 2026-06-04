@@ -237,10 +237,11 @@ func (s *TagQualityScoreScheduler) runComputeCycle(triggerSource string) {
 		logging.Warnf("TagQualityScore: failed to reconcile auxiliary label ref_count: %v", result.Error)
 	}
 
-	// Reconcile: remove orphan auxiliary labels (ref_count=0, not protected, older than 7 days)
+	// Reconcile: remove orphan auxiliary labels (ref_count=0, not protected, older than 1 day,
+	// not mounted on any board)
 	cutoff := time.Now().AddDate(0, 0, -1)
 	if result := database.DB.Where(
-		"label_type = ? AND ref_count = 0 AND protected = false AND status = ? AND created_at < ?",
+		"label_type = ? AND ref_count = 0 AND protected = false AND status = ? AND created_at < ? AND id NOT IN (SELECT auxiliary_label_id FROM board_composition)",
 		"auxiliary", "active", cutoff,
 	).Delete(&models.SemanticLabel{}); result.Error != nil {
 		logging.Warnf("TagQualityScore: failed to clean orphan auxiliary labels: %v", result.Error)

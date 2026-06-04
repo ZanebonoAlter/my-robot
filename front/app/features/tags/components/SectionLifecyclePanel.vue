@@ -168,9 +168,9 @@ const neighborsOf = computed(() => {
   return map
 })
 
-function isEdgeHighlighted(r: { from_id: number; to_id: number }): boolean {
+function isEdgeHighlighted(r: { fromId: number; toId: number }): boolean {
   if (hoveredId.value === null) return false
-  return r.from_id === hoveredId.value || r.to_id === hoveredId.value
+  return r.fromId === hoveredId.value || r.toId === hoveredId.value
 }
 
 function isNodeHighlighted(nodeId: number): boolean {

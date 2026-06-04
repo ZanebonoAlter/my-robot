@@ -28,12 +28,6 @@ func RegisterDailyReportRoutes(api *gin.RouterGroup) {
 	// GET /api/semantic-boards/:id/daily-reports
 	api.GET("/semantic-boards/:id/daily-reports", listBoardDailyReports)
 
-	// GET /api/daily-reports/threads/:id/lineage
-	api.GET("/daily-reports/threads/:id/lineage", getThreadLineage)
-
-	// GET /api/semantic-boards/:id/thread-timeline
-	api.GET("/semantic-boards/:id/thread-timeline", getBoardThreadTimeline)
-
 	// GET /api/semantic-boards/:id/section-timeline
 	api.GET("/semantic-boards/:id/section-timeline", getBoardSectionTimeline)
 
@@ -207,51 +201,6 @@ func getDailyReport(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"success": true, "data": gin.H{"report": report}})
 }
 
-// getThreadLineage handles GET /api/daily-reports/threads/:id/lineage
-func getThreadLineage(c *gin.Context) {
-	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "invalid thread id"})
-		return
-	}
-
-	chain, err := GetThreadLineage(uint(id))
-	if err != nil || len(chain) == 0 {
-		c.JSON(http.StatusNotFound, gin.H{"success": false, "error": "thread lineage not found"})
-		return
-	}
-
-	c.JSON(http.StatusOK, gin.H{"success": true, "data": gin.H{"chain": chain}})
-}
-
-// getBoardThreadTimeline handles GET /api/semantic-boards/:id/thread-timeline
-func getBoardThreadTimeline(c *gin.Context) {
-	boardID, err := strconv.ParseUint(c.Param("id"), 10, 64)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "invalid board id"})
-		return
-	}
-
-	days := 30
-	if d := c.Query("days"); d != "" {
-		if parsed, err := strconv.Atoi(d); err == nil {
-			days = parsed
-		}
-	}
-
-	threads, err := GetBoardThreadTimeline(uint(boardID), days)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "failed to fetch thread timeline"})
-		return
-	}
-
-	if threads == nil {
-		threads = []ThreadLineageNode{}
-	}
-
-	c.JSON(http.StatusOK, gin.H{"success": true, "data": gin.H{"threads": threads}})
-}
-
 // getBoardSectionTimeline handles GET /api/semantic-boards/:id/section-timeline
 func getBoardSectionTimeline(c *gin.Context) {
 	boardID, err := strconv.ParseUint(c.Param("id"), 10, 64)
@@ -261,16 +210,22 @@ func getBoardSectionTimeline(c *gin.Context) {
 	}
 	days, _ := strconv.Atoi(c.DefaultQuery("days", "14"))
 
-	nodes, err := GetBoardSectionTimeline(uint(boardID), days)
+	resp, err := GetBoardSectionTimeline(uint(boardID), days)
 	if err != nil {
 		logging.Errorf("get board section timeline: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "failed to get section timeline"})
 		return
 	}
-	if nodes == nil {
-		nodes = []SectionTimelineNode{}
+	if resp.Sections == nil {
+		resp.Sections = []SectionTimelineNode{}
 	}
-	c.JSON(http.StatusOK, gin.H{"success": true, "data": gin.H{"sections": nodes}})
+	if resp.Relations == nil {
+		resp.Relations = []SectionRelationResult{}
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": gin.H{
+		"sections":  resp.Sections,
+		"relations": resp.Relations,
+	}})
 }
 
 // getSectionLifecycle handles GET /api/daily-reports/sections/:id/lifecycle
@@ -281,16 +236,22 @@ func getSectionLifecycle(c *gin.Context) {
 		return
 	}
 
-	nodes, err := GetSectionLifecycle(uint(sectionID))
+	resp, err := GetSectionLifecycle(uint(sectionID))
 	if err != nil {
 		logging.Errorf("get section lifecycle: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "failed to get section lifecycle"})
 		return
 	}
-	if nodes == nil {
-		nodes = []SectionTimelineNode{}
+	if resp.Sections == nil {
+		resp.Sections = []SectionTimelineNode{}
 	}
-	c.JSON(http.StatusOK, gin.H{"success": true, "data": gin.H{"chain": nodes}})
+	if resp.Relations == nil {
+		resp.Relations = []SectionRelationResult{}
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": gin.H{
+		"sections":  resp.Sections,
+		"relations": resp.Relations,
+	}})
 }
 
 // broadcastProgress sends a WebSocket progress message.

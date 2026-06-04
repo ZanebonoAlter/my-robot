@@ -499,6 +499,65 @@ func postgresMigrations() []Migration {
 			},
 		},
 
+		// ── Section relations (many-to-many) + drop legacy columns ────────
+		{
+			Version:     "20260603_0001",
+			Description: "Add unique constraint to section_relations, migrate prev_section_id, drop status/prev_thread_id columns.",
+			Up: func(db *gorm.DB) error {
+
+				// 1. Add unique constraint (table created by AutoMigrate)
+				if err := db.Exec(`
+					ALTER TABLE daily_report_section_relations
+					DROP CONSTRAINT IF EXISTS uq_section_relations_pair
+				`).Error; err != nil {
+					return fmt.Errorf("drop old constraint: %w", err)
+				}
+				if err := db.Exec(`
+					ALTER TABLE daily_report_section_relations
+					ADD CONSTRAINT uq_section_relations_pair UNIQUE (from_section_id, to_section_id)
+				`).Error; err != nil {
+					return fmt.Errorf("add unique constraint: %w", err)
+				}
+
+				// 2. Migrate existing prev_section_id data into relations
+				if err := db.Exec(`
+					INSERT INTO daily_report_section_relations (from_section_id, to_section_id, distance, created_at)
+					SELECT ps.id, s.id, 0.0, NOW()
+					FROM daily_report_sections s
+					JOIN daily_report_sections ps ON ps.id = s.prev_section_id
+					WHERE s.prev_section_id IS NOT NULL
+					ON CONFLICT (from_section_id, to_section_id) DO NOTHING
+				`).Error; err != nil {
+					logging.Warnf("migration: migrate prev_section_id data: %v", err)
+				}
+
+				// 3. Drop prev_section_id column
+				if err := db.Exec(`ALTER TABLE daily_report_sections DROP COLUMN IF EXISTS prev_section_id CASCADE`).Error; err != nil {
+					logging.Warnf("migration: drop prev_section_id: %v", err)
+				}
+
+				// 4. Drop status column from sections
+				if err := db.Exec(`ALTER TABLE daily_report_sections DROP COLUMN IF EXISTS status CASCADE`).Error; err != nil {
+					logging.Warnf("migration: drop sections.status: %v", err)
+				}
+
+				// 5. Drop status column from threads
+				if err := db.Exec(`ALTER TABLE daily_report_threads DROP COLUMN IF EXISTS status CASCADE`).Error; err != nil {
+					logging.Warnf("migration: drop threads.status: %v", err)
+				}
+
+				// 6. Drop prev_thread_id column from threads
+				if err := db.Exec(`DROP INDEX IF EXISTS idx_daily_report_threads_prev_thread_id`).Error; err != nil {
+					logging.Warnf("migration: drop prev_thread_id index: %v", err)
+				}
+				if err := db.Exec(`ALTER TABLE daily_report_threads DROP COLUMN IF EXISTS prev_thread_id CASCADE`).Error; err != nil {
+					logging.Warnf("migration: drop prev_thread_id: %v", err)
+				}
+
+				return nil
+			},
+		},
+
 		// ── Section embedding column ────────────────────────────────────
 		{
 			Version:     "20260601_0002",

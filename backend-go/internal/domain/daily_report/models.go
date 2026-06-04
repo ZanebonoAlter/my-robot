@@ -36,6 +36,19 @@ func (BoardDailyReport) TableName() string {
 	return "board_daily_reports"
 }
 
+// SectionRelation represents a many-to-many relation between sections across days.
+type SectionRelation struct {
+	ID            uint      `gorm:"primarykey" json:"id"`
+	FromSectionID uint      `gorm:"not null;index:idx_section_relations_from" json:"from_section_id"`
+	ToSectionID   uint      `gorm:"not null;index:idx_section_relations_to" json:"to_section_id"`
+	Distance      float64   `gorm:"not null" json:"distance"`
+	CreatedAt     time.Time `json:"created_at"`
+}
+
+func (SectionRelation) TableName() string {
+	return "daily_report_section_relations"
+}
+
 // DailyReportSection — one section per cluster
 type DailyReportSection struct {
 	ID            uint                `gorm:"primarykey" json:"id"`
@@ -47,9 +60,7 @@ type DailyReportSection struct {
 	ArticleCount  int                 `json:"article_count"`
 	BestTier      int                 `gorm:"default:0" json:"best_tier"`
 	AvgScore      float64             `gorm:"default:0" json:"avg_score"`
-	Status        string              `gorm:"size:20;default:emerging" json:"status"`
 	Embedding     string              `gorm:"type:vector" json:"-"`
-	PrevSectionID *uint               `json:"prev_section_id,omitempty"`
 	CreatedAt     time.Time           `json:"created_at"`
 }
 
@@ -64,10 +75,8 @@ type DailyReportThread struct {
 	SectionID         uint      `gorm:"index;not null" json:"section_id"`
 	Title             string    `json:"title"`
 	Summary           string    `json:"summary"`
-	Status            string    `gorm:"size:20;default:emerging" json:"status"`
 	TagIDs            JSON      `gorm:"type:jsonb" json:"tag_ids"`
 	Confidence        float64   `gorm:"default:0" json:"confidence"`
-	PrevThreadID      *uint     `json:"prev_thread_id,omitempty"`
 	RelatedArticleIDs JSON      `gorm:"type:jsonb" json:"related_article_ids,omitempty"`
 	CreatedAt         time.Time `json:"created_at"`
 }
@@ -154,10 +163,8 @@ type Highlight struct {
 type Thread struct {
 	Title             string  `json:"title"`
 	Summary           string  `json:"summary"`
-	Status            string  `json:"status"` // emerging, continuing, splitting, merging, ending
 	TagIDs            []uint  `json:"tag_ids"`
 	Confidence        float64 `json:"confidence"`
-	PrevThreadID      *uint   `json:"prev_thread_id,omitempty"`
 	RelatedArticleIDs []uint  `json:"related_article_ids,omitempty"`
 }
 
@@ -170,7 +177,7 @@ func ensureSectionEmbeddingDimension(dim int) {
 		return
 	}
 
-	if err := db.Exec("SET LOCAL lock_timeout = '5s'" /* #nosec G201 */ ).Error; err != nil {
+	if err := db.Exec("SET LOCAL lock_timeout = '5s'" /* #nosec G201 */).Error; err != nil {
 		logging.Warnf("Failed to set lock_timeout: %v", err)
 	}
 

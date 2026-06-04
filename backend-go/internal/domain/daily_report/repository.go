@@ -478,35 +478,22 @@ func DeriveSectionStatuses(sectionIDs []uint, relations []SectionRelationResult,
 	return statuses
 }
 
-// GetSectionLifecycle fetches the lifecycle for a section using BFS limited to 2 hops
-// on the relation table.
+// GetSectionLifecycle fetches the clicked section and its directly connected neighbors (1 hop).
 func GetSectionLifecycle(sectionID uint) (SectionTimelineResponse, error) {
-	// BFS: collect connected section IDs, max 2 hops
+	// Collect only direct neighbors (1 hop)
 	visited := map[uint]bool{sectionID: true}
-	queue := []uint{sectionID}
-	const maxHops = 2
 
-	for hop := 0; hop < maxHops && len(queue) > 0; hop++ {
-		nextQueue := []uint{}
-		for _, current := range queue {
-			var connectedIDs []uint
-			if err := database.DB.Raw(`
-				SELECT from_section_id AS id FROM daily_report_section_relations WHERE to_section_id = ?
-				UNION
-				SELECT to_section_id AS id FROM daily_report_section_relations WHERE from_section_id = ?
-			`, current, current).Scan(&connectedIDs).Error; err != nil {
-				logging.Warnf("GetSectionLifecycle: BFS query failed for section %d: %v", current, err)
-				continue
-			}
+	var connectedIDs []uint
+	if err := database.DB.Raw(`
+		SELECT from_section_id AS id FROM daily_report_section_relations WHERE to_section_id = ?
+		UNION
+		SELECT to_section_id AS id FROM daily_report_section_relations WHERE from_section_id = ?
+	`, sectionID, sectionID).Scan(&connectedIDs).Error; err != nil {
+		logging.Warnf("GetSectionLifecycle: query failed for section %d: %v", sectionID, err)
+	}
 
-			for _, id := range connectedIDs {
-				if !visited[id] {
-					visited[id] = true
-					nextQueue = append(nextQueue, id)
-				}
-			}
-		}
-		queue = nextQueue
+	for _, id := range connectedIDs {
+		visited[id] = true
 	}
 
 	allIDs := make([]uint, 0, len(visited))

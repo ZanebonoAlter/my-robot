@@ -1,11 +1,13 @@
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue'
 import { Icon } from '@iconify/vue'
-import { useDailyReportsApi, type SectionTimelineNode, type SectionRelation } from '~/api/dailyReports'
+import { useDailyReportsApi, type SectionTimelineNode, type SectionRelation, type DailyReportThread } from '~/api/dailyReports'
+import { useArticlesApi } from '~/api/articles'
 
 const props = defineProps<{ boardId: number }>()
 
-const { getBoardSectionTimeline } = useDailyReportsApi()
+const { getBoardSectionTimeline, getDailyReportDetail } = useDailyReportsApi()
+const { getArticle } = useArticlesApi()
 
 const days = ref(14)
 const loading = ref(false)
@@ -13,6 +15,13 @@ const sections = ref<SectionTimelineNode[]>([])
 const relations = ref<SectionRelation[]>([])
 const selectedNode = ref<SectionTimelineNode | null>(null)
 const hoveredId = ref<number | null>(null)
+
+// --- Popup thread/article state ---
+const popupThreads = ref<DailyReportThread[]>([])
+const popupThreadsLoading = ref(false)
+const expandedThreadId = ref<number | null>(null)
+const threadArticles = ref<Map<number, { id: number, title: string, link: string }[]>>(new Map())
+const threadArticlesLoading = ref(false)
 
 // --- Constants ---
 const COL_W = 120
@@ -69,7 +78,6 @@ const neighborsOf = computed(() => {
   return map
 })
 
-/** node ids in the full lineage (connected component) of a given node */
 function lineageOf(nodeId: number): Set<number> {
   const visited = new Set<number>()
   const stack = [nodeId]
@@ -83,34 +91,29 @@ function lineageOf(nodeId: number): Set<number> {
   return visited
 }
 
-/** Is this edge related to the hovered node? */
-function isEdgeHighlighted(r: SectionRelation): boolean {
+function isEdgeHighlighted(r: { from_id: number; to_id: number }): boolean {
   if (hoveredId.value === null) return false
   return r.from_id === hoveredId.value || r.to_id === hoveredId.value
 }
 
-/** Is this node in the lineage of the hovered node? */
 function isNodeHighlighted(nodeId: number): boolean {
   if (hoveredId.value === null) return false
   return lineageOf(hoveredId.value).has(nodeId)
 }
 
-// --- Simple timeline layout: date → column, stack vertically within column ---
+// --- Simple timeline layout ---
 
-/** Sorted unique dates from all sections */
 const sortedDates = computed<string[]>(() => {
   const dates = new Set(sections.value.map(s => s.period_date.slice(0, 10)))
   return [...dates].sort()
 })
 
-/** date string → column index */
 const dateIndex = computed(() => {
   const map = new Map<string, number>()
   sortedDates.value.forEach((d, i) => map.set(d, i))
   return map
 })
 
-/** Maximum nodes in any single date column */
 const maxRows = computed(() => {
   const counts = new Map<string, number>()
   for (const s of sections.value) {
@@ -128,7 +131,6 @@ interface PositionedSection {
   cy: number
 }
 
-/** Place each node at (col * COL_W, row * ROW_H) + padding */
 const positionedNodes = computed<PositionedSection[]>(() => {
   const rowCounter = new Map<string, number>()
   return sections.value.map(s => {
@@ -144,7 +146,6 @@ const positionedNodes = computed<PositionedSection[]>(() => {
   })
 })
 
-/** Quick lookup: section id → pixel position */
 const posById = computed(() => {
   const map = new Map<number, { cx: number; cy: number }>()
   for (const pn of positionedNodes.value) {
@@ -160,7 +161,6 @@ interface EdgeLine {
   toId: number
 }
 
-/** Bezier edges between related sections */
 const edgePaths = computed<EdgeLine[]>(() => {
   return relations.value.map((r, i) => {
     const from = posById.value.get(r.from_id)
@@ -176,11 +176,9 @@ const edgePaths = computed<EdgeLine[]>(() => {
   }).filter(e => e.d !== '')
 })
 
-// SVG dimensions
 const svgWidth = computed(() => sortedDates.value.length * COL_W + PAD * 2)
 const svgHeight = computed(() => maxRows.value * ROW_H + PAD * 2)
 
-// Date column headers
 interface DateCol {
   date: string
   label: string
@@ -195,12 +193,58 @@ const dateColumns = computed<DateCol[]>(() =>
   })),
 )
 
-function selectNode(node: SectionTimelineNode) {
+// --- Node select → load threads ---
+
+async function selectNode(node: SectionTimelineNode) {
   if (selectedNode.value?.id === node.id) {
     selectedNode.value = null
-  } else {
-    selectedNode.value = node
+    popupThreads.value = []
+    expandedThreadId.value = null
+    return
   }
+  selectedNode.value = node
+  expandedThreadId.value = null
+  popupThreads.value = []
+  threadArticles.value = new Map()
+
+  popupThreadsLoading.value = true
+  try {
+    const res = await getDailyReportDetail(node.report_id)
+    if (res.success && res.data) {
+      const section = res.data.report.sections?.find(s => s.id === node.id)
+      popupThreads.value = section?.threads || []
+    }
+  } finally {
+    popupThreadsLoading.value = false
+  }
+}
+
+async function toggleThreadArticles(thread: DailyReportThread) {
+  if (expandedThreadId.value === thread.id) {
+    expandedThreadId.value = null
+    return
+  }
+  expandedThreadId.value = thread.id
+
+  if (threadArticles.value.has(thread.id)) return
+  if (!thread.related_article_ids?.length) return
+
+  threadArticlesLoading.value = true
+  const ids = thread.related_article_ids.slice(0, 10)
+  const results = await Promise.allSettled(ids.map(id => getArticle(id)))
+  const articles = results.map((r, i) => {
+    const aid = ids[i]!
+    if (r.status === 'fulfilled' && r.value.success && r.value.data) {
+      return { id: aid, title: r.value.data.title || '(无标题)', link: r.value.data.link || '' }
+    }
+    return { id: aid, title: `文章 #${aid}`, link: '' }
+  })
+  threadArticles.value = new Map(threadArticles.value).set(thread.id, articles)
+  threadArticlesLoading.value = false
+}
+
+function openArticleLink(link: string) {
+  if (link) window.open(link, '_blank')
 }
 
 // --- Data loading ---
@@ -300,8 +344,8 @@ watch(
             :key="edge.key"
             :d="edge.d"
             fill="none"
-            :stroke="isEdgeHighlighted({ from_id: edge.fromId, to_id: edge.toId, distance: 0 }) ? 'rgba(255,255,255,0.55)' : 'rgba(255,255,255,0.1)'"
-            :stroke-width="isEdgeHighlighted({ from_id: edge.fromId, to_id: edge.toId, distance: 0 }) ? 2 : 1.5"
+            :stroke="isEdgeHighlighted(edge) ? 'rgba(255,255,255,0.55)' : 'rgba(255,255,255,0.1)'"
+            :stroke-width="isEdgeHighlighted(edge) ? 2 : 1.5"
           />
 
           <!-- Nodes -->
@@ -364,6 +408,56 @@ watch(
             <span>{{ formatDateShort(selectedNode.period_date) }}</span>
             <span>{{ selectedNode.article_count }} 篇</span>
             <span>{{ selectedNode.thread_count }} 条线索</span>
+          </div>
+
+          <!-- Threads -->
+          <div class="btb-threads">
+            <div v-if="popupThreadsLoading" class="btb-threads-loading">
+              <div v-for="i in 2" :key="i" class="btb-thread-skeleton" />
+            </div>
+            <div v-else-if="popupThreads.length === 0" class="btb-threads-empty">
+              无关联线索
+            </div>
+            <div
+              v-else
+              v-for="thread in popupThreads"
+              :key="thread.id"
+              class="btb-thread"
+              :class="{ 'btb-thread--expanded': expandedThreadId === thread.id }"
+            >
+              <div class="btb-thread-header" @click="toggleThreadArticles(thread)">
+                <Icon icon="mdi:chevron-right" width="14" class="btb-thread-arrow" />
+                <span class="btb-thread-title">{{ thread.title }}</span>
+                <span class="btb-thread-count">{{ thread.related_article_ids?.length || 0 }}篇</span>
+              </div>
+              <div v-if="thread.summary" class="btb-thread-summary">{{ thread.summary }}</div>
+
+              <!-- Articles -->
+              <Transition name="btb-slide">
+                <div v-if="expandedThreadId === thread.id" class="btb-articles">
+                  <div v-if="threadArticlesLoading" class="btb-articles-loading">加载中…</div>
+                  <template v-else>
+                    <div
+                      v-for="art in (threadArticles.get(thread.id) || [])"
+                      :key="art.id"
+                      class="btb-article"
+                      :class="{ 'btb-article--link': !!art.link }"
+                      @click="openArticleLink(art.link)"
+                    >
+                      <Icon icon="mdi:file-document-outline" width="12" class="btb-article-icon" />
+                      <span class="btb-article-title">{{ art.title }}</span>
+                      <Icon v-if="art.link" icon="mdi:open-in-new" width="10" class="btb-article-external" />
+                    </div>
+                    <div
+                      v-if="thread.related_article_ids?.length > 10"
+                      class="btb-articles-more"
+                    >
+                      还有 {{ thread.related_article_ids.length - 10 }} 篇…
+                    </div>
+                  </template>
+                </div>
+              </Transition>
+            </div>
           </div>
         </div>
       </div>
@@ -519,7 +613,6 @@ watch(
   opacity: 1;
 }
 
-/* Lineage highlight: hovered node's entire connected component */
 .btb-dag-node--lineage circle {
   filter: drop-shadow(0 0 4px rgba(255, 255, 255, 0.2));
 }
@@ -528,12 +621,10 @@ watch(
   opacity: 1;
 }
 
-/* Dimmed: not in the hovered lineage */
 .btb-dag-node--dimmed {
   opacity: 0.2;
 }
 
-/* Ending nodes */
 .btb-dag-node--ending {
   opacity: 0.45;
 }
@@ -546,7 +637,6 @@ watch(
   opacity: 0.8;
 }
 
-/* Selected */
 .btb-dag-node--selected circle {
   filter: drop-shadow(0 0 6px rgba(255, 255, 255, 0.35));
   stroke: rgba(255, 255, 255, 0.5);
@@ -568,8 +658,10 @@ watch(
   border: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: 10px;
   padding: 1rem 1.2rem;
-  max-width: 400px;
+  max-width: 420px;
   width: 90vw;
+  max-height: 80vh;
+  overflow-y: auto;
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
 }
 
@@ -621,6 +713,163 @@ watch(
   gap: 0.5rem;
   font-size: 0.65rem;
   color: rgba(255, 255, 255, 0.3);
+}
+
+/* Threads section */
+.btb-threads {
+  margin-top: 0.7rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  padding-top: 0.6rem;
+}
+
+.btb-threads-loading,
+.btb-threads-empty {
+  font-size: 0.7rem;
+  color: rgba(255, 255, 255, 0.25);
+  text-align: center;
+  padding: 0.5rem 0;
+}
+
+.btb-thread-skeleton {
+  height: 28px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.03);
+  margin-bottom: 0.3rem;
+  animation: btbPulse 1.5s ease-in-out infinite;
+}
+
+.btb-thread {
+  margin-bottom: 0.35rem;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  background: rgba(255, 255, 255, 0.02);
+  overflow: hidden;
+}
+
+.btb-thread--expanded {
+  border-color: rgba(255, 255, 255, 0.1);
+}
+
+.btb-thread-header {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.4rem 0.5rem;
+  cursor: pointer;
+  transition: background 0.1s ease;
+}
+
+.btb-thread-header:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.btb-thread-arrow {
+  color: rgba(255, 255, 255, 0.25);
+  transition: transform 0.15s ease;
+  flex-shrink: 0;
+}
+
+.btb-thread--expanded .btb-thread-arrow {
+  transform: rotate(90deg);
+}
+
+.btb-thread-title {
+  flex: 1;
+  font-size: 0.72rem;
+  color: rgba(255, 255, 255, 0.7);
+  line-height: 1.3;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.btb-thread-count {
+  font-size: 0.6rem;
+  color: rgba(255, 255, 255, 0.2);
+  flex-shrink: 0;
+}
+
+.btb-thread-summary {
+  font-size: 0.65rem;
+  color: rgba(255, 255, 255, 0.35);
+  line-height: 1.4;
+  padding: 0 0.5rem 0.3rem 1.4rem;
+}
+
+/* Articles */
+.btb-articles {
+  border-top: 1px solid rgba(255, 255, 255, 0.04);
+  padding: 0.3rem 0.5rem 0.4rem;
+}
+
+.btb-articles-loading {
+  font-size: 0.65rem;
+  color: rgba(255, 255, 255, 0.25);
+  padding: 0.2rem 0;
+}
+
+.btb-article {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.25rem 0.3rem;
+  border-radius: 3px;
+  transition: background 0.1s ease;
+}
+
+.btb-article--link {
+  cursor: pointer;
+}
+
+.btb-article--link:hover {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.btb-article-icon {
+  color: rgba(255, 255, 255, 0.2);
+  flex-shrink: 0;
+}
+
+.btb-article-title {
+  flex: 1;
+  font-size: 0.65rem;
+  color: rgba(255, 255, 255, 0.5);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.btb-article--link .btb-article-title {
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.btb-article--link:hover .btb-article-title {
+  color: rgba(255, 255, 255, 0.9);
+}
+
+.btb-article-external {
+  color: rgba(255, 255, 255, 0.15);
+  flex-shrink: 0;
+}
+
+.btb-articles-more {
+  font-size: 0.6rem;
+  color: rgba(255, 255, 255, 0.2);
+  padding: 0.15rem 0.3rem;
+}
+
+/* Slide animation for articles */
+.btb-slide-enter-active {
+  transition: max-height 150ms ease-out, opacity 150ms ease-out;
+}
+.btb-slide-leave-active {
+  transition: max-height 100ms ease-in, opacity 100ms ease-in;
+}
+.btb-slide-enter-from,
+.btb-slide-leave-to {
+  max-height: 0;
+  opacity: 0;
+  overflow: hidden;
 }
 
 /* Popup animation */

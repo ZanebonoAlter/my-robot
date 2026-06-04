@@ -1,40 +1,27 @@
 import { graphConnect, sugiyama } from 'd3-dag'
 
-/** Input node shape */
-export interface DagNodeInput {
-  id: number | string
-  [key: string]: unknown
-}
-
-/** Input edge shape */
-export interface DagEdgeInput {
-  from: number | string
-  to: number | string
-  [key: string]: unknown
-}
-
 /** A positioned node returned by the composable */
-export interface PositionedNode {
+export interface PositionedNode<T = Record<string, unknown>> {
   id: string
   x: number
   y: number
   /** Original input data */
-  data: DagNodeInput
+  data: T
 }
 
 /** An edge path returned by the composable */
-export interface EdgePath {
+export interface EdgePath<T = Record<string, unknown>> {
   from: string
   to: string
   /** SVG path string (cubic bezier) */
   path: string
   /** Original input data */
-  data: DagEdgeInput
+  data: T
 }
 
-export interface DagLayoutResult {
-  nodes: PositionedNode[]
-  edges: EdgePath[]
+export interface DagLayoutResult<N = Record<string, unknown>, E = Record<string, unknown>> {
+  nodes: PositionedNode<N>[]
+  edges: EdgePath<E>[]
   width: number
   height: number
 }
@@ -60,11 +47,14 @@ export interface UseDagLayoutOptions {
  * - For LR direction, x and y are swapped after layout so that the
  *   "layers" go left-to-right.
  */
-export function useDagLayout(
-  nodes: DagNodeInput[],
-  edges: DagEdgeInput[],
+export function useDagLayout<
+  N extends { id: number | string },
+  E extends { from: number | string; to: number | string },
+>(
+  nodes: N[],
+  edges: E[],
   options: UseDagLayoutOptions = {},
-): DagLayoutResult | null {
+): DagLayoutResult<N, E> | null {
   if (nodes.length === 0) return null
 
   const direction: DagDirection = options.direction ?? 'TB'
@@ -72,7 +62,7 @@ export function useDagLayout(
   const gap: [number, number] = options.gap ?? [1, 1]
 
   // Build a lookup from id -> original node data
-  const nodeMap = new Map<string, DagNodeInput>()
+  const nodeMap = new Map<string, N>()
   for (const n of nodes) {
     nodeMap.set(String(n.id), n)
   }
@@ -86,8 +76,11 @@ export function useDagLayout(
 
   const orphanNodes = nodes.filter((n) => !connectedIds.has(String(n.id)))
 
-  // Build edge pairs for d3-dag
-  const edgePairs: [string, string][] = edges.map((e) => [String(e.from), String(e.to)])
+  // Filter edges: only keep those whose both endpoints exist in the node set
+  const validEdges = edges.filter(
+    (e) => nodeMap.has(String(e.from)) && nodeMap.has(String(e.to)),
+  )
+  const edgePairs: [string, string][] = validEdges.map((e) => [String(e.from), String(e.to)])
 
   let layoutWidth = 0
   let layoutHeight = 0
@@ -146,14 +139,14 @@ export function useDagLayout(
   }
 
   // Build result nodes
-  const resultNodes: PositionedNode[] = nodes.map((n) => {
+  const resultNodes: PositionedNode<N>[] = nodes.map((n) => {
     const id = String(n.id)
     const pos = positioned.get(id) ?? { x: 0, y: 0 }
     return { id, x: pos.x, y: pos.y, data: n }
   })
 
   // Build edge paths
-  const resultEdges: EdgePath[] = edges.map((e) => {
+  const resultEdges: EdgePath<E>[] = edges.map((e) => {
     const fromId = String(e.from)
     const toId = String(e.to)
     const from = positioned.get(fromId) ?? { x: 0, y: 0 }
@@ -185,7 +178,7 @@ function buildEdgePath(
   sy: number,
   tx: number,
   ty: number,
-  nodeSize: [number, number],
+  _nodeSize: [number, number],
   direction: DagDirection,
 ): string {
   if (direction === 'LR') {

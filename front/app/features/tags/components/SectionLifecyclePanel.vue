@@ -59,11 +59,11 @@ function truncateLabel(label: string, max = 20): string {
 
 // Compute DAG layout
 const dagInputNodes = computed(() =>
-  sections.value.map(s => ({ id: s.id, ...s })),
+  sections.value.map(s => ({ ...s, id: s.id as number | string })),
 )
 
 const dagInputEdges = computed(() =>
-  relations.value.map(r => ({ from: r.from_id, to: r.to_id, ...r })),
+  relations.value.map(r => ({ ...r, from: r.from_id as number | string, to: r.to_id as number | string })),
 )
 
 const layout = computed(() => {
@@ -151,8 +151,8 @@ watch(
   { immediate: true },
 )
 
-function handleNodeClick(node: SectionLifecycleNode) {
-  emit('navigate', node)
+function handleNodeClick(node: SectionLifecycleNode & { id: number | string }) {
+  emit('navigate', node as SectionLifecycleNode)
 }
 </script>
 

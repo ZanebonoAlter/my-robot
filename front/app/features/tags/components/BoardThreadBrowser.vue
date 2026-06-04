@@ -51,11 +51,11 @@ function formatDateShort(dateStr: string): string {
 // --- DAG layout ---
 
 const dagNodes = computed(() =>
-  sections.value.map(s => ({ id: s.id, ...s })),
+  sections.value.map(s => ({ ...s, id: s.id as number | string })),
 )
 
 const dagEdges = computed(() =>
-  relations.value.map(r => ({ from: r.from_id, to: r.to_id, ...r })),
+  relations.value.map(r => ({ ...r, from: r.from_id as number | string, to: r.to_id as number | string })),
 )
 
 const layout = computed(() =>
@@ -104,7 +104,7 @@ const dateColumns = computed<DateCol[]>(() => {
   // Collect (date, x) from each node, then deduplicate keeping one per date
   const seen = new Map<string, number>()
   for (const ln of layout.value.nodes) {
-    const date = (ln.data as SectionTimelineNode).period_date.slice(0, 10)
+    const date = ln.data.period_date.slice(0, 10)
     const nodeX = px(ln.x, 'x')
     if (!seen.has(date) || seen.get(date)! > nodeX) {
       seen.set(date, nodeX)
@@ -128,7 +128,7 @@ interface PositionedSection {
 const positionedNodes = computed<PositionedSection[]>(() => {
   if (!layout.value) return []
   return layout.value.nodes.map(ln => ({
-    data: ln.data as SectionTimelineNode,
+    data: ln.data,
     cx: px(ln.x, 'x'),
     cy: px(ln.y, 'y'),
   }))

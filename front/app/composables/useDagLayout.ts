@@ -1,4 +1,4 @@
-import { graphConnect, sugiyama } from 'd3-dag'
+import { graphConnect, layeringSimplex, sugiyama } from 'd3-dag'
 
 /** A positioned node returned by the composable */
 export interface PositionedNode<T = Record<string, unknown>> {
@@ -28,13 +28,19 @@ export interface DagLayoutResult<N = Record<string, unknown>, E = Record<string,
 
 export type DagDirection = 'TB' | 'LR'
 
-export interface UseDagLayoutOptions {
+export interface UseDagLayoutOptions<N extends { id: number | string } = { id: number | string }> {
   /** Layout direction: top-bottom or left-right (default 'TB') */
   direction?: DagDirection
   /** [width, height] in abstract units (default [1, 1]) */
   nodeSize?: [number, number]
   /** [horizontalGap, verticalGap] in abstract units (default [1, 1]) */
   gap?: [number, number]
+  /**
+   * Optional rank accessor for layering.
+   * Nodes with the same rank value will be placed on the same layer.
+   * Lower rank = earlier layer (top in TB, left in LR).
+   */
+  rank?: (nodeData: N) => number | undefined
 }
 
 /**
@@ -60,6 +66,7 @@ export function useDagLayout<
   const direction: DagDirection = options.direction ?? 'TB'
   const nodeSize: [number, number] = options.nodeSize ?? [1, 1]
   const gap: [number, number] = options.gap ?? [1, 1]
+  const rankFn = options.rank
 
   // Build a lookup from id -> original node data
   const nodeMap = new Map<string, N>()
@@ -92,7 +99,22 @@ export function useDagLayout<
     const builder = graphConnect()
     const graph = builder(edgePairs)
 
+    // Configure layering with optional rank constraints
+    let layering = layeringSimplex()
+    if (rankFn) {
+      // Map node IDs to their data for rank lookup
+      const nodeDataMap = new Map<string, N>()
+      for (const n of nodes) {
+        nodeDataMap.set(String(n.id), n)
+      }
+      layering = layering.rank((node: { data: string }) => {
+        const original = nodeDataMap.get(node.data)
+        return original ? rankFn(original) : undefined
+      })
+    }
+
     const layout = sugiyama()
+      .layering(layering)
       .nodeSize(nodeSize)
       .gap(gap)
 

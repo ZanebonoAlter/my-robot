@@ -50,6 +50,15 @@ function formatDateShort(dateStr: string): string {
 
 // --- DAG layout ---
 
+// Build date rank map for layering: same date = same layer, ordered chronologically
+const dateRankMap = computed(() => {
+  const dates = [...new Set(sections.value.map(s => s.period_date.slice(0, 10)))]
+  dates.sort()
+  const map = new Map<string, number>()
+  dates.forEach((d, i) => map.set(d, i))
+  return map
+})
+
 const dagNodes = computed(() =>
   sections.value.map(s => ({ ...s, id: s.id as number | string })),
 )
@@ -63,6 +72,7 @@ const layout = computed(() =>
     direction: 'LR',
     nodeSize: [1, 1],
     gap: [1, 1],
+    rank: (nodeData) => dateRankMap.value.get(nodeData.period_date.slice(0, 10)),
   }),
 )
 

@@ -6,7 +6,6 @@ import { autoUpdate, offset, shift, flip } from '@floating-ui/dom'
 import { useDailyReportsApi, type DailyReportListItem, type DailyReport, type DailyReportThread } from '~/api/dailyReports'
 import { useArticlesApi } from '~/api/articles'
 import SectionLifecyclePanel from './SectionLifecyclePanel.vue'
-import ThreadLineagePanel from './ThreadLineagePanel.vue'
 import BoardThreadBrowser from './BoardThreadBrowser.vue'
 
 const props = defineProps<{ boardId: number }>()
@@ -68,18 +67,6 @@ const qualityZones = computed<QualityZone[]>(() => {
   return zones
 })
 
-const sectionStatusColor: Record<string, string> = {
-  emerging: 'np-section-emerging',
-  continuing: 'np-section-continuing',
-  ending: 'np-section-ending',
-}
-
-const sectionStatusLabel: Record<string, string> = {
-  emerging: '新兴',
-  continuing: '持续',
-  ending: '结束',
-}
-
 const reportStatusStyle: Record<string, string> = {
   done: 'bg-green-900/40 text-green-400',
   generating: 'bg-yellow-900/40 text-yellow-400',
@@ -105,10 +92,6 @@ let currentOpenThread: DailyReportThread | null = null
 // Section lifecycle panel state
 const lifecycleSectionId = ref<number | null>(null)
 const lifecycleVisible = ref(false)
-
-// Thread lineage panel state
-const lineageThreadId = ref<number | null>(null)
-const lineageVisible = ref(false)
 
 // Section expand state
 const expandedSections = ref<Set<number>>(new Set())
@@ -169,16 +152,6 @@ function closeSectionLifecycle() {
   lifecycleSectionId.value = null
 }
 
-function openThreadLineage(thread: DailyReportThread) {
-  lineageThreadId.value = thread.id
-  lineageVisible.value = true
-}
-
-function closeThreadLineage() {
-  lineageVisible.value = false
-  lineageThreadId.value = null
-}
-
 function toggleSectionExpand(clusterIndex: number) {
   const next = new Set(expandedSections.value)
   if (next.has(clusterIndex)) {
@@ -201,7 +174,6 @@ function closeNewspaper() {
   showModal.value = false
   closeThreadPopup()
   closeSectionLifecycle()
-  closeThreadLineage()
 }
 
 function prevDay() {
@@ -388,7 +360,7 @@ watch(() => props.boardId, () => {
       </div>
 
       <!-- Thread browser view -->
-      <BoardThreadBrowser v-if="showThreadBrowser" :board-id="boardId" />
+      <BoardThreadBrowser v-if="showThreadBrowser" :board-id="boardId" @open-article="emit('openArticle', $event)" />
 
       <!-- Report list view -->
       <template v-else>
@@ -484,9 +456,6 @@ watch(() => props.boardId, () => {
                     <div class="np-cluster-card-header" @click.stop="openSectionLifecycle(section)">
                       <div class="np-cluster-card-header-left">
                         <span class="np-cluster-card-name">{{ section.cluster_label }}</span>
-                        <span v-if="section.status" class="np-section-status" :class="sectionStatusColor[section.status] || ''">
-                          {{ sectionStatusLabel[section.status] || section.status }}
-                        </span>
                       </div>
                       <div class="np-cluster-card-header-right">
                         <span class="np-cluster-card-count">{{ section.article_count }}篇</span>
@@ -503,7 +472,6 @@ watch(() => props.boardId, () => {
                           <div v-if="thread.summary" class="np-thread-summary">{{ thread.summary }}</div>
                         </div>
                         <div class="np-thread-actions">
-                          <Icon icon="mdi:sitemap-outline" width="14" class="np-thread-lineage-icon" title="查看线程血统" @click.stop="openThreadLineage(thread)" />
                           <Icon icon="mdi:file-document-multiple-outline" width="14" class="np-thread-articles-icon" @click.stop="openThreadArticles($event, thread)" />
                         </div>
                       </div>
@@ -519,12 +487,7 @@ watch(() => props.boardId, () => {
             @close="closeSectionLifecycle"
             @navigate="navigateToSectionReport"
           />
-          <ThreadLineagePanel
-            v-if="lineageThreadId !== null"
-            :thread-id="lineageThreadId"
-            :visible="lineageVisible"
-            @close="closeThreadLineage"
-          />
+
           </div>
         </div>
       </div>
@@ -997,17 +960,6 @@ watch(() => props.boardId, () => {
   gap: 0.3rem;
 }
 
-.np-thread-lineage-icon {
-  color: rgba(0, 0, 0, 0.15);
-  margin-top: 0.15rem;
-  cursor: pointer;
-  transition: color 0.12s ease;
-}
-
-.np-thread-lineage-icon:hover {
-  color: rgba(0, 0, 0, 0.5);
-}
-
 .np-thread-articles-icon {
   flex-shrink: 0;
   color: rgba(0, 0, 0, 0.2);
@@ -1121,19 +1073,6 @@ watch(() => props.boardId, () => {
 .np-modal-leave-to .np-paper {
   opacity: 0;
   transform: scale(0.95);
-}
-
-/* Section status colors for light paper background */
-.np-section-emerging { background: rgba(34, 197, 94, 0.15); color: rgba(22, 101, 52, 0.8); }
-.np-section-continuing { background: rgba(59, 130, 246, 0.15); color: rgba(30, 64, 175, 0.8); }
-.np-section-ending { background: rgba(107, 114, 128, 0.15); color: rgba(55, 65, 81, 0.8); }
-
-.np-section-status {
-  font-size: 0.58rem;
-  padding: 0.08rem 0.35rem;
-  border-radius: 3px;
-  font-weight: 500;
-  line-height: 1.4;
 }
 
 .np-cluster-card-header-left {

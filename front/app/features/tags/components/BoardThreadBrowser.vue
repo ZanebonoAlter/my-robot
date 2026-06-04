@@ -20,7 +20,7 @@ const hoveredId = ref<number | null>(null)
 const popupThreads = ref<DailyReportThread[]>([])
 const popupThreadsLoading = ref(false)
 const expandedThreadId = ref<number | null>(null)
-const threadArticles = ref<Map<number, { id: number, title: string, link: string }[]>>(new Map())
+const threadArticles = ref<Map<number, { id: number, title: string }[]>>(new Map())
 const threadArticlesLoading = ref(false)
 
 // --- Constants ---
@@ -235,17 +235,17 @@ async function toggleThreadArticles(thread: DailyReportThread) {
   const articles = results.map((r, i) => {
     const aid = ids[i]!
     if (r.status === 'fulfilled' && r.value.success && r.value.data) {
-      return { id: aid, title: r.value.data.title || '(无标题)', link: r.value.data.link || '' }
+      return { id: aid, title: r.value.data.title || '(无标题)' }
     }
-    return { id: aid, title: `文章 #${aid}`, link: '' }
+    return { id: aid, title: `文章 #${aid}` }
   })
   threadArticles.value = new Map(threadArticles.value).set(thread.id, articles)
   threadArticlesLoading.value = false
 }
 
-function openArticleLink(link: string) {
-  if (link) window.open(link, '_blank')
-}
+const emit = defineEmits<{
+  openArticle: [articleId: number]
+}>()
 
 // --- Data loading ---
 
@@ -441,12 +441,11 @@ watch(
                       v-for="art in (threadArticles.get(thread.id) || [])"
                       :key="art.id"
                       class="btb-article"
-                      :class="{ 'btb-article--link': !!art.link }"
-                      @click="openArticleLink(art.link)"
+                      @click="emit('openArticle', art.id)"
                     >
                       <Icon icon="mdi:file-document-outline" width="12" class="btb-article-icon" />
                       <span class="btb-article-title">{{ art.title }}</span>
-                      <Icon v-if="art.link" icon="mdi:open-in-new" width="10" class="btb-article-external" />
+                      <Icon icon="mdi:eye-outline" width="10" class="btb-article-external" />
                     </div>
                     <div
                       v-if="thread.related_article_ids?.length > 10"
@@ -814,15 +813,16 @@ watch(
   gap: 0.3rem;
   padding: 0.25rem 0.3rem;
   border-radius: 3px;
+  cursor: pointer;
   transition: background 0.1s ease;
 }
 
-.btb-article--link {
-  cursor: pointer;
+.btb-article:hover {
+  background: rgba(255, 255, 255, 0.05);
 }
 
-.btb-article--link:hover {
-  background: rgba(255, 255, 255, 0.05);
+.btb-article:hover .btb-article-title {
+  color: rgba(255, 255, 255, 0.9);
 }
 
 .btb-article-icon {
@@ -839,11 +839,7 @@ watch(
   white-space: nowrap;
 }
 
-.btb-article--link .btb-article-title {
-  color: rgba(255, 255, 255, 0.7);
-}
-
-.btb-article--link:hover .btb-article-title {
+.btb-article:hover .btb-article-title {
   color: rgba(255, 255, 255, 0.9);
 }
 

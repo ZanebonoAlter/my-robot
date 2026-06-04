@@ -34,7 +34,13 @@
 - [x] 5.3 验证 `DeriveSectionStatuses` 的 `ending` 覆盖逻辑在新 relation 拓扑下无异常
 - [x] 5.4 编译通过、受影响包测试通过
 
-## 6. 方向修正（已完成的前置工作）
+## 6. 前端可视化
+
+- [x] 6.1 `BoardThreadBrowser` 连线根据 distance 显示粗细/透明度（<0.15 粗, <0.25 中, >=0.25 细淡）
+- [x] 6.2 `SectionLifecyclePanel` 同上
+- [x] 6.3 hover 连线时 tooltip 显示距离值（"距离: 0.158"）
+
+## 7. 方向修正（已完成的前置工作）
 
 - [x] 6.1 改写 `MatchAndSaveRelations`：相邻天 < 0.35 进入候选、跨天需无中间延续 + < 0.25 进入候选
 - [x] 6.2 新增 `BackfillRelations(boardID)` + `BackfillAllRelations()` 回刷函数

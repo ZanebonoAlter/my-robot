@@ -15,6 +15,13 @@ embedding 为空的 section SHALL 跳过关系写入。新 section 的 embedding
 
 distance 字段 SHALL 正确存储实际计算的距离值（非零值）。写入方式 SHALL 使用 raw SQL `INSERT ... ON CONFLICT DO UPDATE` 确保 distance 在 upsert 时也被正确写入。
 
+**竞争过滤**：通过时间维度过滤后的候选 relation，SHALL 经过竞争过滤后才写入 DB。对每个 section 的所有候选按 distance 升序排列：
+- 若候选数为 0 或 1 → 原样通过
+- 若 best 与 2nd 的 gap ≥ 0.03 → 只保留 best
+- 若 gap < 0.03 → 保留所有 distance ≤ best + 0.03 的候选（真正的 split/merge）
+
+竞争过滤 SHALL 作为纯函数 `competitiveFilter(candidates) []matchCandidate` 实现，无 DB 依赖，在 `shouldWriteRelation` 之后、写入 DB 之前调用。
+
 **回刷支持**：系统 SHALL 提供 `BackfillRelations(boardID)` 函数，清理指定 board 的所有 relation 并按日期从早到晚逐个 section 重新执行上述写入逻辑（确保中间天判断基于已写入的 relation）。
 
 #### Scenario: 单个相邻天匹配写入关系
@@ -34,8 +41,24 @@ distance 字段 SHALL 正确存储实际计算的距离值（非零值）。写�
 - **THEN** 系统 SHALL 不插入该 relation（跨天，无中间天延续，但 dist ≥ 0.25，过滤掉）
 
 #### Scenario: 多个相邻天匹配写入多条关系（split）
-- **WHEN** 新 section 与相邻天旧 section #80 (distance=0.20) 和 #85 (distance=0.30) 均低于阈值
-- **THEN** 系统 SHALL 插入两条 relation：(from=80, to=新id, distance=0.20) 和 (from=85, to=新id, distance=0.30)
+- **WHEN** 新 section 与相邻天旧 section #80 (distance=0.20) 和 #85 (distance=0.22) 均低于阈值，两者都通过了 `shouldWriteRelation`
+- **AND** 竞争过滤中 best=0.20, 2nd=0.22, gap=0.02 < 0.03
+- **THEN** 系统 SHALL 插入两条 relation（gap < 0.03，保留 split）：(from=80, to=新id, distance=0.20) 和 (from=85, to=新id, distance=0.22)
+
+#### Scenario: 竞争过滤——gap ≥ 0.03 只保留 best
+- **WHEN** 新 section 通过 `shouldWriteRelation` 后有 3 条候选：#A (distance=0.15), #B (distance=0.22), #C (distance=0.30)
+- **AND** best=0.15, 2nd=0.22, gap=0.07 ≥ 0.03
+- **THEN** 系统 SHALL 只插入 1 条 relation：(from=#A, to=新id, distance=0.15)
+
+#### Scenario: 竞争过滤——gap < 0.03 保留多候选
+- **WHEN** 新 section 通过 `shouldWriteRelation` 后有 4 条候选：#A (distance=0.20), #B (distance=0.22), #C (distance=0.24), #D (distance=0.28)
+- **AND** best=0.20, 2nd=0.22, gap=0.02 < 0.03
+- **THEN** 系统 SHALL 保留 distance ≤ 0.20 + 0.03 = 0.23 的候选，即 #A (0.20) 和 #B (0.22)
+- **AND** 系统 SHALL 不插入 #C (0.24 > 0.23) 和 #D (0.28 > 0.23) 的 relation
+
+#### Scenario: 竞争过滤——单候选直接通过
+- **WHEN** 新 section 通过 `shouldWriteRelation` 后只有 1 条候选
+- **THEN** 系统 SHALL 直接插入该 relation，不执行竞争过滤
 
 #### Scenario: 距离超阈值不写关系
 - **WHEN** 新 section 与同 board 所有旧 section 的 cosine distance 均不满足过滤条件（相邻天 ≥ 0.35，跨天 ≥ 0.25 或有中间天延续）

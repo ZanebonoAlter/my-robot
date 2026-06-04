@@ -148,19 +148,35 @@ interface EdgeLine {
   d: string
   fromId: number
   toId: number
+  distance: number
+}
+
+/** Map distance to visual weight: strong (<0.15) → 2, medium (<0.25) → 1.2, weak → 0.6 */
+function edgeWeight(dist: number): number {
+  if (dist < 0.15) return 2
+  if (dist < 0.25) return 1.2
+  return 0.6
+}
+
+/** Map distance to opacity: strong → 0.35, medium → 0.18, weak → 0.08 */
+function edgeOpacity(dist: number): number {
+  if (dist < 0.15) return 0.35
+  if (dist < 0.25) return 0.18
+  return 0.08
 }
 
 const edgePaths = computed<EdgeLine[]>(() => {
   return relations.value.map((r, i) => {
     const from = posById.value.get(r.from_id)
     const to = posById.value.get(r.to_id)
-    if (!from || !to) return { key: `edge-${i}`, d: '', fromId: r.from_id, toId: r.to_id }
+    if (!from || !to) return { key: `edge-${i}`, d: '', fromId: r.from_id, toId: r.to_id, distance: r.distance }
     const midX = (from.cx + to.cx) / 2
     return {
       key: `edge-${i}`,
       d: `M${from.cx},${from.cy} C${midX},${from.cy} ${midX},${to.cy} ${to.cx},${to.cy}`,
       fromId: r.from_id,
       toId: r.to_id,
+      distance: r.distance,
     }
   }).filter(e => e.d !== '')
 })
@@ -333,9 +349,11 @@ watch(
             :key="edge.key"
             :d="edge.d"
             fill="none"
-            :stroke="isEdgeHighlighted(edge) ? 'rgba(255,255,255,0.65)' : 'rgba(255,255,255,0.08)'"
-            :stroke-width="isEdgeHighlighted(edge) ? 2.5 : 1"
-          />
+            :stroke="isEdgeHighlighted(edge) ? 'rgba(255,255,255,0.65)' : `rgba(255,255,255,${edgeOpacity(edge.distance)})`"
+            :stroke-width="isEdgeHighlighted(edge) ? 2.5 : edgeWeight(edge.distance)"
+          >
+            <title>距离: {{ edge.distance.toFixed(3) }}</title>
+          </path>
 
           <!-- Nodes -->
           <g

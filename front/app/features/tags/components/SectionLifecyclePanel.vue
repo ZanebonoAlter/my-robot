@@ -23,6 +23,7 @@ const loading = ref(false)
 const error = ref(false)
 
 // Thread/article state per node
+const selectedNodeId = ref<number | null>(null)
 const expandedNodeId = ref<number | null>(null)
 const nodeThreads = ref<Map<number, DailyReportThread[]>>(new Map())
 const nodeThreadsLoading = ref(false)
@@ -216,8 +217,6 @@ async function fetchLifecycle() {
 }
 
 watch(() => props.sectionId, () => { fetchLifecycle() }, { immediate: true })
-
-const selectedNodeId = ref<number | null>(null)
 
 function handleNodeClick(node: SectionLifecycleNode) {
   if (selectedNodeId.value === node.id) {

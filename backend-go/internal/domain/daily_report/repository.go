@@ -717,7 +717,7 @@ func BackfillSectionEmbeddings(ctx context.Context) (embedded int, matched int, 
 		}
 	}
 
-	// Phase 2: Run pgvector matching for ALL sections (overwrite unreliable tag Jaccard results)
+	// Phase 2: Rebuild relations for all boards using the unified filtering logic
 	type boardGroup struct {
 		BoardID uint
 	}
@@ -730,46 +730,151 @@ func BackfillSectionEmbeddings(ctx context.Context) (embedded int, matched int, 
 	`).Scan(&boards)
 
 	for _, b := range boards {
-		var sections []DailyReportSection
-		if err := database.DB.Raw(`
-			SELECT s.id, s.embedding
+		rebuilt, backfillErr := BackfillRelations(b.BoardID)
+		if backfillErr != nil {
+			logging.Warnf("BackfillSectionEmbeddings: backfill board %d failed: %v", b.BoardID, backfillErr)
+			continue
+		}
+		matched += rebuilt
+	}
+
+	return embedded, matched, nil
+}
+
+// BackfillRelations deletes all relations for a board and rebuilds them using
+// the two-layer filtering logic, processing sections in chronological order.
+func BackfillRelations(boardID uint) (rebuilt int, err error) {
+	tx := database.DB.Begin()
+	defer func() {
+		if err != nil {
+			tx.Rollback()
+		}
+	}()
+
+	// 1. Delete all existing relations for this board
+	if err = tx.Exec(`
+		DELETE FROM daily_report_section_relations
+		WHERE from_section_id IN (
+			SELECT s.id FROM daily_report_sections s
+			JOIN board_daily_reports r ON r.id = s.report_id
+			WHERE r.semantic_board_id = ?
+		) OR to_section_id IN (
+			SELECT s.id FROM daily_report_sections s
+			JOIN board_daily_reports r ON r.id = s.report_id
+			WHERE r.semantic_board_id = ?
+		)
+	`, boardID, boardID).Error; err != nil {
+		return 0, fmt.Errorf("delete old relations: %w", err)
+	}
+
+	// 2. Load all sections with embeddings, ordered by date ascending
+	var sections []struct {
+		ID         uint
+		Embedding  string
+		ReportID   uint
+		PeriodDate time.Time
+	}
+	if err = tx.Raw(`
+		SELECT s.id, s.embedding, s.report_id, r.period_date::date AS period_date
+		FROM daily_report_sections s
+		JOIN board_daily_reports r ON r.id = s.report_id
+		WHERE r.semantic_board_id = ?
+		  AND s.embedding IS NOT NULL
+		  AND s.cluster_label != '' AND s.cluster_label IS NOT NULL
+		ORDER BY r.period_date ASC, s.id ASC
+	`, boardID).Scan(&sections).Error; err != nil {
+		return 0, fmt.Errorf("query sections: %w", err)
+	}
+
+	// 3. Load completed report dates
+	var completedDates []time.Time
+	tx.Raw(`
+		SELECT DISTINCT period_date::date
+		FROM board_daily_reports
+		WHERE semantic_board_id = ? AND status = 'completed'
+		ORDER BY period_date::date
+	`, boardID).Scan(&completedDates)
+	dateSet := make(map[string]bool, len(completedDates))
+	for _, d := range completedDates {
+		dateSet[d.Format("2006-01-02")] = true
+	}
+
+	// 4. Process each section in chronological order, building relations incrementally
+	adjacency := make(map[uint][]uint)
+	sectionDateMap := make(map[uint]time.Time, len(sections))
+	for _, sec := range sections {
+		sectionDateMap[sec.ID] = sec.PeriodDate
+	}
+
+	for _, sec := range sections {
+		var matches []struct {
+			MatchID   uint
+			MatchDate time.Time
+			Distance  float64
+		}
+		qErr := tx.Raw(`
+			SELECT s.id AS match_id, r.period_date::date AS match_date, s.embedding <=> ?::vector AS distance
 			FROM daily_report_sections s
 			JOIN board_daily_reports r ON r.id = s.report_id
 			WHERE r.semantic_board_id = ?
+			  AND r.status = 'completed'
+			  AND r.period_date::date != ?
 			  AND s.embedding IS NOT NULL
-			ORDER BY r.period_date ASC, s.id ASC
-		`, b.BoardID).Scan(&sections).Error; err != nil {
+			  AND s.embedding <=> ?::vector < 0.35
+			ORDER BY s.embedding <=> ?::vector
+		`, sec.Embedding, boardID, sec.PeriodDate.Format("2006-01-02"), sec.Embedding, sec.Embedding).Scan(&matches).Error
+		if qErr != nil {
+			logging.Warnf("BackfillRelations: query failed for section %d: %v", sec.ID, qErr)
 			continue
 		}
 
-		for _, sec := range sections {
-			var match struct {
-				MatchID  uint
-				Distance float64
-			}
-			err := database.DB.Raw(`
-				SELECT s2.id AS match_id, s2.embedding <=> ?::vector AS distance
-				FROM daily_report_sections s2
-				JOIN board_daily_reports r2 ON r2.id = s2.report_id
-				WHERE r2.semantic_board_id = ?
-				  AND s2.id != ?
-				  AND s2.embedding IS NOT NULL
-				ORDER BY s2.embedding <=> ?::vector
-				LIMIT 1
-			`, sec.Embedding, b.BoardID, sec.ID, sec.Embedding).Scan(&match).Error
-			if err != nil || match.MatchID == 0 {
+		for _, m := range matches {
+			if !shouldWriteRelation(m.MatchID, m.MatchDate, sec.ID, sec.PeriodDate, m.Distance, adjacency, sectionDateMap, dateSet) {
 				continue
 			}
-			if match.Distance < 0.35 {
-				database.DB.Exec(`
-					INSERT INTO daily_report_section_relations (from_section_id, to_section_id, distance)
-					VALUES (?, ?, ?)
-					ON CONFLICT (from_section_id, to_section_id) DO UPDATE SET distance = EXCLUDED.distance
-				`, match.MatchID, sec.ID, match.Distance)
-				matched++
+			if wErr := tx.Exec(`
+				INSERT INTO daily_report_section_relations (from_section_id, to_section_id, distance)
+				VALUES (?, ?, ?)
+				ON CONFLICT (from_section_id, to_section_id) DO UPDATE SET distance = EXCLUDED.distance
+			`, m.MatchID, sec.ID, m.Distance).Error; wErr != nil {
+				logging.Warnf("BackfillRelations: write relation failed: %v", wErr)
+			} else {
+				adjacency[m.MatchID] = append(adjacency[m.MatchID], sec.ID)
+				rebuilt++
 			}
 		}
 	}
 
-	return embedded, matched, nil
+	if err = tx.Commit().Error; err != nil {
+		return 0, fmt.Errorf("commit backfill: %w", err)
+	}
+	return rebuilt, nil
+}
+
+// BackfillAllRelations rebuilds relations for all boards that have sections with embeddings.
+func BackfillAllRelations() (map[uint]int, error) {
+	type boardEntry struct {
+		BoardID uint
+	}
+	var boards []boardEntry
+	if err := database.DB.Raw(`
+		SELECT DISTINCT r.semantic_board_id AS board_id
+		FROM daily_report_sections s
+		JOIN board_daily_reports r ON r.id = s.report_id
+		WHERE s.embedding IS NOT NULL
+	`).Scan(&boards).Error; err != nil {
+		return nil, fmt.Errorf("query boards: %w", err)
+	}
+
+	results := make(map[uint]int, len(boards))
+	for _, b := range boards {
+		rebuilt, err := BackfillRelations(b.BoardID)
+		if err != nil {
+			logging.Warnf("BackfillAllRelations: board %d failed: %v", b.BoardID, err)
+			continue
+		}
+		results[b.BoardID] = rebuilt
+		logging.Infof("BackfillAllRelations: board %d rebuilt %d relations", b.BoardID, rebuilt)
+	}
+	return results, nil
 }

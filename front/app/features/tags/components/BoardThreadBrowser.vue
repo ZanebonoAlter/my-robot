@@ -2,7 +2,6 @@
 import { ref, computed, watch } from 'vue'
 import { Icon } from '@iconify/vue'
 import { useDailyReportsApi, type SectionTimelineNode, type SectionRelation } from '~/api/dailyReports'
-import { useDagLayout } from '~/composables/useDagLayout'
 
 const props = defineProps<{ boardId: number }>()
 
@@ -48,103 +47,101 @@ function formatDateShort(dateStr: string): string {
   return `${d.getMonth() + 1}/${d.getDate()}`
 }
 
-// --- DAG layout ---
+// --- Simple timeline layout: date → column, stack vertically within column ---
 
-// Build date rank map for layering: same date = same layer, ordered chronologically
-const dateRankMap = computed(() => {
-  const dates = [...new Set(sections.value.map(s => s.period_date.slice(0, 10)))]
-  dates.sort()
+/** Sorted unique dates from all sections */
+const sortedDates = computed<string[]>(() => {
+  const dates = new Set(sections.value.map(s => s.period_date.slice(0, 10)))
+  return [...dates].sort()
+})
+
+/** date string → column index */
+const dateIndex = computed(() => {
   const map = new Map<string, number>()
-  dates.forEach((d, i) => map.set(d, i))
+  sortedDates.value.forEach((d, i) => map.set(d, i))
   return map
 })
 
-const dagNodes = computed(() =>
-  sections.value.map(s => ({ ...s, id: s.id as number | string })),
-)
-
-const dagEdges = computed(() =>
-  relations.value.map(r => ({ ...r, from: r.from_id as number | string, to: r.to_id as number | string })),
-)
-
-const layout = computed(() =>
-  useDagLayout(dagNodes.value, dagEdges.value, {
-    direction: 'LR',
-    nodeSize: [1, 1],
-    gap: [1, 1],
-    rank: (nodeData) => dateRankMap.value.get(nodeData.period_date.slice(0, 10)),
-  }),
-)
-
-// Scale layout-unit coordinates to pixel positions
-function px(layoutVal: number, unit: 'x' | 'y'): number {
-  return unit === 'x'
-    ? layoutVal * COL_W + PAD + COL_W / 2
-    : layoutVal * ROW_H + PAD + ROW_H / 2
-}
-
-// Transform an SVG path string from layout units to pixel coordinates
-function scalePath(pathStr: string): string {
-  return pathStr.replace(
-    /(-?[\d.]+)\s*,\s*(-?[\d.]+)/g,
-    (_, xs, ys) => `${px(parseFloat(xs), 'x')},${px(parseFloat(ys), 'y')}`,
-  )
-}
-
-// SVG dimensions
-const svgWidth = computed(() => {
-  if (!layout.value) return 0
-  return layout.value.width * COL_W + PAD * 2
-})
-
-const svgHeight = computed(() => {
-  if (!layout.value) return 0
-  return layout.value.height * ROW_H + PAD * 2
-})
-
-// Date column positions derived from layout nodes
-interface DateCol {
-  date: string
-  label: string
-  x: number
-}
-
-const dateColumns = computed<DateCol[]>(() => {
-  if (!layout.value || sections.value.length === 0) return []
-  // Collect (date, x) from each node, then deduplicate keeping one per date
-  const seen = new Map<string, number>()
-  for (const ln of layout.value.nodes) {
-    const date = ln.data.period_date.slice(0, 10)
-    const nodeX = px(ln.x, 'x')
-    if (!seen.has(date) || seen.get(date)! > nodeX) {
-      seen.set(date, nodeX)
-    }
+/** Maximum nodes in any single date column */
+const maxRows = computed(() => {
+  const counts = new Map<string, number>()
+  for (const s of sections.value) {
+    const d = s.period_date.slice(0, 10)
+    counts.set(d, (counts.get(d) ?? 0) + 1)
   }
-  const cols: DateCol[] = []
-  for (const [date, x] of seen) {
-    cols.push({ date, label: formatDateShort(date), x })
-  }
-  cols.sort((a, b) => a.date.localeCompare(b.date))
-  return cols
+  let max = 0
+  for (const c of counts.values()) max = Math.max(max, c)
+  return max
 })
 
-// Positioned node helper
 interface PositionedSection {
   data: SectionTimelineNode
   cx: number
   cy: number
 }
 
+/** Place each node at (col * COL_W, row * ROW_H) + padding */
 const positionedNodes = computed<PositionedSection[]>(() => {
-  if (!layout.value) return []
-  return layout.value.nodes.map(ln => ({
-    data: ln.data,
-    cx: px(ln.x, 'x'),
-    cy: px(ln.y, 'y'),
-  }))
+  const rowCounter = new Map<string, number>()
+  return sections.value.map(s => {
+    const date = s.period_date.slice(0, 10)
+    const col = dateIndex.value.get(date) ?? 0
+    const row = rowCounter.get(date) ?? 0
+    rowCounter.set(date, row + 1)
+    return {
+      data: s,
+      cx: col * COL_W + PAD + COL_W / 2,
+      cy: row * ROW_H + PAD + ROW_H / 2,
+    }
+  })
 })
 
+/** Quick lookup: section id → pixel position */
+const posById = computed(() => {
+  const map = new Map<number, { cx: number; cy: number }>()
+  for (const pn of positionedNodes.value) {
+    map.set(pn.data.id, { cx: pn.cx, cy: pn.cy })
+  }
+  return map
+})
 
+interface EdgeLine {
+  key: string
+  d: string
+}
+
+/** Bezier edges between related sections */
+const edgePaths = computed<EdgeLine[]>(() => {
+  return relations.value.map((r, i) => {
+    const from = posById.value.get(r.from_id)
+    const to = posById.value.get(r.to_id)
+    if (!from || !to) return { key: `edge-${i}`, d: '' }
+    const midX = (from.cx + to.cx) / 2
+    return {
+      key: `edge-${i}`,
+      d: `M${from.cx},${from.cy} C${midX},${from.cy} ${midX},${to.cy} ${to.cx},${to.cy}`,
+    }
+  }).filter(e => e.d !== '')
+})
+
+// SVG dimensions
+const svgWidth = computed(() => sortedDates.value.length * COL_W + PAD * 2)
+const svgHeight = computed(() => maxRows.value * ROW_H + PAD * 2)
+
+// Date column headers
+interface DateCol {
+  date: string
+  label: string
+  x: number
+}
+
+const dateColumns = computed<DateCol[]>(() =>
+  sortedDates.value.map((date, i) => ({
+    date,
+    label: formatDateShort(date),
+    x: i * COL_W + PAD + COL_W / 2,
+  })),
+)
 
 function selectNode(node: SectionTimelineNode) {
   if (selectedNode.value?.id === node.id) {
@@ -212,8 +209,8 @@ watch(
       <p>暂无话题数据</p>
     </div>
 
-    <!-- DAG timeline -->
-    <div v-else-if="layout" class="btb-chart">
+    <!-- Timeline -->
+    <div v-else class="btb-chart">
       <!-- Date header -->
       <div class="btb-date-header" :style="{ width: svgWidth + 'px' }">
         <span
@@ -247,9 +244,9 @@ watch(
 
           <!-- Edges -->
           <path
-            v-for="(edge, ei) in layout.edges"
-            :key="'edge-' + ei"
-            :d="scalePath(edge.path)"
+            v-for="edge in edgePaths"
+            :key="edge.key"
+            :d="edge.d"
             fill="none"
             stroke="rgba(255,255,255,0.12)"
             stroke-width="1.5"

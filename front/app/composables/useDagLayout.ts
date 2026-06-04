@@ -1,4 +1,4 @@
-import { graphConnect, layeringSimplex, sugiyama } from 'd3-dag'
+import { graphConnect, sugiyama } from 'd3-dag'
 
 /** A positioned node returned by the composable */
 export interface PositionedNode<T = Record<string, unknown>> {
@@ -28,19 +28,13 @@ export interface DagLayoutResult<N = Record<string, unknown>, E = Record<string,
 
 export type DagDirection = 'TB' | 'LR'
 
-export interface UseDagLayoutOptions<N extends { id: number | string } = { id: number | string }> {
+export interface UseDagLayoutOptions {
   /** Layout direction: top-bottom or left-right (default 'TB') */
   direction?: DagDirection
   /** [width, height] in abstract units (default [1, 1]) */
   nodeSize?: [number, number]
   /** [horizontalGap, verticalGap] in abstract units (default [1, 1]) */
   gap?: [number, number]
-  /**
-   * Optional rank accessor for layering.
-   * Nodes with the same rank value will be placed on the same layer.
-   * Lower rank = earlier layer (top in TB, left in LR).
-   */
-  rank?: (nodeData: N) => number | undefined
 }
 
 /**
@@ -66,7 +60,6 @@ export function useDagLayout<
   const direction: DagDirection = options.direction ?? 'TB'
   const nodeSize: [number, number] = options.nodeSize ?? [1, 1]
   const gap: [number, number] = options.gap ?? [1, 1]
-  const rankFn = options.rank
 
   // Build a lookup from id -> original node data
   const nodeMap = new Map<string, N>()
@@ -99,22 +92,7 @@ export function useDagLayout<
     const builder = graphConnect()
     const graph = builder(edgePairs)
 
-    // Configure layering with optional rank constraints
-    let layering = layeringSimplex()
-    if (rankFn) {
-      // Map node IDs to their data for rank lookup
-      const nodeDataMap = new Map<string, N>()
-      for (const n of nodes) {
-        nodeDataMap.set(String(n.id), n)
-      }
-      layering = layering.rank((node: { data: string }) => {
-        const original = nodeDataMap.get(node.data)
-        return original ? rankFn(original) : undefined
-      })
-    }
-
     const layout = sugiyama()
-      .layering(layering)
       .nodeSize(nodeSize)
       .gap(gap)
 
@@ -127,67 +105,25 @@ export function useDagLayout<
     }
   }
 
-  // Place orphan nodes (no edges), respecting rank when available
+  // Place orphan nodes in a row below / to the right
   if (orphanNodes.length > 0) {
-    if (rankFn) {
-      // Build rank → y mapping from connected layout
-      const rankToY = new Map<number, number>()
-      for (const [id, pos] of positioned) {
-        const orig = nodeMap.get(id)
-        if (orig) {
-          const r = rankFn(orig)
-          if (r !== undefined && !rankToY.has(r)) rankToY.set(r, pos.y)
-        }
-      }
+    const orphanStartX = 0
+    // For TB: place below the graph; for LR: also below (before swap)
+    const orphanStartY = layoutHeight > 0 ? layoutHeight + gap[1] + nodeSize[1] : 0
 
-      // Compute layer spacing for ranks not present in connected layout
-      let spacing = nodeSize[1] + gap[1]
-      if (rankToY.size >= 2) {
-        const entries = [...rankToY.entries()].sort((a, b) => a[0] - b[0])
-        spacing = (entries[entries.length - 1][1] - entries[0][1])
-          / (entries[entries.length - 1][0] - entries[0][0])
-      }
-      const baseY = rankToY.size > 0
-        ? [...rankToY.values()].reduce((a, b) => Math.min(a, b))
-        : nodeSize[1] / 2
-
-      // Group orphans by rank, place each group at the correct layer y
-      const byRank = new Map<number, N[]>()
-      for (const n of orphanNodes) {
-        const r = rankFn(n) ?? 0
-        if (!byRank.has(r)) byRank.set(r, [])
-        byRank.get(r)!.push(n)
-      }
-
-      for (const [rank, orphans] of byRank) {
-        const targetY = rankToY.get(rank) ?? (baseY + rank * spacing)
-        // Find max x among nodes already at this y to avoid overlap
-        let maxX = -Infinity
-        for (const pos of positioned.values()) {
-          if (Math.abs(pos.y - targetY) < 0.01) maxX = Math.max(maxX, pos.x)
-        }
-        let cx = maxX > -Infinity ? maxX + nodeSize[0] + gap[0] : 0
-        for (const n of orphans) {
-          positioned.set(String(n.id), { x: cx, y: targetY })
-          cx += nodeSize[0] + gap[0]
-        }
-      }
-    } else {
-      // No rank info: place orphans in a row below the graph
-      const orphanStartY = layoutHeight > 0 ? layoutHeight + gap[1] + nodeSize[1] : 0
-      for (let i = 0; i < orphanNodes.length; i++) {
-        positioned.set(String(orphanNodes[i].id), {
-          x: i * (nodeSize[0] + gap[0]),
-          y: orphanStartY,
-        })
-      }
+    for (let i = 0; i < orphanNodes.length; i++) {
+      const id = String(orphanNodes[i].id)
+      positioned.set(id, {
+        x: orphanStartX + i * (nodeSize[0] + gap[0]),
+        y: orphanStartY,
+      })
     }
 
-    // Update bounding box
-    for (const pos of positioned.values()) {
-      layoutWidth = Math.max(layoutWidth, pos.x + nodeSize[0])
-      layoutHeight = Math.max(layoutHeight, pos.y + nodeSize[1])
-    }
+    // Expand bounding box to include orphans
+    const maxOrphanX = orphanStartX + (orphanNodes.length - 1) * (nodeSize[0] + gap[0]) + nodeSize[0]
+    const orphanRowY = orphanStartY + nodeSize[1]
+    layoutWidth = Math.max(layoutWidth, maxOrphanX)
+    layoutHeight = Math.max(layoutHeight, orphanRowY)
   }
 
   // Swap x/y for LR direction

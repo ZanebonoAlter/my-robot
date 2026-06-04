@@ -6,8 +6,6 @@ import { useDagLayout } from '~/composables/useDagLayout'
 
 const props = defineProps<{
   sectionId: number
-  /** Inline mode: renders inside parent container instead of fixed sidebar */
-  inline?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -22,7 +20,7 @@ const relations = ref<SectionRelation[]>([])
 const loading = ref(false)
 const error = ref(false)
 
-// Layout constants — wider in inline mode
+// Layout constants
 const NODE_W = 280
 const NODE_H = 64
 const GAP_X = 24
@@ -30,10 +28,10 @@ const GAP_Y = 16
 const PADDING = 20
 
 const statusColorMap: Record<string, string> = {
-  emerging: '#34d399',
-  continuing: '#60a5fa',
-  split: '#fb923c',
-  merge: '#c084fc',
+  emerging: '#16a34a',
+  continuing: '#2563eb',
+  split: '#ea580c',
+  merge: '#9333ea',
   ending: '#9ca3af',
 }
 
@@ -59,12 +57,10 @@ function truncateLabel(label: string, max = 24): string {
   return label.length > max ? label.slice(0, max) + '...' : label
 }
 
-// Find the current section's label for the header
 const currentSection = computed(() =>
   sections.value.find(s => s.id === props.sectionId),
 )
 
-// Compute DAG layout
 const dagInputNodes = computed(() =>
   sections.value.map(s => ({ ...s, id: s.id as number | string })),
 )
@@ -88,7 +84,6 @@ const layoutNodeMap = computed(() => {
   return map
 })
 
-// SVG canvas dimensions
 const svgWidth = computed(() => {
   if (!layout.value) return 600
   const maxX = Math.max(0, ...layout.value.nodes.map(n => n.x))
@@ -108,7 +103,6 @@ function scaleY(y: number): number {
   return y * (NODE_H + GAP_Y) + PADDING
 }
 
-// Edge path — cubic bezier, vertical DAG
 function edgePathFromLayout(fromId: string | number, toId: string | number): string {
   const from = layoutNodeMap.value.get(Number(fromId))
   const to = layoutNodeMap.value.get(Number(toId))
@@ -206,7 +200,7 @@ function handleNodeClick(node: SectionLifecycleNode & { id: number | string }) {
             :key="'e' + i"
             :d="edgePathFromLayout(edge.from, edge.to)"
             fill="none"
-            stroke="rgba(255,255,255,0.15)"
+            stroke="rgba(80,60,30,0.18)"
             stroke-width="1.5"
           />
         </g>
@@ -228,8 +222,8 @@ function handleNodeClick(node: SectionLifecycleNode & { id: number | string }) {
             :width="NODE_W"
             :height="NODE_H"
             rx="6"
-            :fill="posNode.data.id === sectionId ? 'rgba(255,255,255,0.08)' : 'rgba(255,255,255,0.03)'"
-            :stroke="posNode.data.status === 'ending' ? 'rgba(156,163,175,0.3)' : 'rgba(255,255,255,0.06)'"
+            :fill="posNode.data.id === sectionId ? 'rgba(80,60,20,0.08)' : 'rgba(255,255,255,0.5)'"
+            :stroke="posNode.data.status === 'ending' ? 'rgba(120,120,120,0.3)' : 'rgba(80,60,30,0.15)'"
             :stroke-dasharray="posNode.data.status === 'ending' ? '4,3' : 'none'"
             stroke-width="1"
           />
@@ -240,14 +234,13 @@ function handleNodeClick(node: SectionLifecycleNode & { id: number | string }) {
             :cy="NODE_H / 2"
             r="4"
             :fill="statusColorMap[posNode.data.status] || '#9ca3af'"
-            :filter="posNode.data.id === sectionId ? 'url(#slp-glow)' : undefined"
           />
 
           <!-- Date -->
           <text
             x="26"
             y="16"
-            fill="rgba(255,255,255,0.35)"
+            fill="rgba(80,60,30,0.5)"
             font-size="9"
             font-family="system-ui, sans-serif"
           >{{ formatDate(posNode.data.period_date) }}</text>
@@ -256,7 +249,7 @@ function handleNodeClick(node: SectionLifecycleNode & { id: number | string }) {
           <text
             x="26"
             y="32"
-            fill="rgba(255,255,255,0.8)"
+            fill="rgba(40,30,10,0.85)"
             font-size="12"
             font-weight="500"
             font-family="system-ui, sans-serif"
@@ -266,7 +259,7 @@ function handleNodeClick(node: SectionLifecycleNode & { id: number | string }) {
           <text
             x="26"
             y="50"
-            fill="rgba(255,255,255,0.3)"
+            fill="rgba(80,60,30,0.45)"
             font-size="9"
             font-family="system-ui, sans-serif"
           >{{ posNode.data.article_count }} 篇 · {{ posNode.data.thread_count }} 条线索</text>
@@ -278,8 +271,8 @@ function handleNodeClick(node: SectionLifecycleNode & { id: number | string }) {
             width="38"
             height="18"
             rx="4"
-            :fill="statusColorMap[posNode.data.status] + '22'"
-            :stroke="statusColorMap[posNode.data.status] + '44'"
+            :fill="statusColorMap[posNode.data.status] + '18'"
+            :stroke="statusColorMap[posNode.data.status] + '40'"
             stroke-width="0.5"
           />
           <text
@@ -292,17 +285,6 @@ function handleNodeClick(node: SectionLifecycleNode & { id: number | string }) {
             text-anchor="middle"
           >{{ statusLabel[posNode.data.status] || posNode.data.status }}</text>
         </g>
-
-        <!-- Glow filter -->
-        <defs>
-          <filter id="slp-glow" x="-50%" y="-50%" width="200%" height="200%">
-            <feGaussianBlur stdDeviation="3" result="blur" />
-            <feMerge>
-              <feMergeNode in="blur" />
-              <feMergeNode in="SourceGraphic" />
-            </feMerge>
-          </filter>
-        </defs>
       </svg>
     </div>
   </div>
@@ -322,7 +304,7 @@ function handleNodeClick(node: SectionLifecycleNode & { id: number | string }) {
   align-items: center;
   gap: 0.75rem;
   padding-bottom: 0.8rem;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  border-bottom: 1px solid rgba(80, 60, 30, 0.12);
   margin-bottom: 0.8rem;
   flex-shrink: 0;
 }
@@ -332,24 +314,24 @@ function handleNodeClick(node: SectionLifecycleNode & { id: number | string }) {
   align-items: center;
   gap: 0.3rem;
   padding: 0.3rem 0.6rem;
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(80, 60, 30, 0.15);
   border-radius: 6px;
-  background: rgba(255, 255, 255, 0.04);
-  color: rgba(255, 255, 255, 0.6);
+  background: rgba(255, 255, 255, 0.4);
+  color: rgba(60, 40, 10, 0.7);
   font-size: 0.75rem;
   cursor: pointer;
   transition: all 0.12s ease;
 }
 
 .slp-back:hover {
-  background: rgba(255, 255, 255, 0.08);
-  color: rgba(255, 255, 255, 0.85);
+  background: rgba(255, 255, 255, 0.6);
+  color: rgba(40, 20, 0, 0.9);
 }
 
 .slp-header-title {
   font-size: 0.85rem;
   font-weight: 600;
-  color: rgba(255, 255, 255, 0.8);
+  color: rgba(40, 30, 10, 0.85);
   flex: 1;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -358,7 +340,7 @@ function handleNodeClick(node: SectionLifecycleNode & { id: number | string }) {
 
 .slp-header-label {
   font-size: 0.7rem;
-  color: rgba(255, 255, 255, 0.3);
+  color: rgba(80, 60, 30, 0.4);
   flex-shrink: 0;
 }
 
@@ -383,7 +365,7 @@ function handleNodeClick(node: SectionLifecycleNode & { id: number | string }) {
 }
 
 .slp-dag-node:hover rect {
-  fill: rgba(255, 255, 255, 0.06);
+  fill: rgba(255, 255, 255, 0.7);
 }
 
 .slp-dag-node-ending {
@@ -395,7 +377,7 @@ function handleNodeClick(node: SectionLifecycleNode & { id: number | string }) {
   text-align: center;
   padding: 3rem 0;
   font-size: 0.8rem;
-  color: rgba(255, 255, 255, 0.3);
+  color: rgba(80, 60, 30, 0.35);
 }
 
 /* Error */
@@ -405,7 +387,7 @@ function handleNodeClick(node: SectionLifecycleNode & { id: number | string }) {
   justify-content: center;
   padding: 2rem 0;
   font-size: 0.8rem;
-  color: rgba(255, 255, 255, 0.3);
+  color: rgba(80, 60, 30, 0.4);
 }
 
 /* Loading skeleton */
@@ -420,7 +402,7 @@ function handleNodeClick(node: SectionLifecycleNode & { id: number | string }) {
   width: 10px;
   height: 10px;
   border-radius: 50%;
-  background: rgba(255, 255, 255, 0.08);
+  background: rgba(80, 60, 30, 0.08);
   margin-top: 4px;
 }
 
@@ -434,7 +416,7 @@ function handleNodeClick(node: SectionLifecycleNode & { id: number | string }) {
 .slp-skeleton-line {
   height: 10px;
   border-radius: 4px;
-  background: rgba(255, 255, 255, 0.06);
+  background: rgba(80, 60, 30, 0.06);
   animation: slpPulse 1.5s ease-in-out infinite;
 }
 

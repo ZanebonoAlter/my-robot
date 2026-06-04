@@ -429,9 +429,9 @@ watch(() => props.boardId, () => {
             <SectionLifecyclePanel
               v-if="lifecycleSectionId !== null && lifecycleVisible"
               :section-id="lifecycleSectionId"
-              :inline="true"
               @close="closeSectionLifecycle"
               @navigate="navigateToSectionReport"
+              @open-article="emit('openArticle', $event)"
             />
 
             <!-- Newspaper content (hidden when lifecycle is open) -->

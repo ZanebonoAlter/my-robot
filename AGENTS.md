@@ -19,6 +19,20 @@ Agent guide for coding assistants working in `Syntopica` (`D:\project\my-robot`)
 | Node.js | `pnpm`（要求 corepack 启用）。详见 `front/AGENTS.md`。|
 | Go | 直接使用系统 Go 工具链。详见 `backend-go/AGENTS.md`。|
 
+## Headroom (Context Compression)
+
+[Headroom](https://headroom-docs.vercel.app/) 已通过 MCP 集成，用于压缩大量上下文（日志、搜索结果、JSON、代码等），节省 token。已安装并配置为 pi 直接工具。
+
+| 工具 | 用途 |
+|------|------|
+| `headroom_headroom_compress` | 压缩内容，返回压缩文本 + hash |
+| `headroom_headroom_retrieve` | 用 hash 取回原始内容（支持 query 过滤） |
+| `headroom_headroom_stats` | 查看本次会话压缩统计 |
+
+**使用场景：** 工具输出过大时（如大量 grep 结果、长日志、大型 JSON），主动调用 `compress` 压缩后再分析，需要细节时用 `retrieve` 取回。短内容会被 noop 跳过。
+
+**配置文件：** `~/.pi/agent/mcp.json`（pi）、`~/.claude.json`（Claude Code）。
+
 **快速开始本地开发：**
 
 ```bash

@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestHungarian_Simple2x2(t *testing.T) {
@@ -146,4 +147,122 @@ func nextPermutation(a []int) bool {
 		a[l], a[r] = a[r], a[l]
 	}
 	return true
+}
+
+// === Phase 1 tests ===
+
+func TestPhase1_PerfectOneToOne(t *testing.T) {
+	left := []uint{10, 20, 30}
+	right := []uint{40, 50, 60}
+	dist := map[[2]uint]float64{
+		{10, 40}: 0.01, {20, 50}: 0.02, {30, 60}: 0.03,
+	}
+	primaries, unmatchedL, unmatchedR := phase1Hungarian(left, right, dist)
+	assert.Len(t, primaries, 3)
+	assert.Empty(t, unmatchedL)
+	assert.Empty(t, unmatchedR)
+	totalDist := 0.0
+	for _, p := range primaries {
+		totalDist += p.Distance
+		assert.Equal(t, "primary", p.Type)
+	}
+	assert.InDelta(t, 0.06, totalDist, 1e-9)
+}
+
+func TestPhase1_PenaltyBlocksWeakMatch(t *testing.T) {
+	left := []uint{10, 20}
+	right := []uint{30}
+	dist := map[[2]uint]float64{{10, 30}: 0.31, {20, 30}: 0.32}
+	primaries, unmatchedL, unmatchedR := phase1Hungarian(left, right, dist)
+	assert.Empty(t, primaries)
+	assert.Len(t, unmatchedL, 2)
+	assert.Len(t, unmatchedR, 1)
+}
+
+func TestPhase1_Mixed(t *testing.T) {
+	left := []uint{10, 20}
+	right := []uint{30, 40}
+	dist := map[[2]uint]float64{
+		{10, 30}: 0.15, {10, 40}: 0.25,
+		{20, 30}: 0.27, {20, 40}: 0.10,
+	}
+	primaries, _, _ := phase1Hungarian(left, right, dist)
+	assert.Len(t, primaries, 2)
+	totalDist := 0.0
+	for _, p := range primaries {
+		totalDist += p.Distance
+	}
+	// Optimal: 10→30(0.15) + 20→40(0.10) = 0.25
+	assert.InDelta(t, 0.25, totalDist, 1e-9)
+}
+
+func TestPhase1_EmptySides(t *testing.T) {
+	primaries, unmatchedL, unmatchedR := phase1Hungarian(nil, []uint{10}, nil)
+	assert.Nil(t, primaries)
+	assert.Empty(t, unmatchedL)
+	assert.Len(t, unmatchedR, 1)
+}
+
+// === Phase 2 tests ===
+
+func TestPhase2_SplitDetection(t *testing.T) {
+	left := []uint{10, 20}
+	right := []uint{30, 40}
+	dist := map[[2]uint]float64{
+		{10, 30}: 0.15, {10, 40}: 0.17, {20, 30}: 0.30, {20, 40}: 0.28,
+	}
+	primaries := []matchResult{{FromID: 10, ToID: 30, Distance: 0.15, Type: "primary"}}
+	unmatchedL := map[uint]bool{20: true}
+	unmatchedR := map[uint]bool{40: true}
+	results := phase2SplitMerge(left, right, dist, primaries, unmatchedL, unmatchedR)
+	require.Len(t, results, 1)
+	assert.Equal(t, "split", results[0].Type)
+	assert.Equal(t, uint(10), results[0].FromID)
+	assert.Equal(t, uint(40), results[0].ToID)
+	assert.InDelta(t, 0.17, results[0].Distance, 1e-9)
+}
+
+func TestPhase2_SplitGapTooLarge(t *testing.T) {
+	left := []uint{10}
+	right := []uint{30, 40}
+	dist := map[[2]uint]float64{{10, 30}: 0.10, {10, 40}: 0.25}
+	primaries := []matchResult{{FromID: 10, ToID: 30, Distance: 0.10, Type: "primary"}}
+	unmatchedL := map[uint]bool{}
+	unmatchedR := map[uint]bool{40: true}
+	results := phase2SplitMerge(left, right, dist, primaries, unmatchedL, unmatchedR)
+	assert.Empty(t, results)
+}
+
+func TestPhase2_MergeDetection(t *testing.T) {
+	left := []uint{10, 20}
+	right := []uint{30}
+	dist := map[[2]uint]float64{{10, 30}: 0.14, {20, 30}: 0.12}
+	primaries := []matchResult{{FromID: 20, ToID: 30, Distance: 0.12, Type: "primary"}}
+	unmatchedL := map[uint]bool{10: true}
+	unmatchedR := map[uint]bool{}
+	results := phase2SplitMerge(left, right, dist, primaries, unmatchedL, unmatchedR)
+	require.Len(t, results, 1)
+	assert.Equal(t, "merge", results[0].Type)
+	assert.Equal(t, uint(10), results[0].FromID)
+	assert.Equal(t, uint(30), results[0].ToID)
+	assert.InDelta(t, 0.14, results[0].Distance, 1e-9)
+}
+
+func TestPhase2_NoCandidates(t *testing.T) {
+	dist := map[[2]uint]float64{}
+	results := phase2SplitMerge([]uint{10}, []uint{30}, dist, nil, map[uint]bool{10: true}, map[uint]bool{30: true})
+	assert.Empty(t, results)
+}
+
+// === Phase 3 helper tests ===
+
+func TestHasRelationToDay(t *testing.T) {
+	written := []matchResult{
+		{FromID: 10, ToID: 20},
+		{FromID: 20, ToID: 30},
+	}
+	dateMap := map[uint]string{20: "2026-06-02", 30: "2026-06-03"}
+	assert.True(t, hasRelationToDay(10, "2026-06-02", written, dateMap))
+	assert.False(t, hasRelationToDay(10, "2026-06-03", written, dateMap))
+	assert.False(t, hasRelationToDay(20, "2026-06-01", written, dateMap))
 }

@@ -1,7 +1,10 @@
 package daily_report
 
 import (
+	"fmt"
 	"math"
+
+	"syntopica-backend/internal/platform/logging"
 
 	"gorm.io/gorm"
 )
@@ -287,4 +290,142 @@ func hasRelationToDay(sectionID uint, targetDay string, written []matchResult, s
 		}
 	}
 	return false
+}
+
+// RebuildBoardRelations clears all relations for a board and rebuilds them
+// using three-phase bipartite matching on adjacent day pairs.
+// Receives *gorm.DB (may be a transaction); does NOT manage its own transaction.
+func RebuildBoardRelations(tx *gorm.DB, boardID uint) error {
+	// 1. Delete all existing relations for this board
+	if err := tx.Exec(`
+		DELETE FROM daily_report_section_relations
+		WHERE from_section_id IN (
+			SELECT s.id FROM daily_report_sections s
+			JOIN board_daily_reports r ON r.id = s.report_id
+			WHERE r.semantic_board_id = ?
+		) OR to_section_id IN (
+			SELECT s.id FROM daily_report_sections s
+			JOIN board_daily_reports r ON r.id = s.report_id
+			WHERE r.semantic_board_id = ?
+		)
+	`, boardID, boardID).Error; err != nil {
+		return fmt.Errorf("delete old relations: %w", err)
+	}
+
+	// 2. Load all sections with embeddings, grouped by date
+	type dateSection struct {
+		ID        uint
+		Embedding string
+		Day       string
+	}
+	var allSections []dateSection
+	if err := tx.Raw(`
+		SELECT s.id, s.embedding, r.period_date::date AS day
+		FROM daily_report_sections s
+		JOIN board_daily_reports r ON r.id = s.report_id
+		WHERE r.semantic_board_id = ?
+		  AND s.embedding IS NOT NULL
+		  AND s.cluster_label IS NOT NULL AND s.cluster_label != ''
+		ORDER BY r.period_date ASC, s.id ASC
+	`, boardID).Scan(&allSections).Error; err != nil {
+		return fmt.Errorf("query sections: %w", err)
+	}
+
+	if len(allSections) == 0 {
+		return nil
+	}
+
+	// 3. Group sections by date
+	dateSections := make(map[string][]sectionInfo)
+	var sortedDates []string
+	for _, sec := range allSections {
+		if _, exists := dateSections[sec.Day]; !exists {
+			sortedDates = append(sortedDates, sec.Day)
+		}
+		dateSections[sec.Day] = append(dateSections[sec.Day], sectionInfo{
+			ID:        sec.ID,
+			Embedding: sec.Embedding,
+		})
+	}
+
+	if len(sortedDates) < 2 {
+		return nil // first report, no matching needed
+	}
+
+	// 4. Build section→date map for Phase 3 skip-day checks
+	sectionDateMap := make(map[uint]string, len(allSections))
+	for _, sec := range allSections {
+		sectionDateMap[sec.ID] = sec.Day
+	}
+
+	// 5. Process each adjacent day pair
+	var allWritten []matchResult
+	for i := 0; i < len(sortedDates)-1; i++ {
+		leftDay := sortedDates[i]
+		rightDay := sortedDates[i+1]
+		left := dateSections[leftDay]
+		right := dateSections[rightDay]
+
+		leftIDs := make([]uint, len(left))
+		rightIDs := make([]uint, len(right))
+		for k, s := range left { leftIDs[k] = s.ID }
+		for k, s := range right { rightIDs[k] = s.ID }
+
+		// Phase 1
+		dist := buildDistMatrix(tx, left, right)
+		primaries, unmatchedLeft, unmatchedRight := phase1Hungarian(leftIDs, rightIDs, dist)
+
+		// Phase 2
+		splitMerges := phase2SplitMerge(leftIDs, rightIDs, dist, primaries, unmatchedLeft, unmatchedRight)
+
+		// Collect and write
+		var pairWritten []matchResult
+		pairWritten = append(pairWritten, primaries...)
+		pairWritten = append(pairWritten, splitMerges...)
+		allWritten = append(allWritten, pairWritten...)
+
+		for _, r := range pairWritten {
+			if err := tx.Exec(`
+				INSERT INTO daily_report_section_relations (from_section_id, to_section_id, distance)
+				VALUES (?, ?, ?)
+				ON CONFLICT (from_section_id, to_section_id) DO UPDATE SET distance = EXCLUDED.distance
+			`, r.FromID, r.ToID, r.Distance).Error; err != nil {
+				return fmt.Errorf("write relation %d→%d: %w", r.FromID, r.ToID, err)
+			}
+		}
+
+		// Phase 3: skip-day reconnect (Day_i → Day_{i+2} only)
+		if i+2 < len(sortedDates) {
+			skipDay := sortedDates[i+2]
+			skipRight := dateSections[skipDay]
+			skipDist := buildDistMatrix(tx, left, skipRight)
+
+			for _, lSec := range left {
+				if _, stillUnmatched := unmatchedLeft[lSec.ID]; !stillUnmatched {
+					continue
+				}
+				if hasRelationToDay(lSec.ID, rightDay, allWritten, sectionDateMap) {
+					continue
+				}
+				for _, rSec := range skipRight {
+					if d, ok := skipDist[[2]uint{lSec.ID, rSec.ID}]; ok && d < SkipDayThresh {
+						if err := tx.Exec(`
+							INSERT INTO daily_report_section_relations (from_section_id, to_section_id, distance)
+							VALUES (?, ?, ?)
+							ON CONFLICT (from_section_id, to_section_id) DO UPDATE SET distance = EXCLUDED.distance
+						`, lSec.ID, rSec.ID, d).Error; err != nil {
+							return fmt.Errorf("write skip-day relation %d→%d: %w", lSec.ID, rSec.ID, err)
+						}
+						allWritten = append(allWritten, matchResult{
+							FromID: lSec.ID, ToID: rSec.ID, Distance: d, Type: "skip_day",
+						})
+					}
+				}
+			}
+		}
+	}
+
+	logging.Infof("RebuildBoardRelations: board %d rebuilt %d relations across %d days",
+		boardID, len(allWritten), len(sortedDates))
+	return nil
 }

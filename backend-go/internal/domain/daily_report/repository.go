@@ -3,8 +3,6 @@ package daily_report
 import (
 	"context"
 	"fmt"
-	"slices"
-	"strings"
 	"time"
 
 	"syntopica-backend/internal/domain/models"
@@ -53,12 +51,6 @@ func SaveReport(report *BoardDailyReport, sections []DailyReportSection, threadB
 		}
 
 		if findErr == nil {
-			// Delete old relations involving old section IDs
-			var oldSectionIDs []uint
-			tx.Model(&DailyReportSection{}).Where("report_id = ?", existing.ID).Pluck("id", &oldSectionIDs)
-			if len(oldSectionIDs) > 0 {
-				tx.Where("from_section_id IN ? OR to_section_id IN ?", oldSectionIDs, oldSectionIDs).Delete(&SectionRelation{})
-			}
 			// Delete old threads
 			if err := tx.Where("report_id = ?", existing.ID).Delete(&DailyReportThread{}).Error; err != nil {
 				return fmt.Errorf("delete old threads: %w", err)
@@ -79,9 +71,9 @@ func SaveReport(report *BoardDailyReport, sections []DailyReportSection, threadB
 			}
 		}
 
-		// Write relations for new sections
-		if err := MatchAndSaveRelations(tx, report.SemanticBoardID, report.PeriodDate, sections); err != nil {
-			logging.Warnf("SaveReport: relation matching failed: %v", err)
+		// Rebuild all relations for this board using bipartite matching
+		if err := RebuildBoardRelations(tx, report.SemanticBoardID); err != nil {
+			logging.Warnf("SaveReport: relation rebuild failed: %v", err)
 		}
 
 		// Save threads for each section (sections now have IDs after insertion)
@@ -382,211 +374,6 @@ type SectionTimelineResponse struct {
 	Relations []SectionRelationResult `json:"relations"`
 }
 
-// MatchAndSaveRelations finds and persists section relations based on embedding similarity.
-// For each section with a non-empty embedding, it queries ALL matching sections in the
-// same board with distance < 0.35, excluding same-day sections, then applies two-layer
-// filtering: adjacent-day matches write directly, skip-day matches require no intermediate
-// continuation and distance < 0.25.
-func MatchAndSaveRelations(tx *gorm.DB, boardID uint, reportDate time.Time, sections []DailyReportSection) error {
-	// Pre-load existing relations into in-memory adjacency map (from_section_id → []to_section_id)
-	adjacency := make(map[uint][]uint)
-	var existingRelations []SectionRelation
-	if err := tx.Raw(`
-		SELECT r.from_section_id, r.to_section_id
-		FROM daily_report_section_relations r
-		JOIN daily_report_sections s1 ON s1.id = r.from_section_id
-		JOIN board_daily_reports b1 ON b1.id = s1.report_id
-		WHERE b1.semantic_board_id = ?
-	`, boardID).Scan(&existingRelations).Error; err == nil {
-		for _, r := range existingRelations {
-			adjacency[r.FromSectionID] = append(adjacency[r.FromSectionID], r.ToSectionID)
-		}
-	}
-
-	// Pre-load completed report dates for this board
-	var completedDates []time.Time
-	if err := tx.Raw(`
-		SELECT DISTINCT period_date::date
-		FROM board_daily_reports
-		WHERE semantic_board_id = ? AND status = 'completed'
-		ORDER BY period_date::date
-	`, boardID).Scan(&completedDates).Error; err != nil {
-		logging.Warnf("MatchAndSaveRelations: query completed dates failed: %v", err)
-	}
-	dateSet := make(map[string]bool, len(completedDates))
-	for _, d := range completedDates {
-		dateSet[d.Format("2006-01-02")] = true
-	}
-
-	// Pre-load section → date mapping for intermediate-day checks
-	sectionDateMap := make(map[uint]time.Time)
-	var sectionDateRows []struct {
-		SectionID  uint
-		PeriodDate time.Time
-	}
-	tx.Raw(`
-		SELECT s.id AS section_id, r.period_date::date AS period_date
-		FROM daily_report_sections s
-		JOIN board_daily_reports r ON r.id = s.report_id
-		WHERE r.semantic_board_id = ?
-	`, boardID).Scan(&sectionDateRows)
-	for _, row := range sectionDateRows {
-		sectionDateMap[row.SectionID] = row.PeriodDate
-	}
-
-	for _, sec := range sections {
-		if strings.TrimSpace(sec.Embedding) == "" {
-			continue
-		}
-		var matches []struct {
-			MatchID   uint
-			MatchDate time.Time
-			Distance  float64
-		}
-		err := tx.Raw(`
-			SELECT s.id AS match_id, r.period_date::date AS match_date, s.embedding <=> ?::vector AS distance
-			FROM daily_report_sections s
-			JOIN board_daily_reports r ON r.id = s.report_id
-			WHERE r.semantic_board_id = ?
-			  AND r.status = 'completed'
-			  AND r.period_date::date < ?
-			  AND s.embedding IS NOT NULL
-			  AND s.embedding <=> ?::vector < 0.35
-			ORDER BY s.embedding <=> ?::vector
-		`, sec.Embedding, boardID, reportDate.Format("2006-01-02"), sec.Embedding, sec.Embedding).Scan(&matches).Error
-		if err != nil {
-			logging.Warnf("MatchAndSaveRelations: query failed for section %d: %v", sec.ID, err)
-			continue
-		}
-
-		// Collect candidates that pass time-dimension filtering
-		var candidates []matchCandidate
-		for _, m := range matches {
-			if !shouldWriteRelation(m.MatchID, m.MatchDate, sec.ID, reportDate, m.Distance, adjacency, sectionDateMap, dateSet) {
-				continue
-			}
-			candidates = append(candidates, matchCandidate{
-				FromID:   m.MatchID,
-				FromDate: m.MatchDate,
-				Distance: m.Distance,
-			})
-		}
-
-		// Apply competitive filtering
-		survivors := competitiveFilter(candidates)
-
-		// Write surviving relations
-		for _, c := range survivors {
-			if err := tx.Exec(`
-				INSERT INTO daily_report_section_relations (from_section_id, to_section_id, distance)
-				VALUES (?, ?, ?)
-				ON CONFLICT (from_section_id, to_section_id) DO UPDATE SET distance = EXCLUDED.distance
-			`, c.FromID, sec.ID, c.Distance).Error; err != nil {
-				logging.Warnf("MatchAndSaveRelations: save relation failed: %v", err)
-			} else {
-				adjacency[c.FromID] = append(adjacency[c.FromID], sec.ID)
-				sectionDateMap[sec.ID] = reportDate
-			}
-		}
-	}
-	return nil
-}
-
-// shouldWriteRelation determines whether a relation should be written based on two-layer filtering:
-//   - Adjacent-day matches (no intermediate completed report days): distance < 0.35 → write directly
-//   - Skip-day matches (intermediate days exist): no intermediate continuation + distance < 0.25 → write
-func shouldWriteRelation(
-	fromID uint, fromDate time.Time,
-	toID uint, toDate time.Time,
-	distance float64,
-	adjacency map[uint][]uint,
-	sectionDateMap map[uint]time.Time,
-	completedDateSet map[string]bool,
-) bool {
-	fromStr := fromDate.Format("2006-01-02")
-	toStr := toDate.Format("2006-01-02")
-
-	// Check if any completed report days exist between from and to
-	hasIntermediate := false
-	for dStr := range completedDateSet {
-		if dStr > fromStr && dStr < toStr {
-			hasIntermediate = true
-			break
-		}
-	}
-
-	if !hasIntermediate {
-		// Adjacent-day match: distance < 0.35 → write directly
-		return distance < 0.35
-	}
-
-	// Skip-day match: check if from_section has continuation in intermediate days
-	if hasContinuationInIntermediateDays(fromID, fromDate, toDate, adjacency, sectionDateMap) {
-		return false
-	}
-	return distance < 0.25
-}
-
-// hasContinuationInIntermediateDays checks if fromSection has any outgoing relation
-// pointing to a section on a day between fromDate and toDate.
-func hasContinuationInIntermediateDays(
-	fromSectionID uint, fromDate time.Time, toDate time.Time,
-	adjacency map[uint][]uint,
-	sectionDateMap map[uint]time.Time,
-) bool {
-	toTargets, ok := adjacency[fromSectionID]
-	if !ok {
-		return false
-	}
-	fromStr := fromDate.Format("2006-01-02")
-	toStr := toDate.Format("2006-01-02")
-	for _, tid := range toTargets {
-		if targetDate, exists := sectionDateMap[tid]; exists {
-			targetStr := targetDate.Format("2006-01-02")
-			if targetStr > fromStr && targetStr < toStr {
-				return true
-			}
-		}
-	}
-	return false
-}
-
-type matchCandidate struct {
-	FromID   uint
-	FromDate time.Time
-	Distance  float64
-}
-
-func competitiveFilter(candidates []matchCandidate) []matchCandidate {
-	if len(candidates) <= 1 {
-		return candidates
-	}
-
-	slices.SortFunc(candidates, func(a, b matchCandidate) int {
-		if a.Distance < b.Distance {
-			return -1
-		}
-		if a.Distance > b.Distance {
-			return 1
-		}
-		return 0
-	})
-
-	best := candidates[0].Distance
-	gap := candidates[1].Distance - best
-
-	if gap >= 0.03 {
-		return candidates[:1]
-	}
-
-	threshold := best + 0.03
-	i := 1
-	for i < len(candidates) && candidates[i].Distance <= threshold {
-		i++
-	}
-	return candidates[:i]
-}
-
 // DeriveSectionStatuses computes status for each section based on its relation graph.
 //
 // Priority: merge > split > continuing > ending > emerging
@@ -792,8 +579,6 @@ func BackfillSectionEmbeddings(ctx context.Context) (embedded int, matched int, 
 	return embedded, matched, nil
 }
 
-// BackfillRelations deletes all relations for a board and rebuilds them using
-// the two-layer filtering logic, processing sections in chronological order.
 func BackfillRelations(boardID uint) (rebuilt int, err error) {
 	tx := database.DB.Begin()
 	defer func() {
@@ -802,112 +587,19 @@ func BackfillRelations(boardID uint) (rebuilt int, err error) {
 		}
 	}()
 
-	// 1. Delete all existing relations for this board
-	if err = tx.Exec(`
-		DELETE FROM daily_report_section_relations
+	if err = RebuildBoardRelations(tx, boardID); err != nil {
+		return 0, fmt.Errorf("rebuild board relations: %w", err)
+	}
+
+	if err = tx.Raw(`
+		SELECT COUNT(*) FROM daily_report_section_relations
 		WHERE from_section_id IN (
 			SELECT s.id FROM daily_report_sections s
 			JOIN board_daily_reports r ON r.id = s.report_id
 			WHERE r.semantic_board_id = ?
-		) OR to_section_id IN (
-			SELECT s.id FROM daily_report_sections s
-			JOIN board_daily_reports r ON r.id = s.report_id
-			WHERE r.semantic_board_id = ?
 		)
-	`, boardID, boardID).Error; err != nil {
-		return 0, fmt.Errorf("delete old relations: %w", err)
-	}
-
-	// 2. Load all sections with embeddings, ordered by date ascending
-	var sections []struct {
-		ID         uint
-		Embedding  string
-		ReportID   uint
-		PeriodDate time.Time
-	}
-	if err = tx.Raw(`
-		SELECT s.id, s.embedding, s.report_id, r.period_date::date AS period_date
-		FROM daily_report_sections s
-		JOIN board_daily_reports r ON r.id = s.report_id
-		WHERE r.semantic_board_id = ?
-		  AND s.embedding IS NOT NULL
-		  AND s.cluster_label != '' AND s.cluster_label IS NOT NULL
-		ORDER BY r.period_date ASC, s.id ASC
-	`, boardID).Scan(&sections).Error; err != nil {
-		return 0, fmt.Errorf("query sections: %w", err)
-	}
-
-	// 3. Load completed report dates
-	var completedDates []time.Time
-	tx.Raw(`
-		SELECT DISTINCT period_date::date
-		FROM board_daily_reports
-		WHERE semantic_board_id = ? AND status = 'completed'
-		ORDER BY period_date::date
-	`, boardID).Scan(&completedDates)
-	dateSet := make(map[string]bool, len(completedDates))
-	for _, d := range completedDates {
-		dateSet[d.Format("2006-01-02")] = true
-	}
-
-	// 4. Process each section in chronological order, building relations incrementally
-	adjacency := make(map[uint][]uint)
-	sectionDateMap := make(map[uint]time.Time, len(sections))
-	for _, sec := range sections {
-		sectionDateMap[sec.ID] = sec.PeriodDate
-	}
-
-	for _, sec := range sections {
-		var matches []struct {
-			MatchID   uint
-			MatchDate time.Time
-			Distance  float64
-		}
-		qErr := tx.Raw(`
-			SELECT s.id AS match_id, r.period_date::date AS match_date, s.embedding <=> ?::vector AS distance
-			FROM daily_report_sections s
-			JOIN board_daily_reports r ON r.id = s.report_id
-			WHERE r.semantic_board_id = ?
-			  AND r.status = 'completed'
-			  AND r.period_date::date < ?
-			  AND s.embedding IS NOT NULL
-			  AND s.embedding <=> ?::vector < 0.35
-			ORDER BY s.embedding <=> ?::vector
-		`, sec.Embedding, boardID, sec.PeriodDate.Format("2006-01-02"), sec.Embedding, sec.Embedding).Scan(&matches).Error
-		if qErr != nil {
-			logging.Warnf("BackfillRelations: query failed for section %d: %v", sec.ID, qErr)
-			continue
-		}
-
-		// Collect candidates that pass time-dimension filtering
-		var candidates []matchCandidate
-		for _, m := range matches {
-			if !shouldWriteRelation(m.MatchID, m.MatchDate, sec.ID, sec.PeriodDate, m.Distance, adjacency, sectionDateMap, dateSet) {
-				continue
-			}
-			candidates = append(candidates, matchCandidate{
-				FromID:   m.MatchID,
-				FromDate: m.MatchDate,
-				Distance: m.Distance,
-			})
-		}
-
-		// Apply competitive filtering
-		survivors := competitiveFilter(candidates)
-
-		// Write surviving relations
-		for _, c := range survivors {
-			if wErr := tx.Exec(`
-				INSERT INTO daily_report_section_relations (from_section_id, to_section_id, distance)
-				VALUES (?, ?, ?)
-				ON CONFLICT (from_section_id, to_section_id) DO UPDATE SET distance = EXCLUDED.distance
-			`, c.FromID, sec.ID, c.Distance).Error; wErr != nil {
-				logging.Warnf("BackfillRelations: write relation failed: %v", wErr)
-			} else {
-				adjacency[c.FromID] = append(adjacency[c.FromID], sec.ID)
-				rebuilt++
-			}
-		}
+	`, boardID).Scan(&rebuilt).Error; err != nil {
+		return 0, fmt.Errorf("count relations: %w", err)
 	}
 
 	if err = tx.Commit().Error; err != nil {

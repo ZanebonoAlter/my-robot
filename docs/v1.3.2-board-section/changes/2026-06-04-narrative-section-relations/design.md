@@ -1,5 +1,7 @@
 ## Context
 
+> **Note:** The `MatchAndSaveRelations` function mentioned below has been superseded by `RebuildBoardRelations` (Hungarian bipartite matching). See `docs/plans/2026-06-06-bipartite-relation-matching.md`.
+
 日报系统当前有两层结构：Section（话题/聚类）和 Thread（线索）。Section 之间通过 `prev_section_id` 形成单链式跨天延续，Thread 通过 `prev_thread_id` 和 tag 交集做类似的链式追踪。
 
 实际数据暴露了两个问题：

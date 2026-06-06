@@ -1,5 +1,7 @@
 # Narrative Section Relations 实施计划
 
+> **SUPERSEDED:** 增量贪心匹配算法（`MatchAndSaveRelations`, `shouldWriteRelation`, `competitiveFilter`, `hasContinuationInIntermediateDays`）已被匈牙利二分图匹配（`RebuildBoardRelations`）取代。详见 `docs/plans/2026-06-06-bipartite-relation-matching.md`。
+
 > **REQUIRED SUB-SKILL:** Use the executing-plans skill to implement this plan task-by-task.
 
 **Goal:** 将 Section 间的单链 `prev_section_id` 关系升级为多对多关系表，支持 split/merge；简化 Thread 移除 status 和 prev_thread_id。

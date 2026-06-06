@@ -1,5 +1,7 @@
 # Relation Skip-Day Filter 实现计划
 
+> **SUPERSEDED:** 增量贪心匹配算法（`MatchAndSaveRelations`, `shouldWriteRelation`, `competitiveFilter`, `hasContinuationInIntermediateDays`）已被匈牙利二分图匹配（`RebuildBoardRelations`）取代。详见 `docs/plans/2026-06-06-bipartite-relation-matching.md`。
+
 > **REQUIRED SUB-SKILL:** Use the executing-plans skill to implement this plan task-by-task.
 
 **Goal:** 消除跨天跳跃噪声 relation，保留有价值的隔天续上关系，使 status 推导基于真实的叙事流动

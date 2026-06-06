@@ -1,5 +1,7 @@
 # Narrative Section Relations - Remaining Tasks Implementation Plan
 
+> **SUPERSEDED:** The incremental greedy matching algorithm described in this plan (`MatchAndSaveRelations`, `shouldWriteRelation`, `competitiveFilter`, `hasContinuationInIntermediateDays`) has been replaced by Hungarian bipartite matching (`RebuildBoardRelations`). See `docs/plans/2026-06-06-bipartite-relation-matching.md`.
+
 > **REQUIRED SUB-SKILL:** Use the executing-plans skill to implement this plan task-by-task.
 
 **Goal:** Complete the remaining 3 task groups for the narrative-section-relations change: fix distance=0.0 bug, implement same-day section merging, and verify everything passes.

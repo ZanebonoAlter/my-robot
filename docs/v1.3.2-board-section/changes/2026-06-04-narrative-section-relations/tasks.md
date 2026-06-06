@@ -1,5 +1,7 @@
 ## 1. 数据库迁移
 
+> **Note:** `MatchAndSaveRelations` mentioned in tasks below has been superseded by `RebuildBoardRelations` (Hungarian bipartite matching). See `docs/plans/2026-06-06-bipartite-relation-matching.md`.
+
 - [x] 新增 `daily_report_section_relations` 表 migration（字段、约束、索引）
 - [x] 编写数据迁移：将现有 `prev_section_id` 转为 relation 记录
 - [x] 删除 `daily_report_threads` 表的 `status`、`prev_thread_id` 列和相关索引

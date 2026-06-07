@@ -12,7 +12,7 @@
 - 让垃圾信息见ai去吧！你只需要看你关心的东西
 - ps 因为产品快速迭代，每次更新可能会break changes（字面意思会爆炸）
 
-![主界面截图](img/1.3-feather/main-title.png)
+![主界面截图](img/1.3.2-narrative/topic-lifeline.png)
 
 ## 🎯 语义标签板块（v1.3）
 
@@ -35,7 +35,7 @@
 
 建议分三种：🟢 创建新板块 / 🔵 合并到已有板块 / ⚪ 跳过（太碎片化不值得）。你挑着确认，不满意的直接跳过。
 
-![板块升级建议](img/1.3-feather/board_upgrade.png)
+![板块升级建议](img/1.3.2-narrative/llm-upgrade.png)
 
 ### 3. 智能标签推荐 — 板块不够丰满？
 
@@ -48,7 +48,7 @@
 
 每个板块每天自动生成一份叙事报告。不是冷冰冰的摘要堆砌，而是连贯的叙述——"这个板块今天发生了什么，有什么趋势"。
 
-![每日简报](img/1.3.1-bugfix/daily_report.png)
+![每日简报](img/1.3.2-narrative/daily-report.png)
 
 ### 🤔 和其他 RSS 阅读器有什么不同？
 

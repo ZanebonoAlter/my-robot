@@ -38,7 +38,7 @@ func ScanSimilarTagPairs(limit int, scopeFeedID uint, scopeCategoryID uint) ([]T
 		limit = 100
 	}
 
-	distanceThreshold := 1.0 - DefaultThresholds.HighSimilarity
+	distanceThreshold := 1.0 - MatchThreshold
 
 	type similarPair struct {
 		SourceID    uint    `gorm:"column:source_id"`

@@ -18,6 +18,7 @@ import (
 	"syntopica-backend/internal/platform/airouter"
 	"syntopica-backend/internal/platform/database"
 	"syntopica-backend/internal/platform/jsonutil"
+	"syntopica-backend/internal/platform/logging"
 )
 
 var semanticBoardLabelEmbedder auxiliaryLabelEmbedder = defaultAuxiliaryLabelEmbedder
@@ -109,9 +110,10 @@ type semanticBoardUpgradeSuggestionDTO struct {
 		ID    uint   `json:"id"`
 		Label string `json:"label"`
 	} `json:"auxiliary_labels"`
-	TargetBoardID    *uint  `json:"target_board_id,omitempty"`
-	TargetBoardLabel string `json:"target_board_label,omitempty"`
-	Reason           string `json:"reason"`
+	TargetBoardID    *uint              `json:"target_board_id,omitempty"`
+	TargetBoardLabel string             `json:"target_board_label,omitempty"`
+	Reason           string             `json:"reason"`
+	BoardAffinities  []boardAffinityDTO `json:"board_affinities"`
 }
 
 type semanticBoardUpgradeCandidateDTO struct {
@@ -121,12 +123,16 @@ type semanticBoardUpgradeCandidateDTO struct {
 	RefCount int    `json:"ref_count"`
 }
 
+type boardAffinityDTO struct {
+	BoardID            uint    `json:"board_id"`
+	BoardLabel         string  `json:"board_label"`
+	MatchingCandidates int     `json:"matching_candidates"`
+	AvgDistance         float64 `json:"avg_distance"`
+}
+
 type semanticBoardUpgradeClusterDTO struct {
-	Candidates                   []semanticBoardUpgradeCandidateDTO `json:"candidates"`
-	ExistingBoardID              *uint                              `json:"existing_board_id,omitempty"`
-	ExistingBoardLabel           string                             `json:"existing_board_label"`
-	ExistingBoardDescription     string                             `json:"existing_board_description"`
-	ExistingBoardAuxiliaryLabels []string                           `json:"existing_board_auxiliary_labels"`
+	Candidates      []semanticBoardUpgradeCandidateDTO `json:"candidates"`
+	BoardAffinities []boardAffinityDTO                 `json:"board_affinities"`
 }
 
 type airouterSemanticBoardUpgradeLLM struct{}
@@ -145,6 +151,8 @@ func RegisterSemanticBoardRoutes(rg *gin.RouterGroup) {
 		boards.POST("/upgrade-execute", handler.executeUpgrade)
 		boards.POST("/backfill", handler.enqueueBackfill)
 		boards.GET("/backfill/:id", handler.getBackfillJob)
+		boards.POST("/backfill-embeddings", handler.backfillBoardEmbeddings)
+		boards.POST("/rematch-all", handler.rematchAll)
 		boards.GET("/matching-config", handler.getMatchingConfig)
 		boards.PUT("/matching-config", handler.updateMatchingConfig)
 
@@ -169,6 +177,7 @@ func RegisterSemanticBoardRoutes(rg *gin.RouterGroup) {
 		auxiliary.GET("", handler.listAuxiliaryLabels)
 		auxiliary.GET("/clusters", handler.clusterAuxiliaryLabels)
 		auxiliary.POST("/merge-alias", handler.mergeAuxiliaryAlias)
+		auxiliary.POST("/gc", handler.gcAuxiliaryLabels)
 		auxiliary.POST("/:id/disable", handler.disableAuxiliaryLabel)
 	}
 
@@ -217,7 +226,9 @@ func (h *semanticBoardHandler) createSemanticBoard(c *gin.Context) {
 		respondError(c, http.StatusBadRequest, fmt.Errorf("label is required"))
 		return
 	}
-	pgVector, _, err := semanticBoardLabelEmbedder(c.Request.Context(), label, auxiliaryLabelEmbeddingModeStorage)
+	description := strings.TrimSpace(req.Description)
+	input := semanticBoardEmbeddingInput(label, description)
+	pgVector, _, err := semanticBoardLabelEmbedder(c.Request.Context(), input, auxiliaryLabelEmbeddingModeStorage)
 	if err != nil {
 		respondError(c, http.StatusInternalServerError, err)
 		return
@@ -231,7 +242,7 @@ func (h *semanticBoardHandler) createSemanticBoard(c *gin.Context) {
 		Slug:         uniqueSemanticLabelSlug(h.db.WithContext(c.Request.Context()), Slugify(label)),
 		Embedding:    &pgVector,
 		LabelType:    "board",
-		Description:  strings.TrimSpace(req.Description),
+		Description:  description,
 		Source:       "manual",
 		Status:       "active",
 		Protected:    protected,
@@ -249,6 +260,15 @@ func (h *semanticBoardHandler) createSemanticBoard(c *gin.Context) {
 	respondOK(c, gin.H{"id": board.ID})
 }
 
+func semanticBoardEmbeddingInput(label, description string) string {
+	label = strings.TrimSpace(label)
+	description = strings.TrimSpace(description)
+	if description != "" {
+		return label + ". " + description
+	}
+	return label
+}
+
 func (h *semanticBoardHandler) updateSemanticBoard(c *gin.Context) {
 	id, ok := parseUintParam(c, "id")
 	if !ok {
@@ -264,17 +284,24 @@ func (h *semanticBoardHandler) updateSemanticBoard(c *gin.Context) {
 		respondError(c, http.StatusNotFound, fmt.Errorf("semantic board not found"))
 		return
 	}
+	boardOrigLabel := board.Label
+	boardOrigDesc := board.Description
 	if label := strings.TrimSpace(req.Label); label != "" && label != board.Label {
-		pgVector, _, err := semanticBoardLabelEmbedder(c.Request.Context(), label, auxiliaryLabelEmbeddingModeStorage)
+		board.Label = label
+		board.Slug = uniqueSemanticLabelSlug(h.db.WithContext(c.Request.Context()).Where("id <> ?", board.ID), Slugify(label))
+	}
+	if desc := strings.TrimSpace(req.Description); desc != board.Description {
+		board.Description = desc
+	}
+	if board.Label != boardOrigLabel || board.Description != boardOrigDesc {
+		input := semanticBoardEmbeddingInput(board.Label, board.Description)
+		pgVector, _, err := semanticBoardLabelEmbedder(c.Request.Context(), input, auxiliaryLabelEmbeddingModeStorage)
 		if err != nil {
 			respondError(c, http.StatusInternalServerError, err)
 			return
 		}
-		board.Label = label
-		board.Slug = uniqueSemanticLabelSlug(h.db.WithContext(c.Request.Context()).Where("id <> ?", board.ID), Slugify(label))
 		board.Embedding = &pgVector
 	}
-	board.Description = strings.TrimSpace(req.Description)
 	if req.DisplayOrder != nil {
 		board.DisplayOrder = *req.DisplayOrder
 	}
@@ -309,11 +336,13 @@ func (h *semanticBoardHandler) deleteSemanticBoard(c *gin.Context) {
 }
 
 type boardArticleTagDTO struct {
-	ID          uint    `json:"id"`
-	Label       string  `json:"label"`
-	Category    string  `json:"category"`
-	MatchReason string  `json:"match_reason"`
-	Score       float64 `json:"score"`
+	ID                uint    `json:"id"`
+	Label             string  `json:"label"`
+	Category          string  `json:"category"`
+	MatchReason       string  `json:"match_reason"`
+	Score             float64 `json:"score"`
+	Downgraded        bool    `json:"downgraded"`
+	DirectionMismatch bool    `json:"direction_mismatch"`
 }
 
 type matchDetailConfigDTO struct {
@@ -328,6 +357,7 @@ type matchDetailConfigDTO struct {
 	WeightDensity          float64 `json:"weight_density"`
 	WeightedThreshold      float64 `json:"weighted_threshold"`
 	DirectHitMinOverlap    int     `json:"direct_hit_min_overlap"`
+	DirectionSimThreshold  float64 `json:"direction_sim_threshold"`
 }
 
 type directHitAuxiliaryDTO struct {
@@ -352,6 +382,9 @@ type matchDetailResponse struct {
 	SemanticBoardID      uint                    `json:"semantic_board_id"`
 	MatchReason          string                  `json:"match_reason"`
 	Score                float64                 `json:"score"`
+	Downgraded           bool                    `json:"downgraded"`
+	EffectiveMinHits     int                     `json:"effective_min_hits"`
+	DirectionSim         *float64                `json:"direction_sim"`
 	Config               matchDetailConfigDTO    `json:"config"`
 	DirectHitAuxiliaries []directHitAuxiliaryDTO `json:"direct_hit_auxiliaries"`
 	TagAuxiliaryCount    int                     `json:"tag_auxiliary_count"`
@@ -380,6 +413,8 @@ func (h *semanticBoardHandler) getBoardArticles(c *gin.Context) {
 	auxiliaryLabelID, _ := strconv.Atoi(c.Query("auxiliary_label_id"))
 	startDate := strings.TrimSpace(c.Query("start_date"))
 	endDate := strings.TrimSpace(c.Query("end_date"))
+	showDirectionMismatch := c.Query("show_direction_mismatch") == "true"
+	sortMode := c.DefaultQuery("sort", "quality") // "quality" | "time"
 
 	ctx := c.Request.Context()
 
@@ -449,7 +484,11 @@ func (h *semanticBoardHandler) getBoardArticles(c *gin.Context) {
 
 	// Fetch page
 	offset := (page - 1) * perPage
-	query = query.Order("articles.pub_date DESC").Offset(offset).Limit(perPage)
+	if sortMode == "time" {
+		query = query.Order("articles.pub_date DESC, articles.id DESC").Offset(offset).Limit(perPage)
+	} else {
+		query = query.Order("articles.id ASC").Offset(offset).Limit(perPage)
+	}
 
 	type articleRow struct {
 		models.Article
@@ -477,21 +516,26 @@ func (h *semanticBoardHandler) getBoardArticles(c *gin.Context) {
 	}
 
 	type filteredTagRow struct {
-		ArticleID   uint    `gorm:"column:article_id"`
-		ID          uint    `gorm:"column:id"`
-		Label       string  `gorm:"column:label"`
-		Category    string  `gorm:"column:category"`
-		MatchReason string  `gorm:"column:match_reason"`
-		Score       float64 `gorm:"column:score"`
+		ArticleID         uint    `gorm:"column:article_id"`
+		ID                uint    `gorm:"column:id"`
+		Label             string  `gorm:"column:label"`
+		Category          string  `gorm:"column:category"`
+		MatchReason       string  `gorm:"column:match_reason"`
+		Score             float64 `gorm:"column:score"`
+		Downgraded        bool    `gorm:"column:downgraded"`
+		DirectionMismatch bool    `gorm:"column:direction_mismatch"`
 	}
 	var tagRows []filteredTagRow
-	if err := h.db.WithContext(ctx).Table("article_topic_tags att").
-		Select("att.article_id, tt.id, tt.label, tt.category, tbl.match_reason, tbl.score").
+	tagQuery := h.db.WithContext(ctx).Table("article_topic_tags att").
+		Select("att.article_id, tt.id, tt.label, tt.category, tbl.match_reason, tbl.score, tbl.downgraded, tbl.direction_mismatch").
 		Joins("JOIN topic_tags tt ON tt.id = att.topic_tag_id").
 		Joins("JOIN topic_tag_board_labels tbl ON tbl.topic_tag_id = tt.id AND tbl.semantic_board_id = ?", boardID).
 		Where("att.article_id IN ?", articleIDs).
-		Where("tt.status = ?", "active").
-		Find(&tagRows).Error; err != nil {
+		Where("tt.status = ?", "active")
+	if !showDirectionMismatch {
+		tagQuery = tagQuery.Where("NOT COALESCE(tbl.direction_mismatch, false)")
+	}
+	if err := tagQuery.Find(&tagRows).Error; err != nil {
 		respondError(c, http.StatusInternalServerError, err)
 		return
 	}
@@ -500,11 +544,54 @@ func (h *semanticBoardHandler) getBoardArticles(c *gin.Context) {
 	tagMap := make(map[uint][]boardArticleTagDTO)
 	for _, tr := range tagRows {
 		tagMap[tr.ArticleID] = append(tagMap[tr.ArticleID], boardArticleTagDTO{
-			ID:          tr.ID,
-			Label:       tr.Label,
-			Category:    tr.Category,
-			MatchReason: tr.MatchReason,
-			Score:       tr.Score,
+			ID:                tr.ID,
+			Label:             tr.Label,
+			Category:          tr.Category,
+			MatchReason:       tr.MatchReason,
+			Score:             tr.Score,
+			Downgraded:        tr.Downgraded,
+			DirectionMismatch: tr.DirectionMismatch,
+		})
+	}
+
+	// Sort articles by match quality: tier ASC, score DESC, pub_date DESC
+	// (only when sort=quality; sort=time is already handled by DB query)
+	if sortMode != "time" {
+		type articleSortKey struct {
+			BestTier  int
+			BestScore float64
+		}
+		sortKeys := make(map[uint]articleSortKey)
+		for _, ft := range tagRows {
+			t := MatchTier(ft.MatchReason, ft.Downgraded)
+			existing, ok := sortKeys[ft.ArticleID]
+			if !ok || t < existing.BestTier || (t == existing.BestTier && ft.Score > existing.BestScore) {
+				sortKeys[ft.ArticleID] = articleSortKey{BestTier: t, BestScore: ft.Score}
+			}
+		}
+		sort.SliceStable(articles, func(i, j int) bool {
+			ki, oki := sortKeys[articles[i].ID]
+			kj, okj := sortKeys[articles[j].ID]
+			if !oki {
+				return false
+			}
+			if !okj {
+				return true
+			}
+			if ki.BestTier != kj.BestTier {
+				return ki.BestTier < kj.BestTier
+			}
+			if ki.BestScore != kj.BestScore {
+				return ki.BestScore > kj.BestScore
+			}
+			pdi, pdj := articles[i].PubDate, articles[j].PubDate
+			if pdi != nil && pdj != nil {
+				return pdi.After(*pdj)
+			}
+			if pdi != nil {
+				return true
+			}
+			return false
 		})
 	}
 
@@ -582,12 +669,31 @@ func (h *semanticBoardHandler) getTagMatchDetail(c *gin.Context) {
 	hitRate := detail.HitRate
 	maxSimilarity := detail.MaxSimilarity
 
+	var directionSim *float64
+	if tagEmb, _ := matcher.loadTagIdentityEmbedding(ctx, tagID); len(tagEmb) > 0 {
+		var board models.SemanticLabel
+		if err := h.db.WithContext(ctx).
+			Select("id, embedding").
+			Where("id = ? AND label_type = ?", boardID, "board").
+			First(&board).Error; err == nil && board.Embedding != nil {
+			if boardVec, parseErr := parsePgVector(*board.Embedding); parseErr == nil {
+				sim := cosineSimilarity(tagEmb, boardVec)
+				directionSim = &sim
+			}
+		}
+	}
+
+	effectiveMinHits := min(config.DirectMaxSimMinHits, len(tagAuxiliaries))
+
 	respondOK(c, matchDetailResponse{
 		TopicTagID:           tag.ID,
 		TopicTagLabel:        tag.Label,
 		SemanticBoardID:      boardID,
 		MatchReason:          stored.MatchReason,
 		Score:                stored.Score,
+		Downgraded:           stored.Downgraded,
+		EffectiveMinHits:     effectiveMinHits,
+		DirectionSim:         directionSim,
 		Config:               matchDetailConfigToDTO(config),
 		DirectHitAuxiliaries: directHits,
 		TagAuxiliaryCount:    len(tagAuxiliaries),
@@ -620,6 +726,21 @@ func buildDirectHitAuxiliaryDTOs(tagAuxiliaries []models.SemanticLabel, boardAux
 	return directHits
 }
 
+// MatchTier returns a priority tier for a given match reason and downgrade status.
+// Lower tiers indicate higher-quality matches.
+func MatchTier(matchReason string, downgraded bool) int {
+	switch {
+	case matchReason == "direct_hit":
+		return 0
+	case matchReason == "hit_rate":
+		return 1
+	case matchReason == "max_sim" && !downgraded:
+		return 2
+	default: // max_sim(downgraded) or weighted
+		return 3
+	}
+}
+
 func matchDetailPairsToDTOs(pairs []matchDetailPair) []matchDetailPairDTO {
 	dtos := make([]matchDetailPairDTO, 0, len(pairs))
 	for _, pair := range pairs {
@@ -648,6 +769,7 @@ func matchDetailConfigToDTO(config SemanticBoardMatchConfig) matchDetailConfigDT
 		WeightDensity:          config.WeightDensity,
 		WeightedThreshold:      config.WeightedThreshold,
 		DirectHitMinOverlap:    config.DirectHitMinOverlap,
+		DirectionSimThreshold:  config.DirectionSimThreshold,
 	}
 }
 
@@ -1034,6 +1156,38 @@ func (h *semanticBoardHandler) disableAuxiliaryLabel(c *gin.Context) {
 	respondOK(c, gin.H{"id": id})
 }
 
+func (h *semanticBoardHandler) gcAuxiliaryLabels(c *gin.Context) {
+	var req struct {
+		Mode      string `json:"mode" binding:"required"`
+		GraceDays int    `json:"grace_days"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "mode is required"})
+		return
+	}
+
+	mode := AuxLabelGCMode(req.Mode)
+	if mode != AuxLabelGCModeDryRun && mode != AuxLabelGCModeDisable &&
+		mode != AuxLabelGCModeDelete && mode != AuxLabelGCModeRecalculate {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"error":   "invalid mode, must be one of: dry_run, disable, delete, recalculate",
+		})
+		return
+	}
+
+	result, err := h.auxiliary.GC(c.Request.Context(), AuxLabelGCRequest{
+		Mode:      mode,
+		GraceDays: req.GraceDays,
+	})
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": result})
+}
+
 func (h *semanticBoardHandler) mergeAuxiliaryAlias(c *gin.Context) {
 	var req mergeAuxiliaryAliasRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -1048,7 +1202,7 @@ func (h *semanticBoardHandler) mergeAuxiliaryAlias(c *gin.Context) {
 }
 
 func (h *semanticBoardHandler) getUpgradeCandidates(c *gin.Context) {
-	service := NewSemanticBoardUpgradeService(h.db, nil)
+	service := NewSemanticBoardUpgradeService(h.db, nil, nil)
 	config := service.LoadUpgradeConfig(c.Request.Context())
 	candidates, err := service.collectCandidates(c.Request.Context(), config)
 	if err != nil {
@@ -1064,13 +1218,13 @@ func (h *semanticBoardHandler) getUpgradeCandidates(c *gin.Context) {
 }
 
 func (h *semanticBoardHandler) suggestUpgrades(c *gin.Context) {
-	service := NewSemanticBoardUpgradeService(h.db, semanticBoardUpgradeLLMFactory())
-	suggestions, err := service.GenerateSuggestions(c.Request.Context())
+	service := NewSemanticBoardUpgradeService(h.db, semanticBoardUpgradeLLMFactory(), nil)
+	suggestions, clusters, err := service.GenerateSuggestions(c.Request.Context())
 	if err != nil {
 		respondError(c, http.StatusBadRequest, err)
 		return
 	}
-	respondOK(c, gin.H{"suggestions": h.suggestionsToDTO(c.Request.Context(), suggestions)})
+	respondOK(c, gin.H{"suggestions": h.suggestionsToDTO(c.Request.Context(), suggestions, clusters)})
 }
 
 func (h *semanticBoardHandler) executeUpgrade(c *gin.Context) {
@@ -1079,7 +1233,7 @@ func (h *semanticBoardHandler) executeUpgrade(c *gin.Context) {
 		respondError(c, http.StatusBadRequest, fmt.Errorf("invalid request body"))
 		return
 	}
-	result, err := NewSemanticBoardUpgradeService(h.db, nil).ConfirmSuggestion(c.Request.Context(), ConfirmSemanticBoardUpgradeRequest(req))
+	result, err := NewSemanticBoardUpgradeService(h.db, nil, semanticBoardLabelEmbedder).ConfirmSuggestion(c.Request.Context(), ConfirmSemanticBoardUpgradeRequest(req))
 	if err != nil {
 		respondError(c, http.StatusBadRequest, err)
 		return
@@ -1109,6 +1263,55 @@ func (h *semanticBoardHandler) getBackfillJob(c *gin.Context) {
 		return
 	}
 	respondOK(c, job)
+}
+
+func (h *semanticBoardHandler) backfillBoardEmbeddings(c *gin.Context) {
+	ctx := c.Request.Context()
+	var boards []models.SemanticLabel
+	if err := h.db.WithContext(ctx).
+		Where("label_type = ? AND embedding IS NULL", "board").
+		Find(&boards).Error; err != nil {
+		respondError(c, http.StatusInternalServerError, err)
+		return
+	}
+	count := 0
+	for _, board := range boards {
+		input := semanticBoardEmbeddingInput(board.Label, board.Description)
+		pgVector, _, err := semanticBoardLabelEmbedder(ctx, input, auxiliaryLabelEmbeddingModeStorage)
+		if err != nil {
+			logging.Warnf("[backfill-embeddings] failed for board %d (%s): %v", board.ID, board.Label, err)
+			continue
+		}
+		if err := h.db.WithContext(ctx).Model(&models.SemanticLabel{}).Where("id = ?", board.ID).Update("embedding", pgVector).Error; err != nil {
+			logging.Warnf("[backfill-embeddings] db update failed for board %d: %v", board.ID, err)
+			continue
+		}
+		count++
+	}
+	respondOK(c, gin.H{"backfilled": count, "total": len(boards)})
+}
+
+func (h *semanticBoardHandler) rematchAll(c *gin.Context) {
+	ctx := c.Request.Context()
+	var tagIDs []uint
+	if err := h.db.WithContext(ctx).
+		Model(&models.TopicTagBoardLabel{}).
+		Distinct("topic_tag_id").
+		Pluck("topic_tag_id", &tagIDs).Error; err != nil {
+		respondError(c, http.StatusInternalServerError, err)
+		return
+	}
+	matcher := NewSemanticBoardMatchingService(h.db)
+	success, failed := 0, 0
+	for _, tid := range tagIDs {
+		if _, err := matcher.MatchTopicTag(ctx, tid); err != nil {
+			logging.Warnf("[rematch-all] failed for tag %d: %v", tid, err)
+			failed++
+			continue
+		}
+		success++
+	}
+	respondOK(c, gin.H{"success": success, "failed": failed, "total": len(tagIDs)})
 }
 
 func (h *semanticBoardHandler) getMatchingConfig(c *gin.Context) {
@@ -1247,7 +1450,7 @@ func (airouterSemanticBoardUpgradeLLM) SuggestSemanticBoardUpgrades(ctx context.
 	result, err := airouter.NewRouter().Chat(ctx, airouter.ChatRequest{
 		Capability: airouter.CapabilityTopicTagging,
 		Messages: []airouter.Message{
-			{Role: "system", Content: "Return JSON only in this shape: {\"suggestions\":[{\"decision\":\"create_new|merge_into_existing|skip\",\"board_label\":\"\",\"description\":\"\",\"auxiliary_label_ids\":[1],\"target_board_id\":1,\"reason\":\"\"}]}"},
+			{Role: "system", Content: "Return JSON only in this shape: {\"suggestions\":[{\"decision\":\"create_new|skip\",\"board_label\":\"\",\"description\":\"\",\"auxiliary_label_ids\":[1],\"reason\":\"\"}]}"},
 			{Role: "user", Content: prompt},
 		},
 		JSONMode: true,
@@ -1262,16 +1465,21 @@ func (airouterSemanticBoardUpgradeLLM) SuggestSemanticBoardUpgrades(ctx context.
 			BoardLabel        string                       `json:"board_label"`
 			Description       string                       `json:"description"`
 			AuxiliaryLabelIDs []uint                       `json:"auxiliary_label_ids"`
-			TargetBoardID     *uint                        `json:"target_board_id"`
 			Reason            string                       `json:"reason"`
 		} `json:"suggestions"`
 	}
-	if err := json.Unmarshal([]byte(jsonutil.SanitizeLLMJSON(result.Content)), &parsed); err != nil {
+	sanitized := jsonutil.SanitizeLLMJSON(result.Content)
+	if err := json.Unmarshal([]byte(sanitized), &parsed); err != nil {
+		rawPreview := sanitized
+		if len(rawPreview) > 500 {
+			rawPreview = rawPreview[:500] + "..."
+		}
+		logging.Warnf("[semantic-board-upgrade] LLM JSON parse failed: %v, raw=%d sanitized=%d preview=%s", err, len(result.Content), len(sanitized), rawPreview)
 		return nil, err
 	}
 	suggestions := make([]SemanticBoardUpgradeSuggestion, 0, len(parsed.Suggestions))
 	for _, raw := range parsed.Suggestions {
-		suggestions = append(suggestions, SemanticBoardUpgradeSuggestion{Decision: raw.Decision, BoardLabel: raw.BoardLabel, Description: raw.Description, AuxiliaryLabelIDs: raw.AuxiliaryLabelIDs, TargetBoardID: raw.TargetBoardID, Reason: raw.Reason})
+		suggestions = append(suggestions, SemanticBoardUpgradeSuggestion{Decision: raw.Decision, BoardLabel: raw.BoardLabel, Description: raw.Description, AuxiliaryLabelIDs: raw.AuxiliaryLabelIDs, Reason: raw.Reason})
 	}
 	return suggestions, nil
 }
@@ -1314,12 +1522,19 @@ func upgradeCandidatesToDTO(candidates []SemanticBoardUpgradeCandidate) []semant
 func upgradeClustersToDTO(clusters []SemanticBoardUpgradeCluster) []semanticBoardUpgradeClusterDTO {
 	items := make([]semanticBoardUpgradeClusterDTO, 0, len(clusters))
 	for _, cluster := range clusters {
-		items = append(items, semanticBoardUpgradeClusterDTO{Candidates: upgradeCandidatesToDTO(cluster.Candidates), ExistingBoardID: cluster.ExistingBoardID, ExistingBoardLabel: cluster.ExistingBoardLabel, ExistingBoardDescription: cluster.ExistingBoardDescription, ExistingBoardAuxiliaryLabels: cluster.ExistingBoardAuxiliaryLabels})
+		affDTOs := make([]boardAffinityDTO, 0, len(cluster.BoardAffinities))
+		for _, aff := range cluster.BoardAffinities {
+			affDTOs = append(affDTOs, boardAffinityDTO(aff))
+		}
+		items = append(items, semanticBoardUpgradeClusterDTO{
+			Candidates:      upgradeCandidatesToDTO(cluster.Candidates),
+			BoardAffinities: affDTOs,
+		})
 	}
 	return items
 }
 
-func (h *semanticBoardHandler) suggestionsToDTO(ctx context.Context, suggestions []SemanticBoardUpgradeSuggestion) []semanticBoardUpgradeSuggestionDTO {
+func (h *semanticBoardHandler) suggestionsToDTO(ctx context.Context, suggestions []SemanticBoardUpgradeSuggestion, clusters []SemanticBoardUpgradeCluster) []semanticBoardUpgradeSuggestionDTO {
 	// Collect unique IDs for batch lookup
 	labelIDSet := make(map[uint]struct{})
 	boardIDSet := make(map[uint]struct{})
@@ -1362,6 +1577,14 @@ func (h *semanticBoardHandler) suggestionsToDTO(ctx context.Context, suggestions
 		}
 	}
 
+	// Build candidate ID → cluster index map for board_affinities lookup
+	candidateToCluster := make(map[uint]int)
+	for i, cluster := range clusters {
+		for _, c := range cluster.Candidates {
+			candidateToCluster[c.ID] = i
+		}
+	}
+
 	items := make([]semanticBoardUpgradeSuggestionDTO, 0, len(suggestions))
 	for _, s := range suggestions {
 		dto := semanticBoardUpgradeSuggestionDTO{
@@ -1383,6 +1606,16 @@ func (h *semanticBoardHandler) suggestionsToDTO(ctx context.Context, suggestions
 				dto.TargetBoardLabel = name
 			}
 		}
+		// Embed board_affinities from matching cluster
+		if len(s.AuxiliaryLabelIDs) > 0 {
+			if clusterIdx, ok := candidateToCluster[s.AuxiliaryLabelIDs[0]]; ok {
+				bas := clusters[clusterIdx].BoardAffinities
+				dto.BoardAffinities = make([]boardAffinityDTO, 0, len(bas))
+				for _, ba := range bas {
+					dto.BoardAffinities = append(dto.BoardAffinities, boardAffinityDTO(ba))
+				}
+			}
+		}
 		items = append(items, dto)
 	}
 	return items
@@ -1401,7 +1634,8 @@ func semanticBoardMatchConfigToMap(config SemanticBoardMatchConfig) gin.H {
 		"semantic_board_match_weight_density":              config.WeightDensity,
 		"semantic_board_match_weighted_threshold":          config.WeightedThreshold,
 		"semantic_board_match_max_boards":                  config.MaxBoards,
-		"semantic_board_match_direct_hit_min_overlap":       config.DirectHitMinOverlap,
+		"semantic_board_match_direct_hit_min_overlap":      config.DirectHitMinOverlap,
+		"semantic_board_match_direction_sim_threshold":     config.DirectionSimThreshold,
 	}
 }
 
@@ -1413,12 +1647,13 @@ func semanticBoardUpgradeConfigToMap(config SemanticBoardUpgradeConfig) gin.H {
 		"semantic_board_upgrade_cotag_top_n":                config.CoTagTopN,
 		"semantic_board_upgrade_cotag_dedupe_sim_threshold": config.CoTagDedupeSimThreshold,
 		"semantic_board_upgrade_cotag_hard_limit":           config.CoTagHardLimit,
+		"semantic_board_upgrade_cluster_method":             config.ClusterMethod,
 	}
 }
 
 func (h *semanticBoardHandler) getAllConfigs(c *gin.Context) gin.H {
 	matchConfig := semanticBoardMatchConfigToMap(NewSemanticBoardMatchingService(h.db).loadConfig(c.Request.Context()))
-	upgradeConfig := semanticBoardUpgradeConfigToMap(NewSemanticBoardUpgradeService(h.db, nil).LoadUpgradeConfig(c.Request.Context()))
+	upgradeConfig := semanticBoardUpgradeConfigToMap(NewSemanticBoardUpgradeService(h.db, nil, nil).LoadUpgradeConfig(c.Request.Context()))
 	merged := make(gin.H, len(matchConfig)+len(upgradeConfig))
 	for k, v := range matchConfig {
 		merged[k] = v
@@ -1431,8 +1666,8 @@ func (h *semanticBoardHandler) getAllConfigs(c *gin.Context) gin.H {
 
 func isSemanticBoardConfigKey(key string) bool {
 	switch key {
-	case "semantic_board_match_sim_threshold", "semantic_board_match_direct_hit_rate", "semantic_board_match_direct_max_sim", "semantic_board_match_direct_max_sim_min_hits", "semantic_board_match_direct_max_sim_min_hit_rate", "semantic_board_match_min_effective_sample", "semantic_board_match_hit_rate_sim_blend", "semantic_board_match_weight_sim", "semantic_board_match_weight_density", "semantic_board_match_weighted_threshold", "semantic_board_match_max_boards", "semantic_board_match_direct_hit_min_overlap",
-		"semantic_board_upgrade_ref_count_threshold", "semantic_board_upgrade_cluster_distance_threshold", "semantic_board_upgrade_cotag_window_days", "semantic_board_upgrade_cotag_top_n", "semantic_board_upgrade_cotag_dedupe_sim_threshold", "semantic_board_upgrade_cotag_hard_limit":
+	case "semantic_board_match_sim_threshold", "semantic_board_match_direct_hit_rate", "semantic_board_match_direct_max_sim", "semantic_board_match_direct_max_sim_min_hits", "semantic_board_match_direct_max_sim_min_hit_rate", "semantic_board_match_min_effective_sample", "semantic_board_match_hit_rate_sim_blend", "semantic_board_match_weight_sim", "semantic_board_match_weight_density", "semantic_board_match_weighted_threshold", "semantic_board_match_max_boards", "semantic_board_match_direct_hit_min_overlap", "semantic_board_match_direction_sim_threshold",
+		"semantic_board_upgrade_ref_count_threshold", "semantic_board_upgrade_cluster_distance_threshold", "semantic_board_upgrade_cotag_window_days", "semantic_board_upgrade_cotag_top_n", "semantic_board_upgrade_cotag_dedupe_sim_threshold", "semantic_board_upgrade_cotag_hard_limit", "semantic_board_upgrade_cluster_method":
 		return true
 	default:
 		return false
@@ -1445,6 +1680,11 @@ func validateSemanticBoardConfigValue(key string, value string) error {
 		parsed, err := strconv.Atoi(value)
 		if err != nil || parsed <= 0 {
 			return fmt.Errorf("%s must be a positive integer", key)
+		}
+		return nil
+	case "semantic_board_upgrade_cluster_method":
+		if value != "average_link" && value != "centroid" {
+			return fmt.Errorf("%s must be 'average_link' or 'centroid'", key)
 		}
 		return nil
 	default:

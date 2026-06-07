@@ -120,7 +120,6 @@ type TopicTagEmbedding struct {
 	ID            uint      `gorm:"primaryKey" json:"id"`
 	TopicTagID    uint      `gorm:"not null;uniqueIndex:idx_topic_tag_embeddings_tag_type_hash" json:"topic_tag_id"`
 	EmbeddingType string    `gorm:"size:20;not null;default:identity;uniqueIndex:idx_topic_tag_embeddings_tag_type_hash" json:"embedding_type"`
-	Vector        string    `gorm:"type:text;not null" json:"vector"` // Deprecated: legacy JSON text payload. Use EmbeddingVec for pgvector.
 	EmbeddingVec  string    `gorm:"type:vector;column:embedding" json:"-"`
 	Dimension     int       `gorm:"not null" json:"dimension"`                                                   // Vector dimension (e.g., 2048 for text-embedding-3-large)
 	Model         string    `gorm:"size:50;not null" json:"model"`                                               // Model used: "text-embedding-ada-002"
@@ -134,6 +133,22 @@ type TopicTagEmbedding struct {
 // TableName specifies the table name for TopicTagEmbedding
 func (TopicTagEmbedding) TableName() string {
 	return "topic_tag_embeddings"
+}
+
+// TagMergeSuggestion records a pair of similar tags proposed for manual merging.
+type TagMergeSuggestion struct {
+	ID            uint      `gorm:"primaryKey" json:"id"`
+	NewTagID      uint      `gorm:"not null;uniqueIndex:idx_tag_merge_suggestion_pair" json:"new_tag_id"`
+	ExistingTagID uint      `gorm:"not null;uniqueIndex:idx_tag_merge_suggestion_pair" json:"existing_tag_id"`
+	NewLabel      string    `gorm:"size:160;not null" json:"new_label"`
+	ExistingLabel string    `gorm:"size:160;not null" json:"existing_label"`
+	Category      string    `gorm:"size:20;not null" json:"category"`
+	Similarity    float64   `gorm:"not null;index:idx_tag_merge_suggestion_status_sim" json:"similarity"`
+	Status        string    `gorm:"size:20;not null;default:pending;index:idx_tag_merge_suggestion_status_sim" json:"status"` // pending, merged, dismissed
+	Source        string    `gorm:"size:20;not null;default:incremental" json:"source"`                                       // incremental, full_scan
+	LLMVerdict    string    `gorm:"type:text" json:"llm_verdict"`
+	CreatedAt     time.Time `json:"created_at"`
+	UpdatedAt     time.Time `json:"updated_at"`
 }
 
 // ArticleTopicTag represents the many-to-many relationship between articles and tags

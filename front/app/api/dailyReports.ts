@@ -8,13 +8,35 @@ export interface DailyReportHighlight {
 }
 
 export interface DailyReportThread {
+  id: number
+  report_id: number
+  section_id: number
   title: string
   summary: string
-  status: string
-  related_tag_ids: number[]
+  tag_ids: number[]
+  confidence: number
   related_article_ids: number[]
-  parent_thread_id: string
+  created_at: string
 }
+
+export interface SectionTimelineNode {
+  id: number
+  report_id: number
+  period_date: string
+  cluster_label: string
+  status: string  // emerging / continuing / split / merge / ending (dynamically derived)
+  article_count: number
+  thread_count: number
+}
+
+export interface SectionRelation {
+  from_id: number
+  to_id: number
+  distance: number
+}
+
+// SectionLifecycleNode has the same shape as SectionTimelineNode
+export type SectionLifecycleNode = SectionTimelineNode
 
 export interface DailyReportSection {
   id: number
@@ -23,6 +45,8 @@ export interface DailyReportSection {
   cluster_tag_ids: number[]
   threads: DailyReportThread[]
   article_count: number
+  best_tier: number
+  avg_score: number
 }
 
 export interface DailyReport {
@@ -68,9 +92,20 @@ export function useDailyReportsApi() {
     return apiClient.get(`/daily-reports/${id}`)
   }
 
+  async function getBoardSectionTimeline(boardId: number, days?: number): Promise<ApiResponse<{ sections: SectionTimelineNode[], relations: SectionRelation[] }>> {
+    const query = days ? `?days=${days}` : ''
+    return apiClient.get(`/semantic-boards/${boardId}/section-timeline${query}`)
+  }
+
+  async function getSectionLifecycle(sectionId: number): Promise<ApiResponse<{ sections: SectionLifecycleNode[], relations: SectionRelation[] }>> {
+    return apiClient.get(`/daily-reports/sections/${sectionId}/lifecycle`)
+  }
+
   return {
     generateDailyReport,
     getBoardDailyReports,
     getDailyReportDetail,
+    getBoardSectionTimeline,
+    getSectionLifecycle,
   }
 }

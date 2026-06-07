@@ -29,3 +29,8 @@ front/node_modules/
 .code-review-graph/
 # Log files
 logs/
+.codegraph/.gitignore
+# Added by code-review-graph
+.code-review-graph/
+# Log files
+logs/

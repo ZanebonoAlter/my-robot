@@ -284,7 +284,7 @@ func (s *EmbeddingQueueService) processNext() {
 
 	// Generate and save embedding
 	ctx := context.Background()
-	identityEmb, err := s.embedding.GenerateEmbedding(ctx, &tag, EmbeddingTypeIdentity)
+	identityEmb, _, err := s.embedding.GenerateEmbedding(ctx, &tag, EmbeddingTypeIdentity)
 	if err != nil {
 		s.markFailed(task.ID, "failed to generate identity embedding: "+err.Error())
 		return
@@ -295,7 +295,7 @@ func (s *EmbeddingQueueService) processNext() {
 		return
 	}
 
-	semanticEmb, semErr := s.embedding.GenerateEmbedding(ctx, &tag, EmbeddingTypeSemantic)
+	semanticEmb, _, semErr := s.embedding.GenerateEmbedding(ctx, &tag, EmbeddingTypeSemantic)
 	if semErr != nil {
 		s.markFailed(task.ID, "failed to generate semantic embedding: "+semErr.Error())
 		return
@@ -311,7 +311,7 @@ func (s *EmbeddingQueueService) processNext() {
 
 		keywords := getEventKeywords(&tag)
 		for _, kw := range keywords {
-			kwEmb, kwErr := s.embedding.GenerateEmbeddingForText(ctx, tag.ID, EmbeddingTypeEventKeyword, kw)
+			kwEmb, _, kwErr := s.embedding.GenerateEmbeddingForText(ctx, tag.ID, EmbeddingTypeEventKeyword, kw)
 			if kwErr != nil {
 				s.logger.Warn("failed to generate keyword embedding", zap.Uint("tag_id", tag.ID), zap.String("keyword", kw), zap.Error(kwErr))
 				continue
@@ -322,6 +322,15 @@ func (s *EmbeddingQueueService) processNext() {
 			}
 		}
 		s.logger.Info("event keyword embeddings generated", zap.Uint("tag_id", tag.ID), zap.Int("keyword_count", len(keywords)))
+	}
+
+	// Auto-trigger board matching for event tags after embedding completion
+	if tag.Category == "event" {
+		if matcher := getSemanticBoardMatchingService(); matcher != nil {
+			if _, matchErr := matcher.MatchTopicTag(ctx, tag.ID); matchErr != nil {
+				s.logger.Warn("auto board match failed", zap.Uint("tag_id", tag.ID), zap.Error(matchErr))
+			}
+		}
 	}
 
 	// Mark completed

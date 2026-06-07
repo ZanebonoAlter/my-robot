@@ -288,7 +288,6 @@ func TestEmbeddingDimensionMismatch2560(t *testing.T) {
 func TestGenerateEmbeddingBuildsCorrectDimension(t *testing.T) {
 	emb := &models.TopicTagEmbedding{
 		TopicTagID:   1,
-		Vector:       "[0.1,0.2,0.3]",
 		EmbeddingVec: "[0.100000,0.200000,0.300000]",
 		Dimension:    2560,
 		Model:        "qwen3-embedding:4b",
@@ -330,7 +329,6 @@ func TestSaveEmbeddingReturnsTagNotFoundWhenParentDeleted(t *testing.T) {
 	err := service.SaveEmbedding(&models.TopicTagEmbedding{
 		TopicTagID:    tag.ID,
 		EmbeddingType: EmbeddingTypeIdentity,
-		Vector:        "[0.1,0.2]",
 		Model:         "test-model",
 		TextHash:      "abc123",
 	})
@@ -350,74 +348,9 @@ func TestSaveEmbeddingReturnsTagNotFoundWhenParentDeleted(t *testing.T) {
 	}
 }
 
-func TestThresholdsForCategory(t *testing.T) {
-	tests := []struct {
-		name        string
-		category    string
-		wantHighSim float64
-		wantLowSim  float64
-	}{
-		{
-			name:        "keyword uses override high=0.90",
-			category:    "keyword",
-			wantHighSim: 0.90,
-			wantLowSim:  0.78,
-		},
-		{
-			name:        "event falls back to default",
-			category:    "event",
-			wantHighSim: 0.97,
-			wantLowSim:  0.78,
-		},
-		{
-			name:        "person falls back to default",
-			category:    "person",
-			wantHighSim: 0.97,
-			wantLowSim:  0.78,
-		},
-		{
-			name:        "unknown category falls back to default",
-			category:    "organization",
-			wantHighSim: 0.97,
-			wantLowSim:  0.78,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := ThresholdsForCategory(tt.category)
-			if got.HighSimilarity != tt.wantHighSim {
-				t.Errorf("HighSimilarity = %.2f, want %.2f", got.HighSimilarity, tt.wantHighSim)
-			}
-			if got.LowSimilarity != tt.wantLowSim {
-				t.Errorf("LowSimilarity = %.2f, want %.2f", got.LowSimilarity, tt.wantLowSim)
-			}
-		})
-	}
-}
-
-func TestThresholdsForCategoryOverrideIsolation(t *testing.T) {
-	original := CategoryThresholdOverrides["keyword"]
-	defer func() {
-		CategoryThresholdOverrides["keyword"] = original
-	}()
-
-	CategoryThresholdOverrides["keyword"] = EmbeddingMatchThresholds{
-		HighSimilarity: 0.85,
-		LowSimilarity:  0.70,
-	}
-
-	got := ThresholdsForCategory("keyword")
-	if got.HighSimilarity != 0.85 {
-		t.Errorf("HighSimilarity = %.2f, want 0.85", got.HighSimilarity)
-	}
-	if got.LowSimilarity != 0.70 {
-		t.Errorf("LowSimilarity = %.2f, want 0.70", got.LowSimilarity)
-	}
-
-	eventGot := ThresholdsForCategory("event")
-	if eventGot.HighSimilarity != 0.97 {
-		t.Errorf("event HighSimilarity should be unaffected, got %.2f", eventGot.HighSimilarity)
+func TestMatchThreshold(t *testing.T) {
+	if MatchThreshold != 0.92 {
+		t.Errorf("MatchThreshold = %.2f, want 0.92", MatchThreshold)
 	}
 }
 
@@ -472,6 +405,65 @@ func TestGetEventKeywords(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestSaveEmbeddingCleansUpStaleRecords(t *testing.T) {
+	db := setupEmbeddingTestDB(t)
+	service := NewEmbeddingService()
+
+	tag := models.TopicTag{
+		Slug:     "test-tag",
+		Label:    "Test Tag",
+		Category: models.TagCategoryKeyword,
+		Status:   "active",
+	}
+	if err := db.Create(&tag).Error; err != nil {
+		t.Fatalf("create tag: %v", err)
+	}
+
+	// Create 3 stale embeddings with different text hashes for the same tag+type
+	for i, hash := range []string{"stale-hash-1", "stale-hash-2", "stale-hash-3"} {
+		if err := db.Create(&models.TopicTagEmbedding{
+			TopicTagID:    tag.ID,
+			EmbeddingType: EmbeddingTypeIdentity,
+			Model:         "test-model",
+			TextHash:      hash,
+		}).Error; err != nil {
+			t.Fatalf("create stale embedding %d: %v", i, err)
+		}
+	}
+
+	var count int64
+	db.Model(&models.TopicTagEmbedding{}).Where("topic_tag_id = ? AND embedding_type = ?", tag.ID, EmbeddingTypeIdentity).Count(&count)
+	if count != 3 {
+		t.Fatalf("stale embedding count = %d, want 3 before cleanup", count)
+	}
+
+	// Save a new embedding with a different text hash
+	newHash := "fresh-hash"
+	if err := service.SaveEmbedding(&models.TopicTagEmbedding{
+		TopicTagID:    tag.ID,
+		EmbeddingType: EmbeddingTypeIdentity,
+		Model:         "test-model",
+		TextHash:      newHash,
+	}); err != nil {
+		t.Fatalf("SaveEmbedding: %v", err)
+	}
+
+	// Verify only 1 record remains
+	db.Model(&models.TopicTagEmbedding{}).Where("topic_tag_id = ? AND embedding_type = ?", tag.ID, EmbeddingTypeIdentity).Count(&count)
+	if count != 1 {
+		t.Fatalf("embedding count after cleanup = %d, want 1", count)
+	}
+
+	// Verify the remaining record has the new text hash
+	var remaining models.TopicTagEmbedding
+	if err := db.Where("topic_tag_id = ? AND embedding_type = ?", tag.ID, EmbeddingTypeIdentity).First(&remaining).Error; err != nil {
+		t.Fatalf("find remaining embedding: %v", err)
+	}
+	if remaining.TextHash != newHash {
+		t.Fatalf("remaining text_hash = %q, want %q", remaining.TextHash, newHash)
 	}
 }
 

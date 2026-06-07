@@ -27,6 +27,18 @@ func RegisterDailyReportRoutes(api *gin.RouterGroup) {
 
 	// GET /api/semantic-boards/:id/daily-reports
 	api.GET("/semantic-boards/:id/daily-reports", listBoardDailyReports)
+
+	// GET /api/semantic-boards/:id/section-timeline
+	api.GET("/semantic-boards/:id/section-timeline", getBoardSectionTimeline)
+
+	// GET /api/daily-reports/sections/:id/lifecycle
+	api.GET("/daily-reports/sections/:id/lifecycle", getSectionLifecycle)
+
+	// POST /api/daily-reports/backfill-embeddings
+	api.POST("/daily-reports/backfill-embeddings", triggerBackfillEmbeddings)
+
+	// POST /api/daily-reports/backfill-relations
+	api.POST("/daily-reports/backfill-relations", triggerBackfillRelations)
 }
 
 // triggerGenerateDailyReport handles POST /api/daily-reports/generate
@@ -78,7 +90,7 @@ func generateSingleBoard(boardID uint, date time.Time, jobID string) {
 	boardName := dailyReportBoardName(boardID)
 	broadcastProgress(jobID, "generating", boardID, boardName, 0, "0/1")
 
-	report, sections, err := GenerateDailyReport(ctx, boardID, date)
+	report, sections, threadBatches, err := GenerateDailyReport(ctx, boardID, date)
 	if err != nil {
 		logging.Errorf("daily-report: generate failed for board %d: %v", boardID, err)
 		broadcastProgress(jobID, "failed", boardID, boardName, 0, "1/1")
@@ -91,7 +103,7 @@ func generateSingleBoard(boardID uint, date time.Time, jobID string) {
 		return
 	}
 
-	if err := SaveReport(report, sections); err != nil {
+	if err := SaveReport(report, sections, threadBatches); err != nil {
 		logging.Errorf("daily-report: save failed for board %d: %v", boardID, err)
 		broadcastProgress(jobID, "failed", boardID, boardName, 0, "1/1")
 		broadcastDone(jobID, 0, 1)
@@ -125,7 +137,7 @@ func generateAllBoards(date time.Time, jobID string) {
 		boardName := dailyReportBoardName(boardID)
 		broadcastProgress(jobID, "generating", boardID, boardName, savedCount, fmt.Sprintf("%d/%d", idx, totalBoards))
 
-		report, sections, genErr := GenerateDailyReport(ctx, boardID, date)
+		report, sections, threadBatches, genErr := GenerateDailyReport(ctx, boardID, date)
 		if genErr != nil {
 			logging.Warnf("daily-report: generate failed for board %d: %v", boardID, genErr)
 			broadcastProgress(jobID, "failed", boardID, boardName, savedCount, fmt.Sprintf("%d/%d", idx+1, totalBoards))
@@ -136,7 +148,7 @@ func generateAllBoards(date time.Time, jobID string) {
 			continue
 		}
 
-		if saveErr := SaveReport(report, sections); saveErr != nil {
+		if saveErr := SaveReport(report, sections, threadBatches); saveErr != nil {
 			logging.Warnf("daily-report: save failed for board %d: %v", boardID, saveErr)
 			broadcastProgress(jobID, "failed", boardID, boardName, savedCount, fmt.Sprintf("%d/%d", idx+1, totalBoards))
 			continue
@@ -192,6 +204,59 @@ func getDailyReport(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"success": true, "data": gin.H{"report": report}})
 }
 
+// getBoardSectionTimeline handles GET /api/semantic-boards/:id/section-timeline
+func getBoardSectionTimeline(c *gin.Context) {
+	boardID, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "invalid board id"})
+		return
+	}
+	days, _ := strconv.Atoi(c.DefaultQuery("days", "14"))
+
+	resp, err := GetBoardSectionTimeline(uint(boardID), days)
+	if err != nil {
+		logging.Errorf("get board section timeline: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "failed to get section timeline"})
+		return
+	}
+	if resp.Sections == nil {
+		resp.Sections = []SectionTimelineNode{}
+	}
+	if resp.Relations == nil {
+		resp.Relations = []SectionRelationResult{}
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": gin.H{
+		"sections":  resp.Sections,
+		"relations": resp.Relations,
+	}})
+}
+
+// getSectionLifecycle handles GET /api/daily-reports/sections/:id/lifecycle
+func getSectionLifecycle(c *gin.Context) {
+	sectionID, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "invalid section id"})
+		return
+	}
+
+	resp, err := GetSectionLifecycle(uint(sectionID))
+	if err != nil {
+		logging.Errorf("get section lifecycle: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "failed to get section lifecycle"})
+		return
+	}
+	if resp.Sections == nil {
+		resp.Sections = []SectionTimelineNode{}
+	}
+	if resp.Relations == nil {
+		resp.Relations = []SectionRelationResult{}
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": gin.H{
+		"sections":  resp.Sections,
+		"relations": resp.Relations,
+	}})
+}
+
 // broadcastProgress sends a WebSocket progress message.
 func broadcastProgress(jobID string, status string, boardID uint, boardName string, saved int, progress string) {
 	msg := buildProgressMessage(jobID, status, boardID, boardName, saved, progress)
@@ -226,6 +291,66 @@ func buildDoneMessage(jobID string, totalSaved int, totalBoards int) map[string]
 		"total_boards": totalBoards,
 		"timestamp":    time.Now().Format(time.RFC3339),
 	}
+}
+
+// triggerBackfillEmbeddings handles POST /api/daily-reports/backfill-embeddings
+func triggerBackfillEmbeddings(c *gin.Context) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+	defer cancel()
+
+	go func() {
+		embedded, matched, err := BackfillSectionEmbeddings(ctx)
+		if err != nil {
+			logging.Errorf("daily-report: backfill failed: %v", err)
+			return
+		}
+		logging.Infof("daily-report: backfill complete: %d sections embedded, %d sections matched", embedded, matched)
+	}()
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data": gin.H{
+			"status": "processing",
+		},
+	})
+}
+
+// triggerBackfillRelations handles POST /api/daily-reports/backfill-relations
+func triggerBackfillRelations(c *gin.Context) {
+	boardIDStr := c.Query("board_id")
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+	defer cancel()
+
+	if boardIDStr != "" {
+		boardID, err := strconv.ParseUint(boardIDStr, 10, 32)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid board_id"})
+			return
+		}
+		go func() {
+			<-ctx.Done() // wait for response to be sent
+			rebuilt, err := BackfillRelations(uint(boardID))
+			if err != nil {
+				logging.Errorf("daily-report: backfill relations for board %d failed: %v", boardID, err)
+				return
+			}
+			logging.Infof("daily-report: backfill relations for board %d complete: %d relations rebuilt", boardID, rebuilt)
+		}()
+	} else {
+		go func() {
+			<-ctx.Done()
+			results, err := BackfillAllRelations()
+			if err != nil {
+				logging.Errorf("daily-report: backfill all relations failed: %v", err)
+				return
+			}
+			for bid, cnt := range results {
+				logging.Infof("daily-report: board %d: %d relations rebuilt", bid, cnt)
+			}
+		}()
+	}
+
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": gin.H{"status": "processing"}})
 }
 
 func dailyReportBoardName(boardID uint) string {

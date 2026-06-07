@@ -29,40 +29,9 @@ var (
 	ErrTopicTagNotFound    = errors.New("topic tag not found")
 )
 
-// EmbeddingMatchThresholds defines similarity thresholds for tag matching
-type EmbeddingMatchThresholds struct {
-	// High similarity - auto-reuse existing tag
-	HighSimilarity float64
-	// Low similarity - auto-create new tag
-	LowSimilarity float64
-	// Middle band - requires AI judgment
-	// Tags with similarity between LowSimilarity and HighSimilarity need AI decision
-}
-
-// DefaultThresholds provides sensible defaults for matching
-var DefaultThresholds = EmbeddingMatchThresholds{
-	HighSimilarity: 0.97, // Auto-reuse if similarity >= 0.97
-	LowSimilarity:  0.78, // Auto-create if similarity < 0.78
-}
-
-// CategoryThresholdOverrides defines per-category threshold adjustments.
-// Keys are category names; the corresponding HighSimilarity overrides the default
-// when TagMatch processes a tag of that category.
-var CategoryThresholdOverrides = map[string]EmbeddingMatchThresholds{
-	"keyword": {
-		HighSimilarity: 0.90,
-		LowSimilarity:  0.78,
-	},
-}
-
-// ThresholdsForCategory returns the effective thresholds for a given category,
-// falling back to DefaultThresholds when no override is configured.
-func ThresholdsForCategory(category string) EmbeddingMatchThresholds {
-	if override, ok := CategoryThresholdOverrides[category]; ok {
-		return override
-	}
-	return DefaultThresholds
-}
+// MatchThreshold is the minimum cosine similarity for a tag pair to be
+// considered a merge candidate. Pairs below this threshold are ignored.
+var MatchThreshold = 0.92
 
 // TagMatchResult represents a tag match result
 type TagMatchResult struct {
@@ -81,39 +50,18 @@ type TagCandidate struct {
 
 // EmbeddingService handles embedding generation and similarity matching
 type EmbeddingService struct {
-	router     *airouter.Router
-	thresholds EmbeddingMatchThresholds
+	router *airouter.Router
 }
 
 // NewEmbeddingService creates a new embedding service
 func NewEmbeddingService() *EmbeddingService {
-	thresholds := DefaultThresholds
-	configService := NewEmbeddingConfigService()
-	if loaded, err := configService.LoadThresholds(); err == nil {
-		thresholds = loaded
-	}
-
 	return &EmbeddingService{
-		router:     airouter.NewRouter(),
-		thresholds: thresholds,
+		router: airouter.NewRouter(),
 	}
-}
-
-// NewEmbeddingServiceWithThresholds creates a service with custom thresholds
-func NewEmbeddingServiceWithThresholds(thresholds EmbeddingMatchThresholds) *EmbeddingService {
-	return &EmbeddingService{
-		router:     airouter.NewRouter(),
-		thresholds: thresholds,
-	}
-}
-
-// GetThresholds returns the configured match thresholds for this service.
-func (s *EmbeddingService) GetThresholds() EmbeddingMatchThresholds {
-	return s.thresholds
 }
 
 // GenerateEmbedding generates an embedding for a tag's text representation
-func (s *EmbeddingService) GenerateEmbedding(ctx context.Context, tag *models.TopicTag, embeddingType string, opts ...EmbeddingTextOptions) (*models.TopicTagEmbedding, error) {
+func (s *EmbeddingService) GenerateEmbedding(ctx context.Context, tag *models.TopicTag, embeddingType string, opts ...EmbeddingTextOptions) (*models.TopicTagEmbedding, []float64, error) {
 	text := buildTagEmbeddingText(tag, embeddingType, opts...)
 	textHash := hashText(embeddingType + "\n" + text)
 
@@ -128,36 +76,28 @@ func (s *EmbeddingService) GenerateEmbedding(ctx context.Context, tag *models.To
 	}
 	result, err := s.router.Embed(ctx, req, airouter.CapabilityEmbedding)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrEmbeddingFailed, err)
+		return nil, nil, fmt.Errorf("%w: %v", ErrEmbeddingFailed, err)
 	}
 
 	if len(result.Embeddings) == 0 || len(result.Embeddings[0]) == 0 {
-		return nil, ErrEmbeddingFailed
+		return nil, nil, ErrEmbeddingFailed
 	}
 
-	// Store embedding as JSON (legacy) and as pgvector format
-	vectorJSON, err := json.Marshal(result.Embeddings[0])
-	if err != nil {
-		return nil, fmt.Errorf("failed to marshal embedding: %w", err)
-	}
-
-	// Build pgvector format string: [0.1,0.2,0.3,...]
 	pgVecStr := floatsToPgVector(result.Embeddings[0])
 
 	embedding := &models.TopicTagEmbedding{
 		TopicTagID:    tag.ID,
 		EmbeddingType: embeddingType,
-		Vector:        string(vectorJSON),
 		EmbeddingVec:  pgVecStr,
 		Dimension:     result.Dimensions,
 		Model:         result.Model,
 		TextHash:      textHash,
 	}
 
-	return embedding, nil
+	return embedding, result.Embeddings[0], nil
 }
 
-func (s *EmbeddingService) GenerateEmbeddingForText(ctx context.Context, tagID uint, embeddingType string, text string) (*models.TopicTagEmbedding, error) {
+func (s *EmbeddingService) GenerateEmbeddingForText(ctx context.Context, tagID uint, embeddingType string, text string) (*models.TopicTagEmbedding, []float64, error) {
 	textHash := hashText(embeddingType + "\n" + text)
 
 	req := airouter.EmbeddingRequest{
@@ -166,16 +106,11 @@ func (s *EmbeddingService) GenerateEmbeddingForText(ctx context.Context, tagID u
 	}
 	result, err := s.router.Embed(ctx, req, airouter.CapabilityEmbedding)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrEmbeddingFailed, err)
+		return nil, nil, fmt.Errorf("%w: %v", ErrEmbeddingFailed, err)
 	}
 
 	if len(result.Embeddings) == 0 || len(result.Embeddings[0]) == 0 {
-		return nil, ErrEmbeddingFailed
-	}
-
-	vectorJSON, err := json.Marshal(result.Embeddings[0])
-	if err != nil {
-		return nil, fmt.Errorf("failed to marshal embedding: %w", err)
+		return nil, nil, ErrEmbeddingFailed
 	}
 
 	pgVecStr := floatsToPgVector(result.Embeddings[0])
@@ -183,14 +118,13 @@ func (s *EmbeddingService) GenerateEmbeddingForText(ctx context.Context, tagID u
 	embedding := &models.TopicTagEmbedding{
 		TopicTagID:    tagID,
 		EmbeddingType: embeddingType,
-		Vector:        string(vectorJSON),
 		EmbeddingVec:  pgVecStr,
 		Dimension:     result.Dimensions,
 		Model:         result.Model,
 		TextHash:      textHash,
 	}
 
-	return embedding, nil
+	return embedding, result.Embeddings[0], nil
 }
 
 func getEventKeywords(tag *models.TopicTag) []string {
@@ -217,17 +151,12 @@ func getEventKeywords(tag *models.TopicTag) []string {
 }
 
 func (s *EmbeddingService) FindSimilarTags(ctx context.Context, tag *models.TopicTag, category string, limit int, embeddingType string) ([]TagCandidate, error) {
-	embedding, err := s.GenerateEmbedding(ctx, tag, embeddingType)
+	_, rawFloats, err := s.GenerateEmbedding(ctx, tag, embeddingType)
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate embedding: %w", err)
 	}
 
-	// Build pgvector format for the query vector
-	var vector []float64
-	if err := json.Unmarshal([]byte(embedding.Vector), &vector); err != nil {
-		return nil, fmt.Errorf("failed to parse embedding vector: %w", err)
-	}
-	pgVecStr := floatsToPgVector(vector)
+	pgVecStr := floatsToPgVector(rawFloats)
 
 	// Use pgvector SQL cosine distance (<=>) for similarity search
 	// Filter out merged tags (only match active tags)
@@ -288,8 +217,7 @@ func (s *EmbeddingService) FindSimilarTags(ctx context.Context, tag *models.Topi
 // TagMatch decides how to handle a candidate tag
 func (s *EmbeddingService) TagMatch(ctx context.Context, label, category string, aliases string) (*TagMatchResult, error) {
 	slug := Slugify(label)
-	thresholds := ThresholdsForCategory(category)
-	logging.Infof("TagMatch: start label=%q slug=%q category=%s low=%.2f high=%.2f", label, slug, category, thresholds.LowSimilarity, thresholds.HighSimilarity)
+	logging.Infof("TagMatch: start label=%q slug=%q category=%s threshold=%.2f", label, slug, category, MatchThreshold)
 	var existingTag models.TopicTag
 	err := database.DB.Scopes(activeTagFilter).Where("slug = ? AND category = ?", slug, category).First(&existingTag).Error
 	if err == nil {
@@ -358,7 +286,7 @@ func (s *EmbeddingService) TagMatch(ctx context.Context, label, category string,
 
 	var validCandidates []TagCandidate
 	for _, c := range candidates {
-		if c.Similarity >= thresholds.LowSimilarity {
+		if c.Similarity >= MatchThreshold {
 			validCandidates = append(validCandidates, c)
 		}
 	}
@@ -368,16 +296,6 @@ func (s *EmbeddingService) TagMatch(ctx context.Context, label, category string,
 		return &TagMatchResult{
 			MatchType:  "no_match",
 			Similarity: bestSimilarity(candidates),
-		}, nil
-	}
-
-	if validCandidates[0].Similarity >= thresholds.HighSimilarity {
-		top := validCandidates[0]
-		logging.Infof("TagMatch: label=%q category=%s result=exact reason=high_similarity existingID=%d existingLabel=%q similarity=%.4f", label, category, top.Tag.ID, top.Tag.Label, top.Similarity)
-		return &TagMatchResult{
-			MatchType:   "exact",
-			ExistingTag: top.Tag,
-			Similarity:  top.Similarity,
 		}, nil
 	}
 
@@ -511,6 +429,12 @@ func (s *EmbeddingService) SaveEmbedding(embedding *models.TopicTagEmbedding) er
 		}
 		return fmt.Errorf("load topic tag %d: %w", embedding.TopicTagID, err)
 	}
+
+	// Clean up stale embeddings: same tag + type but different text_hash
+	database.DB.Where(
+		"topic_tag_id = ? AND embedding_type = ? AND text_hash != ?",
+		embedding.TopicTagID, embedding.EmbeddingType, embedding.TextHash,
+	).Delete(&models.TopicTagEmbedding{})
 
 	var existing models.TopicTagEmbedding
 	err := database.DB.Where("topic_tag_id = ? AND embedding_type = ? AND text_hash = ?", embedding.TopicTagID, embedding.EmbeddingType, embedding.TextHash).First(&existing).Error

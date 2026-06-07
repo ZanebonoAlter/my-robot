@@ -23,6 +23,7 @@ export function getSchedulerDisplayName(name: string): string {
     'auto_refresh': '后台刷新',
     'firecrawl': '全文爬取',
     'tag_hierarchy_cleanup': '标签清理',
+    'aux_label_cleanup': '辅助标签清理',
   }
 
   return names[name] || name
@@ -37,6 +38,7 @@ export function getSchedulerIcon(name: string): string {
     'auto_refresh': 'mdi:refresh',
     'firecrawl': 'mdi:spider-web',
     'tag_hierarchy_cleanup': 'mdi:tag-remove-outline',
+    'aux_label_cleanup': 'mdi:tag-minus-outline',
   }
 
   return icons[name] || 'mdi:cog'
@@ -51,6 +53,7 @@ export function getSchedulerColor(name: string): string {
     'auto_refresh': 'from-blue-500 to-cyan-500',
     'firecrawl': 'from-rose-500 to-orange-500',
     'tag_hierarchy_cleanup': 'from-violet-500 to-purple-600',
+    'aux_label_cleanup': 'from-teal-500 to-emerald-500',
   }
 
   return colors[name] || 'from-gray-500 to-gray-600'

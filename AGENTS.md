@@ -19,6 +19,20 @@ Agent guide for coding assistants working in `Syntopica` (`D:\project\my-robot`)
 | Node.js | `pnpm`（要求 corepack 启用）。详见 `front/AGENTS.md`。|
 | Go | 直接使用系统 Go 工具链。详见 `backend-go/AGENTS.md`。|
 
+## Headroom (Context Compression)
+
+[Headroom](https://headroom-docs.vercel.app/) 已通过 MCP 集成，用于压缩大量上下文（日志、搜索结果、JSON、代码等），节省 token。已安装并配置为 pi 直接工具。
+
+| 工具 | 用途 |
+|------|------|
+| `headroom_headroom_compress` | 压缩内容，返回压缩文本 + hash |
+| `headroom_headroom_retrieve` | 用 hash 取回原始内容（支持 query 过滤） |
+| `headroom_headroom_stats` | 查看本次会话压缩统计 |
+
+**使用场景：** 工具输出过大时（如大量 grep 结果、长日志、大型 JSON），主动调用 `compress` 压缩后再分析，需要细节时用 `retrieve` 取回。短内容会被 noop 跳过。
+
+**配置文件：** `~/.pi/agent/mcp.json`（pi）、`~/.claude.json`（Claude Code）。
+
 **快速开始本地开发：**
 
 ```bash
@@ -79,58 +93,9 @@ cd front && pnpm dev
 - Keep code changes minimal and scoped. Match existing code style.
 - 完成任务后更新维护 `./docs` 知识库。
 
-## GitNexus Workflow
-- Repo indexed as `my-robot`. Before editing any function/method/class, run `gitnexus_impact`.
-- Warn user if HIGH or CRITICAL risk. Use `gitnexus_query` for unfamiliar flows.
-- Before committing, run `gitnexus_detect_changes()`. Never skip impact analysis.
-- See `.claude/skills/gitnexus/` for detailed workflow docs.
-
 ## Browser Automation
 Use `agent-browser`: `open <url>` → `snapshot -i` → `click @eX` / `fill @eX "text"` → re-snapshot.
 
-<!-- gitnexus:start -->
-# GitNexus — Code Intelligence
-
-This project is indexed by GitNexus as **Syntopica** (14159 symbols, 22565 relationships, 300 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
-
-> If any GitNexus tool warns the index is stale, run `npx gitnexus analyze` in terminal first.
-
-## Always Do
-
-- **MUST run impact analysis before editing any symbol.** Before modifying a function, class, or method, run `gitnexus_impact({target: "symbolName", direction: "upstream"})` and report the blast radius (direct callers, affected processes, risk level) to the user.
-- **MUST run `gitnexus_detect_changes()` before committing** to verify your changes only affect expected symbols and execution flows.
-- **MUST warn the user** if impact analysis returns HIGH or CRITICAL risk before proceeding with edits.
-- When exploring unfamiliar code, use `gitnexus_query({query: "concept"})` to find execution flows instead of grepping. It returns process-grouped results ranked by relevance.
-- When you need full context on a specific symbol — callers, callees, which execution flows it participates in — use `gitnexus_context({name: "symbolName"})`.
-
-## Never Do
-
-- NEVER edit a function, class, or method without first running `gitnexus_impact` on it.
-- NEVER ignore HIGH or CRITICAL risk warnings from impact analysis.
-- NEVER rename symbols with find-and-replace — use `gitnexus_rename` which understands the call graph.
-- NEVER commit changes without running `gitnexus_detect_changes()` to check affected scope.
-
-## Resources
-
-| Resource | Use for |
-|----------|---------|
-| `gitnexus://repo/Syntopica/context` | Codebase overview, check index freshness |
-| `gitnexus://repo/Syntopica/clusters` | All functional areas |
-| `gitnexus://repo/Syntopica/processes` | All execution flows |
-| `gitnexus://repo/Syntopica/process/{name}` | Step-by-step execution trace |
-
-## CLI
-
-| Task | Read this skill file |
-|------|---------------------|
-| Understand architecture / "How does X work?" | `.claude/skills/gitnexus/gitnexus-exploring/SKILL.md` |
-| Blast radius / "What breaks if I change X?" | `.claude/skills/gitnexus/gitnexus-impact-analysis/SKILL.md` |
-| Trace bugs / "Why is X failing?" | `.claude/skills/gitnexus/gitnexus-debugging/SKILL.md` |
-| Rename / extract / split / refactor | `.claude/skills/gitnexus/gitnexus-refactoring/SKILL.md` |
-| Tools, resources, schema reference | `.claude/skills/gitnexus/gitnexus-guide/SKILL.md` |
-| Index, status, clean, wiki CLI commands | `.claude/skills/gitnexus/gitnexus-cli/SKILL.md` |
-
-<!-- gitnexus:end -->
 ---
 Behavioral guidelines to reduce common LLM coding mistakes. Merge with project-specific instructions as needed.
 

@@ -11,19 +11,40 @@ import (
 	"syntopica-backend/internal/platform/logging"
 )
 
-const clusterSystemPrompt = `你是一名专业的事件分组分析师。你的任务是将一组事件标签按"同一核心事件"进行分组。
+func buildClusterSystemPrompt(tagCount int) string {
+	base := `你是一名专业的新闻叙事分析师。你的任务是将一组事件标签按"同一叙事框架"进行分组。
 
 分组规则：
-1. 属于同一核心事件的标签归入一组
+1. 围绕同一深层主题演化的事件归入一组，形成一个叙事框架
 2. 每组 2-8 个标签；如果某个标签找不到同类，可以单独成组
-3. 分组粒度：比"同一主题"更细，比"完全相同"更宽。例如"G7 峰会开幕"和"G7 峰会联合声明"是同一核心事件，但"G7 峰会"和"美联储加息"不是
-4. 每组给出一个简洁的中文组名（不超过20字）
+3. 分组粒度：不是"同一事件"，而是"同一叙事框架"。一组标签应该讲述同一个更大的故事，而非仅仅是同一件事的不同报道
+4. 每组给出一个叙事级标题（不超过20字），应该是跨事件的解释性判断，而非事件描述
 5. 必须确保每个输入标签恰好出现在一个组中
+
+标题示例（好的）:
+- 开发者 Agent 工具链进入平台化竞争
+- 本地 AI 算力生态重新升温
+- 企业级 AI 应用从 Demo 走向工程化落地
+- 中东局势推动全球能源格局重塑
+
+标题示例（不好的，太具体）:
+- Codex 工具更新与第三方模型接入
+- 英伟达 6 月重磅产品发布
+- 美伊谈判进展及特朗普相关表态
 
 输出要求：
 1. 顶层 JSON 对象，只包含 groups 字段
 2. groups 是数组，每个元素包含 group_name（字符串）和 tag_ids（整数数组）
 3. 只返回合法 JSON，不要 Markdown 代码块或解释文字`
+
+	if tagCount > 25 {
+		base += "\n6. 标签数量较多，请分成 8-15 组，合并关联性强的事件"
+	} else if tagCount > 15 {
+		base += "\n6. 请分成 6-12 组"
+	}
+
+	return base
+}
 
 // ClusterTags groups deduplicated tags into clusters using LLM.
 // Returns cluster groups with group names and member tag IDs.
@@ -46,11 +67,11 @@ func ClusterTags(ctx context.Context, tags []TagInput) ([]ClusterGroup, error) {
 	prompt := buildClusterPrompt(tags)
 
 	temperature := 0.1
-	maxTokens := 4000
+	maxTokens := 8192
 	result, err := airouter.NewRouter().Chat(ctx, airouter.ChatRequest{
 		Capability: airouter.CapabilityTopicTagging,
 		Messages: []airouter.Message{
-			{Role: "system", Content: clusterSystemPrompt},
+			{Role: "system", Content: buildClusterSystemPrompt(len(tags))},
 			{Role: "user", Content: prompt},
 		},
 		Temperature: &temperature,

@@ -4,19 +4,83 @@
 
 *Where feeds become topics*
 
-Syntopica 不是传统 RSS 阅读器，也不是热点监控工具。
-它会把你的 RSS 信息流自动整理成长期语义板块，例如「AI Agent」「金价」「中东局势」「储能行业」。
-每个板块会持续吸收相关文章、演化语义标签，并每天生成一份连贯的叙事简报。
+Syntopica 是一个 AI-powered RSS 阅读器。  
+但它的目标不是让你更快刷完文章列表，而是把持续涌入的信息流整理成可以长期追踪的语义主题。
 
-你不再面对几百篇零散文章，而是每天查看几个你真正关心的主题：
-- 今天这个主题发生了什么？
-- 哪些事件是延续昨天的？
-- 哪些是新出现的信号？
-- 哪些文章值得进一步阅读？
+如果你订阅了大量 RSS 源，每天都会面对几百篇新闻、博客、公告和文章。  
+普通 RSS 阅读器会把它们按时间排成列表，而 Syntopica 会尝试回答另一个问题：
+
+> 我关心的这些主题，今天到底发生了什么？
+
+例如：
+
+- 「AI Agent」今天有哪些新进展？
+- 「金价」上涨背后有哪些连续信号？
+- 「中东局势」哪些事件是昨天的延续？
+- 「某个产品发布会」后续反应是否还在发酵？
+- 哪些文章只是噪音，哪些值得进一步阅读？
+
+Syntopica 希望把 RSS 从“文章时间流”变成“长期主题流”。
 
 ![主界面截图](img/1.3.2-narrative/topic-lifeline.png)
 
-## 🎯 语义标签板块（v1.3）
+---
+
+## 为什么做 Syntopica？
+
+很多 RSS 用户的问题不是信息太少，而是信息没有被组织。
+
+你可能订阅了：
+
+- 新闻媒体
+- 技术博客
+- 产品更新
+- 行业资讯
+- GitHub / Release / Blog Feed
+- RSSHub 生成的各种信息源
+
+结果是：每天打开阅读器，看到的是一长串按时间排列的文章。
+
+这些文章里有些属于你长期关注的议题，但它们通常被打散在不同来源、不同时间、不同标题之中。
+
+普通 RSS 阅读器擅长回答：
+
+> 今天来了哪些新文章？
+
+但长期关注一个议题时，你真正需要的是：
+
+> 这个主题今天发生了什么？  
+> 它和前几天有什么关系？  
+> 有哪些新信号？  
+> 哪些内容值得继续看？
+
+Syntopica 就是为这个问题设计的。
+
+---
+
+## 核心想法
+
+Syntopica 不把 RSS 只当作“文章列表”，而是把每篇文章理解为某些长期主题的一部分。
+
+它会通过 AI 和语义标签，把文章归入你关心的板块，然后每天为每个板块生成叙事简报。
+
+```text
+RSS Feeds
+   ↓
+Articles
+   ↓
+AI semantic tags / embedding
+   ↓
+Topic sections
+   ↓
+Daily narrative brief
+```
+
+你不再需要从几百篇文章里手动拼线索。
+Syntopica 会把信息沉淀成可以持续追踪的 topics。
+
+
+## 一个典型使用场景
 
 把 RSS 订阅文章自动归类到几个「长期话题板块」里，每个板块每天生成一份叙事简报——就像雇了个编辑，每天帮你盯几个赛道。
 
@@ -52,23 +116,18 @@ Syntopica 不是传统 RSS 阅读器，也不是热点监控工具。
 
 ![每日简报](img/1.3.2-narrative/daily-report.png)
 
-### 🤔 和其他 RSS 阅读器有什么不同？
+### 🤔 它和普通 RSS、搜索引擎、RAG 有什么不同？
 
-| 普通 RSS 阅读器 | 本项目的语义标签板块 |
-|---|---|
-| 关键词硬匹配 → 死板，"苹果"到底是水果还是公司？ | AI 提取语义标签 → 理解上下文 |
-| 每天看文章列表 → 信息过载，大海捞针 | 每天看板块简报 → 几个赛道一目了然 |
-| LLM 只做单篇总结 → 碎片化，看完就忘 | LLM 按板块生成叙事报告 → 连贯，有脉络 |
-| 文章当知识库 → RAG 检索，每次都得提问 | 板块自动追踪 → 坐等推送，持续积累 |
+| 工具         | 你得到什么           | 局限             |
+| ---------- | --------------- | -------------- |
+| 普通 RSS 阅读器 | 按时间排列的文章列表      | 信息仍然是散的，需要自己归纳 |
+| 搜索引擎       | 某一刻的搜索结果        | 需要主动搜索，缺少长期积累  |
+| RAG 知识库    | 对历史内容提问         | 每次都需要你提出问题     |
+| 热点监控工具     | 当前流行的热点         | 不一定匹配你的长期关注主题  |
+| Syntopica  | 长期语义板块 + 每日叙事简报 | 更适合持续追踪个人关注议题  |
 
-### 🔍 和搜索引擎有什么不同？
-
-| 搜索引擎 | 语义标签板块 |
-|---|---|
-| 你要**主动提问**才能获取信息 | 系统**主动推送**你关心的话题 |
-| 搜索结果是"你搜的那一刻"互联网的样子 | 板块简报是**一段时间内**该话题的发展脉络 |
-| 搜"金价" → 一堆网页，质量参差不齐 | 板块「金价」→ 你订阅的优质信源中，AI 筛选+整理 |
-| 看完就忘，下次再搜，零积累 | 标签和板块持续演化，越用越聪明 |
+Syntopica 更像是一个个人议题编辑器。
+它每天帮你把订阅源里的内容按长期主题整理好。
 
 ## ✨ 更多功能
 
@@ -82,19 +141,26 @@ Syntopica 不是传统 RSS 阅读器，也不是热点监控工具。
 ![主题图谱文章](img/image-topic-article.png)
 
 ### 📰 订阅管理
+
+虽然 Syntopica 的重点是主题组织，但它仍然保留了 RSS 阅读器的基础体验：
+
+你可以像使用普通 RSS 阅读器一样添加订阅源，也可以通过 OPML 导入已有订阅。
+
+Syntopica 不替你决定信息来源。
+你仍然掌控自己的 feeds
+
 - Feed 管理：添加、编辑、删除、手动刷新、全量刷新
 - 分类管理：自定义名称、图标、颜色
 - OPML 导入导出
 - 可配置自动刷新间隔
-
-![订阅管理界面](img/image-feed.png)
-
-### 📖 文章阅读
 - FeedBro 风格三栏布局
 - 收藏、已读标记、全屏阅读
 - 预览模式与 iframe 模式切换
 - 上一篇/下一篇快速导航
 
+你可以把它当作普通 RSS 阅读器使用，也可以逐步启用 AI 主题能力。
+
+![订阅管理界面](img/image-feed.png)
 ![文章阅读界面](img/image-article.png)
 
 ### 🤖 智能增强
@@ -124,11 +190,29 @@ Syntopica 不是传统 RSS 阅读器，也不是热点监控工具。
 
 ## 🛠 技术栈
 
-| 层级 | 技术 |
-|------|------|
-| 前端 | Nuxt 4 + Vue 3 + TypeScript + Pinia + Tailwind CSS v4 |
-| 后端 | Go + Gin + GORM + Postgres |
-| AI | OpenAI 兼容 API |
+### Frontend
+- Nuxt
+- Vue
+- TypeScript
+- Pinia
+- Tailwind CSS
+
+### Backend
+- Go
+- Gin
+- GORM
+
+### Storage
+- PostgreSQL
+
+### AI
+- OpenAI-compatible API
+- LLM
+- Embedding Model
+
+### Optional Services
+- RSSHub
+- Firecrawl
 
 ## 🚀 快速开始
 
@@ -291,33 +375,48 @@ Syntopica/
 └── docker-compose.rsshub.yml           # Docker Compose（RSSHub + Redis + Browserless，可选）
 ```
 
-## 📚 文档
+## Roadmap
 
-### 架构
-- [项目总览](docs/reference/architecture/overview.md) — 架构与运行关系
-- [前端架构](docs/reference/architecture/frontend.md) — Nuxt 4 前端结构
-- [后端架构](docs/reference/architecture/backend.md) — Go 后端结构
-- [数据流](docs/reference/architecture/data-flow.md) — 数据流转与处理流程
+### 当前重点
+优化语义板块匹配效果
+改进每日简报质量
+完善板块生命周期
+降低 AI 配置门槛
+优化本地部署体验
 
-### 操作指南
-- [快速上手](docs/getting-started.md) — 环境搭建与首次运行
-- [配置说明](docs/reference/configuration.md) — 环境变量与配置项
-- [开发指南](docs/reference/development.md) — 本地开发、构建、测试
-- [测试指南](docs/reference/testing.md) — 测试框架与运行方式
-- [部署指南](docs/reference/deployment.md) — 容器化部署与生产配置
+### 后续可能方向
+更强的主题演化分析
+更清晰的板块合并 / 拆分流程
+更好的跨天叙事追踪
+更多 RSSHub / 全文抓取适配
+更完善的图谱视图
+移动端体验优化
 
-### 功能说明
-- [内容处理](docs/reference/content-processing.md) — Firecrawl 与 AI 增强流程
-- [主题图谱](docs/v1.2-tag-intelligence/user-guide/topic-graph.md) — 主题图谱功能说明
-- [阅读偏好](docs/reference/reading-preferences.md) — 偏好追踪与排序
+## 适合谁使用？
 
-### API
-- [API 参考](docs/reference/api/_index.md) — 后端 API 接口文档
-- [主题图谱 API](docs/reference/api/topic-graph.md) — 主题图谱接口说明
+### Syntopica 适合这些用户：
 
-## 🤝 贡献
+- 每天阅读大量 RSS 的人
+- 长期关注某些行业、公司、技术或市场的人
+- 不想被信息流淹没，但又不想放弃信息密度的人
+- 希望用 AI 辅助整理信息，而不是只做单篇摘要的人
+- 想搭建个人信息雷达的人
 
-参见 [CONTRIBUTING.md](CONTRIBUTING.md) 了解贡献指南。
+### 它不太适合：
+
+- 只想偶尔看几篇新闻的人
+- 不需要长期主题追踪的人
+- 完全不想配置 AI 服务的人
+- 只需要极简 RSS 客户端的人
+
+## 🤝 项目状态
+
+Syntopica 仍在持续开发中。
+
+当前更偏个人使用和实验性产品阶段。
+部分能力仍在调整，包括语义匹配、板块推荐、简报生成和本地模型适配。
+
+如果你对 RSS、个人信息管理、AI 内容组织、主题追踪感兴趣，欢迎试用、反馈或参与改进。
 
 ## License
 

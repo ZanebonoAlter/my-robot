@@ -66,8 +66,4 @@ func TestSaveOpenNotebookConfig_CreatesAndUpdatesRow(t *testing.T) {
 	var count int64
 	require.NoError(t, db.Model(&models.AISettings{}).Where("key = ?", openNotebookConfigKey).Count(&count).Error)
 	require.EqualValues(t, 1, count)
-
-	var summaryCount int64
-	require.NoError(t, db.Model(&models.AISettings{}).Where("key = ?", summaryConfigKey).Count(&summaryCount).Error)
-	require.EqualValues(t, 0, summaryCount)
 }

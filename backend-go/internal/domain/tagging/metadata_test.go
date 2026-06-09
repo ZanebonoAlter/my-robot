@@ -40,53 +40,6 @@ func setupTopicExtractionTestDB(t *testing.T) {
 	}
 }
 
-func TestBackfillArticleTagsOnlyTagsUntaggedArticles(t *testing.T) {
-	setupTopicExtractionTestDB(t)
-
-	feed := models.Feed{Title: "OpenAI Feed", URL: "https://example.com/feed"}
-	if err := database.DB.Create(&feed).Error; err != nil {
-		t.Fatalf("create feed: %v", err)
-	}
-
-	preTagged := models.Article{FeedID: feed.ID, Title: "OpenAI note", Link: "https://example.com/pre", Description: "OpenAI update"}
-	untagged := models.Article{FeedID: feed.ID, Title: "AI agent runtime", Link: "https://example.com/new", Description: "OpenAI agentic runtime"}
-	if err := database.DB.Create(&preTagged).Error; err != nil {
-		t.Fatalf("create pre-tagged article: %v", err)
-	}
-	if err := database.DB.Create(&untagged).Error; err != nil {
-		t.Fatalf("create untagged article: %v", err)
-	}
-
-	existingTag := models.TopicTag{Label: "Existing", Slug: "existing", Category: models.TagCategoryKeyword, Kind: "keyword"}
-	if err := database.DB.Create(&existingTag).Error; err != nil {
-		t.Fatalf("create existing tag: %v", err)
-	}
-	if err := database.DB.Create(&models.ArticleTopicTag{ArticleID: preTagged.ID, TopicTagID: existingTag.ID, Score: 1, Source: "manual"}).Error; err != nil {
-		t.Fatalf("create existing article tag: %v", err)
-	}
-
-	articles := []models.Article{preTagged, untagged}
-	if err := BackfillArticleTags(context.Background(), articles, feed.Title, ""); err != nil {
-		t.Fatalf("backfill article tags: %v", err)
-	}
-
-	var preTaggedLinks []models.ArticleTopicTag
-	if err := database.DB.Where("article_id = ?", preTagged.ID).Find(&preTaggedLinks).Error; err != nil {
-		t.Fatalf("load pre-tagged links: %v", err)
-	}
-	if len(preTaggedLinks) != 1 {
-		t.Fatalf("pre-tagged link count = %d, want 1", len(preTaggedLinks))
-	}
-
-	var untaggedLinks []models.ArticleTopicTag
-	if err := database.DB.Where("article_id = ?", untagged.ID).Find(&untaggedLinks).Error; err != nil {
-		t.Fatalf("load untagged links: %v", err)
-	}
-	if len(untaggedLinks) == 0 {
-		t.Fatal("expected untagged article to receive backfilled tags")
-	}
-}
-
 func TestLimitArticleTagsKeepsTopFiveInOrder(t *testing.T) {
 	tags := make([]TopicTag, 0, 10)
 	for i := 0; i < 10; i++ {

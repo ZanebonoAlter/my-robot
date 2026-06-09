@@ -207,10 +207,6 @@ export function useSemanticBoardsApi() {
     return apiClient.get(`/semantic-boards${query ? `?${query}` : ''}`)
   }
 
-  async function getBoard(id: number): Promise<ApiResponse<SemanticBoard>> {
-    return apiClient.get(`/semantic-boards/${id}`)
-  }
-
   async function createBoard(data: {
     label: string
     description?: string
@@ -313,7 +309,6 @@ async function suggestAuxiliariesForBoard(boardId: number, params?: {
 
 return {
     getBoards,
-    getBoard,
     createBoard,
     updateBoard,
     deleteBoard,

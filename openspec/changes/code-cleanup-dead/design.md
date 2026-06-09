@@ -47,8 +47,9 @@ This cleanup is scheduled **before** the `scheduler-cron` change (which will ref
 - **BlockedArticleRecovery scheduler** — Runs but not in `schedulerDescriptors`; leave for `scheduler-cron` change.
 - **Remove `Kind` field from `TopicTag` struct** — Requires DB migration; defer to a schema-focused change.
 - **Simplify `normalizeTopicCategory()` frontend fallback** — When backend stops writing `Kind`, the `kind` parameter will always be undefined. Simplification of this fallback logic is deferred to the `Kind` field removal change.
-- **Other zero-caller functions in `content/`, `preferences/`, `daily_report/repository.go`, `tagging/`** — 40+ additional dead functions found but out of scope for this change. Can be addressed in a follow-up cleanup pass.
-- **Dead platform-layer functions** (`logging.ConfigureStdlib`, `logging.Errorln`, `tracing.TraceIDFromContext`, `tracing.MustStartSpan`, `tracing.TraceAsyncOp`, `ai.TestConnection`, `jsonutil.TruncateStr`, `database.SlowLogger.Trace`) — low priority, deferred to future cleanup.
+- **Deprecated narrative/service.go functions** (8 functions marked "Use daily_report.GenerateDailyReport") — kept for rollback safety. Will be removed in a future change once daily_report path is fully validated in production.
+- **`_deprecated/` directory cleanup** (`front/app/_deprecated/tags/` — 6 components, 2,811 lines) — already in deprecated folder, intentionally preserved for reference. Separate cleanup decision needed.
+- **Remaining false-positive CodeGraph findings** — ~26 reported functions were actually Gin handlers or had callers missed by CodeGraph. Cross-verified with grep before inclusion.
 - **Any API or DB schema changes** — This is pure code deletion and internal cleanup.
 
 ## Decisions
@@ -118,6 +119,26 @@ This deprecated wrapper at line 146 just calls `RunAutoMigrate(db)` and has zero
 - Remove dead types: `NarrativeItem`, `NarrativeTimelineDay`, `NarrativeScopesResponse`, `BoardNarrativeItem`, `BoardItem`, `TagBrief` (topicGraph.ts), `BoardTimelineDay`
 - Remove `getBoardNarratives` and `triggerNarrativeGeneration` from `front/app/api/semanticBoards.ts`
 - Remove `BoardNarrative` and `BoardNarrativeTag` types from `front/app/api/semanticBoards.ts` if only used by dead methods
+
+### D15: Extended dead function removal — grep-verified only
+
+Only functions with **zero non-definition references** in `grep` (excluding test files) are removed. Functions that are Gin handlers (registered via `group.GET/POST(..., fn)` in `router.go`) are preserved since CodeGraph cannot trace Gin's function reference registration pattern. This avoids false-positive deletions.
+
+### D16: Frontend dead components — full file deletion
+
+All 13 unreferenced Vue components under `features/` are deleted entirely. Since `features/` is not in Nuxt's auto-import scan path, these components need explicit imports to be used. Zero imports = zero usage = safe to delete.
+
+### D17: Dead composables and store — delete entire files
+
+`useRssParser.ts` (274 lines) and `useDagLayout.ts` (191 lines, with all exported types) have zero imports across the entire codebase. `useAIAnalysisStore` (385 lines) is similarly unreferenced. All three files are deleted entirely.
+
+### D18: Dead API methods — remove exported functions only
+
+Remove dead methods from their parent API composables. Do **not** delete the entire API file if other methods remain in use. Each removal is scoped to the dead function only.
+
+### D19: Dead types — remove only unreferenced exports
+
+For each type file, only remove types confirmed to have zero external imports. Types used as return types of still-used functions are preserved.
 
 ## Risks / Trade-offs
 

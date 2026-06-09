@@ -9,7 +9,6 @@ import (
 	"syntopica-backend/internal/platform/database"
 )
 
-const summaryConfigKey = "summary_config"
 const openNotebookConfigKey = "open_notebook_config"
 const firecrawlConfigKey = "firecrawl_config"
 
@@ -63,14 +62,6 @@ func saveConfigByKey(key string, config map[string]interface{}, description stri
 	}
 
 	return database.DB.Create(&settings).Error
-}
-
-func LoadSummaryConfig() (map[string]interface{}, *models.AISettings, error) {
-	return loadConfigByKey(summaryConfigKey)
-}
-
-func SaveSummaryConfig(config map[string]interface{}, description string) error {
-	return saveConfigByKey(summaryConfigKey, config, description)
 }
 
 func LoadFirecrawlConfig() (map[string]interface{}, *models.AISettings, error) {

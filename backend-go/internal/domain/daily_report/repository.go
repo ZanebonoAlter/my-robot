@@ -207,12 +207,6 @@ func ListReportsForAllBoards(days int) ([]BoardDailyReport, error) {
 	return reports, nil
 }
 
-// SetReportStatus updates the status field of a report.
-func SetReportStatus(id uint, status string) error {
-	return database.DB.Model(&BoardDailyReport{}).Where("id = ?", id).
-		Update("status", status).Error
-}
-
 func normalizeReportDate(date time.Time) time.Time {
 	return time.Date(date.Year(), date.Month(), date.Day(), 12, 0, 0, 0, time.UTC)
 }
@@ -252,30 +246,6 @@ func SaveThreads(tx *gorm.DB, reportID, sectionID uint, threads []DailyReportThr
 		threads[i].SectionID = sectionID
 	}
 	return tx.Create(&threads).Error
-}
-
-// GetThreadsBySection returns all threads for a section, ordered by id.
-func GetThreadsBySection(sectionID uint) ([]DailyReportThread, error) {
-	var threads []DailyReportThread
-	err := database.DB.Where("section_id = ?", sectionID).Order("id ASC").Find(&threads).Error
-	return threads, err
-}
-
-// GetThreadsByReport returns all threads for a report.
-func GetThreadsByReport(reportID uint) ([]DailyReportThread, error) {
-	var threads []DailyReportThread
-	err := database.DB.Where("report_id = ?", reportID).Order("section_id ASC, id ASC").Find(&threads).Error
-	return threads, err
-}
-
-// GetThreadByID returns a single thread by its primary key.
-func GetThreadByID(id uint) (*DailyReportThread, error) {
-	var thread DailyReportThread
-	err := database.DB.First(&thread, id).Error
-	if err != nil {
-		return nil, fmt.Errorf("thread %d not found: %w", id, err)
-	}
-	return &thread, nil
 }
 
 // DeleteThreadsByReport deletes all threads for a report.

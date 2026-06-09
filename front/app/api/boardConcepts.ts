@@ -80,44 +80,12 @@ export function useBoardConceptsApi() {
     return apiClient.post<BoardConcept>('/hierarchy/concepts', data)
   }
 
-  async function updateBoardConcept(
-    id: number,
-    data: { name: string; description: string },
-  ): Promise<ApiResponse<BoardConcept>> {
-    return apiClient.put<BoardConcept>(`/hierarchy/concepts/${id}`, data)
-  }
-
   async function deleteBoardConcept(id: number): Promise<ApiResponse<void>> {
     return apiClient.delete<void>(`/hierarchy/concepts/${id}`)
   }
 
   async function suggestConcepts(category: string): Promise<ApiResponse<ConceptSuggestion[]>> {
     return apiClient.post<ConceptSuggestion[]>('/hierarchy/concepts/suggest', { category })
-  }
-
-  async function getSectors(category: string, all?: boolean): Promise<ApiResponse<SectorItem[]>> {
-    const params = new URLSearchParams()
-    params.set('category', category)
-    if (all) params.set('all', 'true')
-    return apiClient.get<SectorItem[]>(`/narratives/board-concepts?${params.toString()}`)
-  }
-
-  async function createSector(data: {
-    name: string
-    description?: string
-    category: string
-    source?: string
-  }): Promise<ApiResponse<SectorItem>> {
-    return apiClient.post<SectorItem>('/narratives/board-concepts', data)
-  }
-
-  async function deleteSector(id: number, confirm?: boolean): Promise<ApiResponse<void>> {
-    const query = confirm ? '?confirm=true' : ''
-    return apiClient.delete<void>(`/narratives/board-concepts/${id}${query}`)
-  }
-
-  async function regenerateSectors(category: string): Promise<ApiResponse<SectorDiff>> {
-    return apiClient.post<SectorDiff>('/narratives/board-concepts/regenerate', { category })
   }
 
   async function confirmRegenerateSectors(category: string, diff: SectorDiff): Promise<ApiResponse<SectorDiffExecutionResult>> {
@@ -130,13 +98,8 @@ export function useBoardConceptsApi() {
   return {
     getBoardConcepts,
     createBoardConcept,
-    updateBoardConcept,
     deleteBoardConcept,
     suggestConcepts,
-    getSectors,
-    createSector,
-    deleteSector,
-    regenerateSectors,
     confirmRegenerateSectors,
   }
 }

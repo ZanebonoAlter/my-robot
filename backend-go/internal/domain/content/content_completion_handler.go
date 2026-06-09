@@ -29,11 +29,6 @@ func loadCompletionAISettings() {
 	}
 }
 
-func SetCompletionAICredentials(baseURL, apiKey, model string) {
-	if completionService != nil {
-		completionService.SetAICredentials(baseURL, apiKey, model)
-	}
-}
 
 func CompleteArticleContent(c *gin.Context) {
 	id := c.Param("article_id")

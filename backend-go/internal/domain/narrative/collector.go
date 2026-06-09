@@ -122,58 +122,6 @@ func CollectSemanticBoardNarrativeInputs(date time.Time) ([]SemanticBoardNarrati
 	return inputs, nil
 }
 
-type ActiveCategory struct {
-	ID           uint   `json:"id"`
-	Name         string `json:"name"`
-	Icon         string `json:"icon"`
-	Color        string `json:"color"`
-	ArticleCount int    `json:"article_count"`
-	TagCount     int    `json:"tag_count"`
-}
-
-func CollectActiveCategories(date time.Time) ([]ActiveCategory, error) {
-	startOfDay := time.Date(date.Year(), date.Month(), date.Day(), 0, 0, 0, 0, date.Location())
-	endOfDay := startOfDay.Add(24 * time.Hour)
-
-	var categories []models.Category
-	database.DB.Find(&categories)
-
-	var result []ActiveCategory
-	for _, cat := range categories {
-		var feedIDs []uint
-		database.DB.Model(&models.Feed{}).Where("category_id = ?", cat.ID).Pluck("id", &feedIDs)
-		if len(feedIDs) == 0 {
-			continue
-		}
-
-		var articleCount int64
-		database.DB.Model(&models.Article{}).
-			Where("feed_id IN ? AND pub_date >= ? AND pub_date < ?", feedIDs, startOfDay, endOfDay).
-			Count(&articleCount)
-
-		if articleCount == 0 {
-			continue
-		}
-
-		var tagCount int64
-		database.DB.Model(&models.ArticleTopicTag{}).
-			Joins("JOIN articles ON articles.id = article_topic_tags.article_id").
-			Where("articles.feed_id IN ? AND articles.pub_date >= ? AND articles.pub_date < ?", feedIDs, startOfDay, endOfDay).
-			Distinct("article_topic_tags.topic_tag_id").
-			Count(&tagCount)
-
-		result = append(result, ActiveCategory{
-			ID:           cat.ID,
-			Name:         cat.Name,
-			Icon:         cat.Icon,
-			Color:        cat.Color,
-			ArticleCount: int(articleCount),
-			TagCount:     int(tagCount),
-		})
-	}
-	return result, nil
-}
-
 func CollectPreviousNarratives(date time.Time, scopeType string, categoryID *uint) ([]PreviousNarrative, error) {
 	yesterday := date.AddDate(0, 0, -1)
 	query := database.DB.

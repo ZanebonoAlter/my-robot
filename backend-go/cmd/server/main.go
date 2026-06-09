@@ -9,7 +9,6 @@ import (
 	"go.opentelemetry.io/contrib/instrumentation/github.com/gin-gonic/gin/otelgin"
 	appbootstrap "syntopica-backend/internal/app"
 	taggingdomain "syntopica-backend/internal/domain/tagging"
-	"syntopica-backend/internal/platform/airouter"
 	"syntopica-backend/internal/platform/config"
 	"syntopica-backend/internal/platform/database"
 	"syntopica-backend/internal/platform/logging"
@@ -39,10 +38,6 @@ func main() {
 
 	if err := database.InitDB(config.AppConfig); err != nil {
 		logging.Fatalf("Failed to initialize database: %v", err)
-	}
-
-	if err := airouter.EnsureLegacySummaryConfigMigrated(); err != nil {
-		logging.Warnf("Failed to migrate legacy AI summary config: %v", err)
 	}
 
 	// Ensure semantic_labels.embedding vector dimension matches the embedder model.

@@ -38,14 +38,3 @@ export interface PaginatedData<T> {
   items: T[]
   pagination: PaginationMeta
 }
-
-/**
- * 分页 API 响应
- */
-export interface PaginatedApiResponse<T = unknown> {
-  success: boolean
-  data: T[]
-  pagination: PaginationMeta
-  message?: string
-  error?: string
-}

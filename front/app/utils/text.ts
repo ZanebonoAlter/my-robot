@@ -56,15 +56,6 @@ export function highlightKeyword(text: string, keyword: string): string {
 }
 
 /**
- * 生成随机颜色
- * @returns 随机颜色十六进制字符串
- */
-export function generateRandomColor(): string {
-  const colors = ['#3b82f6', '#ef4444', '#10b981', '#f59e0b', '#8b5cf6', '#ec4899', '#6b7280']
-  return colors[Math.floor(Math.random() * colors.length)] || '#6b7280'
-}
-
-/**
  * 从分类 ID 获取颜色
  * @param categoryId - 分类 ID
  * @returns 颜色十六进制字符串

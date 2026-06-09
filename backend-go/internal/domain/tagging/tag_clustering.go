@@ -11,12 +11,6 @@ import (
 	"syntopica-backend/internal/platform/logging"
 )
 
-type TagCluster struct {
-	TagIDs []uint
-	Tags   []*models.TopicTag
-	AvgSim float64
-}
-
 type ClusterConfig struct {
 	MaxTags             int
 	SimilarityThreshold float64

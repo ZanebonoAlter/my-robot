@@ -6,15 +6,10 @@ import (
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
-	"syntopica-backend/internal/platform/logging"
 )
 
 func Tracer(name string) trace.Tracer {
 	return otel.Tracer(name)
-}
-
-func StartSpan(ctx context.Context, tracerName, spanName string, opts ...trace.SpanStartOption) (context.Context, trace.Span) {
-	return Tracer(tracerName).Start(ctx, spanName, opts...)
 }
 
 func GoWithTrace(ctx context.Context, name string, fn func(ctx context.Context)) {
@@ -86,10 +81,3 @@ func SetStatus(ctx context.Context, code int, msg string) {
 	}
 }
 
-func MustStartSpan(ctx context.Context, tracerName, spanName string, opts ...trace.SpanStartOption) (context.Context, trace.Span) {
-	ctx, span := StartSpan(ctx, tracerName, spanName, opts...)
-	if !span.IsRecording() {
-		logging.Infof("[tracing] warning: span %q is not recording, tracing may not be initialized", spanName)
-	}
-	return ctx, span
-}

@@ -1,12 +1,9 @@
 package tagging
 
 import (
-	"context"
-	"fmt"
 	"sort"
 
 	"syntopica-backend/internal/domain/models"
-	"syntopica-backend/internal/platform/database"
 	"syntopica-backend/internal/platform/logging"
 
 	"gorm.io/gorm"
@@ -43,74 +40,6 @@ type coTagCandidate struct {
 type articleKeyword struct {
 	TagID uint
 	Score float64
-}
-
-// ExpandEventCandidatesByArticleCoTags expands event-tag candidates with article co-tag signals.
-// Pass articleID for raw article-based expansion, or abstractTagID for abstract-tag subtree expansion.
-func ExpandEventCandidatesByArticleCoTags(ctx context.Context, articleID uint, abstractTagID uint, existingCandidateIDs []uint) ([]TagCandidate, error) {
-	if database.DB == nil {
-		return nil, fmt.Errorf("database not initialized")
-	}
-
-	tx := database.DB.WithContext(ctx)
-
-	var keywordTagIDs []uint
-	topN := coTagBaseTopN
-
-	switch {
-	case articleID > 0:
-		keywords := getTopArticleKeywords(tx, articleID, coTagBaseTopN)
-		for _, kw := range keywords {
-			keywordTagIDs = append(keywordTagIDs, kw.TagID)
-		}
-	case abstractTagID > 0:
-		subtreeDepth := getAbstractSubtreeDepth(tx, abstractTagID)
-		topN = calculateCoTagTopN(subtreeDepth)
-		keywords := aggregateKeywordsByChildCoverage(tx, abstractTagID, topN)
-		for _, kw := range keywords {
-			keywordTagIDs = append(keywordTagIDs, kw.KeywordTagID)
-		}
-	default:
-		return nil, nil
-	}
-
-	if len(keywordTagIDs) == 0 {
-		return nil, nil
-	}
-
-	existingSet := make(map[uint]bool, len(existingCandidateIDs))
-	for _, id := range existingCandidateIDs {
-		existingSet[id] = true
-	}
-
-	eventTagArticleMap := findEventTagsViaKeywords(tx, keywordTagIDs, existingSet, coTagMaxCandidates)
-	if len(eventTagArticleMap) == 0 {
-		return nil, nil
-	}
-
-	eventTagIDs := make([]uint, 0, len(eventTagArticleMap))
-	for id := range eventTagArticleMap {
-		eventTagIDs = append(eventTagIDs, id)
-	}
-
-	var eventTags []models.TopicTag
-	if err := tx.Where("id IN ? AND category = ? AND status = ?", eventTagIDs, "event", "active").Find(&eventTags).Error; err != nil {
-		return nil, fmt.Errorf("load event tags: %w", err)
-	}
-
-	logging.Infof("co-tag expansion: found %d additional event candidates (topN=%d, source=article:%d/abstract:%d)",
-		len(eventTags), topN, articleID, abstractTagID)
-
-	result := make([]TagCandidate, 0, len(eventTags))
-	for _, tag := range eventTags {
-		tagCopy := tag
-		result = append(result, TagCandidate{
-			Tag:        &tagCopy,
-			Similarity: 0.80,
-		})
-	}
-
-	return result, nil
 }
 
 func getTopArticleKeywords(tx *gorm.DB, articleID uint, topN int) []articleKeyword {

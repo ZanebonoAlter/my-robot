@@ -3,7 +3,6 @@ package tagging
 import (
 	"context"
 	"encoding/json"
-	"sort"
 	"strings"
 	"time"
 
@@ -223,29 +222,6 @@ func TagArticles(ctx context.Context, articles []models.Article, feedName, categ
 	return nil
 }
 
-func BackfillArticleTags(ctx context.Context, articles []models.Article, feedName, categoryName string) error {
-	if len(articles) == 0 {
-		return nil
-	}
-
-	for i := range articles {
-		var existingCount int64
-		if err := database.DB.Model(&models.ArticleTopicTag{}).Where("article_id = ?", articles[i].ID).Count(&existingCount).Error; err != nil {
-			logging.Warnf("Failed to inspect article tags for %d: %v", articles[i].ID, err)
-			continue
-		}
-		if existingCount > 0 {
-			continue
-		}
-
-		if err := TagArticle(ctx, &articles[i], feedName, categoryName); err != nil {
-			logging.Warnf("Failed to backfill article %d tags: %v", articles[i].ID, err)
-		}
-	}
-
-	return nil
-}
-
 // GetArticleTags retrieves all tags for a specific article
 func GetArticleTags(articleID uint) ([]TopicTag, error) {
 	var links []models.ArticleTopicTag
@@ -300,92 +276,6 @@ func GetArticleTags(articleID uint) ([]TopicTag, error) {
 			ArticleCount: articleCounts[link.TopicTagID],
 		})
 	}
-
-	return result, nil
-}
-
-func AggregateArticleTags(articleIDs []uint) ([]AggregatedTopicTag, error) {
-	if len(articleIDs) == 0 {
-		return []AggregatedTopicTag{}, nil
-	}
-
-	uniqueIDs := make([]uint, 0, len(articleIDs))
-	seenArticleIDs := make(map[uint]struct{}, len(articleIDs))
-	for _, articleID := range articleIDs {
-		if articleID == 0 {
-			continue
-		}
-		if _, exists := seenArticleIDs[articleID]; exists {
-			continue
-		}
-		seenArticleIDs[articleID] = struct{}{}
-		uniqueIDs = append(uniqueIDs, articleID)
-	}
-
-	if len(uniqueIDs) == 0 {
-		return []AggregatedTopicTag{}, nil
-	}
-
-	var links []models.ArticleTopicTag
-	err := database.DB.Where("article_id IN ?", uniqueIDs).
-		Preload("TopicTag").
-		Find(&links).Error
-	if err != nil {
-		return nil, err
-	}
-
-	aggregatedBySlug := make(map[string]*AggregatedTopicTag)
-	articleSeenBySlug := make(map[string]map[uint]struct{})
-
-	for _, link := range links {
-		if link.TopicTag == nil {
-			continue
-		}
-
-		slug := link.TopicTag.Slug
-		if slug == "" {
-			continue
-		}
-
-		item, exists := aggregatedBySlug[slug]
-		if !exists {
-			item = &AggregatedTopicTag{
-				Slug:     slug,
-				Label:    link.TopicTag.Label,
-				Category: NormalizeDisplayCategory(link.TopicTag.Kind, link.TopicTag.Category),
-				Kind:     NormalizeTopicKind(link.TopicTag.Kind, link.TopicTag.Category),
-				Icon:     link.TopicTag.Icon,
-				Aliases:  parseAliasesFromJSON(link.TopicTag.Aliases),
-				Score:    0,
-			}
-			aggregatedBySlug[slug] = item
-		}
-
-		item.Score += link.Score
-
-		if articleSeenBySlug[slug] == nil {
-			articleSeenBySlug[slug] = make(map[uint]struct{})
-		}
-		if _, exists := articleSeenBySlug[slug][link.ArticleID]; !exists {
-			articleSeenBySlug[slug][link.ArticleID] = struct{}{}
-			item.ArticleCount++
-		}
-	}
-
-	result := make([]AggregatedTopicTag, 0, len(aggregatedBySlug))
-	for _, item := range aggregatedBySlug {
-		result = append(result, *item)
-	}
-
-	sort.SliceStable(result, func(i, j int) bool {
-		if result[i].ArticleCount == result[j].ArticleCount {
-			if result[i].Score == result[j].Score {
-				return result[i].Label < result[j].Label
-			}
-			return result[i].Score > result[j].Score
-		}
-		return result[i].ArticleCount > result[j].ArticleCount
-	})
 
 	return result, nil
 }

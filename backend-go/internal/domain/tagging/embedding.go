@@ -403,16 +403,6 @@ func MergeTags(sourceTagID, targetTagID uint) error {
 	return nil
 }
 
-// DeleteTagEmbedding removes the embedding row for a given tag ID.
-// Used after establishing parent-child relationships to prevent child tags
-// from appearing in future embedding similarity matches.
-func DeleteTagEmbedding(tagID uint) error {
-	if tagID == 0 {
-		return nil
-	}
-	return database.DB.Where("topic_tag_id = ?", tagID).Delete(&models.TopicTagEmbedding{}).Error
-}
-
 // SaveEmbedding saves or updates a tag's embedding in the database.
 // If the actual vector dimension differs from the column definition, it alters the column type.
 func (s *EmbeddingService) SaveEmbedding(embedding *models.TopicTagEmbedding) error {

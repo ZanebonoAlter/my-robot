@@ -179,60 +179,6 @@ func (s *Store) ResolvePrimaryProvider(capability Capability) (*models.AIProvide
 	return &provider, route, nil
 }
 
-func (s *Store) EnsureLegacyProviderAndRoutes(baseURL, apiKey, model string) (*models.AIProvider, error) {
-	provider := &models.AIProvider{
-		Name:           DefaultProviderName,
-		ProviderType:   ProviderTypeOpenAICompatible,
-		BaseURL:        strings.TrimRight(strings.TrimSpace(baseURL), "/"),
-		APIKey:         strings.TrimSpace(apiKey),
-		Model:          strings.TrimSpace(model),
-		Enabled:        true,
-		TimeoutSeconds: 120,
-	}
-	if err := s.UpsertProvider(provider); err != nil {
-		return nil, err
-	}
-
-	for _, capability := range defaultCapabilities {
-		if err := s.ensureDefaultRoute(capability, provider.ID); err != nil {
-			return nil, err
-		}
-	}
-
-	return provider, nil
-}
-
-func (s *Store) ensureDefaultRoute(capability Capability, providerID uint) error {
-	var route models.AIRoute
-	err := s.db.Where("capability = ? AND name = ?", string(capability), DefaultRouteName).First(&route).Error
-	if err != nil {
-		if !errors.Is(err, gorm.ErrRecordNotFound) {
-			return err
-		}
-		route = models.AIRoute{
-			Capability:  string(capability),
-			Name:        DefaultRouteName,
-			Enabled:     true,
-			Strategy:    "ordered_failover",
-			Description: fmt.Sprintf("Default route for %s", capability),
-		}
-		if err := s.db.Create(&route).Error; err != nil {
-			return err
-		}
-	}
-
-	link := models.AIRouteProvider{RouteID: route.ID, ProviderID: providerID, Priority: 1, Enabled: true}
-	var existing models.AIRouteProvider
-	err = s.db.Where("route_id = ? AND provider_id = ?", route.ID, providerID).First(&existing).Error
-	if err != nil {
-		if !errors.Is(err, gorm.ErrRecordNotFound) {
-			return err
-		}
-		return s.db.Create(&link).Error
-	}
-	return s.db.Model(&existing).Update("enabled", true).Error
-}
-
 func (s *Store) LogCall(ctx context.Context, logEntry *models.AICallLog) {
 	if logEntry == nil || s.db == nil {
 		return

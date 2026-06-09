@@ -30,5 +30,4 @@ export type {
   PaginationParams,
   PaginationMeta,
   PaginatedData,
-  PaginatedApiResponse,
 } from './api'

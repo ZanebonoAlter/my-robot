@@ -17,14 +17,6 @@ type AIService struct {
 	client  *http.Client
 }
 
-type AISummaryRequest struct {
-	BaseURL  string `json:"base_url"`
-	APIKey   string `json:"api_key"`
-	Model    string `json:"model"`
-	Title    string `json:"title"`
-	Content  string `json:"content"`
-	Language string `json:"language"`
-}
 
 type AISummaryResponse struct {
 	OneSentence string   `json:"one_sentence"`

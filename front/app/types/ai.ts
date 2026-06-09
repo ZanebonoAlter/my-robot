@@ -186,14 +186,6 @@ export interface KeywordAnalysis {
 }
 
 /**
- * AI Analysis metadata
- */
-export interface AIAnalysisMetadata {
-  analysisTime: string
-  modelVersion: string
-}
-
-/**
  * Complete AI analysis result
  */
 export interface AIAnalysisResult {
@@ -201,7 +193,7 @@ export interface AIAnalysisResult {
   eventAnalysis?: EventAnalysis
   personAnalysis?: PersonAnalysis
   keywordAnalysis?: KeywordAnalysis
-  metadata: AIAnalysisMetadata
+  metadata: Record<string, unknown>
 }
 
 /**

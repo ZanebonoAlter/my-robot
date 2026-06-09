@@ -2,8 +2,6 @@
  * 阅读行为相关类型定义
  */
 
-import type { ApiResponse } from './api'
-
 export type ReadingEventType = 'open' | 'close' | 'scroll' | 'favorite' | 'unfavorite'
 
 /**
@@ -17,13 +15,6 @@ export interface ReadingBehaviorEvent {
   event_type: ReadingEventType
   scroll_depth?: number
   reading_time?: number
-}
-
-/**
- * 批量行为事件请求
- */
-export interface BatchBehaviorRequest {
-  events: ReadingBehaviorEvent[]
 }
 
 /**
@@ -55,8 +46,3 @@ export interface UserPreference {
   feed_title?: string
   category_name?: string
 }
-
-/**
- * 用户偏好列表响应
- */
-export type UserPreferencesResponse = ApiResponse<UserPreference[]>

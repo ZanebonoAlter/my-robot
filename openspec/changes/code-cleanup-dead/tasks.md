@@ -78,3 +78,130 @@
 - [x] 9.5 Run `cd front && pnpm lint` — must pass
 - [x] 9.6 Run `cmd.exe /C "cd /d D:\project\Syntopica\front && pnpm exec nuxi typecheck"` — must pass
 - [x] 9.7 Run `cmd.exe /C "cd /d D:\project\Syntopica\front && pnpm build"` — must pass
+
+## 10. Remove dead Go functions (18 confirmed, CodeGraph + grep cross-verified)
+
+### 10.1 tagging 包死函数
+
+- [x] 10.1.1 Remove `AggregateArticleTags` from `backend-go/internal/domain/tagging/article_tagger.go` (~50 lines, was called by removed GenerateNarratives)
+- [x] 10.1.2 Remove `BackfillArticleTags` from `article_tagger.go` (~30 lines, only called in test)
+- [x] 10.1.3 Remove `BackfillMissingDescriptions` from `description_backfill.go` (~50 lines, only called in test)
+- [x] 10.1.4 Remove `DeleteTagEmbedding` from `backend-go/internal/domain/tagging/embedding.go` (~8 lines)
+- [x] 10.1.5 Remove `ExpandEventCandidatesByArticleCoTags` from `cotag_expansion.go` (~70 lines)
+- [x] 10.1.6 Remove `GetCandidateArticleTitles` + `ScanSimilarTagPairs` from `tag_merge_preview.go` (file deleted, ~210 lines)
+- [x] 10.1.7 Remove `TagCluster` type from `tag_clustering.go` + `AISummaryRequest` from `ai/service.go`
+
+### 10.2 daily_report 包死函数
+
+- [x] 10.2.1 Remove `GetThreadByID` from `backend-go/internal/domain/daily_report/repository.go` (~25 lines)
+- [x] 10.2.2 Remove `GetThreadsByReport` from `repository.go` (~25 lines)
+- [x] 10.2.3 Remove `GetThreadsBySection` from `repository.go` (~25 lines)
+- [x] 10.2.4 Remove `SetReportStatus` from `repository.go` (~15 lines)
+
+### 10.3 platform 包死函数
+
+- [x] 10.3.1 Remove `ConfigureStdlib` from `backend-go/internal/platform/logging/logging.go` (~10 lines)
+- [x] 10.3.2 Remove `EnsureSchemaMigrated` from `backend-go/internal/platform/airouter/migration.go` (~15 lines)
+- [x] 10.3.3 SKIP `SaveSummaryConfig` — false positive: function is in `aisettings/config_store.go`, has test callers
+- [x] 10.3.4 Remove `MustStartSpan` + `StartSpan` from `backend-go/internal/platform/tracing/helpers.go` (~20 lines)
+- [x] 10.3.5 Remove `TruncateStr` from `backend-go/internal/platform/jsonutil/truncate.go` (file deleted)
+- [x] 10.3.6 Remove `TraceAsyncOp` from `backend-go/internal/platform/tracing/scheduler.go` (~8 lines)
+
+### 10.4 其他包死函数
+
+- [x] 10.4.1 Remove `CollectActiveCategories` from `backend-go/internal/domain/narrative/collector.go` (~60 lines)
+- [x] 10.4.2 Remove `SetCompletionAICredentials` from `content_completion_handler.go` (~5 lines; function was in content package, not ai)
+
+## 11. Remove dead frontend components (13 components, ~4,234 lines)
+
+### 11.1 孤立组件（无任何 import 引用）
+
+- [x] 11.1.1 Delete `front/app/features/ai/components/MergeReembeddingQueuePanel.vue` (285 lines)
+- [x] 11.1.2 Delete `front/app/features/articles/components/ContentCompletionView.vue` (111 lines)
+- [x] 11.1.3 Delete `front/app/features/hierarchy-config/HierarchyConfigPage.vue` (116 lines)
+- [x] 11.1.4 Delete `front/app/features/hierarchy-config/HierarchyPendingList.vue` (91 lines)
+- [x] 11.1.5 Delete `front/app/features/hierarchy-config/RebuildTrigger.vue` (111 lines)
+- [x] 11.1.6 Delete `front/app/features/tags/components/SemanticBoardList.vue` (320 lines)
+- [x] 11.1.7 Delete `front/app/features/topic-graph/components/AIAnalysisPanel.vue` (918 lines)
+- [x] 11.1.8 Delete `front/app/features/topic-graph/components/BoardConceptManager.vue` (247 lines)
+- [x] 11.1.9 Delete `front/app/features/topic-graph/components/HotspotCategorySelect.vue` (483 lines)
+- [x] 11.1.10 Delete `front/app/features/topic-graph/components/TimelinePendingItem.vue` (155 lines)
+- [x] 11.1.11 Delete `front/app/features/topic-graph/components/TopicAIAnalysisPanel.vue` (668 lines)
+- [x] 11.1.12 Delete `front/app/features/topic-graph/components/TopicAnalysisPanel.vue` (577 lines)
+- [x] 11.1.13 Delete `front/app/features/topic-graph/components/TopicAnalysisTabs.vue` (152 lines)
+
+### 11.2 清理孤儿子目录
+
+- [x] 11.2.1 If `front/app/features/hierarchy-config/` becomes empty after deletions, remove the directory
+
+## 12. Remove dead composables and store
+
+- [x] 12.1 Delete `front/app/composables/useRssParser.ts` (274 lines, zero imports)
+- [x] 12.2 Delete `front/app/composables/useDagLayout.ts` + exported types (191 lines, zero imports; SectionLifecyclePanel defines own PositionedNode)
+- [x] 12.3 Delete `front/app/stores/aiAnalysis.ts` (385 lines, zero imports)
+
+## 13. Remove dead frontend API methods
+
+- [x] 13.1 Remove `triggerGc` from `front/app/api/auxiliaryLabels.ts` (~3 lines)
+- [x] 13.2 Remove `enableFeedFirecrawl` from `front/app/api/firecrawl.ts` (~3 lines)
+- [x] 13.3 Remove `trackBehavior` from `front/app/api/reading_behavior.ts` (~3 lines)
+- [x] 13.4 Remove `getBoard` from `front/app/api/semanticBoards.ts` (~3 lines)
+- [x] 13.5 Remove `updateBoardConcept`/`getSectors`/`createSector`/`deleteSector`/`regenerateSectors` from `front/app/api/boardConcepts.ts` (~15 lines)
+
+## 14. Remove dead frontend utilities, constants, and types
+
+### 14.1 死工具函数
+
+- [x] 14.1.1 Remove `formatRelativeTime` and `isToday` from `front/app/utils/date.ts` (~15 lines)
+- [x] 14.1.2 Remove `generateRandomColor` from `front/app/utils/text.ts` (~5 lines)
+- [x] 14.1.3 Delete `front/app/utils/storage.ts` entirely (4 functions, ~20 lines, zero references)
+
+### 14.2 死常量
+
+- [x] 14.2.1 Remove all 10 dead constants from `front/app/utils/constants.ts`: `DEFAULT_PAGE_SIZE`, `MAX_PAGE_SIZE`, `SIDEBAR_ARTICLE_LIMIT`, `AUTO_REFRESH_MINUTES`, `SIDEBAR_COLLAPSED_WIDTH`, `AI_GENERATION_TIMEOUT`, `AI_SUMMARY_MAX_LENGTH`, `TIME_RANGE_OPTIONS`, `COLOR_OPTIONS`, `ICON_OPTIONS` (~15 lines)
+
+### 14.3 死类型（~45 个，分布在多个文件中）
+
+- [~] 14.3.1 SKIPPED - all 16 topicGraph.ts types are used internally by living `useTopicGraphApi()` methods (verified with grep)
+- [~] 14.3.2 SKIPPED - all 7 semanticBoards.ts types are used internally by living `useSemanticBoardsApi()` methods
+- [~] 14.3.3 SKIPPED - all 5 hierarchyConfig.ts types are used internally by living `useHierarchyConfigApi()` methods
+- [~] 14.3.4 SKIPPED - both auxiliaryLabels.ts types are used by living `getClusters()` method called from TagsPage.vue
+- [~] 14.3.5 SKIPPED - both dailyReports.ts types are used by `DailyReport` interface (itself alive)
+- [~] 14.3.6 SKIPPED - both firecrawl.ts types are used by living `getStatus()` and `saveSettings()` methods
+- [x] 14.3.7 Remove `PaginatedApiResponse` from `front/app/types/api.ts` (skipped `PaginationMeta` - used by `ApiResponse` and `PaginatedData`)
+- [x] 14.3.8 Remove `BatchBehaviorRequest`, `UserPreferencesResponse` from `front/app/types/reading_behavior.ts`
+- [x] 14.3.9 Remove `TimeRangeOption`, `RefreshTimer`, `GenerationStatus`, `GenerationStatusItem` from `front/app/types/common.ts` (skipped `SortOption`, `FilterOption` - used by `FilterState` in `stores/articles.ts`)
+- [~] 14.3.10 SKIPPED - all 3 timeline.ts types are used by `TimelineDigest`/`TimelineFilters` (imported by TopicGraphPage.vue)
+- [~] 14.3.11 SKIPPED - all 3 scheduler.ts types are used by `SchedulerStatus` (imported by GlobalSettingsDialog.vue, schedulerMeta.ts, scheduler.ts)
+- [x] 14.3.12 Remove `UpdateAbstractNameRequest`, `DetachChildRequest` from `front/app/types/topicTag.ts`
+- [~] 14.3.13 SKIPPED - `FeedItem` is used by `FeedResponse` (imported by `server/api/fetch-feed.post.ts`)
+- [x] 14.3.14 Remove `AIAnalysisMetadata` from `front/app/types/ai.ts` (skipped `AIRouteProviderLink` - used by `AIRoute` in `AIRouterSettingsPanel.vue`)
+
+### 14.4 重复类型
+
+- [x] 14.4.1 Remove duplicate `RefreshStatus`/`ViewMode`/`MessageType` from both `utils/constants.ts` and `types/common.ts` (kept neither since none used anywhere)
+
+## 15. Verify (extended)
+
+- [x] 15.1 Run `go build ./...` — PASSED
+- [x] 15.2 Run `go vet ./...` — PASSED
+- [x] 15.3 Run targeted `go test` (narrative, daily_report, airouter, logging, tracing) — PASSED (tagging 预存在 PG 依赖失败，非本次变更)
+- [x] 15.4 Run `pnpm lint` — PASSED
+- [x] 15.5 Run `pnpm exec nuxi typecheck` (Windows cmd) — 1 pre-existing error in TagsPage.vue:946 (not caused by these changes; TagsPage.vue was untouched)
+- [x] 15.6 Run `pnpm build` (Windows cmd) — PASSED
+
+## 16. Remove legacy AI config migration (追加)
+
+### 16.1 背景
+`main.go:44` 在每次启动时调用 `EnsureLegacySummaryConfigMigrated()`，将老版本 AI 配置（单一 `summary_config` JSON blob）迁移到新格式（独立 provider/route 表 + 独立 `firecrawl_config` 键）。这是一个已完成的一次性迁移，生产环境早已迁完，每次启动纯空转。
+
+### 16.2 删除内容
+
+- [x] 16.2.1 Delete `backend-go/internal/platform/airouter/migration.go` entirely (2 functions: `EnsureLegacySummaryConfigMigrated` + `MarshalMetadata`)
+- [x] 16.2.2 Delete `backend-go/internal/platform/airouter/migration_test.go` (28 lines)
+- [x] 16.2.3 Remove `EnsureLegacyProviderAndRoutes` + `ensureDefaultRoute` from `store.go` (~50 lines)
+- [x] 16.2.4 Remove `LoadSummaryConfig` + `SaveSummaryConfig` + `summaryConfigKey` from `aisettings/config_store.go` (~10 lines)
+- [x] 16.2.5 Remove `airouter.EnsureLegacySummaryConfigMigrated()` call from `cmd/server/main.go:44`
+- [x] 16.2.6 Remove legacy `summary_config` firecrawl fallback from `content/firecrawl_config.go` (~8 lines, tried reading firecrawl from old summary_config blob)
+- [x] 16.2.7 Fix `aisettings/config_store_test.go` — remove reference to deleted `summaryConfigKey`
+- [x] 16.2.8 Remove unused `airouter` import from `main.go`

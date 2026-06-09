@@ -50,21 +50,10 @@ export function useAuxiliaryLabelsApi() {
     return apiClient.post('/auxiliary-labels/merge-alias', { source_id: sourceId, target_id: targetId })
   }
 
-  async function triggerGc(mode: 'dry_run' | 'disable' | 'delete' | 'recalculate', graceDays?: number): Promise<ApiResponse<{
-    eligible_count?: number
-    affected_count?: number
-    corrected_count?: number
-    total_count?: number
-    preview?: Array<{ id: number; label: string; ref_count: number; created_at: string }>
-  }>> {
-    return apiClient.post('/auxiliary-labels/gc', { mode, grace_days: graceDays })
-  }
-
   return {
     getLabels,
     getClusters,
     disableLabel,
     mergeAlias,
-    triggerGc,
   }
 }

@@ -10,15 +10,7 @@ func GetFirecrawlConfig() (*FirecrawlConfig, error) {
 
 	firecrawlData := settingsData
 	if len(firecrawlData) == 0 {
-		legacy, _, legacyErr := aisettings.LoadSummaryConfig()
-		if legacyErr != nil {
-			return nil, legacyErr
-		}
-		if nested, ok := legacy["firecrawl"].(map[string]interface{}); ok {
-			firecrawlData = nested
-		} else {
-			return nil, ErrFirecrawlConfigMissing
-		}
+		return nil, ErrFirecrawlConfigMissing
 	}
 
 	config := &FirecrawlConfig{

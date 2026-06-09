@@ -205,3 +205,32 @@
 - [x] 16.2.6 Remove legacy `summary_config` firecrawl fallback from `content/firecrawl_config.go` (~8 lines, tried reading firecrawl from old summary_config blob)
 - [x] 16.2.7 Fix `aisettings/config_store_test.go` — remove reference to deleted `summaryConfigKey`
 - [x] 16.2.8 Remove unused `airouter` import from `main.go`
+
+## 17. Residual dead code cleanup (追加 — 扫描发现)
+
+### 17.1 前端：已删功能的 API 层残留
+
+三组已删 Feature 的 API 模块仍留在代码库中，仅被 `_deprecated/` 引用：
+
+- [x] 17.1.1 Delete `app/api/mergeReembeddingQueue.ts` entirely (3 dead API methods, zero live callers)
+- [x] 17.1.2 Delete `app/api/hierarchyConfig.ts` entirely (151 lines, 10 methods + 8 types, only used by `_deprecated/`)
+- [x] 17.1.3 Delete `app/api/boardConcepts.ts` entirely (105 lines, 5 methods + 6 types, only used by `_deprecated/`)
+- [x] 17.1.4 Remove dead barrel re-exports from `app/api/index.ts` (6 lines re-exporting `mergeReembeddingQueue` types)
+- [x] 17.1.5 Delete `app/_deprecated/tags/` directory entirely (6 files: AddSectorDialog, PendingChangePanel, SectorApprovalPanel, SectorList, SectorRegenerateDialog, TemplateSettingsDialog — all only imported from the deleted API modules)
+
+### 17.2 前端：死类型
+
+- [x] 17.2.1 Remove 5 dead types from `app/types/ai.ts`: `TopicCategoryType` (inlined into `RelatedTopic`), `AIAnalysisStatus`, `AIAnalysisResult`, `TopicInfo`, `TopicAnalysisState`
+
+### 17.3 Go：SQLite 时代残留
+
+- [x] 17.3.1 Fix `config/config_test.go` — update test DSN from SQLite-era `/app/data/archive.db` to `postgres://postgres:postgres@localhost:5432/postgres`
+
+### 17.4 验证
+
+- [x] 17.4.1 `go build ./...` — PASSED
+- [x] 17.4.2 `go vet ./...` — PASSED
+- [x] 17.4.3 `go test ./internal/platform/config/...` — PASSED
+- [x] 17.4.4 `pnpm lint` — PASSED
+- [x] 17.4.5 `pnpm exec nuxi typecheck` — 1 pre-existing error (TagsPage.vue:946)
+- [x] 17.4.6 `pnpm build` — PASSED

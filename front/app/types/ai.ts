@@ -69,15 +69,6 @@ export interface AIProviderUpsertRequest {
  * AI Analysis Types for Topic Graph
  */
 
-/**
- * Topic category types
- */
-export type TopicCategoryType = 'event' | 'person' | 'keyword'
-
-/**
- * AI Analysis status
- */
-export type AIAnalysisStatus = 'idle' | 'pending' | 'processing' | 'completed' | 'failed'
 
 /**
  * Event timeline item for AI analysis
@@ -153,7 +144,7 @@ export interface PersonAnalysis {
 export interface RelatedTopic {
   slug: string
   label: string
-  category: TopicCategoryType
+  category: 'event' | 'person' | 'keyword'
   score: number
 }
 
@@ -185,35 +176,4 @@ export interface KeywordAnalysis {
   summary: string
 }
 
-/**
- * Complete AI analysis result
- */
-export interface AIAnalysisResult {
-  type: TopicCategoryType
-  eventAnalysis?: EventAnalysis
-  personAnalysis?: PersonAnalysis
-  keywordAnalysis?: KeywordAnalysis
-  metadata: Record<string, unknown>
-}
 
-/**
- * Topic info for AI analysis
- */
-export interface TopicInfo {
-  id: number
-  slug: string
-  label: string
-  category: TopicCategoryType
-}
-
-/**
- * AI Analysis state for a single topic
- */
-export interface TopicAnalysisState {
-  topic: TopicInfo | null
-  status: AIAnalysisStatus
-  progress: number
-  result: AIAnalysisResult | null
-  error: string | null
-  lastUpdated: string | null
-}

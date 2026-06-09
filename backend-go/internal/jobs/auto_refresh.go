@@ -234,7 +234,7 @@ func (s *AutoRefreshScheduler) refreshFeedAsync(ctx context.Context, feedID uint
 }
 
 func (s *AutoRefreshScheduler) resetFeedStatus(feedID uint, errMsg string) {
-	now := time.Now().In(time.FixedZone("CST", 8*3600))
+	now := time.Now().In(models.ShanghaiTZ)
 	database.DB.Model(&models.Feed{}).Where("id = ? AND refresh_status = ?", feedID, "refreshing").Updates(map[string]interface{}{
 		"refresh_status":  "error",
 		"refresh_error":   errMsg,

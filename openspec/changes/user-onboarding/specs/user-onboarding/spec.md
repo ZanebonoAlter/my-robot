@@ -1,0 +1,148 @@
+## ADDED Requirements
+
+### Requirement: First-run detection
+The system SHALL detect first-time users by checking the absence of the `syntopica_onboarding_complete` key in localStorage. When the key does not exist, the system MUST treat the user as a first-time user and set `isFirstRun` to true.
+
+#### Scenario: First visit detected
+- **WHEN** a user loads the application and `syntopica_onboarding_complete` is not present in localStorage
+- **THEN** the system identifies the user as a first-time user and `isFirstRun` is true
+
+#### Scenario: Returning user detected
+- **WHEN** a user loads the application and `syntopica_onboarding_complete` is `"true"` in localStorage
+- **THEN** the system identifies the user as a returning user and `isFirstRun` is false
+
+### Requirement: Guided tour auto-start on first run
+The system SHALL automatically start the guided tour when a first-time user visits the application. The tour MUST begin after the main layout has fully mounted (sidebar, header, and navigation elements are present in the DOM).
+
+#### Scenario: Tour starts automatically for first-time user
+- **WHEN** a first-time user loads the application and the main layout is fully mounted
+- **THEN** the guided tour starts automatically, showing the welcome step
+
+#### Scenario: Tour does not start for returning user
+- **WHEN** a returning user loads the application
+- **THEN** no guided tour is triggered automatically
+
+### Requirement: Guided tour steps
+The system SHALL present a guided tour consisting of exactly 5 sequential steps. Each step MUST highlight a specific UI element using a `data-onboarding` attribute selector and display a popover with a title and description in Chinese. The steps SHALL be:
+
+1. Welcome overlay (no element highlight) — "欢迎使用 Syntopica"
+2. Sidebar feed/categories area (`data-onboarding="sidebar-feeds"`) — feed management introduction
+3. Topic graph navigation button (`data-onboarding="nav-topic-graph"`) — topic graph introduction
+4. Tag management navigation button (`data-onboarding="nav-tags"`) — tag management introduction
+5. Watched tags section (`data-onboarding="watched-tags"`) — personalized feed introduction
+
+#### Scenario: Tour displays all 5 steps in sequence
+- **WHEN** the guided tour is active
+- **THEN** the system displays 5 steps in order, each highlighting the corresponding `data-onboarding` element with a popover containing Chinese title and description
+
+#### Scenario: Tour step skips missing DOM element
+- **WHEN** a tour step targets a `data-onboarding` element that is not present in the DOM (e.g., sidebar is collapsed)
+- **THEN** the system skips that step and proceeds to the next available step
+
+### Requirement: Guided tour navigation
+The system SHALL provide Next, Previous, and Skip controls on each tour step. The user MUST be able to advance through all steps, go back to a previous step, or dismiss the tour entirely at any point.
+
+#### Scenario: User advances through tour steps
+- **WHEN** the user clicks "Next" on any non-final tour step
+- **THEN** the tour advances to the next step and highlights the corresponding element
+
+#### Scenario: User goes back to previous step
+- **WHEN** the user clicks "Previous" on any non-first tour step
+- **THEN** the tour returns to the previous step and highlights its element
+
+#### Scenario: User completes the final step
+- **WHEN** the user clicks "Next" (or "Done") on the final tour step
+- **THEN** the tour ends and `syntopica_onboarding_complete` is set to `"true"` in localStorage
+
+### Requirement: Guided tour dismissal
+The system SHALL allow the user to dismiss the tour at any step by clicking a "Skip" button or clicking outside the popover. Upon dismissal, the system MUST set `syntopica_onboarding_complete` to `"true"` in localStorage.
+
+#### Scenario: User skips the tour
+- **WHEN** the user clicks "Skip" on any tour step
+- **THEN** the tour ends immediately and `syntopica_onboarding_complete` is set to `"true"` in localStorage
+
+#### Scenario: User clicks outside tour popover
+- **WHEN** the user clicks outside the highlighted area or popover during the tour
+- **THEN** the tour ends and `syntopica_onboarding_complete` is set to `"true"` in localStorage
+
+### Requirement: Guided tour re-trigger from settings
+The system SHALL provide a "重新播放引导" (Replay Guide) button in the settings/preferences area. When clicked, the system MUST reset `syntopica_onboarding_complete` from localStorage and start the guided tour.
+
+#### Scenario: User triggers tour replay from settings
+- **WHEN** the user clicks the "重新播放引导" button in settings
+- **THEN** `syntopica_onboarding_complete` is removed from localStorage and the guided tour starts
+
+### Requirement: Empty state guide for feeds
+When the user has no RSS feeds and no feed categories, the system SHALL display a `FeedEmptyGuide` component in the sidebar or main content area. The guide MUST include a message encouraging the user to add their first RSS feed and an action button to trigger the feed addition dialog.
+
+#### Scenario: Feed empty state displayed
+- **WHEN** the user's feed list is empty and no categories exist
+- **THEN** the system displays `FeedEmptyGuide` with a Chinese message and an "添加 RSS 源" action button
+
+#### Scenario: Feed empty state hidden when feeds exist
+- **WHEN** the user has at least one feed or category
+- **THEN** the `FeedEmptyGuide` component is not displayed
+
+### Requirement: Empty state guide for topic graph
+When the topic graph has no data (no tags or no tag relationships), the system SHALL display a `TopicGraphEmptyGuide` component explaining why the graph is empty and suggesting actions (e.g., wait for content crawling and tagging).
+
+#### Scenario: Topic graph empty state displayed
+- **WHEN** the topic graph has no tag data to render
+- **THEN** the system displays `TopicGraphEmptyGuide` with an explanation and suggested actions
+
+#### Scenario: Topic graph empty state hidden when data exists
+- **WHEN** the topic graph has tags and relationships to display
+- **THEN** the `TopicGraphEmptyGuide` component is not displayed
+
+### Requirement: Empty state guide for daily reports
+When no daily reports exist, the system SHALL display a `DailyReportEmptyGuide` component explaining that daily reports require accumulated data and time.
+
+#### Scenario: Daily report empty state displayed
+- **WHEN** the daily report list is empty
+- **THEN** the system displays `DailyReportEmptyGuide` with an explanation about data accumulation
+
+#### Scenario: Daily report empty state hidden when reports exist
+- **WHEN** at least one daily report is available
+- **THEN** the `DailyReportEmptyGuide` component is not displayed
+
+### Requirement: Feature discovery tooltips
+The system SHALL display feature discovery tooltips on first interaction with designated feature entry points. Each tooltip MUST be identified by a unique `tipId` and MUST only be shown once per user. The system MUST track shown tooltips in localStorage under `syntopica_feature_tips` as a JSON object mapping `tipId` to `true`.
+
+Initial feature discovery tooltips:
+- `topic-graph-filter`: Topic graph filter controls
+- `tag-merge-suggestions`: Tag merge suggestion panel
+- `daily-report-timeline`: Daily report timeline view
+
+#### Scenario: Feature tooltip shown on first interaction
+- **WHEN** the user interacts with a feature entry point marked with `data-feature-tip="<tipId>"` and that `tipId` is not recorded in `syntopica_feature_tips`
+- **THEN** the system displays a tooltip with a brief Chinese description of the feature
+
+#### Scenario: Feature tooltip not shown again after first display
+- **WHEN** the user interacts with a feature entry point and the corresponding `tipId` is already recorded in `syntopica_feature_tips`
+- **THEN** the tooltip is not displayed
+
+#### Scenario: Feature tip recorded after display
+- **WHEN** a feature discovery tooltip is displayed to the user
+- **THEN** the corresponding `tipId` is saved to `syntopica_feature_tips` in localStorage
+
+### Requirement: prefers-reduced-motion accessibility
+The system SHALL respect the `prefers-reduced-motion: reduce` media query. When reduced motion is preferred, the guided tour highlight animations MUST be disabled (instant transitions only), and feature discovery tooltip animations MUST be replaced with immediate appearance.
+
+#### Scenario: Tour with reduced motion preference
+- **WHEN** the user's system has `prefers-reduced-motion: reduce` enabled and the guided tour is active
+- **THEN** all tour highlight transitions and popover animations are disabled, using instant state changes instead
+
+#### Scenario: Feature tooltip with reduced motion preference
+- **WHEN** the user's system has `prefers-reduced-motion: reduce` enabled and a feature discovery tooltip appears
+- **THEN** the tooltip appears immediately without transition animation
+
+### Requirement: useOnboarding composable API
+The system SHALL provide a `useOnboarding` Vue composable exposing: `isFirstRun` (computed boolean), `isTourActive` (computed boolean), `startTour()` (function), `dismissTour()` (function), `isFeatureTipShown(tipId)` (function), `markFeatureTipShown(tipId)` (function), and `resetOnboarding()` (function). The composable MUST only initialize driver.js on the client side (not during SSR).
+
+#### Scenario: Composable provides reactive state
+- **WHEN** a Vue component calls `useOnboarding()`
+- **THEN** the composable returns `isFirstRun` and `isTourActive` as reactive computed refs, and all functions are callable
+
+#### Scenario: Composable SSR-safe initialization
+- **WHEN** `useOnboarding()` is called during server-side rendering
+- **THEN** no driver.js instance is created and no localStorage access occurs; `isFirstRun` defaults to false and `isTourActive` defaults to false

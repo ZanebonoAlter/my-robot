@@ -343,7 +343,7 @@ func mapArticleInfos(articles []models.Article) []SummaryInfo {
 			ArticleID: uint64(article.ID),
 			Title:     article.Title,
 			Summary:   summary,
-			CreatedAt: article.CreatedAt.In(tagging.TopicGraphCST).Format("2006-01-02"),
+			CreatedAt: article.CreatedAt.In(models.ShanghaiTZ).Format("2006-01-02"),
 		}
 		if article.Feed.ID != 0 {
 			item.FeedName = article.Feed.Title
@@ -381,7 +381,7 @@ func (s *analysisService) buildEventPayload(tag models.TopicTag, articles []mode
 		}
 
 		timeline = append(timeline, map[string]any{
-			"date":            article.CreatedAt.In(tagging.TopicGraphCST).Format("2006-01-02"),
+			"date":            article.CreatedAt.In(models.ShanghaiTZ).Format("2006-01-02"),
 			"title":           article.Title,
 			"summary":         truncateText(summary, 240),
 			"source_articles": sources,
@@ -408,7 +408,7 @@ func (s *analysisService) buildPersonPayload(tag models.TopicTag, articles []mod
 		}
 
 		item := map[string]any{
-			"date":  article.CreatedAt.In(tagging.TopicGraphCST).Format("2006-01-02"),
+			"date":  article.CreatedAt.In(models.ShanghaiTZ).Format("2006-01-02"),
 			"scene": truncateText(article.Title, 96),
 			"quote": firstSentence(summary),
 		}
@@ -542,7 +542,7 @@ func (s *analysisService) updateCursor(tagID uint64, analysisType, windowType st
 	}
 
 	cursor.LastArticleID = maxArticleID(articles)
-	cursor.LastUpdatedAt = time.Now().In(tagging.TopicGraphCST)
+	cursor.LastUpdatedAt = time.Now().In(models.ShanghaiTZ)
 
 	if cursor.ID == 0 {
 		if err := s.db.Create(&cursor).Error; err != nil {
@@ -581,7 +581,7 @@ func normalizeAnalysisAnchor(windowType string, anchorDate time.Time) (time.Time
 func buildTrendData(articles []models.Article, windowType string) []map[string]any {
 	counter := map[string]int{}
 	for _, article := range articles {
-		key := article.CreatedAt.In(tagging.TopicGraphCST).Format("2006-01-02")
+		key := article.CreatedAt.In(models.ShanghaiTZ).Format("2006-01-02")
 		counter[key]++
 	}
 	trend := make([]map[string]any, 0, len(counter))

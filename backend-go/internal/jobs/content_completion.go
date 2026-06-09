@@ -201,7 +201,7 @@ func (s *ContentCompletionScheduler) runCompletionCycle(triggerSource, runID str
 		return
 	}
 
-	now := time.Now().In(time.FixedZone("CST", 8*3600))
+	now := time.Now().In(models.ShanghaiTZ)
 	s.mu.Lock()
 	s.isExecuting = true
 	s.currentArticle = nil
@@ -302,7 +302,7 @@ func (s *ContentCompletionScheduler) runCompletionCycle(triggerSource, runID str
 		runSummary.LiveProcessingCount = 0
 		runSummary.StaleProcessingArticle = overview.StaleProcessingArticle
 	}
-	runSummary.FinishedAt = time.Now().In(time.FixedZone("CST", 8*3600)).Format(time.RFC3339)
+	runSummary.FinishedAt = time.Now().In(models.ShanghaiTZ).Format(time.RFC3339)
 	if encoded, err := json.Marshal(runSummary); err == nil {
 		task.LastExecutionResult = string(encoded)
 	}
@@ -329,7 +329,7 @@ func (s *ContentCompletionScheduler) initSchedulerTask() {
 		return
 	}
 
-	now := time.Now().In(time.FixedZone("CST", 8*3600))
+	now := time.Now().In(models.ShanghaiTZ)
 	nextRun := now.Add(s.checkInterval)
 
 	task = models.SchedulerTask{
@@ -401,7 +401,7 @@ func (s *ContentCompletionScheduler) reconcileSchedulerTask() error {
 	}
 
 	if primary.Status == "running" {
-		nextRun := time.Now().In(time.FixedZone("CST", 8*3600)).Add(s.checkInterval)
+		nextRun := time.Now().In(models.ShanghaiTZ).Add(s.checkInterval)
 		primary.Status = "idle"
 		primary.NextExecutionTime = &nextRun
 	}

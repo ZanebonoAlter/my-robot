@@ -282,7 +282,7 @@ func TestCompleteArticleWithForceSkipsFreshPendingAndReclaimsStalePending(t *tes
 		t.Fatalf("create feed: %v", err)
 	}
 
-	now := time.Now().In(time.FixedZone("CST", 8*3600))
+	now := time.Now().In(models.ShanghaiTZ)
 	freshStartedAt := now.Add(-2 * time.Minute)
 	staleStartedAt := now.Add(-2 * time.Hour)
 

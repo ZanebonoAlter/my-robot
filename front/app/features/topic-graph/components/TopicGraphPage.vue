@@ -9,7 +9,6 @@ import {
   type TopicGraphDetailPayload,
   type TopicGraphFilters,
   type TopicGraphType,
-  type TopicKind,
   type TopicsByCategoryPayload,
 } from '~/api/topicGraph'
 import type { Article } from '~/types'

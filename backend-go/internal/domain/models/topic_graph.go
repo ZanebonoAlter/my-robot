@@ -64,8 +64,8 @@ type TopicTag struct {
 	CreatedAt    time.Time   `json:"created_at"`
 	UpdatedAt    time.Time   `json:"updated_at"`
 
-	// Deprecated: Use Category instead.
-	// Kind is retained for backward compatibility, maps to Category.
+	// Deprecated: Kind is no longer written. Use Category as the authoritative field.
+	// This field is retained for backward compatibility and will be removed with a DB migration.
 	Kind string `gorm:"size:20;default:keyword" json:"kind"`
 
 	// Deprecated: Each tag now has multiple embeddings (identity + semantic).

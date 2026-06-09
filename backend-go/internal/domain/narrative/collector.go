@@ -1,14 +1,11 @@
 package narrative
 
 import (
-	"encoding/json"
 	"fmt"
-	"sort"
 	"time"
 
 	"syntopica-backend/internal/domain/models"
 	"syntopica-backend/internal/platform/database"
-	"syntopica-backend/internal/platform/logging"
 )
 
 type TagInput struct {
@@ -125,20 +122,6 @@ func CollectSemanticBoardNarrativeInputs(date time.Time) ([]SemanticBoardNarrati
 	return inputs, nil
 }
 
-type CategoryNarrativeBrief struct {
-	ID          uint       `json:"id"`
-	Title       string     `json:"title"`
-	Summary     string     `json:"summary"`
-	RelatedTags []TagBrief `json:"related_tags"`
-}
-
-type CategoryInput struct {
-	CategoryID   uint                     `json:"category_id"`
-	CategoryName string                   `json:"category_name"`
-	CategoryIcon string                   `json:"category_icon"`
-	Narratives   []CategoryNarrativeBrief `json:"narratives"`
-}
-
 type ActiveCategory struct {
 	ID           uint   `json:"id"`
 	Name         string `json:"name"`
@@ -221,160 +204,4 @@ func CollectPreviousNarratives(date time.Time, scopeType string, categoryID *uin
 	return result, nil
 }
 
-func CollectCategoryNarrativeSummaries(date time.Time) ([]CategoryInput, error) {
-	startOfDay := time.Date(date.Year(), date.Month(), date.Day(), 0, 0, 0, 0, date.Location())
-	endOfDay := startOfDay.Add(24 * time.Hour)
 
-	var narratives []models.NarrativeSummary
-	if err := database.DB.
-		Where("scope_type = ? AND status != ? AND period_date >= ? AND period_date < ?",
-			models.NarrativeScopeTypeFeedCategory, models.NarrativeStatusEnding, startOfDay, endOfDay).
-		Order("generation DESC, id DESC").
-		Find(&narratives).Error; err != nil {
-		return nil, fmt.Errorf("query category narratives: %w", err)
-	}
-
-	if len(narratives) == 0 {
-		return nil, nil
-	}
-
-	grouped := make(map[uint][]models.NarrativeSummary)
-	for _, n := range narratives {
-		if n.ScopeCategoryID != nil {
-			grouped[*n.ScopeCategoryID] = append(grouped[*n.ScopeCategoryID], n)
-		}
-	}
-
-	for catID, ns := range grouped {
-		if len(ns) > 5 {
-			grouped[catID] = ns[:5]
-		}
-	}
-
-	type catWithCount struct {
-		CategoryID   uint
-		Narratives   []models.NarrativeSummary
-		ArticleCount int
-	}
-
-	var buckets []catWithCount
-	for catID, ns := range grouped {
-		totalArticles := 0
-		for _, n := range ns {
-			var ids []interface{}
-			if n.RelatedArticleIDs != "" {
-				_ = json.Unmarshal([]byte(n.RelatedArticleIDs), &ids)
-			}
-			totalArticles += len(ids)
-		}
-		buckets = append(buckets, catWithCount{
-			CategoryID:   catID,
-			Narratives:   ns,
-			ArticleCount: totalArticles,
-		})
-	}
-
-	sort.Slice(buckets, func(i, j int) bool {
-		return buckets[i].ArticleCount > buckets[j].ArticleCount
-	})
-
-	totalCap := 30
-	var selected []catWithCount
-	total := 0
-	for _, b := range buckets {
-		if total >= totalCap {
-			break
-		}
-		take := b.Narratives
-		if total+len(take) > totalCap {
-			take = take[:totalCap-total]
-		}
-		selected = append(selected, catWithCount{
-			CategoryID:   b.CategoryID,
-			Narratives:   take,
-			ArticleCount: b.ArticleCount,
-		})
-		total += len(take)
-	}
-
-	catIDs := make([]uint, len(selected))
-	for i, s := range selected {
-		catIDs[i] = s.CategoryID
-	}
-
-	var categories []models.Category
-	if len(catIDs) > 0 {
-		database.DB.Where("id IN ?", catIDs).Find(&categories)
-	}
-	catMap := make(map[uint]models.Category, len(categories))
-	for _, c := range categories {
-		catMap[c.ID] = c
-	}
-
-	tagIDSet := make(map[uint]bool)
-	for _, b := range selected {
-		for _, n := range b.Narratives {
-			var tagIDs []uint
-			if n.RelatedTagIDs != "" {
-				_ = json.Unmarshal([]byte(n.RelatedTagIDs), &tagIDs)
-			}
-			for _, id := range tagIDs {
-				tagIDSet[id] = true
-			}
-		}
-	}
-
-	tagBriefMap := make(map[uint]TagBrief)
-	if len(tagIDSet) > 0 {
-		tagIDs := make([]uint, 0, len(tagIDSet))
-		for id := range tagIDSet {
-			tagIDs = append(tagIDs, id)
-		}
-		var tags []models.TopicTag
-		database.DB.Where("id IN ?", tagIDs).Find(&tags)
-		for _, t := range tags {
-			tagBriefMap[t.ID] = TagBrief{ID: t.ID, Slug: t.Slug, Label: t.Label, Category: t.Category, Kind: t.Kind}
-		}
-	}
-
-	var result []CategoryInput
-	for _, b := range selected {
-		cat, ok := catMap[b.CategoryID]
-		if !ok {
-			continue
-		}
-
-		briefs := make([]CategoryNarrativeBrief, 0, len(b.Narratives))
-		for _, n := range b.Narratives {
-			var tagIDs []uint
-			if n.RelatedTagIDs != "" {
-				_ = json.Unmarshal([]byte(n.RelatedTagIDs), &tagIDs)
-			}
-			relatedTags := make([]TagBrief, 0, len(tagIDs))
-			for _, tid := range tagIDs {
-				if brief, ok := tagBriefMap[tid]; ok {
-					relatedTags = append(relatedTags, brief)
-				}
-			}
-
-			briefs = append(briefs, CategoryNarrativeBrief{
-				ID:          uint(n.ID),
-				Title:       n.Title,
-				Summary:     n.Summary,
-				RelatedTags: relatedTags,
-			})
-		}
-
-		result = append(result, CategoryInput{
-			CategoryID:   b.CategoryID,
-			CategoryName: cat.Name,
-			CategoryIcon: cat.Icon,
-			Narratives:   briefs,
-		})
-	}
-
-	logging.Infof("narrative: collected %d category inputs with %d total narratives for %s",
-		len(result), total, date.Format("2006-01-02"))
-
-	return result, nil
-}

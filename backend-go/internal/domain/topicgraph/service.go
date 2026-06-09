@@ -87,7 +87,6 @@ func BuildTopicDetail(kind string, slug string, anchor time.Time, categoryID, fe
 		Slug:        topic.Slug,
 		Category:    tagging.NormalizeDisplayCategory(topic.Kind, topic.Category),
 		Icon:        topic.Icon,
-		Kind:        tagging.NormalizeTopicKind(topic.Kind, topic.Category),
 		Description: topic.Description,
 		Score:       0,
 	}
@@ -258,7 +257,6 @@ func getRelatedTags(topicID uint, limit int) ([]tagging.RelatedTag, error) {
 
 	for i := range relatedTags {
 		relatedTags[i].Category = tagging.NormalizeDisplayCategory(relatedTags[i].Kind, relatedTags[i].Category)
-		relatedTags[i].Kind = tagging.NormalizeTopicKind(relatedTags[i].Kind, relatedTags[i].Category)
 	}
 
 	return relatedTags, nil
@@ -410,7 +408,6 @@ func BuildTopicsByCategory(kind string, anchor time.Time, categoryID, feedID *ui
 			Slug:         at.TopicTag.Slug,
 			Category:     tagging.NormalizeDisplayCategory(at.TopicTag.Kind, at.TopicTag.Category),
 			Icon:         at.TopicTag.Icon,
-			Kind:         tagging.NormalizeTopicKind(at.TopicTag.Kind, at.TopicTag.Category),
 			Description:  at.TopicTag.Description,
 			Score:        at.Score,
 			QualityScore: at.TopicTag.QualityScore,
@@ -724,7 +721,7 @@ func GetPendingArticlesByTag(tagSlug string, kind string, anchor time.Time) (*ta
 		}
 
 		if article.PubDate != nil {
-			pa.PubDate = article.PubDate.In(tagging.TopicGraphCST).Format(time.RFC3339)
+			pa.PubDate = article.PubDate.In(models.ShanghaiTZ).Format(time.RFC3339)
 		}
 
 		if article.Feed.ID != 0 {

@@ -32,34 +32,6 @@ func TestInitDBConnectsToPostgres(t *testing.T) {
 	}
 }
 
-func TestMigrateCreatesAllTables(t *testing.T) {
-	if err := config.LoadConfig("../../configs"); err != nil {
-		t.Fatalf("load config: %v", err)
-	}
-
-	if err := InitDB(config.AppConfig); err != nil {
-		t.Fatalf("InitDB: %v", err)
-	}
-
-	if err := Migrate(); err != nil {
-		t.Fatalf("Migrate: %v", err)
-	}
-
-	expectedTables := []any{
-		&models.FirecrawlJob{},
-		&models.TagJob{},
-		&models.AISettings{},
-		&models.AIProvider{},
-		&models.AIRoute{},
-	}
-
-	for _, table := range expectedTables {
-		if !DB.Migrator().HasTable(table) {
-			t.Fatalf("expected table %T to exist", table)
-		}
-	}
-}
-
 func TestPostgresMigrationsDocumentStagedEmbeddingCutover(t *testing.T) {
 	migrations := postgresMigrations()
 	if len(migrations) < 3 {

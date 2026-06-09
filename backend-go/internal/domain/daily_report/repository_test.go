@@ -5,10 +5,11 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"syntopica-backend/internal/domain/models"
 )
 
 func TestNormalizeReportDateKeepsRequestedDate(t *testing.T) {
-	requested, err := time.ParseInLocation("2006-01-02", "2026-05-26", time.FixedZone("UTC+8", 8*60*60))
+	requested, err := time.ParseInLocation("2006-01-02", "2026-05-26", models.ShanghaiTZ)
 	require.NoError(t, err)
 
 	got := normalizeReportDate(requested)

@@ -581,7 +581,7 @@ func refreshAllFeedsWorker(feedIDs []uint) {
 // resetFeedStatus sets a feed to "error" status, but only if it's still in "refreshing" state.
 // This avoids overwriting a concurrent status change (e.g. from auto-refresh completing it).
 func resetFeedStatus(feedID uint, errMsg string) {
-	now := time.Now().In(time.FixedZone("CST", 8*3600))
+	now := time.Now().In(models.ShanghaiTZ)
 	database.DB.Model(&models.Feed{}).Where("id = ? AND refresh_status = ?", feedID, "refreshing").Updates(map[string]interface{}{
 		"refresh_status": "error",
 		"refresh_error":  errMsg,

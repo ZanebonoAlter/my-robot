@@ -58,7 +58,6 @@ func legacyExtractTopics(input ExtractionInput) []TopicTag {
 func findOrCreateTag(ctx context.Context, tag TopicTag, source string, articleContext string, articleID uint) (*models.TopicTag, error) {
 	slug := Slugify(tag.Label)
 	category := NormalizeDisplayCategory(tag.Kind, tag.Category)
-	kind := NormalizeTopicKind(tag.Kind, category)
 	logging.Infof("findOrCreateTag: start label=%q slug=%q category=%s source=%s", tag.Label, slug, category, source)
 
 	if cached, ok := GetTagCache().Get(slug, category); ok {
@@ -102,7 +101,6 @@ func findOrCreateTag(ctx context.Context, tag TopicTag, source string, articleCo
 						aJSON, _ := json.Marshal(tag.Aliases)
 						existing.Aliases = string(aJSON)
 					}
-					existing.Kind = kind
 					if err := database.DB.Save(existing).Error; err != nil {
 						return nil, err
 					}
@@ -142,7 +140,6 @@ func findOrCreateTag(ctx context.Context, tag TopicTag, source string, articleCo
 			aJSON, _ := json.Marshal(tag.Aliases)
 			dbTag.Aliases = string(aJSON)
 		}
-		dbTag.Kind = kind
 		if err := database.DB.Save(&dbTag).Error; err != nil {
 			return nil, err
 		}
@@ -160,7 +157,6 @@ func findOrCreateTag(ctx context.Context, tag TopicTag, source string, articleCo
 		Slug:        slug,
 		Label:       tag.Label,
 		Category:    category,
-		Kind:        kind,
 		Icon:        tag.Icon,
 		Aliases:     string(aliasesJSON),
 		IsCanonical: true,

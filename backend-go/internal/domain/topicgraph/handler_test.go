@@ -37,7 +37,7 @@ func seedTopicGraphData(t *testing.T) {
 	require.NoError(t, database.DB.Create(&feedA).Error)
 	require.NoError(t, database.DB.Create(&feedB).Error)
 
-	createdAt := time.Date(2026, 3, 11, 9, 30, 0, 0, time.FixedZone("CST", 8*3600))
+	createdAt := time.Date(2026, 3, 11, 9, 30, 0, 0, models.ShanghaiTZ)
 	articles := []models.Article{
 		{FeedID: feedA.ID, Title: "Runtime launch", Link: "https://example.com/runtime", CreatedAt: createdAt},
 		{FeedID: feedA.ID, Title: "Toolchain memo", Link: "https://example.com/toolchain", CreatedAt: createdAt},
@@ -76,7 +76,7 @@ func seedTopicArticlesData(t *testing.T) {
 		require.NoError(t, database.DB.Create(&topicTags[i]).Error)
 	}
 
-	createdAt := time.Date(2026, 3, 11, 9, 30, 0, 0, time.FixedZone("CST", 8*3600))
+	createdAt := time.Date(2026, 3, 11, 9, 30, 0, 0, models.ShanghaiTZ)
 	articles := []models.Article{
 		{Title: "AI Agent Article 1", Link: "https://example.com/ai-agent-1", CreatedAt: createdAt},
 		{Title: "AI Agent Article 2", Link: "https://example.com/ai-agent-2", CreatedAt: createdAt.Add(1 * time.Hour)},

@@ -1,7 +1,6 @@
 package narrative
 
 import (
-	"context"
 	"strings"
 	"testing"
 
@@ -133,78 +132,6 @@ func TestParseNarrativeResponse_MissingStatus(t *testing.T) {
 	}
 	if result[0].Status != "" {
 		t.Errorf("missing status should produce empty string, got %q", result[0].Status)
-	}
-}
-
-func TestBuildNarrativePrompt_NoPrevious(t *testing.T) {
-	tags := []TagInput{
-		{ID: 1, Label: "AI", Category: "keyword", ArticleCount: 5, Source: "llm"},
-		{ID: 2, Label: "芯片", Category: "keyword", Description: "半导体行业", ArticleCount: 3, Source: "abstract"},
-	}
-
-	prompt := buildNarrativePrompt(tags, nil)
-
-	if !strings.Contains(prompt, "今日话题标签数据") {
-		t.Error("prompt missing section header '今日话题标签数据'")
-	}
-	if !strings.Contains(prompt, "[ID:1] AI") {
-		t.Error("prompt missing tag ID:1 AI")
-	}
-	if !strings.Contains(prompt, "[ID:2] 芯片") {
-		t.Error("prompt missing tag ID:2 芯片")
-	}
-	if !strings.Contains(prompt, "描述:半导体行业") {
-		t.Error("prompt should include description for tag with description field")
-	}
-	if !strings.Contains(prompt, "描述:半导体行业") {
-		t.Error("prompt missing tag description")
-	}
-	if strings.Contains(prompt, "昨日叙事线索") {
-		t.Error("prompt should NOT contain '昨日叙事线索' when no previous narratives")
-	}
-}
-
-func TestBuildNarrativePrompt_WithPrevious(t *testing.T) {
-	tags := []TagInput{
-		{ID: 10, Label: "量子计算", Category: "keyword", ArticleCount: 2},
-	}
-	prev := []PreviousNarrative{
-		{ID: 100, Title: "量子突破", Summary: "昨天的量子叙事", Status: "continuing", Generation: 2},
-		{ID: 101, Title: "芯片战争", Summary: "昨天芯片相关", Status: "emerging", Generation: 0},
-	}
-
-	prompt := buildNarrativePrompt(tags, prev)
-
-	if !strings.Contains(prompt, "昨日叙事线索") {
-		t.Error("prompt missing '昨日叙事线索' section")
-	}
-	if !strings.Contains(prompt, "[ID:100] 量子突破") {
-		t.Error("prompt missing previous narrative ID:100")
-	}
-	if !strings.Contains(prompt, "[ID:101] 芯片战争") {
-		t.Error("prompt missing previous narrative ID:101")
-	}
-	if !strings.Contains(prompt, "第2代") {
-		t.Error("prompt missing generation info '第2代'")
-	}
-}
-
-func TestGenerateNarratives_EmptyInput(t *testing.T) {
-	result, err := GenerateNarratives(context.TODO(), nil, nil)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if result != nil {
-		t.Fatalf("expected nil result for empty input, got %v", result)
-	}
-}
-
-func TestNarrativeSystemPrompt_RequiresWrappedNarrativesObject(t *testing.T) {
-	if !strings.Contains(narrativeSystemPrompt, `{"narratives":[]}`) {
-		t.Fatalf("system prompt should include wrapped narratives object example, got %q", narrativeSystemPrompt)
-	}
-	if strings.Contains(narrativeSystemPrompt, "返回JSON数组") {
-		t.Fatalf("system prompt should not ask for a direct JSON array")
 	}
 }
 

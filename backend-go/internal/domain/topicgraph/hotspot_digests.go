@@ -92,7 +92,7 @@ func GetDigestsByArticleTag(tagSlug string, windowKind string, anchor time.Time,
 		}
 
 		if article.PubDate != nil {
-			card.PublishedAt = article.PubDate.In(tagging.TopicGraphCST).Format(time.RFC3339)
+			card.PublishedAt = article.PubDate.In(models.ShanghaiTZ).Format(time.RFC3339)
 		}
 
 		if article.Feed.ID != 0 {

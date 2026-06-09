@@ -13,7 +13,7 @@ import (
 
 	"go.uber.org/zap"
 
-	"syntopica-backend/internal/domain/tagging"
+	"syntopica-backend/internal/domain/models"
 	"syntopica-backend/internal/platform/airouter"
 )
 
@@ -352,7 +352,7 @@ func (s *AIAnalysisService) buildPrompt(params AnalysisParams) (string, error) {
 	input := aiPromptInput{
 		TopicLabel: strings.TrimSpace(params.TopicLabel),
 		WindowType: normalizeWindowType(params.WindowType),
-		AnchorDate: normalizeQueueAnchorDate(params.AnchorDate).In(tagging.TopicGraphCST).Format("2006-01-02"),
+		AnchorDate: normalizeQueueAnchorDate(params.AnchorDate).In(models.ShanghaiTZ).Format("2006-01-02"),
 		Summaries:  strings.Join(lines, "\n\n"),
 	}
 

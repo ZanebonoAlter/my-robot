@@ -90,14 +90,6 @@ func schedulerDescriptors() []schedulerDescriptor {
 			},
 		},
 		{
-			Name:        "narrative_summary",
-			DisplayName: "Narrative Summary",
-			Description: "Generate daily narrative summaries from active topic tags",
-			Get: func() interface{} {
-				return runtimeinfo.NarrativeSummarySchedulerInterface
-			},
-		},
-		{
 			Name:        "log_cleanup",
 			DisplayName: "Log Cleanup",
 			Description: "Clean up expired ai_call_logs and otel_spans rows",

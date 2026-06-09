@@ -11,6 +11,8 @@ import (
 	"unicode/utf8"
 
 	"github.com/mmcdole/gofeed"
+
+	"syntopica-backend/internal/domain/models"
 )
 
 type RSSParser struct {
@@ -153,14 +155,12 @@ func extractContent(item *gofeed.Item) string {
 }
 
 func parseDate(item *gofeed.Item) *time.Time {
-	cstZone := time.FixedZone("CST", 8*3600)
-
 	if item.PublishedParsed != nil {
-		cstTime := item.PublishedParsed.In(cstZone)
+		cstTime := item.PublishedParsed.In(models.ShanghaiTZ)
 		return &cstTime
 	}
 	if item.UpdatedParsed != nil {
-		cstTime := item.UpdatedParsed.In(cstZone)
+		cstTime := item.UpdatedParsed.In(models.ShanghaiTZ)
 		return &cstTime
 	}
 	return nil

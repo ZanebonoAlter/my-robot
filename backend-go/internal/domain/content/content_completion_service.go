@@ -456,7 +456,7 @@ func completionRetryLimit(feed *models.Feed) int {
 }
 
 func currentCompletionTime() time.Time {
-	return time.Now().In(time.FixedZone("CST", 8*3600))
+	return time.Now().In(models.ShanghaiTZ)
 }
 
 func staleCompletionStartedBefore(now time.Time) time.Time {

@@ -49,7 +49,7 @@ func (s *FeedService) RefreshFeed(ctx context.Context, feedID uint) (err error) 
 		return err
 	}
 
-	now := time.Now().In(time.FixedZone("CST", 8*3600))
+	now := time.Now().In(models.ShanghaiTZ)
 	feed.Title = parsed.Title
 	feed.Description = parsed.Description
 	feed.LastUpdated = &now
@@ -98,7 +98,7 @@ func (s *FeedService) RefreshFeed(ctx context.Context, feedID uint) (err error) 
 		article := s.buildArticleFromEntry(feed, entry)
 
 		if article.PubDate == nil {
-			now := time.Now().In(time.FixedZone("CST", 8*3600))
+			now := time.Now().In(models.ShanghaiTZ)
 			article.PubDate = &now
 		}
 
@@ -145,7 +145,7 @@ func (s *FeedService) enqueueArticleProcessing(feed models.Feed, article models.
 }
 
 func (s *FeedService) updateFeedError(feed *models.Feed, err error) {
-	now := time.Now().In(time.FixedZone("CST", 8*3600))
+	now := time.Now().In(models.ShanghaiTZ)
 	feed.RefreshStatus = "error"
 	feed.RefreshError = err.Error()
 	feed.LastRefreshAt = &now

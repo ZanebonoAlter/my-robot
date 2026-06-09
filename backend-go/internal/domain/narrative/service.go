@@ -242,16 +242,6 @@ func (s *NarrativeService) GenerateAndSaveForAllBoards(date time.Time) (int, err
 }
 
 // Deprecated: Use daily_report.GenerateDailyReport instead. Kept for rollback safety.
-func (s *NarrativeService) GenerateAndSaveGlobal(ctx context.Context, date time.Time) (int, error) {
-	scopeOpts := ScopeSaveOpts{
-		ScopeType:  models.NarrativeScopeTypeGlobal,
-		CategoryID: nil,
-		Label:      "",
-	}
-	return s.generateAndSaveSemanticBoardScope(ctx, date, scopeOpts)
-}
-
-// Deprecated: Use daily_report.GenerateDailyReport instead. Kept for rollback safety.
 func (s *NarrativeService) GenerateAndSaveForCategory(date time.Time, categoryID uint, categoryLabel string) (int, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Minute)
 	defer cancel()
@@ -436,30 +426,6 @@ func cleanEmptyBoards(date time.Time, categoryID *uint) {
 	}
 }
 
-// Deprecated: Use daily_report.GenerateDailyReport instead. Kept for rollback safety.
-func (s *NarrativeService) GenerateAndSaveForAllCategories(date time.Time) (int, error) {
-	categories, err := CollectActiveCategories(date)
-	if err != nil {
-		return 0, fmt.Errorf("collect active categories: %w", err)
-	}
-	if len(categories) == 0 {
-		logging.Infof("narrative: no active categories for %s", date.Format("2006-01-02"))
-		return 0, nil
-	}
-
-	totalSaved := 0
-	for _, cat := range categories {
-		saved, err := s.GenerateAndSaveForCategory(date, cat.ID, cat.Name)
-		if err != nil {
-			logging.Warnf("narrative: failed to generate for category %d (%s): %v", cat.ID, cat.Name, err)
-			continue
-		}
-		totalSaved += saved
-	}
-
-	logging.Infof("narrative: saved %d category narratives across %d categories for %s", totalSaved, len(categories), date.Format("2006-01-02"))
-	return totalSaved, nil
-}
 
 func resolveGeneration(out NarrativeOutput, date time.Time) int {
 	if len(out.ParentIDs) == 0 {

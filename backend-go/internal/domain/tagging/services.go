@@ -3,15 +3,15 @@ package tagging
 import (
 	"fmt"
 	"time"
-)
 
-var TopicGraphCST = time.FixedZone("CST", 8*3600)
+	"syntopica-backend/internal/domain/models"
+)
 
 func ParseAnchorDate(value string) (time.Time, error) {
 	if value == "" {
-		return time.Now().In(TopicGraphCST), nil
+		return time.Now().In(models.ShanghaiTZ), nil
 	}
-	parsed, err := time.ParseInLocation("2006-01-02", value, TopicGraphCST)
+	parsed, err := time.ParseInLocation("2006-01-02", value, models.ShanghaiTZ)
 	if err != nil {
 		return time.Time{}, err
 	}
@@ -19,8 +19,8 @@ func ParseAnchorDate(value string) (time.Time, error) {
 }
 
 func ResolveWindow(kind string, anchor time.Time) (time.Time, time.Time, string, error) {
-	current := anchor.In(TopicGraphCST)
-	dayStart := time.Date(current.Year(), current.Month(), current.Day(), 0, 0, 0, 0, TopicGraphCST)
+	current := anchor.In(models.ShanghaiTZ)
+	dayStart := time.Date(current.Year(), current.Month(), current.Day(), 0, 0, 0, 0, models.ShanghaiTZ)
 
 	switch kind {
 	case "daily":
@@ -31,7 +31,7 @@ func ResolveWindow(kind string, anchor time.Time) (time.Time, time.Time, string,
 		weekEnd := weekStart.AddDate(0, 0, 7)
 		return weekStart, weekEnd, fmt.Sprintf("%s - %s", weekStart.Format("01-02"), weekEnd.AddDate(0, 0, -1).Format("01-02")), nil
 	case "all":
-		return time.Date(2000, 1, 1, 0, 0, 0, 0, TopicGraphCST), time.Date(2100, 1, 1, 0, 0, 0, 0, TopicGraphCST), "全部", nil
+		return time.Date(2000, 1, 1, 0, 0, 0, 0, models.ShanghaiTZ), time.Date(2100, 1, 1, 0, 0, 0, 0, models.ShanghaiTZ), "全部", nil
 	default:
 		return time.Time{}, time.Time{}, "", fmt.Errorf("unsupported topic graph type: %s", kind)
 	}

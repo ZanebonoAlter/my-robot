@@ -39,7 +39,7 @@ func TestGetArticleReturnsArticleTags(t *testing.T) {
 		FeedID:    feed.ID,
 		Title:     "GPT-5 agent runtime",
 		Link:      "https://example.com/gpt5-agent-runtime",
-		CreatedAt: time.Date(2026, 3, 22, 9, 0, 0, 0, time.FixedZone("CST", 8*3600)),
+		CreatedAt: time.Date(2026, 3, 22, 9, 0, 0, 0, models.ShanghaiTZ),
 	}
 	require.NoError(t, database.DB.Create(&article).Error)
 

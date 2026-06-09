@@ -22,7 +22,6 @@ type Runtime struct {
 	Firecrawl              *jobs.FirecrawlScheduler
 	BlockedArticleRecovery *jobs.BlockedArticleRecoveryScheduler
 	TagQualityScore        *jobs.TagQualityScoreScheduler
-	NarrativeSummary       *jobs.NarrativeSummaryScheduler
 	DailyReport            *jobs.DailyReportScheduler
 	LogCleanup             *jobs.LogCleanupScheduler
 	AuxLabelCleanup        *jobs.AuxLabelCleanupScheduler
@@ -142,13 +141,6 @@ func StartRuntime() *Runtime {
 		logging.Infoln("Tag quality score scheduler started successfully")
 	}
 
-	runtime.NarrativeSummary = jobs.NewNarrativeSummaryScheduler(86400)
-	if err := runtime.NarrativeSummary.Start(); err != nil {
-		logging.Warnf("Failed to start narrative summary scheduler: %v", err)
-	} else {
-		logging.Infoln("Narrative summary scheduler started successfully")
-	}
-
 	runtime.LogCleanup = jobs.NewLogCleanupScheduler(86400)
 	if err := runtime.LogCleanup.Start(); err != nil {
 		logging.Warnf("Failed to start log cleanup scheduler: %v", err)
@@ -175,7 +167,6 @@ func StartRuntime() *Runtime {
 	runtimeinfo.ContentCompletionSchedulerInterface = runtime.ContentCompletion
 	runtimeinfo.FirecrawlSchedulerInterface = runtime.Firecrawl
 	runtimeinfo.TagQualityScoreSchedulerInterface = runtime.TagQualityScore
-	runtimeinfo.NarrativeSummarySchedulerInterface = runtime.NarrativeSummary
 	runtimeinfo.LogCleanupSchedulerInterface = runtime.LogCleanup
 	runtimeinfo.DailyReportSchedulerInterface = runtime.DailyReport
 	runtimeinfo.AuxLabelCleanupSchedulerInterface = runtime.AuxLabelCleanup
@@ -223,11 +214,6 @@ func SetupGracefulShutdown(runtime *Runtime) {
 			if runtime.TagQualityScore != nil {
 				logging.Infoln("Stopping tag quality score scheduler...")
 				runtime.TagQualityScore.Stop()
-			}
-
-			if runtime.NarrativeSummary != nil {
-				logging.Infoln("Stopping narrative summary scheduler...")
-				runtime.NarrativeSummary.Stop()
 			}
 
 			if runtime.LogCleanup != nil {

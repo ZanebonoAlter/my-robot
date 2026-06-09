@@ -201,23 +201,6 @@ export interface BoardArticle {
   [key: string]: unknown
 }
 
-export interface BoardNarrativeTag {
-  id: number
-  label: string
-}
-
-export interface BoardNarrative {
-  id: number
-  title: string
-  summary: string
-  status: string
-  related_tags: BoardNarrativeTag[]
-  related_article_ids: number[]
-  scope_type: string
-  article_count: number
-  period_date: string
-}
-
 export function useSemanticBoardsApi() {
   async function getBoards(params?: { search?: string; status?: string }): Promise<ApiResponse<{ items: SemanticBoard[]; total: number }>> {
     const query = apiClient.buildQueryParams(params)
@@ -315,12 +298,7 @@ export function useSemanticBoardsApi() {
     return apiClient.get(`/semantic-boards/${boardId}/match-detail/${tagId}`)
   }
 
-  async function getBoardNarratives(id: number, params?: { days?: number }): Promise<ApiResponse<BoardNarrative[]>> {
-    const query = params ? apiClient.buildQueryParams(params) : ''
-    return apiClient.get(`/semantic-boards/${id}/narratives${query ? `?${query}` : ''}`)
-  }
-
-  async function suggestAuxiliariesForBoard(boardId: number, params?: {
+async function suggestAuxiliariesForBoard(boardId: number, params?: {
     search?: string
     page?: number
     page_size?: number
@@ -333,11 +311,7 @@ export function useSemanticBoardsApi() {
     return apiClient.post(`/semantic-boards/${boardId}/composition`, { auxiliary_label_id: auxiliaryLabelId })
   }
 
-  async function triggerNarrativeGeneration(params: { date: string; board_id?: number }) {
-    return apiClient.post<{ success: boolean; data: { saved: number } }>('/narratives/boards/generate', params)
-  }
-
-  return {
+return {
     getBoards,
     getBoard,
     createBoard,
@@ -353,11 +327,9 @@ export function useSemanticBoardsApi() {
     suggestAuxiliariesForBoard,
     getBoardArticles,
     getMatchDetail,
-    getBoardNarratives,
     triggerBackfill,
     getBackfillStatus,
     getMatchingConfig,
     updateMatchingConfig,
-    triggerNarrativeGeneration,
   }
 }

@@ -10,7 +10,7 @@ import (
 	"go.opentelemetry.io/otel/trace"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
-	"syntopica-backend/internal/domain/models"
+	"syntopica-backend/internal/models"
 	"syntopica-backend/internal/platform/database"
 )
 

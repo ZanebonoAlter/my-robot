@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"syntopica-backend/internal/domain/models"
+	"syntopica-backend/internal/models"
 	"syntopica-backend/internal/platform/config"
 )
 

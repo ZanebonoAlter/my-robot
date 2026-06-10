@@ -1,0 +1,513 @@
+package service
+
+import (
+	"encoding/json"
+	"fmt"
+	"strings"
+	"testing"
+
+	"github.com/glebarez/sqlite"
+	"gorm.io/gorm"
+
+	"syntopica-backend/internal/models"
+	"syntopica-backend/internal/tagmanagement/repository"
+)
+
+func setupEmbeddingTestDB(t *testing.T) *gorm.DB {
+	t.Helper()
+
+	db, err := gorm.Open(sqlite.Open(fmt.Sprintf("file:%s?mode=memory&cache=shared", strings.ReplaceAll(t.Name(), "/", "_"))), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+
+	if err := db.Exec("PRAGMA foreign_keys = ON").Error; err != nil {
+		t.Fatalf("enable foreign keys: %v", err)
+	}
+
+	repository.InitRepository(db)
+
+	if err := db.AutoMigrate(&models.TopicTag{}, &models.TopicTagEmbedding{}); err != nil {
+		t.Fatalf("migrate test tables: %v", err)
+	}
+
+	return db
+}
+
+func TestBuildTagEmbeddingText(t *testing.T) {
+	tests := []struct {
+		name          string
+		tag           *models.TopicTag
+		embeddingType string
+		expected      string
+	}{
+		{
+			name:          "identity label only",
+			tag:           &models.TopicTag{Label: "AI", Category: "event"},
+			embeddingType: EmbeddingTypeIdentity,
+			expected:      "AI event",
+		},
+		{
+			name:          "identity excludes description",
+			tag:           &models.TopicTag{Label: "AI", Category: "event", Description: "Artificial Intelligence"},
+			embeddingType: EmbeddingTypeIdentity,
+			expected:      "AI event",
+		},
+		{
+			name:          "semantic includes description",
+			tag:           &models.TopicTag{Label: "AI", Category: "event", Description: "Artificial Intelligence"},
+			embeddingType: EmbeddingTypeSemantic,
+			expected:      "AI. Artificial Intelligence event",
+		},
+		{
+			name:          "identity with JSON aliases",
+			tag:           &models.TopicTag{Label: "AI", Category: "event", Aliases: `["Artificial Intelligence","Machine Learning"]`},
+			embeddingType: EmbeddingTypeIdentity,
+			expected:      "AI Artificial Intelligence Machine Learning event",
+		},
+		{
+			name:          "identity with comma-separated aliases",
+			tag:           &models.TopicTag{Label: "AI", Category: "event", Aliases: "Artificial Intelligence, ML"},
+			embeddingType: EmbeddingTypeIdentity,
+			expected:      "AI Artificial Intelligence, ML event",
+		},
+		{
+			name:          "identity empty aliases",
+			tag:           &models.TopicTag{Label: "Go", Category: "technology"},
+			embeddingType: EmbeddingTypeIdentity,
+			expected:      "Go technology",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := buildTagEmbeddingText(tt.tag, tt.embeddingType)
+			if result != tt.expected {
+				t.Errorf("buildTagEmbeddingText() = %q, want %q", result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestBuildTagEmbeddingTextIdentityVsSemantic(t *testing.T) {
+	tag := &models.TopicTag{
+		Label:       "ChatGPT",
+		Category:    "keyword",
+		Aliases:     `["GPT-4"]`,
+		Description: "OpenAI的对话式AI助手",
+	}
+
+	identity := buildTagEmbeddingText(tag, EmbeddingTypeIdentity)
+	semantic := buildTagEmbeddingText(tag, EmbeddingTypeSemantic)
+
+	if strings.Contains(identity, "OpenAI") {
+		t.Errorf("identity text should not contain description, got %q", identity)
+	}
+	if !strings.Contains(semantic, "OpenAI") {
+		t.Errorf("semantic text should contain description, got %q", semantic)
+	}
+
+	identityHash := hashText(EmbeddingTypeIdentity + "\n" + identity)
+	semanticHash := hashText(EmbeddingTypeSemantic + "\n" + semantic)
+	if identityHash == semanticHash {
+		t.Errorf("identity and semantic hashes should differ for same tag")
+	}
+}
+
+func TestFloatsToPgVector(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    []float64
+		expected string
+	}{
+		{
+			name:     "simple vector",
+			input:    []float64{0.1, 0.2, 0.3},
+			expected: "[0.100000,0.200000,0.300000]",
+		},
+		{
+			name:     "single element",
+			input:    []float64{1.5},
+			expected: "[1.500000]",
+		},
+		{
+			name:     "zero vector",
+			input:    []float64{0, 0, 0, 0},
+			expected: "[0.000000,0.000000,0.000000,0.000000]",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := FloatsToPgVector(tt.input)
+			if result != tt.expected {
+				t.Errorf("FloatsToPgVector() = %q, want %q", result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestHashTextDeterministic(t *testing.T) {
+	a := hashText("hello world")
+	b := hashText("hello world")
+	if a != b {
+		t.Errorf("hashText not deterministic: %q != %q", a, b)
+	}
+
+	c := hashText("different input")
+	if a == c {
+		t.Errorf("hashText collision for different inputs")
+	}
+}
+
+func TestBuildTagEmbeddingTextWithContextTitles(t *testing.T) {
+	tag := &models.TopicTag{
+		Label:       "伊朗袭击霍尔木兹海峡船只",
+		Category:    "event",
+		Description: "指伊朗在霍尔木兹海峡对多艘船只发动的三次袭击事件",
+	}
+
+	text := buildTagEmbeddingText(tag, EmbeddingTypeSemantic)
+	if strings.Contains(text, "相关报道") {
+		t.Errorf("event tag should not contain context marker, got %q", text)
+	}
+
+	text = buildTagEmbeddingText(tag, EmbeddingTypeSemantic, EmbeddingTextOptions{
+		ContextTitles: []string{"伊朗在霍尔木兹海峡的军事行动", "霍尔木兹海峡局势升级"},
+	})
+	if strings.Contains(text, "相关报道") {
+		t.Errorf("event tag no longer includes article context, got %q", text)
+	}
+
+	tag.Category = "person"
+	text = buildTagEmbeddingText(tag, EmbeddingTypeSemantic, EmbeddingTextOptions{
+		ContextTitles: []string{"some title"},
+	})
+	if strings.Contains(text, "相关报道") {
+		t.Errorf("non-event should not include context even with opts, got %q", text)
+	}
+
+	tag.Category = "event"
+	text = buildTagEmbeddingText(tag, EmbeddingTypeIdentity, EmbeddingTextOptions{
+		ContextTitles: []string{"some title"},
+	})
+	if strings.Contains(text, "相关报道") {
+		t.Errorf("identity embedding should not include context, got %q", text)
+	}
+}
+
+func TestContainsAlias(t *testing.T) {
+	tests := []struct {
+		name     string
+		aliases  string
+		label    string
+		expected bool
+	}{
+		{
+			name:     "empty aliases",
+			aliases:  "",
+			label:    "AI",
+			expected: false,
+		},
+		{
+			name:     "JSON aliases match",
+			aliases:  `["Artificial Intelligence","ML"]`,
+			label:    "ML",
+			expected: true,
+		},
+		{
+			name:     "JSON aliases no match",
+			aliases:  `["Artificial Intelligence","ML"]`,
+			label:    "DL",
+			expected: false,
+		},
+		{
+			name:     "JSON case insensitive",
+			aliases:  `["Machine Learning"]`,
+			label:    "machine learning",
+			expected: true,
+		},
+		{
+			name:     "comma-separated match",
+			aliases:  "AI,ML,DL",
+			label:    "ML",
+			expected: true,
+		},
+		{
+			name:     "comma-separated with spaces no match",
+			aliases:  "AI, ML, DL",
+			label:    "ML",
+			expected: false,
+		},
+		{
+			name:     "comma-separated no match",
+			aliases:  "AI, ML, DL",
+			label:    "NLP",
+			expected: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := containsAlias(tt.aliases, tt.label)
+			if result != tt.expected {
+				t.Errorf("containsAlias(%q, %q) = %v, want %v", tt.aliases, tt.label, result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestEmbeddingDimensionMismatch2560(t *testing.T) {
+	vec := make([]float64, 2560)
+	for i := range vec {
+		vec[i] = 0.01
+	}
+	pgVec := FloatsToPgVector(vec)
+	if !strings.HasPrefix(pgVec, "[") || !strings.HasSuffix(pgVec, "]") {
+		t.Fatalf("pgVector format wrong: %s...%s", pgVec[:20], pgVec[len(pgVec)-20:])
+	}
+
+	parts := strings.Split(pgVec[1:len(pgVec)-1], ",")
+	if len(parts) != 2560 {
+		t.Errorf("expected 2560 dimensions, got %d", len(parts))
+	}
+
+	vectorJSON, err := json.Marshal(vec)
+	if err != nil {
+		t.Fatalf("marshal vector: %v", err)
+	}
+	var parsed []float64
+	if err := json.Unmarshal(vectorJSON, &parsed); err != nil {
+		t.Fatalf("unmarshal vector: %v", err)
+	}
+	if len(parsed) != 2560 {
+		t.Errorf("round-trip dimension mismatch: got %d, want 2560", len(parsed))
+	}
+}
+
+func TestGenerateEmbeddingBuildsCorrectDimension(t *testing.T) {
+	emb := &models.TopicTagEmbedding{
+		TopicTagID:   1,
+		EmbeddingVec: "[0.100000,0.200000,0.300000]",
+		Dimension:    2560,
+		Model:        "qwen3-embedding:4b",
+		TextHash:     "abc123",
+	}
+
+	if emb.Dimension != 2560 {
+		t.Errorf("expected dimension 2560, got %d", emb.Dimension)
+	}
+
+	vec := make([]float64, emb.Dimension)
+	pgVec := FloatsToPgVector(vec)
+	expected := fmt.Sprintf("vector(%d)", emb.Dimension)
+	if expected != "vector(2560)" {
+		t.Errorf("expected vector(2560), got %s", expected)
+	}
+
+	_ = len(pgVec)
+}
+
+func TestSaveEmbeddingReturnsTagNotFoundWhenParentDeleted(t *testing.T) {
+	db := setupEmbeddingTestDB(t)
+	service := NewEmbeddingService()
+
+	tag := models.TopicTag{
+		Slug:     "deleted-tag",
+		Label:    "Deleted Tag",
+		Category: models.TagCategoryKeyword,
+		Status:   "active",
+	}
+	if err := db.Create(&tag).Error; err != nil {
+		t.Fatalf("create tag: %v", err)
+	}
+
+	if err := db.Delete(&tag).Error; err != nil {
+		t.Fatalf("delete tag: %v", err)
+	}
+
+	err := service.SaveEmbedding(&models.TopicTagEmbedding{
+		TopicTagID:    tag.ID,
+		EmbeddingType: EmbeddingTypeIdentity,
+		Model:         "test-model",
+		TextHash:      "abc123",
+	})
+	if err == nil {
+		t.Fatal("expected missing parent tag error, got nil")
+	}
+	if err != ErrTopicTagNotFound {
+		t.Fatalf("expected ErrTopicTagNotFound, got %v", err)
+	}
+
+	var count int64
+	if err := db.Model(&models.TopicTagEmbedding{}).Count(&count).Error; err != nil {
+		t.Fatalf("count embeddings: %v", err)
+	}
+	if count != 0 {
+		t.Fatalf("embedding count = %d, want 0", count)
+	}
+}
+
+func TestMatchThreshold(t *testing.T) {
+	if MatchThreshold != 0.92 {
+		t.Errorf("MatchThreshold = %.2f, want 0.92", MatchThreshold)
+	}
+}
+
+func TestGetEventKeywords(t *testing.T) {
+	tests := []struct {
+		name     string
+		metadata models.MetadataMap
+		expected []string
+	}{
+		{
+			name:     "nil metadata",
+			metadata: nil,
+			expected: nil,
+		},
+		{
+			name:     "empty metadata",
+			metadata: models.MetadataMap{},
+			expected: nil,
+		},
+		{
+			name:     "valid keywords",
+			metadata: models.MetadataMap{"event_keywords": []interface{}{"美国", "伊朗", "制裁"}},
+			expected: []string{"美国", "伊朗", "制裁"},
+		},
+		{
+			name:     "string array",
+			metadata: models.MetadataMap{"event_keywords": []string{"美国", "伊朗"}},
+			expected: []string{"美国", "伊朗"},
+		},
+		{
+			name:     "mixed types filtered",
+			metadata: models.MetadataMap{"event_keywords": []interface{}{"美国", 123, "伊朗"}},
+			expected: []string{"美国", "伊朗"},
+		},
+		{
+			name:     "wrong type",
+			metadata: models.MetadataMap{"event_keywords": "not an array"},
+			expected: nil,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tag := &models.TopicTag{Metadata: tt.metadata}
+			result := getEventKeywords(tag)
+			if len(result) != len(tt.expected) {
+				t.Fatalf("getEventKeywords() = %v (len %d), want %v (len %d)", result, len(result), tt.expected, len(tt.expected))
+			}
+			for i, kw := range result {
+				if kw != tt.expected[i] {
+					t.Errorf("keyword[%d] = %q, want %q", i, kw, tt.expected[i])
+				}
+			}
+		})
+	}
+}
+
+func TestSaveEmbeddingCleansUpStaleRecords(t *testing.T) {
+	db := setupEmbeddingTestDB(t)
+	service := NewEmbeddingService()
+
+	tag := models.TopicTag{
+		Slug:     "test-tag",
+		Label:    "Test Tag",
+		Category: models.TagCategoryKeyword,
+		Status:   "active",
+	}
+	if err := db.Create(&tag).Error; err != nil {
+		t.Fatalf("create tag: %v", err)
+	}
+
+	// Create 3 stale embeddings with different text hashes for the same tag+type
+	for i, hash := range []string{"stale-hash-1", "stale-hash-2", "stale-hash-3"} {
+		if err := db.Create(&models.TopicTagEmbedding{
+			TopicTagID:    tag.ID,
+			EmbeddingType: EmbeddingTypeIdentity,
+			Model:         "test-model",
+			TextHash:      hash,
+		}).Error; err != nil {
+			t.Fatalf("create stale embedding %d: %v", i, err)
+		}
+	}
+
+	var count int64
+	db.Model(&models.TopicTagEmbedding{}).Where("topic_tag_id = ? AND embedding_type = ?", tag.ID, EmbeddingTypeIdentity).Count(&count)
+	if count != 3 {
+		t.Fatalf("stale embedding count = %d, want 3 before cleanup", count)
+	}
+
+	// Save a new embedding with a different text hash
+	newHash := "fresh-hash"
+	if err := service.SaveEmbedding(&models.TopicTagEmbedding{
+		TopicTagID:    tag.ID,
+		EmbeddingType: EmbeddingTypeIdentity,
+		Model:         "test-model",
+		TextHash:      newHash,
+	}); err != nil {
+		t.Fatalf("SaveEmbedding: %v", err)
+	}
+
+	// Verify only 1 record remains
+	db.Model(&models.TopicTagEmbedding{}).Where("topic_tag_id = ? AND embedding_type = ?", tag.ID, EmbeddingTypeIdentity).Count(&count)
+	if count != 1 {
+		t.Fatalf("embedding count after cleanup = %d, want 1", count)
+	}
+
+	// Verify the remaining record has the new text hash
+	var remaining models.TopicTagEmbedding
+	if err := db.Where("topic_tag_id = ? AND embedding_type = ?", tag.ID, EmbeddingTypeIdentity).First(&remaining).Error; err != nil {
+		t.Fatalf("find remaining embedding: %v", err)
+	}
+	if remaining.TextHash != newHash {
+		t.Fatalf("remaining text_hash = %q, want %q", remaining.TextHash, newHash)
+	}
+}
+
+func TestProcessNextEventKeywordEmbeddings(t *testing.T) {
+	db := setupEmbeddingTestDB(t)
+
+	tag := models.TopicTag{
+		Label:       "特朗普访华",
+		Category:    "event",
+		Kind:        "topic",
+		Slug:        "trump-visits-china",
+		Status:      "active",
+		Description: "美国总统特朗普对中国的国事访问",
+		Metadata: models.MetadataMap{
+			"event_keywords": []interface{}{"特朗普", "中国", "访华", "中美关系"},
+		},
+	}
+	if err := db.Create(&tag).Error; err != nil {
+		t.Fatalf("create tag: %v", err)
+	}
+
+	keywords := getEventKeywords(&tag)
+	if len(keywords) != 4 {
+		t.Fatalf("expected 4 keywords, got %d: %v", len(keywords), keywords)
+	}
+
+	expectedKeywords := []string{"特朗普", "中国", "访华", "中美关系"}
+	for i, kw := range keywords {
+		if kw != expectedKeywords[i] {
+			t.Errorf("keyword[%d] = %q, want %q", i, kw, expectedKeywords[i])
+		}
+	}
+
+	for _, kw := range keywords {
+		kwHash := hashText(EmbeddingTypeEventKeyword + "\n" + kw)
+		if kwHash == "" {
+			t.Errorf("empty hash for keyword %q", kw)
+		}
+		var count int64
+		db.Model(&models.TopicTagEmbedding{}).
+			Where("topic_tag_id = ? AND embedding_type = ? AND text_hash = ?", tag.ID, EmbeddingTypeEventKeyword, kwHash).
+			Count(&count)
+		if count != 0 {
+			t.Errorf("embedding should not exist yet for keyword %q", kw)
+		}
+	}
+}

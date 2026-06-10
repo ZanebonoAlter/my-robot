@@ -4,21 +4,7 @@ import type { PendingArticlesResponse } from '~/types/timeline'
 
 export type TopicGraphType = 'daily' | 'weekly'
 export type TopicCategory = 'event' | 'person' | 'keyword'
-export type AnalysisType = 'event' | 'person' | 'keyword'
-export type TopicAnalysisType = AnalysisType
 export type TopicKind = 'topic' | 'entity' | 'keyword'
-
-export interface AnalysisStatusResponse {
-  status: 'pending' | 'processing' | 'completed' | 'failed'
-  progress: number
-  error: string | null
-  result: Record<string, unknown> | null
-}
-
-export interface RebuildAnalysisRequest {
-  windowType: string
-  anchorDate: string
-}
 
 export interface TopicTag {
   id?: number
@@ -165,51 +151,6 @@ export interface TopicGraphDetailPayload {
   app_links: Record<string, string>
 }
 
-export interface GetTopicAnalysisParams {
-  tagID: number
-  analysisType: TopicAnalysisType
-  windowType: TopicGraphType
-  anchorDate: string
-}
-
-export interface TopicAnalysisRecord {
-  id: number
-  topic_tag_id: number
-  analysis_type: TopicAnalysisType
-  window_type: TopicGraphType
-  anchor_date: string
-  summary_count: number
-  payload_json: string
-  source: string
-  version: number
-  created_at: string
-  updated_at: string
-  // 支持后端PascalCase格式
-  ID?: number
-  TopicTagID?: number
-  AnalysisType?: TopicAnalysisType
-  WindowType?: TopicGraphType
-  AnchorDate?: string
-  SummaryCount?: number
-  PayloadJSON?: string
-  Source?: string
-  Version?: number
-  CreatedAt?: string
-  UpdatedAt?: string
-}
-
-export interface RebuildAnalysisParams extends RebuildAnalysisRequest {
-  tagID: number
-  analysisType: TopicAnalysisType
-}
-
-export interface TopicAnalysisStatusRecord {
-  status: AnalysisStatusResponse['status'] | 'missing' | 'ready'
-  progress: number
-  error: string | null
-  result: Record<string, unknown> | null
-}
-
 export interface GetTopicArticlesParams {
   slug: string
   page?: number
@@ -269,42 +210,6 @@ export function useTopicGraphApi() {
         category_id: filters?.categoryId,
         feed_id: filters?.feedId,
       }))
-    },
-
-    async getTopicAnalysis(params: GetTopicAnalysisParams) {
-      return apiClient.get<TopicAnalysisRecord>(withQuery('/topic-graph/analysis', {
-        tag_id: String(params.tagID),
-        analysis_type: params.analysisType,
-        window_type: params.windowType,
-        anchor_date: params.anchorDate,
-      }))
-    },
-
-    async rebuildTopicAnalysis(params: RebuildAnalysisParams) {
-      return apiClient.post<TopicAnalysisRecord>(withQuery('/topic-graph/analysis/rebuild', {
-        tag_id: String(params.tagID),
-        analysis_type: params.analysisType,
-        window_type: params.windowType,
-        anchor_date: params.anchorDate,
-      }), {})
-    },
-
-    async getAnalysisStatus(params: GetTopicAnalysisParams) {
-      return apiClient.get<TopicAnalysisStatusRecord>(withQuery('/topic-graph/analysis/status', {
-        tag_id: String(params.tagID),
-        analysis_type: params.analysisType,
-        window_type: params.windowType,
-        anchor_date: params.anchorDate,
-      }))
-    },
-
-    async retryTopicAnalysis(params: RebuildAnalysisParams) {
-      return apiClient.post<TopicAnalysisRecord>(withQuery('/topic-graph/analysis/retry', {
-        tag_id: String(params.tagID),
-        analysis_type: params.analysisType,
-        window_type: params.windowType,
-        anchor_date: params.anchorDate,
-      }), {})
     },
 
     async getTopicsByCategory(type: TopicGraphType, date?: string, filters?: TopicGraphFilters) {

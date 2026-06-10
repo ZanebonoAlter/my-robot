@@ -113,9 +113,6 @@ func Errorf(format string, args ...any) {
 	slog.Error(fmt.Sprintf(format, args...))
 }
 
-func Errorln(args ...any) {
-	slog.Error(fmt.Sprint(args...))
-}
 
 func Fatalf(format string, args ...any) {
 	slog.Error(fmt.Sprintf(format, args...))

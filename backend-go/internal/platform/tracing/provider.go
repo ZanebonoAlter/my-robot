@@ -15,9 +15,9 @@ import (
 )
 
 func InitTracerProvider(db *gorm.DB, cfg Config) (*sdktrace.TracerProvider, error) {
-	exporter, err := NewSQLiteSpanExporter(db, cfg)
+	exporter, err := NewDatabaseSpanExporter(db, cfg)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create sqlite span exporter: %w", err)
+		return nil, fmt.Errorf("failed to create database span exporter: %w", err)
 	}
 
 	res, err := sdkresource.New(

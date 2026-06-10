@@ -64,31 +64,3 @@ export interface UpdateFeedData {
   tagging_enabled?: boolean
 }
 
-/**
- * RSS fetch response data.
- */
-export interface FeedResponse {
-  status: string
-  feed: {
-    title: string
-    description: string
-    image?: string
-  }
-  items: FeedItem[]
-}
-
-/**
- * RSS item entry.
- */
-export interface FeedItem {
-  title: string
-  link: string
-  pubDate: string
-  description?: string
-  content?: string
-  author?: string
-  thumbnail?: string
-  enclosure?: {
-    link: string
-  }
-}

@@ -76,6 +76,24 @@
 - `frontend-narrative-cleanup`: 移除前端零调用者的叙事 API 模块、类型定义和死组件
 - `platform-dead-code`: 删除 `datamigrate/` 整个未使用包、`CleanupBudget` 类型、`autoMigrateModels` 废弃函数
 
+### 第二轮扫描新增（grep 交叉验证）
+
+#### 后端死函数（~30 个）
+- **tagging 包（续）**: `TagArticles`、`GetArticlesByTag`、`DedupeTopics`+`DedupeTagsWithCategory`、`MergeCandidateLists`、`ClusterUnclassifiedTags`+`ClusterUnclassifiedTagsWithConfig`+`LoadClusterConfig`、`NewEmbeddingConfigHandler`、`CancelEvaluation`
+- **content 包**: `AutoCompleteCompletePendingArticles`(整文件)、`AutoCompletePendingArticles`、`CheckAndMarkIncompleteArticles`、`ShouldUseFirecrawl`
+- **feed 包**: `ParseFeedFromString`、`ValidateFeedURL`
+- **preferences 包**: `GetUserFeedPreferences`、`GetUserCategoryPreferences`、`GetTopPreferredFeeds`、`GetTopPreferredCategories`
+- **daily_report 包（续）**: `GetReport(boardID,date)`、`DeleteThreadsByReport`
+- **platform/AI**: `TestConnection`、`AISettings.ToDict()`、`AISettings.ParseValue()`、`Errorln`、`TriggerManualUpdate`、`MarshalLinks`+`UnmarshalLinks`
+- **tracing/helpers.go 剩余**: `GoWithTrace`、`SpanFromContext`、`TraceIDFromContext`、`AddEvent`、`RecordError`、`SetStatus`
+
+#### 前端死代码（~20 项）
+- **死组件（6个）**: `CategoryCard`、`CategorySelectDialog`、`RefreshStatusIcon`、`EventAnalysisView`、`KeywordAnalysisView`、`PersonAnalysisView`
+- **死 Composable**: `useWebSocketRebuild` + 测试
+- **死 API 方法（5个）**: `getTopicAnalysis`、`getAnalysisStatus`、`rebuildTopicAnalysis`、`retryTopicAnalysis`（topicGraph.ts）、`resetSchedulerStats`（scheduler.ts）
+- **死类型**: `GetTopicAnalysisParams`、`RebuildAnalysisParams`（topicGraph.ts）；`FeedResponse`+`FeedItem`（feed.ts，原 14.3.13 误判跳过）
+- **死工具函数**: `cleanHtml`、`extractFirstImage`、`getCategoryColor`（text.ts）
+
 ## Impact
 
 - `backend-go/internal/jobs/narrative_summary.go`：整个文件删除

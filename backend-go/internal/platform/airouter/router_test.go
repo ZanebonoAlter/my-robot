@@ -5,7 +5,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
-	"syntopica-backend/internal/domain/models"
+	"syntopica-backend/internal/models"
 )
 
 type fakeProviderClient struct {

@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"syntopica-backend/internal/domain/models"
+	"syntopica-backend/internal/models"
 	// "syntopica-backend/internal/platform/logging"
 )
 

@@ -234,3 +234,98 @@
 - [x] 17.4.4 `pnpm lint` — PASSED
 - [x] 17.4.5 `pnpm exec nuxi typecheck` — 1 pre-existing error (TagsPage.vue:946)
 - [x] 17.4.6 `pnpm build` — PASSED
+
+## 18. Backend dead functions — second scan (追加)
+
+### 18.1 tagging 包死函数（续）
+
+- [x] 18.1.1 Remove `TagArticles()` from `backend-go/internal/domain/tagging/article_tagger.go` (~40 lines)
+- [x] 18.1.2 Remove `GetArticlesByTag()` from `article_tagger.go` (~20 lines)
+- [x] 18.1.3 Remove `DedupeTopics()` + `DedupeTagsWithCategory()` from `backend-go/internal/domain/tagging/helpers.go` (~30 lines)
+- [x] 18.1.4 Remove `MergeCandidateLists()` from `backend-go/internal/domain/tagging/cotag_expansion.go` (~20 lines)
+- [x] 18.1.5 Remove `ClusterUnclassifiedTags()` + `ClusterUnclassifiedTagsWithConfig()` + `LoadClusterConfig()` from `backend-go/internal/domain/tagging/tag_clustering.go` (~40 lines)
+- [x] 18.1.6 Remove `NewEmbeddingConfigHandler()` from `backend-go/internal/domain/tagging/embedding_config_handler.go` (~10 lines, or delete file if it becomes empty)
+- [x] 18.1.7 Remove `CancelEvaluation()` from `backend-go/internal/domain/tagging/tag_merge_suggest.go` (~15 lines)
+
+### 18.2 content 包死函数
+
+- [x] 18.2.1 Delete `backend-go/internal/domain/content/content_completion_batch.go` entirely (`AutoCompleteCompletePendingArticles`, only file-level function)
+- [x] 18.2.2 Remove `AutoCompletePendingArticles()` from `backend-go/internal/domain/content/content_completion_service.go` (~30 lines)
+- [x] 18.2.3 Remove `CheckAndMarkIncompleteArticles()` from `content_completion_service.go` (~30 lines)
+- [x] 18.2.4 Remove `ShouldUseFirecrawl()` from `backend-go/internal/domain/content/firecrawl_service.go` (~10 lines)
+
+### 18.3 feed 包死函数
+
+- [x] 18.3.1 Remove `ParseFeedFromString()` from `backend-go/internal/domain/feed/rss_parser.go` (~60 lines)
+- [x] 18.3.2 Remove `ValidateFeedURL()` from `rss_parser.go` (~20 lines)
+
+### 18.4 preferences 包死函数
+
+- [x] 18.4.1 Remove `GetUserFeedPreferences()` from `backend-go/internal/domain/preferences/service.go` (~10 lines)
+- [x] 18.4.2 Remove `GetUserCategoryPreferences()` from `service.go` (~10 lines)
+- [x] 18.4.3 Remove `GetTopPreferredFeeds()` from `service.go` (~25 lines)
+- [x] 18.4.4 Remove `GetTopPreferredCategories()` from `service.go` (~25 lines)
+
+### 18.5 daily_report 包死函数（续）
+
+- [x] 18.5.1 Remove `GetReport(boardID, date)` from `backend-go/internal/domain/daily_report/repository.go` (~15 lines; ⚠️ 注意不要误删活的 `GetReportByID`)
+- [x] 18.5.2 Remove `DeleteThreadsByReport()` from `repository.go` (~10 lines)
+
+### 18.6 platform / AI 死函数
+
+- [x] 18.6.1 Remove `TestConnection()` from `backend-go/internal/platform/ai/service.go` (~10 lines)
+- [x] 18.6.2 Remove `AISettings.ToDict()` from `backend-go/internal/domain/models/ai_models.go` (~15 lines; ⚠️ 其他 model 的 `ToDict()` 是活的，只删 `AISettings` 的)
+- [x] 18.6.3 Remove `AISettings.ParseValue()` from `ai_models.go` (~15 lines)
+- [x] 18.6.4 Remove `Errorln()` from `backend-go/internal/platform/logging/logging.go` (~5 lines)
+- [x] 18.6.5 Remove `TriggerManualUpdate()` from `backend-go/internal/jobs/preference_update.go` (~10 lines)
+- [x] 18.6.6 Remove `MarshalLinks()` + `UnmarshalLinks()` from `backend-go/internal/platform/tracing/model.go` (~15 lines)
+
+### 18.7 tracing/helpers.go 剩余死函数
+
+任务 10.3.4 已删 `MustStartSpan` + `StartSpan`，以下函数仍残留且零调用：
+
+- [x] 18.7.1 Remove `GoWithTrace()`, `SpanFromContext()`, `TraceIDFromContext()`, `AddEvent()`, `RecordError()`, `SetStatus()` from `backend-go/internal/platform/tracing/helpers.go` (~50 lines; 如果文件变空则删除整个文件)
+
+### 18.8 验证
+
+- [x] 18.8.1 `cd backend-go && go build ./...`
+- [x] 18.8.2 `cd backend-go && go vet ./...`
+- [x] 18.8.3 `cd backend-go && golangci-lint run ./...`
+- [x] 18.8.4 Targeted `go test` for modified packages
+
+## 19. Frontend dead code — second scan (追加)
+
+### 19.1 死 Vue 组件（6 个）
+
+- [x] 19.1.1 Delete `front/app/components/category/CategoryCard.vue`
+- [x] 19.1.2 Delete `front/app/components/dialog/CategorySelectDialog.vue`
+- [x] 19.1.3 Delete `front/app/components/feed/RefreshStatusIcon.vue`
+- [x] 19.1.4 Delete `front/app/features/topic-graph/components/EventAnalysisView.vue`
+- [x] 19.1.5 Delete `front/app/features/topic-graph/components/KeywordAnalysisView.vue`
+- [x] 19.1.6 Delete `front/app/features/topic-graph/components/PersonAnalysisView.vue`
+- [x] 19.1.7 清理空目录（如 `components/category/` 删完后变空）
+
+### 19.2 死 Composable
+
+- [x] 19.2.1 Delete `front/app/composables/useWebSocketRebuild.ts` + `useWebSocketRebuild.test.ts`
+
+### 19.3 死 API 方法
+
+- [x] 19.3.1 Remove `getTopicAnalysis()`, `getAnalysisStatus()`, `rebuildTopicAnalysis()`, `retryTopicAnalysis()` from `front/app/api/topicGraph.ts` (~30 lines)
+- [x] 19.3.2 Remove `resetSchedulerStats()` from `front/app/api/scheduler.ts` (~5 lines)
+
+### 19.4 死类型（含任务 14.3.13 误判修正）
+
+- [x] 19.4.1 Remove `GetTopicAnalysisParams` + `RebuildAnalysisParams` from `front/app/api/topicGraph.ts`（仅被 19.3.1 删除的方法使用）
+- [x] 19.4.2 Remove `FeedResponse` + `FeedItem` from `front/app/types/feed.ts`（任务 14.3.13 误判跳过：`server/api/fetch-feed.post.ts` 是后端文件，前端零引用）
+- [x] 19.4.3 After removing dead components (19.1.4–19.1.6), remove orphan types from `front/app/types/ai.ts`: `PersonAppearance`, `CoOccurrence`, `ContextExample`, `RelatedTopic` (仅被已删组件使用，需逐个验证)
+
+### 19.5 死工具函数
+
+- [x] 19.5.1 Remove `cleanHtml()`, `extractFirstImage()`, `getCategoryColor()` from `front/app/utils/text.ts` (~40 lines)
+
+### 19.6 验证
+
+- [x] 19.6.1 `cd front && pnpm lint`
+- [x] 19.6.2 `cmd.exe /C "cd /d D:\project\Syntopica\front && pnpm exec nuxi typecheck"`
+- [x] 19.6.3 `cmd.exe /C "cd /d D:\project\Syntopica\front && pnpm build"`

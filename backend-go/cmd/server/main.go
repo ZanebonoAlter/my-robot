@@ -8,7 +8,10 @@ import (
 	"github.com/gin-gonic/gin"
 	"go.opentelemetry.io/contrib/instrumentation/github.com/gin-gonic/gin/otelgin"
 	appbootstrap "syntopica-backend/internal/app"
-	taggingdomain "syntopica-backend/internal/domain/tagging"
+	"syntopica-backend/internal/admin"
+	taggingdomain "syntopica-backend/internal/tagmanagement"
+	"syntopica-backend/internal/reader"
+	"syntopica-backend/internal/topicgraph"
 	"syntopica-backend/internal/platform/config"
 	"syntopica-backend/internal/platform/database"
 	"syntopica-backend/internal/platform/logging"
@@ -39,6 +42,12 @@ func main() {
 	if err := database.InitDB(config.AppConfig); err != nil {
 		logging.Fatalf("Failed to initialize database: %v", err)
 	}
+
+	// Initialize feature repositories
+	admin.InitRepository(database.DB)
+	reader.InitRepository(database.DB)
+	taggingdomain.InitRepository(database.DB)
+	topicgraph.InitRepository(database.DB)
 
 	// Ensure semantic_labels.embedding vector dimension matches the embedder model.
 	// Runs once at startup on the global DB (not inside any transaction) to avoid DDL lock contention.

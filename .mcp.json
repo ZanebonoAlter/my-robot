@@ -4,7 +4,8 @@
       "command": "codegraph",
       "args": [
         "serve",
-        "--mcp"
+        "--mcp",
+        "--no-watch"
       ],
       "directTools": true
     }

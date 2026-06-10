@@ -6,25 +6,25 @@ import (
 	"syscall"
 	"time"
 
-	"syntopica-backend/internal/app/runtimeinfo"
-	"syntopica-backend/internal/domain/content"
-	"syntopica-backend/internal/domain/models"
-	"syntopica-backend/internal/domain/tagging"
-	"syntopica-backend/internal/jobs"
+	"syntopica-backend/internal/runtimeinfo"
+	content "syntopica-backend/internal/reader"
+	"syntopica-backend/internal/models"
+	tagging "syntopica-backend/internal/tagmanagement"
+	"syntopica-backend/internal/admin"
 	"syntopica-backend/internal/platform/database"
 	"syntopica-backend/internal/platform/logging"
 )
 
 type Runtime struct {
-	AutoRefresh            *jobs.AutoRefreshScheduler
-	PreferenceUpdate       *jobs.PreferenceUpdateScheduler
-	ContentCompletion      *jobs.ContentCompletionScheduler
-	Firecrawl              *jobs.FirecrawlScheduler
-	BlockedArticleRecovery *jobs.BlockedArticleRecoveryScheduler
-	TagQualityScore        *jobs.TagQualityScoreScheduler
-	DailyReport            *jobs.DailyReportScheduler
-	LogCleanup             *jobs.LogCleanupScheduler
-	AuxLabelCleanup        *jobs.AuxLabelCleanupScheduler
+	AutoRefresh            *admin.AutoRefreshScheduler
+	PreferenceUpdate       *admin.PreferenceUpdateScheduler
+	ContentCompletion      *admin.ContentCompletionScheduler
+	Firecrawl              *admin.FirecrawlScheduler
+	BlockedArticleRecovery *admin.BlockedArticleRecoveryScheduler
+	TagQualityScore        *admin.TagQualityScoreScheduler
+	DailyReport            *admin.DailyReportScheduler
+	LogCleanup             *admin.LogCleanupScheduler
+	AuxLabelCleanup        *admin.AuxLabelCleanupScheduler
 }
 
 func resetStaleStates() {
@@ -92,7 +92,7 @@ func StartRuntime() *Runtime {
 
 	tagging.StartAllWorkers()
 
-	runtime.AutoRefresh = jobs.NewAutoRefreshScheduler(60)
+	runtime.AutoRefresh = admin.NewAutoRefreshScheduler(60)
 	if err := runtime.AutoRefresh.Start(); err != nil {
 		logging.Warnf("Failed to start auto-refresh scheduler: %v", err)
 	} else {
@@ -100,14 +100,14 @@ func StartRuntime() *Runtime {
 	}
 
 	preferenceUpdateInterval := 1800
-	runtime.PreferenceUpdate = jobs.NewPreferenceUpdateScheduler(preferenceUpdateInterval)
+	runtime.PreferenceUpdate = admin.NewPreferenceUpdateScheduler(preferenceUpdateInterval)
 	if err := runtime.PreferenceUpdate.Start(); err != nil {
 		logging.Warnf("Failed to start preference update scheduler: %v", err)
 	} else {
 		logging.Infoln("Preference update scheduler started successfully")
 	}
 
-	runtime.Firecrawl = jobs.NewFirecrawlScheduler()
+	runtime.Firecrawl = admin.NewFirecrawlScheduler()
 	if err := runtime.Firecrawl.Start(); err != nil {
 		logging.Warnf("Failed to start firecrawl scheduler: %v", err)
 	} else {
@@ -116,7 +116,7 @@ func StartRuntime() *Runtime {
 
 	content.InitContentCompletionHandler()
 
-	runtime.ContentCompletion = jobs.NewContentCompletionScheduler(
+	runtime.ContentCompletion = admin.NewContentCompletionScheduler(
 		content.GetContentCompletionService(),
 		60,
 	)
@@ -127,35 +127,35 @@ func StartRuntime() *Runtime {
 	}
 
 	// STAT-04: Blocked article recovery scheduler (hourly)
-	runtime.BlockedArticleRecovery = jobs.NewBlockedArticleRecoveryScheduler(3600)
+	runtime.BlockedArticleRecovery = admin.NewBlockedArticleRecoveryScheduler(3600)
 	if err := runtime.BlockedArticleRecovery.Start(); err != nil {
 		logging.Warnf("Failed to start blocked article recovery scheduler: %v", err)
 	} else {
 		logging.Infoln("Blocked article recovery scheduler started successfully")
 	}
 
-	runtime.TagQualityScore = jobs.NewTagQualityScoreScheduler(3600)
+	runtime.TagQualityScore = admin.NewTagQualityScoreScheduler(3600)
 	if err := runtime.TagQualityScore.Start(); err != nil {
 		logging.Warnf("Failed to start tag quality score scheduler: %v", err)
 	} else {
 		logging.Infoln("Tag quality score scheduler started successfully")
 	}
 
-	runtime.LogCleanup = jobs.NewLogCleanupScheduler(86400)
+	runtime.LogCleanup = admin.NewLogCleanupScheduler(86400)
 	if err := runtime.LogCleanup.Start(); err != nil {
 		logging.Warnf("Failed to start log cleanup scheduler: %v", err)
 	} else {
 		logging.Infoln("Log cleanup scheduler started successfully")
 	}
 
-	runtime.DailyReport = jobs.NewDailyReportScheduler(86400)
+	runtime.DailyReport = admin.NewDailyReportScheduler(86400)
 	if err := runtime.DailyReport.Start(); err != nil {
 		logging.Warnf("Failed to start daily report scheduler: %v", err)
 	} else {
 		logging.Infoln("Daily report scheduler started successfully")
 	}
 
-	runtime.AuxLabelCleanup = jobs.NewAuxLabelCleanupScheduler(3600)
+	runtime.AuxLabelCleanup = admin.NewAuxLabelCleanupScheduler(3600)
 	if err := runtime.AuxLabelCleanup.Start(); err != nil {
 		logging.Warnf("Failed to start aux label cleanup scheduler: %v", err)
 	} else {

@@ -6,7 +6,7 @@ import (
 
 	"gorm.io/gorm"
 
-	"syntopica-backend/internal/domain/models"
+	"syntopica-backend/internal/models"
 )
 
 type Migration struct {

@@ -1,0 +1,61 @@
+package reader
+
+import (
+	"gorm.io/gorm"
+	"syntopica-backend/internal/reader/repository"
+	"syntopica-backend/internal/reader/service"
+)
+
+// ============================================================================
+// Repository singleton (delegated to sub-package)
+// ============================================================================
+
+// Repo is the package-level repository singleton, initialized by InitRepository.
+var Repo = repository.Repo
+
+// InitRepository initializes the repository sub-package.
+func InitRepository(db *gorm.DB) {
+	repository.InitRepository(db)
+	Repo = repository.Repo
+}
+
+// ============================================================================
+// Re-exports from repository sub-package
+// ============================================================================
+
+// FirecrawlJobQueue is a re-export.
+type FirecrawlJobQueue = repository.FirecrawlJobQueue
+
+// NewFirecrawlJobQueue is a re-export.
+var NewFirecrawlJobQueue = repository.NewFirecrawlJobQueue
+
+// ============================================================================
+// Re-exports from service sub-package
+// ============================================================================
+
+// ContentCompletionService is a re-export.
+type ContentCompletionService = service.ContentCompletionService
+
+// ContentCompletionArticleRef is a re-export.
+type ContentCompletionArticleRef = service.ContentCompletionArticleRef
+
+// ToArticleRef is a re-export.
+var ToArticleRef = service.ToArticleRef
+
+// FeedService is a re-export.
+type FeedService = service.FeedService
+
+// NewFeedService is a re-export.
+var NewFeedService = service.NewFeedService
+
+// FirecrawlConfig is a re-export.
+type FirecrawlConfig = service.FirecrawlConfig
+
+// NewFirecrawlService is a re-export.
+var NewFirecrawlService = service.NewFirecrawlService
+
+// NewContentCompletionService is a re-export.
+var NewContentCompletionService = service.NewContentCompletionService
+
+// GetFirecrawlConfig is a re-export.
+var GetFirecrawlConfig = service.GetFirecrawlConfig

@@ -219,19 +219,4 @@ func (s *AIService) callOpenAI(req openAIRequest) (*openAIResponse, error) {
 	return &openAIResp, nil
 }
 
-func (s *AIService) TestConnection() error {
-	req := openAIRequest{
-		Model:     s.Model,
-		Messages:  []openAIMessage{{Role: "user", Content: "Hi"}},
-		MaxTokens: 10,
-	}
 
-	resp, err := s.callOpenAI(req)
-	if err != nil {
-		return err
-	}
-	if resp.Error != nil {
-		return fmt.Errorf("API error: %s", resp.Error.Message)
-	}
-	return nil
-}

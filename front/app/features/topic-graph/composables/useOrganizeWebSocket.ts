@@ -1,4 +1,13 @@
-import { getApiOrigin } from '~/utils/api'
+/**
+ * 标签整理 WebSocket 连接管理器 — 基于 useEventStream
+ *
+ * 现有消费者（TagHierarchy.vue）的 API 完全兼容：
+ *   status, totalUnclassified, processed, currentGroup, category
+ *   connect(), disconnect(), reset()
+ */
+
+import { useEventStream } from '~/composables/useEventStream'
+import { EVENT_TYPES } from '~/utils/eventTypes'
 
 interface OrganizeGroupInfo {
   new_label: string
@@ -18,55 +27,28 @@ interface OrganizeProgressMessage {
 }
 
 export function useOrganizeWebSocket() {
-  const ws = ref<WebSocket | null>(null)
+  const stream = useEventStream()
   const status = ref<'idle' | 'processing' | 'completed'>('idle')
   const totalUnclassified = ref(0)
   const processed = ref(0)
   const currentGroup = ref<OrganizeGroupInfo | null>(null)
   const category = ref<string>('')
 
+  // 订阅 organize_progress
+  const unsub = stream.on<OrganizeProgressMessage>(EVENT_TYPES.ORGANIZE_PROGRESS, (msg) => {
+    status.value = msg.status
+    totalUnclassified.value = msg.total_unclassified
+    processed.value = msg.processed
+    currentGroup.value = msg.current_group ?? null
+    category.value = msg.category ?? ''
+  })
+
   function connect() {
-    if (ws.value?.readyState === WebSocket.OPEN) return
-    if (ws.value?.readyState === WebSocket.CONNECTING) return
-
-    const wsBase = getApiOrigin().replace(/^http/, 'ws')
-    const url = `${wsBase}/ws`
-
-    ws.value = new WebSocket(url)
-
-    ws.value.onopen = () => {
-      console.log('[OrganizeWS] Connected')
-    }
-
-    ws.value.onmessage = (event) => {
-      try {
-        const msg: OrganizeProgressMessage = JSON.parse(event.data)
-        if (msg.type !== 'organize_progress') return
-
-        status.value = msg.status as 'processing' | 'completed'
-        totalUnclassified.value = msg.total_unclassified
-        processed.value = msg.processed
-        currentGroup.value = msg.current_group ?? null
-        category.value = msg.category ?? ''
-      } catch {
-        // ignore non-JSON messages
-      }
-    }
-
-    ws.value.onclose = () => {
-      ws.value = null
-    }
-
-    ws.value.onerror = () => {
-      ws.value = null
-    }
+    // useEventStream 自动管理连接，这里仅做兼容
   }
 
   function disconnect() {
-    if (ws.value) {
-      ws.value.close(1000, 'Manual disconnect')
-      ws.value = null
-    }
+    // useEventStream 自动管理清理，这里仅做兼容
   }
 
   function reset() {
@@ -77,8 +59,9 @@ export function useOrganizeWebSocket() {
     category.value = ''
   }
 
-  onMounted(() => connect())
-  onUnmounted(() => disconnect())
+  onUnmounted(() => {
+    unsub()
+  })
 
   return {
     status,

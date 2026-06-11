@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { Icon } from '@iconify/vue'
 import { useTagQueueApi, type TagQueueStatus, type TagQueueTask } from '~/api'
-import { getApiOrigin } from '~/utils/api'
+import { useEventStream } from '~/composables/useEventStream'
+import { EVENT_TYPES } from '~/utils/eventTypes'
 
 const loading = ref(false)
 const error = ref<string | null>(null)
@@ -19,14 +20,24 @@ const currentPage = ref(1)
 const pageSize = 20
 const retrying = ref(false)
 const retaggingToday = ref(false)
-const wsConnected = ref(false)
 
 let refreshTimer: ReturnType<typeof setInterval> | null = null
-let ws: WebSocket | null = null
-let wsReconnectTimer: ReturnType<typeof setTimeout> | null = null
 let refreshDebounce: ReturnType<typeof setTimeout> | null = null
 
 const api = useTagQueueApi()
+const stream = useEventStream()
+
+// 通过统一事件流订阅标签事件，触发队列刷新
+const refreshOnEvent = () => {
+  if (refreshDebounce) clearTimeout(refreshDebounce)
+  refreshDebounce = setTimeout(() => {
+    loadStatus()
+    loadTasks()
+  }, 500)
+}
+
+const unsubCompleted = stream.on(EVENT_TYPES.TAG_COMPLETED, refreshOnEvent)
+const unsubFailed = stream.on(EVENT_TYPES.TAG_FAILED, refreshOnEvent)
 
 async function loadStatus() {
   try {
@@ -136,67 +147,20 @@ async function refreshAll() {
   await Promise.all([loadStatus(), loadTasks()])
 }
 
-function connectWS() {
-  if (ws?.readyState === WebSocket.OPEN || ws?.readyState === WebSocket.CONNECTING) return
-
-  const wsBase = getApiOrigin().replace(/^http/, 'ws')
-  ws = new WebSocket(`${wsBase}/ws`)
-
-  ws.onopen = () => {
-    wsConnected.value = true
-  }
-
-  ws.onmessage = () => {
-    if (refreshDebounce) clearTimeout(refreshDebounce)
-    refreshDebounce = setTimeout(() => {
-      loadStatus()
-      loadTasks()
-    }, 500)
-  }
-
-  ws.onclose = () => {
-    wsConnected.value = false
-    ws = null
-    scheduleWSReconnect()
-  }
-
-  ws.onerror = () => {
-    wsConnected.value = false
-  }
-}
-
-function scheduleWSReconnect() {
-  if (wsReconnectTimer) clearTimeout(wsReconnectTimer)
-  wsReconnectTimer = setTimeout(connectWS, 5000)
-}
-
-function disconnectWS() {
-  if (wsReconnectTimer) {
-    clearTimeout(wsReconnectTimer)
-    wsReconnectTimer = null
-  }
-  if (refreshDebounce) {
-    clearTimeout(refreshDebounce)
-    refreshDebounce = null
-  }
-  if (ws) {
-    ws.close(1000, 'Component unmount')
-    ws = null
-  }
-  wsConnected.value = false
-}
-
 onMounted(async () => {
   await refreshAll()
-  connectWS()
   refreshTimer = setInterval(loadStatus, 30000)
 })
 
 onUnmounted(() => {
+  unsubCompleted()
+  unsubFailed()
   if (refreshTimer) {
     clearInterval(refreshTimer)
   }
-  disconnectWS()
+  if (refreshDebounce) {
+    clearTimeout(refreshDebounce)
+  }
 })
 </script>
 
@@ -209,13 +173,8 @@ onUnmounted(() => {
         </div>
         <div>
           <h3 class="font-semibold text-gray-900">标签打标队列</h3>
-          <p class="text-xs text-gray-500 flex items-center gap-1.5">
+          <p class="text-xs text-gray-500">
             追踪文章自动打标进度
-            <span
-              class="inline-block w-1.5 h-1.5 rounded-full"
-              :class="wsConnected ? 'bg-green-500' : 'bg-gray-300'"
-              :title="wsConnected ? '实时连接' : '未连接'"
-            />
           </p>
         </div>
       </div>

@@ -1,6 +1,6 @@
 import type { Article, ArticleFilters, PaginatedData } from '~/types'
 import { useArticlesApi } from '~/api/articles'
-import { normalizeArticle, type ArticlePayload } from '../utils/normalizeArticle'
+import { normalizeArticle, type ArticlePayload } from '~/api/normalizers/article'
 
 export interface PaginationState {
   articles: Article[]

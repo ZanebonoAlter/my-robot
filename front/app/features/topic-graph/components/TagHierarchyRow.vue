@@ -17,7 +17,7 @@ const emit = defineEmits<{
   'confirm-edit': []
   'detach': [node: TagHierarchyNode]
   'reassign': [node: TagHierarchyNode]
-  'select': [node: TagHierarchyNode]
+  'select-node': [node: TagHierarchyNode]
   'update:editing-value': [value: string]
   'toggle-watch': [node: TagHierarchyNode]
 }>()
@@ -38,7 +38,7 @@ function handleLabelClick(node: TagHierarchyNode) {
   if (clickTimer.value) return
   clickTimer.value = setTimeout(() => {
     clickTimer.value = null
-    emit('select', node)
+    emit('select-node', node)
   }, 250)
 }
 
@@ -69,7 +69,7 @@ function handleChildCancelEdit() { emit('cancel-edit') }
 function handleChildConfirmEdit() { emit('confirm-edit') }
 function handleChildDetach(node: TagHierarchyNode) { emit('detach', node) }
 function handleChildReassign(node: TagHierarchyNode) { emit('reassign', node) }
-function handleChildSelect(node: TagHierarchyNode) { emit('select', node) }
+function handleChildSelect(node: TagHierarchyNode) { emit('select-node', node) }
 function handleChildUpdateEditingValue(val: string) { emit('update:editing-value', val) }
 function handleChildToggleWatch(node: TagHierarchyNode) { emit('toggle-watch', node) }
 
@@ -194,7 +194,7 @@ function handleToggleWatch(e: Event) {
         @confirm-edit="handleChildConfirmEdit"
         @detach="handleChildDetach"
         @reassign="handleChildReassign"
-        @select="handleChildSelect"
+        @select-node="handleChildSelect"
         @update:editing-value="handleChildUpdateEditingValue"
         @toggle-watch="handleChildToggleWatch"
       />

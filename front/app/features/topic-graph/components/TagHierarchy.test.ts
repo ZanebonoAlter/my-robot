@@ -1,10 +1,32 @@
-import { describe, expect, it, vi } from 'vitest'
-import { mount } from '@vue/test-utils'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { flushPromises, mount } from '@vue/test-utils'
+import { ref, computed } from 'vue'
 import TagHierarchy from './TagHierarchy.vue'
 import TagHierarchyRow from './TagHierarchyRow.vue'
 import type { TagHierarchyNode } from '~/types/topicTag'
 
+// Setup globals for Nuxt auto-imported functions
+const testGlobals = globalThis as typeof globalThis & {
+  ref: typeof ref
+  computed: typeof computed
+  useNotify: () => { error: (...args: unknown[]) => void; success: (...args: unknown[]) => void; warn: (...args: unknown[]) => void; dismiss: (...args: unknown[]) => void; toasts: never[] }
+}
+
+// Mocks
+const mockNotify = {
+  error: vi.fn(),
+  success: vi.fn(),
+  warn: vi.fn(),
+  dismiss: vi.fn(),
+  toasts: [],
+}
+
+testGlobals.ref = ref
+testGlobals.computed = computed
+testGlobals.useNotify = () => mockNotify
+
 const fetchHierarchy = vi.fn()
+const listWatchedTags = vi.fn()
 
 vi.mock('~/api/abstractTags', () => ({
   useAbstractTagApi: () => ({
@@ -14,6 +36,38 @@ vi.mock('~/api/abstractTags', () => ({
     reassignTag: vi.fn(),
   }),
 }))
+
+vi.mock('~/api/watchedTags', () => ({
+  useWatchedTagsApi: () => ({
+    listWatchedTags,
+    watchTag: vi.fn(),
+    unwatchTag: vi.fn(),
+  }),
+}))
+
+vi.mock('~/features/topic-graph/composables/useOrganizeWebSocket', () => ({
+  useOrganizeWebSocket: () => ({
+    status: ref('idle'),
+    totalUnclassified: ref(0),
+    processed: ref(0),
+    error: ref(null),
+    reset: vi.fn(),
+  }),
+}))
+
+vi.mock('@iconify/vue', () => ({
+  Icon: { template: '<span />' },
+}))
+
+vi.mock('~/composables/useNotify', () => ({
+  useNotify: () => mockNotify,
+}))
+
+afterEach(() => {
+  vi.useRealTimers()
+  fetchHierarchy.mockReset()
+  listWatchedTags.mockReset()
+})
 
 function createNode(overrides: Partial<TagHierarchyNode> = {}): TagHierarchyNode {
   return {
@@ -31,7 +85,7 @@ function createNode(overrides: Partial<TagHierarchyNode> = {}): TagHierarchyNode
 }
 
 describe('TagHierarchyRow', () => {
-  it('emits select when clicking a tag label', async () => {
+  it('emits select-node when clicking a tag label', async () => {
     const node = createNode()
     const wrapper = mount(TagHierarchyRow, {
       props: {
@@ -42,9 +96,12 @@ describe('TagHierarchyRow', () => {
       },
     })
 
-    await wrapper.find('.th-label').trigger('click')
+    vi.useFakeTimers()
 
-    expect(wrapper.emitted('select')).toEqual([[node]])
+    await wrapper.find('.th-label').trigger('click')
+    await vi.advanceTimersByTimeAsync(250)
+
+    expect(wrapper.emitted('select-node')).toEqual([[node]])
   })
 })
 
@@ -57,27 +114,23 @@ describe('TagHierarchy', () => {
         total: 1,
       },
     })
-
-    const TagHierarchyRowStub = {
-      name: 'TagHierarchyRow',
-      template: '<button @click="$emit(\'select\', node)">Select</button>',
-      props: ['node'],
-      emits: ['select'],
-    }
+    listWatchedTags.mockResolvedValue({ success: true, data: [] })
 
     const wrapper = mount(TagHierarchy, {
+      props: {
+        selectable: true,
+      },
       global: {
         stubs: {
-          TagHierarchyRow: TagHierarchyRowStub,
           Teleport: true,
         },
       },
     })
 
-    await Promise.resolve()
-    await Promise.resolve()
+    await flushPromises()
 
-    wrapper.getComponent({ name: 'TagHierarchyRow' }).vm.$emit('select', createNode())
+    await wrapper.find('.th-label').trigger('click')
+    await new Promise(resolve => setTimeout(resolve, 300))
 
     expect(wrapper.emitted('select-tag')).toEqual([['ai-agent', 'keyword']])
   })

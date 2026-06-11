@@ -1,5 +1,7 @@
 # 前端架构
 
+> 最后更新：2026-06-11（v1.3.3 架构深化：Store 拆分、事件流统一、错误通知、API 归一化、Feature Facade、大组件拆分）
+
 ## 技术栈
 
 - Nuxt 4.2.2
@@ -22,96 +24,201 @@
 
 `app.vue` 只做一件事：启动时调用 `apiStore.initialize()`，先拉分类、订阅源和文章，再渲染页面。
 
-## 当前目录分层
+## 目录结构
 
 ```text
 front/
 ├─ app/
 │  ├─ api/                 # 唯一 HTTP 边界
+│  │  ├─ client.ts         # ApiClient 封装（fetch、错误处理、query 构建）
+│  │  ├─ index.ts          # 统一 re-export 所有 API composable
+│  │  ├─ normalizers/      # 共享数据 normalizer（snake_case → camelCase）
+│  │  │  └─ article.ts     # 文章 DTO 转换（唯一权威 normalizer）
+│  │  ├─ categories.ts
+│  │  ├─ feeds.ts
+│  │  ├─ articles.ts
+│  │  ├─ summaries.ts
+│  │  ├─ ...               # 各领域 API 模块
+│  │  └─ createQueueApi.ts # 泛型队列 API 工厂
 │  ├─ assets/css/          # 全局主题与基础样式
-│  ├─ components/          # 通用组件与对话框
-│  ├─ composables/         # 少量跨 feature 的通用能力
-│  ├─ features/            # 业务实现主体
+│  ├─ components/          # 通用组件与对话框（NotifyContainer、dialog、feed 等）
+│  ├─ composables/         # 跨 feature 的全局能力
+│  │  ├─ useEventStream.ts # 统一实时事件流（WebSocket 单例 + 类型化订阅）
+│  │  ├─ useNotify.ts      # 全局通知管道（toast 队列）
+│  │  ├─ useGlobalSettings.ts
+│  │  ├─ useSchedulerStatus.ts
+│  │  ├─ useDailyReportProgress.ts
+│  │  ├─ useAI.ts
+│  │  ├─ useFirecrawlConfig.ts
+│  │  └─ useReadingPreferences.ts
+│  ├─ features/            # 业务实现主体（见下文详细说明）
 │  ├─ pages/               # Nuxt 路由入口
 │  ├─ plugins/             # Nuxt 插件
-│  ├─ stores/              # Pinia store
-│  ├─ types/               # 领域类型
+│  ├─ stores/              # Pinia store（见 Store 层说明）
+│  ├─ types/               # 领域类型（API 响应、Store 状态、业务模型）
 │  ├─ utils/               # 常量和纯工具函数
+│  │  ├─ api-helpers.ts    # 唯一查询构建/解包/camelCase 转换工具
+│  │  ├─ eventTypes.ts     # SSE/WS 事件类型常量集中定义
+│  │  ├─ constants.ts
+│  │  ├─ date.ts
+│  │  └─ text.ts
 │  └─ app.vue
 ├─ nuxt.config.ts
 └─ package.json
 ```
 
-## feature 划分
+## Feature 划分
 
-- `features/shell`：主壳、顶部栏、侧栏、文章列表栏
-- `features/articles`：正文阅读、内容补全状态、Firecrawl 全文、AI 整理稿
-- `features/summaries`：AI 总结列表、队列进度、WebSocket 实时更新
-- `features/digest`：日报、周报、详情页、配置抽屉
-- `features/feeds`：自动刷新和刷新轮询
-- `features/preferences`：阅读行为埋点与偏好相关逻辑
-- `features/tags`：标签管理、标签合并、标签质量评分
-- `features/hierarchy-config`：层级配置管理
-- `features/topic-graph`：主题图谱、热点标签、话题详情、analysis、timeline、标签层级（TagHierarchy）、标签合并预览、叙事面板
+每个 feature 是一个自包含的业务模块，包含自己的组件、composable、工具和公共 facade。
 
-这套结构已经替代旧的“业务都堆在 `components/`”的方式。新功能优先进入 `features/*`。
+```text
+features/
+├─ shell/              # 主壳、顶部栏、侧栏、文章列表栏
+│  └─ components/      # FeedLayoutShell、AppHeader、AppSidebar、ArticleListPanel
+├─ articles/           # 正文阅读、内容补全、Firecrawl 全文、AI 整理稿
+│  ├─ components/      # ArticleContentView、ArticleCardView、ArticleTagList
+│  ├─ composables/     # useArticleContentView、useArticlePagination、useContentCompletion、useTagWebSocket
+│  ├─ utils/           # normalizeArticle（feature 私有）
+│  └─ public.ts        # 跨 feature 共享的稳定 facade
+├─ feeds/              # 自动刷新和刷新轮询
+│  ├─ composables/     # useAutoRefresh、useRefreshPolling
+│  └─ public.ts        # 跨 feature 共享 facade
+├─ summaries/          # AI 总结列表、队列进度（通过 useEventStream 实时更新）
+├─ digest/             # 日报、周报、详情页、配置抽屉
+├─ preferences/        # 阅读行为埋点与偏好
+│  ├─ composables/     # useReadingTracker
+│  └─ public.ts        # 跨 feature 共享 facade
+├─ tags/               # 标签管理、合并、质量评分
+│  ├─ components/      # TagsPage、BoardCRUD、Timeline、Merge 等
+│  └─ composables/     # useTagsPage、useBoardCRUD、useBoardTimeline、useAuxiliaryLabels
+├─ topic-graph/        # 主题图谱、热点标签、话题详情、analysis、timeline、标签层级、合并预览
+│  ├─ components/      # TopicGraphPage、Canvas、Sidebar、Timeline、TagHierarchy、TagMergePreview 等
+│  ├─ composables/     # useTopicGraph、useTopicTimeline、useArticlePreview、useFloatingPanelDrag 等
+│  ├─ utils/           # buildDisplayedTopicGraph、buildTopicGraphViewModel、normalizeTopicCategory
+│  └─ public.ts        # 跨 feature 共享 facade（TagMergePreview）
+├─ ai/                 # AI Router 设置面板、Embedding 配置/队列
+│  ├─ components/      # AIRouterSettingsPanel、EmbeddingConfigPanel 等
+│  └─ composables/     # useAIRouterSettings
+└─ hierarchy-config/   # 层级配置管理
+```
+
+### Feature Facade 约定
+
+每个 feature 如需暴露跨 feature 共享能力，**必须**通过 `public.ts` facade：
+
+- `features/articles/public.ts` → `ArticleContentView`、`ArticleCardView`、`useArticlePagination`
+- `features/feeds/public.ts` → `useGlobalAutoRefresh`、`useRefreshPolling`
+- `features/topic-graph/public.ts` → `TagMergePreview`
+- `features/preferences/public.ts` → `useReadingTracker`、`useScrollDepthTracker`
+
+**禁止跨 feature 深 import 对方内部实现**（组件、composable、工具函数）。共享 normalizer 上移到 `api/normalizers/`，共享 UI 上移到 `components/` 或通过 feature facade 暴露。
 
 ## 数据层约定
 
-### API 层
+### API 层（唯一 HTTP 边界）
 
-`front/app/api/*` 是唯一 HTTP 边界。
+`front/app/api/*` 是前端唯一 HTTP 边界。所有后端调用必须经此。
 
-- `client.ts` 统一封装 `fetch`
-- 各领域模块只关心自己的接口
-- query 参数统一走 `buildQueryParams()`
-- 文件上传和下载也在这里收口
+**核心约定：**
 
-当前已落地的模块包括：
+- `client.ts` 统一封装 `fetch`，返回 `{ success, data, error, message }`
+- 各领域模块通过 `useXxxApi()` composable 形式使用
+- query 参数统一走 `buildQueryString()`（`utils/api-helpers.ts`）
+- 响应解包使用 `mapApiResponse<T>()` / `unwrapResponse<T>()`
+- snake_case → camelCase 转换使用 `camelizeKeys()`（`utils/api-helpers.ts`）
+- `api/index.ts` 统一 re-export 所有 API composable
 
-- `categories.ts`
-- `feeds.ts`
-- `articles.ts`
-- `summaries.ts`
-- `digest.ts`
-- `opml.ts`
-- `reading_behavior.ts`
-- `firecrawl.ts`
-- `scheduler.ts`
-- `aiAdmin.ts`
-- `topicGraph.ts`
-- `abstractTags.ts`
-- `embeddingConfig.ts`
-- `embeddingQueue.ts`
-- `mergeReembeddingQueue.ts`
-- `tagMergePreview.ts`
-- `watchedTags.ts`
+**唯一权威原则（D19）：**
+
+| 职责 | 唯一权威 Module |
+|------|-----------------|
+| 查询参数构建 | `utils/api-helpers.ts` → `buildQueryString()` |
+| 响应解包 | `utils/api-helpers.ts` → `mapApiResponse()` / `unwrapResponse()` |
+| camelCase 转换 | `utils/api-helpers.ts` → `camelizeKeys()` |
+| 文章 DTO 转换 | `api/normalizers/article.ts` → `normalizeArticle()` |
+
+**已落地的 API 模块：**
+
+`categories` · `feeds` · `articles` · `summaries` · `digest` · `opml` · `reading_behavior` · `firecrawl` · `scheduler` · `aiAdmin` · `topicGraph` · `abstractTags` · `semanticBoards` · `auxiliaryLabels` · `embeddingConfig` · `embeddingQueue` · `mergeReembeddingQueue` · `tagMergePreview` · `tagQueue` · `watchedTags` · `dailyReports`
 
 ### Store 层
 
-`useApiStore()` 是前端数据主源。
+**Store 职责分离（D13/D16）：**
 
-- 持有 `categories`、`feeds`、`allFeeds`、`articles`
-- 负责后端返回值到前端字段的映射，例如 `article_summary_enabled -> articleSummaryEnabled`、`summary_status -> summaryStatus`
-- 负责增删改后重新拉取必要数据
-- 负责文章已读、收藏、批量已读等更新
+| Store | 职责 | 自有状态 |
+|-------|------|---------|
+| `useApiStore` | 应用初始化、categories/feeds 的加载与基本 CRUD | `categories`、`feeds`、全局 loading/error |
+| `useArticlesStore` | 文章状态管理，所有文章 mutation 直接调用 API | `articles`、`totalArticles`、`filters`、`currentArticle`、`loading` |
+| `useFeedsStore` | Feed 派生视图层（computed from apiStore） | 无独立状态 |
+| `usePreferencesStore` | 阅读偏好和统计 | 独立偏好状态 |
 
-`useFeedsStore()` 和 `useArticlesStore()` 现在是派生视图层。
+**Store 核心规则（store-integrity）：**
 
-- `feedsStore` 基于 `apiStore` 暴露分类分组、未读数等计算结果
-- `articlesStore` 基于 `apiStore` 暴露筛选、排序、当前文章等视图状态
-- 不再维护本地副本
-- 不再依赖手动 `syncToLocalStores()`
+1. **状态变更必须经 API 持久化**：Store 内的 mutation 必须调用对应 API 方法，禁止仅修改本地状态
+2. **乐观更新 + 回滚**：写操作先本地更新状态，API 失败时回滚并通知用户
+3. **Store 之间不得形成循环知识**：`articlesStore` 不 import `apiStore` 的文章 mutation，`apiStore` 不动态 import `articlesStore`
+4. **Feed unread count 同步**通过 `useFeedsStore` 暴露的小 Interface（`adjustUnreadCount`）完成
 
-`usePreferencesStore()` 独立负责阅读偏好和统计。
+**一次性的 API 调用**（如对话框中的 CRUD）直接走 `api/` 层，不经过 Store。Store 只管理需要跨组件共享的状态。
+
+## 实时事件流（useEventStream）
+
+**唯一全局实时事件 Seam**（D15）。所有全局实时事件消费者必须通过 `useEventStream()` 订阅。
+
+**核心特性：**
+
+- **单例连接**：全局维护唯一 WebSocket 连接（`/ws`），生命周期由订阅者引用计数自动管理
+- **类型化事件**：事件类型常量集中在 `utils/eventTypes.ts`
+- **自动重连**：指数退避（1s → 30s）
+- **自动清理**：最后一个订阅者退订时关闭连接并释放全局实例
+
+**使用模式：**
+
+```typescript
+const stream = useEventStream()
+
+// 订阅
+const off = stream.on(EVENT_TYPES.TAG_COMPLETED, (data) => { ... })
+
+// 组件卸载时清理（onUnmounted 中）
+off()
+```
+
+**禁止：**
+
+- Feature/Component 中直接 `new WebSocket` 或 `new EventSource` 订阅全局事件
+- 组件卸载后不退订（必须在 `onUnmounted` 执行返回的 unsubscribe 函数）
+
+**特例：** 专用长任务 stream（如 tag merge preview 的 scan/evaluate SSE）在对应 API module 中作为命名 Adapter 暴露。
+
+## 错误通知（useNotify）
+
+**全局通知管道**（D20），所有 UI 错误/成功反馈统一经此。
+
+**核心特性：**
+
+- 使用 Nuxt `useState` 管理 toast 队列（SSR 兼容）
+- 提供 `notify.success()`、`notify.error()`、`notify.warn()` 方法
+- 全局共享实例，所有 `useNotify()` 调用返回同一队列
+- `components/common/NotifyContainer.vue` 渲染 toast 列表
+
+**通知责任层（唯一责任原则）：**
+
+| 层级 | 责任 |
+|------|------|
+| Store / Composable | 执行写操作失败时调用 `notify.error()` |
+| 底层 API module | **不直接弹 toast**，只返回错误 |
+| View 组件 | 可保留局部 `error` 展示状态，全局错误走 `useNotify()` |
+
+**禁止同一次失败由多个层同时通知**（如 `apiStore` 和 feature store 同时弹 toast）。
 
 ## 数据映射规则
 
 - 后端字段以 `snake_case` 为主
 - 前端 store 和组件内部统一用 `camelCase`
-- ID 在前端统一存成 `string`
-- 数字 ID 与字符串 ID 的转换只应发生在 API 边界或 store 映射层
-- 文章处理相关字段统一使用 `articleSummaryEnabled`、`summaryStatus`、`summaryGeneratedAt`
+- 转换只发生在 API 边界（`api/normalizers/` 和 `utils/api-helpers.ts`）
+- ID 在前端统一存成 `string`；数字 ID 与字符串 ID 的转换只在 API 边界
+- 后端 snake_case DTO 进入 Store/Feature 前必须经 normalizer 转为前端领域类型
 
 ## 页面骨架
 
@@ -123,24 +230,32 @@ front/
 
 Digest 页面走独立路由和独立视觉壳，不复用主阅读页的三栏壳。
 
-### Topics页面架构
+### Topics 页面架构
 
 #### 组件结构
 
 - `TopicGraphPage`: 主页面容器
   - `TopicGraphHeader`: 头部控制区（返回首页、刷新图谱）
   - `TopicGraphCanvas`: 3D 拓扑图
-  - `TopicAnalysisTabs`: 分析分类 Tabs
-  - `TopicAnalysisPanel`: 分析内容展示
+  - `TopicGraphFooterPanels`: 底部面板区（含 TagQueuePanel）
   - `TopicGraphSidebar`: 右侧详情栏
-  - `ArticleTagList`: digest/article 标签的通用可视化组件
+  - `TopicTimeline`: digest timeline
+  - `TagHierarchy`: 标签层级树
+  - `KeywordCloud`: 关键词云
 
-#### 状态管理
+#### Composable 深化拆分（D17）
 
-- 选中状态统一在 `TopicGraphPage` 管理
-- `selectedCategory`: 当前选中的分类（event/person/keyword）
-- `selectedTagInCategory`: 当前选中的标签 slug
-- `highlightedNodeIds`: 需要高亮的节点 ID 列表
+Topic Graph 页面的复杂度已按内聚行为拆分为多个深 Module：
+
+| Module | 职责 | 外部 Interface |
+|--------|------|----------------|
+| `useTopicGraph` | 页面级状态编排 | `filters`、`viewModel`、`loadGraph`、`loading/error` |
+| `useTopicTimeline` | digest、pending articles、聚合分组 | `items`、`groups`、`selectDigest`、`loadForTopic` |
+| `useArticlePreview` | 文章预览、收藏、局部更新 | `selectedArticle`、`open`、`close`、`toggleFavorite` |
+| `useFloatingPanelDrag` | 浮层拖拽通用逻辑 | `panelRef`、`position`、`startDrag`、`reset` |
+| `useHotspotTopics` | 热点标签加载 | `hotspotTopics`、`loading` |
+
+同样规则适用于 `useTagsPage()` 等其他大型页面 composable。
 
 #### 数据流
 
@@ -154,6 +269,13 @@ Digest 页面走独立路由和独立视觉壳，不复用主阅读页的三栏�
 - `ArticleContentView` 现在会直接展示标准 article tags
 - digest 列表、digest 详情、topic graph timeline 使用 digest 的 `aggregated_tags`
 - `/topics` 中当前选中的 topic slug 会在 digest/article 标签上做高亮
+
+## 大组件拆分阈值（D14）
+
+- 单文件超过 **500 行 / ~15KB** 时应考虑拆分
+- 拆分目标不是文件行数下降，而是形成多个**深 Module**，每个以小 Interface 隐藏一组高内聚行为
+- 不能只把复杂度搬进单个巨型 composable（D17）
+- 组件通过 composable 获取状态和方法，子组件通过 props 接收数据
 
 ## 设计系统
 
@@ -177,12 +299,12 @@ Digest 页面走独立路由和独立视觉壳，不复用主阅读页的三栏�
 
 - 前端开发端口：`http://localhost:3000`
 - 后端 API：`http://localhost:5000/api`
-- AI 总结 WebSocket：基于运行时 `apiBase` 推导，默认连 `ws://localhost:5000/ws`
+- 全局实时事件：`ws://localhost:5000/ws`（通过 `useEventStream()` 统一管理）
+- 专用 SSE 端点：tag merge preview scan/evaluate 等
 
 ## 相关文档
 
-- `docs/architecture/frontend-components.md`
-- `docs/architecture/data-flow.md`
-- `docs/guides/frontend-features.md`
-- `docs/guides/topic-graph.md`
-- `docs/operations/development.md`
+- `docs/reference/architecture/backend.md`
+- `docs/reference/architecture/data-flow.md`
+- `docs/reference/architecture/overview.md`
+- `front/AGENTS.md`

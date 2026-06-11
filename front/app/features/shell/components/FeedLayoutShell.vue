@@ -4,18 +4,19 @@ import LayoutAppHeader from '~/features/shell/components/AppHeaderShell.vue'
 import LayoutAppSidebar from '~/features/shell/components/AppSidebarShell.vue'
 import LayoutArticleListPanel from '~/features/shell/components/ArticleListPanelShell.vue'
 import { useArticlesApi } from '~/api/articles'
-import ArticleContent from '~/features/articles/components/ArticleContentView.vue'
-import { normalizeArticle, type ArticlePayload } from '../../articles/utils/normalizeArticle'
-import { useGlobalAutoRefresh } from '~/features/feeds/composables/useAutoRefresh'
-import { useArticlePagination } from '~/features/articles/composables/useArticlePagination'
+import { ArticleContentView as ArticleContent } from '~/features/articles/public'
+import { normalizeArticle, type ArticlePayload } from '~/api/normalizers/article'
+import { useGlobalAutoRefresh } from '~/features/feeds/public'
+import { useArticlePagination } from '~/features/articles/public'
 import { SIDEBAR_DEFAULT_WIDTH, MAX_POLLING_TIME, REFRESH_POLLING_INTERVAL } from '~/utils/constants'
 import type { WatchedTag } from '~/api/watchedTags'
-import type { Article } from '~/types/article'
-import type { ArticleFilters } from '~/types/article'
+import type { Article, ArticleFilters } from '~/types/article'
+import type { ApiResponse } from '~/types'
 
 const apiStore = useApiStore()
 const feedsStore = useFeedsStore()
 const articlesApi = useArticlesApi()
+const articlesStore = useArticlesStore()
 
 const {
   state: paginationState,
@@ -65,9 +66,9 @@ const editingFeed = computed(() =>
 )
 
 async function fetchGlobalUnreadCount() {
-  const response = await apiStore.fetchArticlesStats()
+  const response = await articlesStore.fetchArticlesStats()
   if (response.success && response.data) {
-    globalUnreadCount.value = (response.data as any).unread || 0
+    globalUnreadCount.value = response.data.unread || 0
   }
 }
 
@@ -81,9 +82,9 @@ async function loadWatchedTags() {
 }
 
 async function fetchFeeds() {
-  if (selectedCategory.value === 'uncategorized') {
+  if (selectedCategory.value === CAT_UNCATEGORIZED) {
     await apiStore.fetchFeeds({ uncategorized: true, per_page: 10000 })
-  } else if (selectedCategory.value && selectedCategory.value !== 'favorites') {
+  } else if (selectedCategory.value && selectedCategory.value !== CAT_FAVORITES) {
     await apiStore.fetchFeeds({ category_id: parseInt(selectedCategory.value), per_page: 10000 })
   } else {
     await apiStore.fetchFeeds({ per_page: 10000 })
@@ -92,7 +93,7 @@ async function fetchFeeds() {
 
 function buildArticleFilters() {
 	const filters: ArticleFilters = {}
-  if (selectedCategory.value === 'watched-tags') {
+  if (selectedCategory.value === CAT_WATCHED_TAGS) {
     if (selectedWatchedTagId.value) {
       filters.watched_tag_ids = selectedWatchedTagId.value
       filters.sort_by = 'date'
@@ -102,11 +103,11 @@ function buildArticleFilters() {
     }
   } else if (selectedFeed.value) {
     filters.feed_id = parseInt(selectedFeed.value)
-  } else if (selectedCategory.value === 'uncategorized') {
+  } else if (selectedCategory.value === CAT_UNCATEGORIZED) {
     filters.uncategorized = true
-  } else if (selectedCategory.value === 'favorites') {
+  } else if (selectedCategory.value === CAT_FAVORITES) {
     filters.favorite = true
-  } else if (selectedCategory.value && selectedCategory.value !== 'favorites') {
+  } else if (selectedCategory.value && selectedCategory.value !== CAT_FAVORITES) {
     filters.category_id = parseInt(selectedCategory.value)
   }
   if (startDate.value) {
@@ -123,14 +124,10 @@ async function loadArticles() {
 }
 
 onMounted(async () => {
-  // Wave 1: no dependencies between these two
-  await Promise.allSettled([
-    fetchFeeds(),
-    loadWatchedTags(),
-  ])
-  // Wave 2: may depend on feeds list
+  // 并行加载所有初始数据 — feeds 已由 app.vue 通过 apiStore.initialize() 提前加载
   await Promise.allSettled([
     loadArticles(),
+    loadWatchedTags(),
     fetchGlobalUnreadCount(),
   ])
 })
@@ -139,7 +136,7 @@ onUnmounted(() => {
   stopPollingRefreshStatus()
 })
 
-async function hydrateSelectedArticle(article: any) {
+async function hydrateSelectedArticle(article: Article) {
   selectedArticle.value = article
 
   try {
@@ -152,14 +149,14 @@ async function hydrateSelectedArticle(article: any) {
   }
 }
 
-function handleArticleClick(article: any) {
+function handleArticleClick(article: Article) {
   void hydrateSelectedArticle(article)
   if (!article.read) {
     updateArticle(article.id, { read: true })
     if (selectedArticle.value) {
       selectedArticle.value = { ...selectedArticle.value, read: true }
     }
-    apiStore.markAsRead(article.id)
+    articlesStore.markAsRead(article.id)
   }
 }
 
@@ -187,7 +184,7 @@ async function handleArticleFavorite(articleId: string) {
   }
 }
 
-function handleArticleUpdate(articleId: string, updates: Partial<any>) {
+function handleArticleUpdate(articleId: string, updates: Partial<Article>) {
   updateArticle(articleId, updates)
 }
 
@@ -248,7 +245,7 @@ async function handleFeedClick(feedId: string) {
 }
 
 async function handleFavoritesClick() {
-  selectedCategory.value = 'favorites'
+  selectedCategory.value = CAT_FAVORITES
   selectedFeed.value = null
   selectedWatchedTagId.value = null
   startDate.value = ''
@@ -269,14 +266,14 @@ async function handleAllArticlesClick() {
 }
 
 function handleTopicGraphClick() {
-  selectedCategory.value = 'topic-graph'
+  selectedCategory.value = CAT_TOPIC_GRAPH
   selectedFeed.value = null
   selectedWatchedTagId.value = null
-  navigateTo('/topics')
+  navigateTo(ROUTE_TOPICS)
 }
 
 async function handleWatchedTagsClick() {
-  selectedCategory.value = 'watched-tags'
+  selectedCategory.value = CAT_WATCHED_TAGS
   selectedFeed.value = null
   selectedWatchedTagId.value = null
   startDate.value = ''
@@ -306,34 +303,7 @@ async function pollRefreshStatus() {
       return
     }
 
-    const response = await apiStore.fetchFeeds({ per_page: 10000 })
-
-    if (response.success && response.data) {
-      const data = response.data as any
-      const items = data.items || data
-      apiStore.allFeeds = items.map((feed: any) => ({
-        id: String(feed.id),
-        title: feed.title,
-        description: feed.description || '',
-        url: feed.url,
-        category: feed.category_id ? String(feed.category_id) : '',
-        icon: feed.icon || undefined,
-        color: feed.color || '#6b7280',
-        lastUpdated: feed.last_updated || new Date().toISOString(),
-        articleCount: feed.article_count || 0,
-        unreadCount: feed.unread_count || 0,
-        maxArticles: feed.max_articles || 100,
-        refreshInterval: feed.refresh_interval || 60,
-        refreshStatus: feed.refresh_status || 'idle',
-        refreshError: feed.refresh_error,
-        lastRefreshAt: feed.last_refresh_at,
-        aiSummaryEnabled: feed.ai_summary_enabled !== undefined ? feed.ai_summary_enabled : true,
-        articleSummaryEnabled: feed.article_summary_enabled,
-        completionOnRefresh: feed.completion_on_refresh,
-        maxCompletionRetries: feed.max_completion_retries,
-        firecrawlEnabled: feed.firecrawl_enabled,
-      }))
-    }
+    await apiStore.fetchFeeds({ per_page: 10000 })
 
     const monitoredFeeds = selectedFeed.value
       ? feedsStore.feeds.filter(f => f.id === selectedFeed.value)
@@ -398,20 +368,20 @@ async function handleRefresh() {
 }
 
 async function handleMarkAllRead() {
-  let response: any
+  let response: ApiResponse<unknown> | undefined
   if (selectedFeed.value) {
-    response = await apiStore.markAllAsRead({ feedId: selectedFeed.value })
+    response = await articlesStore.markAllAsRead({ feedId: selectedFeed.value })
   } else if (selectedCategory.value) {
-    if (selectedCategory.value === 'uncategorized') {
-      response = await apiStore.markAllAsRead({ uncategorized: true })
+    if (selectedCategory.value === CAT_UNCATEGORIZED) {
+      response = await articlesStore.markAllAsRead({ uncategorized: true })
     } else {
       const categoryId = parseInt(selectedCategory.value)
       if (categoryId > 0) {
-        response = await apiStore.markAllAsRead({ categoryId })
+        response = await articlesStore.markAllAsRead({ categoryId })
       }
     }
   } else {
-    response = await apiStore.markAllAsRead()
+    response = await articlesStore.markAllAsRead()
   }
   if (response && !response.success) {
     refreshMessage.value = response.error || '标记已读失败'

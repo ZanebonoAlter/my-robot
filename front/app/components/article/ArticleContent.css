@@ -374,6 +374,62 @@ img[src*="Base64-Image-Removed"] {
   color: var(--color-ink-light);
 }
 
+/* Split component styles */
+.fullscreen-article {
+  background: white;
+}
+.fullscreen-article .article-header {
+  flex-shrink: 0;
+}
+.fullscreen-article .preview-mode {
+  flex: 1;
+  overflow-y: auto;
+}
+.fullscreen-article .iframe-mode {
+  flex: 1;
+}
+.reading-progress-bar {
+  height: 2px;
+  background: rgba(26, 26, 26, 0.06);
+  flex-shrink: 0;
+}
+.reading-progress-bar__fill {
+  height: 100%;
+  background: var(--color-ink-500);
+  transition: width 0.15s ease-out;
+  border-radius: 0 1px 1px 0;
+}
+.back-to-top-btn {
+  position: absolute;
+  bottom: 24px;
+  right: 24px;
+  width: 40px;
+  height: 40px;
+  border-radius: 0.75rem;
+  background: var(--color-ink-500);
+  color: white;
+  border: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: var(--shadow-medium);
+  opacity: 0;
+  transform: translateY(8px);
+  pointer-events: none;
+  transition: opacity 0.25s ease, transform 0.25s ease, background-color 0.2s ease;
+  z-index: 10;
+}
+.back-to-top-btn:hover {
+  background: var(--color-ink-600);
+  box-shadow: var(--shadow-strong);
+}
+.back-to-top-btn--visible {
+  opacity: 1;
+  transform: translateY(0);
+  pointer-events: auto;
+}
+
 .iframe-mode {
   flex: 1;
   position: relative;

@@ -1,6 +1,34 @@
-﻿/**
+/**
  * Feed-related type definitions.
  */
+
+/**
+ * Response shape returned by rss2json.com used by server/api/fetch-feed.post.ts.
+ */
+export interface FeedResponse {
+  status: 'ok' | 'error'
+  feed?: {
+    url?: string
+    title?: string
+    link?: string
+    author?: string
+    description?: string
+    image?: string
+  }
+  items?: Array<{
+    title?: string
+    pubDate?: string
+    link?: string
+    guid?: string
+    author?: string
+    thumbnail?: string
+    description?: string
+    content?: string
+    enclosure?: unknown
+    categories?: string[]
+  }>
+  message?: string
+}
 
 /**
  * RSS feed data model.
@@ -63,4 +91,3 @@ export interface UpdateFeedData {
   firecrawl_enabled?: boolean
   tagging_enabled?: boolean
 }
-

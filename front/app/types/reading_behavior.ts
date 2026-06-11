@@ -1,5 +1,9 @@
 /**
  * 阅读行为相关类型定义
+ *
+ * ⚠️ 这些类型直接映射 API 的 snake_case 响应。按约定，DTO 进入 Store/Feature
+ * 前应通过 camelizeKeys() 转换为 camelCase（见 api-helpers.ts）。
+ * 后续重构时可将这些类型改为 camelCase，在 API 层统一转换。
  */
 
 export type ReadingEventType = 'open' | 'close' | 'scroll' | 'favorite' | 'unfavorite'
@@ -27,6 +31,9 @@ export interface ReadingStats {
   avg_scroll_depth: number
   most_active_feed_id: number
   most_active_category: number
+  /** @deprecated use total_articles / total_reading_time */
+  read_ratio?: number
+  fav_ratio?: number
 }
 
 /**
@@ -34,9 +41,13 @@ export interface ReadingStats {
  */
 export interface UserPreference {
   id: number
+  /** @deprecated use id */
+  preference_id?: number
   feed_id?: number
   category_id?: number
   preference_score: number
+  read_score?: number
+  interest_score?: number
   avg_reading_time: number
   interaction_count: number
   scroll_depth_avg: number

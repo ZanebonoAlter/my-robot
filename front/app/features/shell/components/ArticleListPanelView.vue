@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { Icon } from '@iconify/vue'
 import { useVirtualList } from '@vueuse/core'
-import ArticleCard from '~/features/articles/components/ArticleCardView.vue'
+import { ArticleCardView as ArticleCard } from '~/features/articles/public'
 import type { Article } from '~/types'
 
 interface Props {

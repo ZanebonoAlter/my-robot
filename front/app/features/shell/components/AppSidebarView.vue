@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { Icon } from '@iconify/vue'
-import { useRefreshPolling } from '~/features/feeds/composables/useRefreshPolling'
+import { useRefreshPolling } from '~/features/feeds/public'
 import { SIDEBAR_MIN_WIDTH, SIDEBAR_MAX_WIDTH } from '~/utils/constants'
 import AppTooltip from '~/components/common/AppTooltip.vue'
 import FeedActionMenu from '~/components/feed/FeedActionMenu.vue'
@@ -103,7 +103,7 @@ function handleAllArticlesClick() {
 }
 
 async function handleMarkFeedAsRead(feedId: string) {
-  const response = await apiStore.markAllAsRead({ feedId })
+  const response = await articlesStore.markAllAsRead({ feedId })
   if (!response.success) return
 
   const feed = feedsStore.feeds.find(f => f.id === feedId)

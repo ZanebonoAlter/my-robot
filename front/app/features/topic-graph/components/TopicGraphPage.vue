@@ -1,21 +1,8 @@
 <script setup lang="ts">
 import { Icon } from '@iconify/vue'
-import { computed, onBeforeUnmount, ref, watch } from 'vue'
-import { useArticlesApi } from '~/api/articles'
-import {
-  useTopicGraphApi,
-  type HotspotDigestCard,
-  type TopicCategory,
-  type TopicGraphDetailPayload,
-  type TopicGraphFilters,
-  type TopicGraphType,
-  type TopicsByCategoryPayload,
-} from '~/api/topicGraph'
-import type { Article } from '~/types'
-import type { TimelineDigest, TimelineDigestSelection, PendingArticle, TimelineAggregationGroup, TimelineAggregationMode, TimelineAggregationArticle } from '~/types/timeline'
-import ArticleContentView from '~/features/articles/components/ArticleContentView.vue'
-import { useApiStore } from '~/stores/api'
-import { normalizeArticle, type ArticlePayload } from '../../articles/utils/normalizeArticle'
+import { useTopicGraph } from '~/features/topic-graph/composables/useTopicGraph'
+import { normalizeTopicCategory } from '~/features/topic-graph/utils/normalizeTopicCategory'
+import { ArticleContentView } from '~/features/articles/public'
 import FeedCategoryFilter from '~/features/topic-graph/components/FeedCategoryFilter.vue'
 import TopicGraphCanvas from '~/features/topic-graph/components/TopicGraphCanvas.client.vue'
 import TopicGraphFooterPanels from '~/features/topic-graph/components/TopicGraphFooterPanels.vue'
@@ -23,1183 +10,49 @@ import TopicGraphHeader from '~/features/topic-graph/components/TopicGraphHeader
 import TopicGraphSidebar from '~/features/topic-graph/components/TopicGraphSidebar.vue'
 import TopicTimeline from '~/features/topic-graph/components/TopicTimeline.vue'
 
-import { buildDisplayedTopicGraph, collectRelatedTopicSlugs } from '~/features/topic-graph/utils/buildDisplayedTopicGraph'
-import { buildTopicGraphViewModel } from '~/features/topic-graph/utils/buildTopicGraphViewModel'
-import { normalizeTopicCategory } from '~/features/topic-graph/utils/normalizeTopicCategory'
-
-// Timeline panel drag state
-const timelinePanelRef = ref<HTMLDivElement | null>(null)
-const isDragging = ref(false)
-const dragOffset = ref({ x: 0, y: 0 })
-const timelinePosition = ref({ x: 0, y: 0 })
-const initialRect = ref({ left: 0, top: 0 })
-let initialPositionSet = false
-
-function handleTimelineDragStart(event: MouseEvent) {
-  const target = event.target as HTMLElement
-  if (target.closest('button')) {
-    return
-  }
-  
-  const rect = timelinePanelRef.value?.getBoundingClientRect()
-  if (!rect) return
-  
-  if (!initialPositionSet) {
-    initialRect.value = { left: rect.left, top: rect.top }
-    initialPositionSet = true
-  }
-  
-  isDragging.value = true
-  dragOffset.value = {
-    x: event.clientX - rect.left,
-    y: event.clientY - rect.top,
-  }
-  event.preventDefault()
-  document.addEventListener('mousemove', handleTimelineDrag)
-  document.addEventListener('mouseup', handleTimelineDragEnd)
-}
-
-function handleTimelineDrag(event: MouseEvent) {
-  if (!isDragging.value) return
-  timelinePosition.value = {
-    x: event.clientX - dragOffset.value.x - initialRect.value.left,
-    y: event.clientY - dragOffset.value.y - initialRect.value.top,
-  }
-}
-
-function handleTimelineDragEnd() {
-  isDragging.value = false
-  document.removeEventListener('mousemove', handleTimelineDrag)
-  document.removeEventListener('mouseup', handleTimelineDragEnd)
-}
-
-function resetTimelinePanelPosition() {
-  timelinePosition.value = { x: 0, y: 0 }
-  initialPositionSet = false
-  initialRect.value = { left: 0, top: 0 }
-}
-
-onBeforeUnmount(() => {
-  document.removeEventListener('mousemove', handleTimelineDrag)
-  document.removeEventListener('mouseup', handleTimelineDragEnd)
-})
-
-
-const topicGraphApi = useTopicGraphApi()
-const articlesApi = useArticlesApi()
-const apiStore = useApiStore()
-
-
-function formatDateInput(date = new Date()) {
-  const year = date.getFullYear()
-  const month = `${date.getMonth() + 1}`.padStart(2, '0')
-  const day = `${date.getDate()}`.padStart(2, '0')
-  return `${year}-${month}-${day}`
-}
-
-const selectedType = ref<TopicGraphType>('daily')
-const selectedDate = ref(formatDateInput())
-const selectedFilterCategoryId = ref<string | null>(null)
-const selectedFilterFeedId = ref<string | null>(null)
-const graphPayload = ref<Awaited<ReturnType<typeof topicGraphApi.getGraph>>['data'] | null>(null)
-const selectedTopicSlug = ref<string | null>(null)
-const selectedCategory = ref<TopicCategory | null>(null)
-const selectedKeywordSlug = ref<string | null>(null)
-const selectedDigestId = ref<string | null>(null)
-const previewDigestId = ref<string | null>(null)
-const graphFocusRequestKey = ref(0)
-const detail = ref<TopicGraphDetailPayload | null>(null)
-const loadingGraph = ref(false)
-const loadingDetail = ref(false)
-const loadingPreviewArticle = ref(false)
-const notice = ref<string | null>(null)
-const selectedPreviewArticle = ref<Article | null>(null)
-const previewArticles = ref<Article[]>([])
-
-// Hotspot topics state (from getTopicsByCategory API)
-const hotspotData = ref<TopicsByCategoryPayload | null>(null)
-const loadingHotspots = ref(false)
-const graphVisibilityOverrides = ref<Record<string, boolean>>({})
-const expandedTopicSlugs = ref<string[]>([])
-
-// Hotspot digests state (reverse trace: tag -> articles -> digests)
-const hotspotDigests = ref<HotspotDigestCard[]>([])
-const loadingHotspotDigests = ref(false)
-const selectedHotspotTag = ref<{ slug: string; label: string; category: TopicCategory } | null>(null)
-
-// Pending articles state
-const pendingArticles = ref<PendingArticle[]>([])
-const selectedPendingNode = ref(false)
-const loadingPendingArticles = ref(false)
-
-// Timeline aggregation state
-const aggregationMode = ref<TimelineAggregationMode>('day')
-const aggregatedArticles = ref<TimelineAggregationArticle[]>([])
-const loadingAggregatedArticles = ref(false)
-const selectedGroupKey = ref<string | null>(null)
-
-// Abstract tag node tracking (for sidebar detail panel)
-const abstractNodeSlug = ref<string | null>(null)
-const abstractNodeLabel = ref<string | null>(null)
-const selectedChildTagSlug = ref<string | null>(null)
-
-// Timeline floating panel state
-const timelineOpen = ref(false)
-watch(timelineOpen, (open) => {
-  if (!open) {
-    resetTimelinePanelPosition()
-    isDragging.value = false
-  }
-})
-
-const viewModel = computed(() => graphPayload.value
-  ? buildTopicGraphViewModel(graphPayload.value)
-  : buildTopicGraphViewModel({
-      type: selectedType.value,
-      anchor_date: selectedDate.value,
-      period_label: '正在载入',
-      topic_count: 0,
-      article_count: 0,
-      feed_count: 0,
-      top_topics: [],
-      nodes: [],
-      edges: [],
-    }))
-
-const activeTopicNode = computed(() => {
-  const focusSlug = selectedKeywordSlug.value || selectedTopicSlug.value
-  return displayedGraph.value.nodes.find(node => node.slug === focusSlug) || null
-})
-const highlightedNodeIds = computed(() => {
-  const highlighted = new Set<string>()
-  const focusSlug = selectedKeywordSlug.value || selectedTopicSlug.value
-  if (!focusSlug) return []
-
-  const focusNode = displayedGraph.value.nodes.find(node => node.slug === focusSlug)
-  if (!focusNode) return []
-
-  highlighted.add(focusNode.id)
-
-  for (const edge of displayedGraph.value.edges) {
-    const sourceId = resolveGraphLinkNodeId(edge.source)
-    const targetId = resolveGraphLinkNodeId(edge.target)
-
-    if (sourceId === focusNode.id) {
-      highlighted.add(targetId)
-    }
-    if (targetId === focusNode.id) {
-      highlighted.add(sourceId)
-    }
-  }
-
-  return Array.from(highlighted)
-})
-const relatedEdgeIds = computed(() => {
-  const highlightedSet = new Set(highlightedNodeIds.value)
-  if (!highlightedSet.size) return []
-
-  return displayedGraph.value.edges
-    .filter(edge => {
-      return highlightedSet.has(resolveGraphLinkNodeId(edge.source)) && highlightedSet.has(resolveGraphLinkNodeId(edge.target))
-    })
-    .map(edge => edge.id)
-})
-
-function resolveGraphLinkNodeId(node: string | { id: string }) {
-  return typeof node === 'string' ? node : node.id
-}
-
-function isTopicShownInGraph(slug: string) {
-  return graphVisibleTopicSlugs.value.has(slug)
-}
-
-function ensureTopicShownInGraph(slug: string) {
-  if (isTopicShownInGraph(slug)) return
-
-  graphVisibilityOverrides.value = {
-    ...graphVisibilityOverrides.value,
-    [slug]: true,
-  }
-}
-
-function toggleTopicGraphVisibility(slug: string) {
-  const nextVisible = !isTopicShownInGraph(slug)
-  const defaultVisible = defaultGraphTopicSlugs.value.has(slug)
-  const nextOverrides = { ...graphVisibilityOverrides.value }
-
-  if (nextVisible === defaultVisible) {
-    delete nextOverrides[slug]
-  } else {
-    nextOverrides[slug] = nextVisible
-  }
-
-  graphVisibilityOverrides.value = nextOverrides
-}
-
-function expandRelatedTopics(slug: string) {
-  const relatedSlugs = collectRelatedTopicSlugs(viewModel.value.graph, slug)
-  const nextExpanded = new Set(expandedTopicSlugs.value)
-  const nextOverrides = { ...graphVisibilityOverrides.value }
-
-  nextExpanded.add(slug)
-  nextOverrides[slug] = true
-
-  relatedSlugs.forEach((relatedSlug) => {
-    nextExpanded.add(relatedSlug)
-    nextOverrides[relatedSlug] = true
-  })
-
-  expandedTopicSlugs.value = Array.from(nextExpanded)
-  graphVisibilityOverrides.value = nextOverrides
-}
-
-// Hotspot categories now use data from getTopicsByCategory API
-// Hotspot search state
-const hotspotSearchQueries = ref<Record<string, string>>({ event: '', person: '', keyword: '' })
-const hotspotDropdownOpen = ref<Record<string, boolean>>({ event: false, person: false, keyword: false })
-const hotspotShowAll = ref<Record<string, boolean>>({ event: false, person: false, keyword: false })
-
-// Refs for hotspot search containers
-const hotspotSearchRefs = ref<Record<string, HTMLDivElement | null>>({ event: null, person: null, keyword: null })
-
-// Filter topics based on search query
-function filterTopics(topics: any[], query: string) {
-  if (!query.trim()) return topics
-  const lowerQuery = query.toLowerCase()
-  return topics.filter(topic =>
-    topic.label.toLowerCase().includes(lowerQuery) ||
-    topic.slug.toLowerCase().includes(lowerQuery)
-  )
-}
-
-function isDefaultVisibleTopic(topic: { is_low_quality?: boolean; is_abstract?: boolean }) {
-  return topic.is_abstract || !topic.is_low_quality
-}
-
-function sortTopicsByFrequency<T extends { score: number; quality_score?: number; is_low_quality?: boolean }>(topics: T[]) {
-  return [...topics].sort((left, right) => {
-    // 低质量标签排在底部
-    const leftLowQuality = left.is_low_quality ? 1 : 0
-    const rightLowQuality = right.is_low_quality ? 1 : 0
-    if (leftLowQuality !== rightLowQuality) {
-      return leftLowQuality - rightLowQuality
-    }
-
-    const leftQuality = left.quality_score ?? left.score ?? 0
-    const rightQuality = right.quality_score ?? right.score ?? 0
-    if (rightQuality === leftQuality) {
-      return (right.score ?? 0) - (left.score ?? 0)
-    }
-    return rightQuality - leftQuality
-  })
-}
-
-function buildCategoryTopicState(category: TopicCategory, query: string, showAll: boolean) {
-  const categoryTopics = category === 'event'
-    ? hotspotData.value?.events
-    : category === 'person'
-      ? hotspotData.value?.people
-      : hotspotData.value?.keywords
-  const sourceTopics = sortTopicsByFrequency(categoryTopics || buildFallbackTopics(category))
-  const filteredTopics = filterTopics(sourceTopics, query || '')
-  const displayTopics = showAll ? filteredTopics : filteredTopics.slice(0, 8)
-
-  return {
-    topics: filteredTopics,
-    filteredTopics,
-    displayTopics,
-    hasMore: filteredTopics.length > displayTopics.length,
-    hiddenLowQualityCount: filteredTopics.filter(topic => topic.is_low_quality && !topic.is_abstract).length,
-    showAll,
-  }
-}
-
-function buildFallbackTopics(category: TopicCategory) {
-  return sortTopicsByFrequency(
-    viewModel.value.topTopics.filter(topic => normalizeTopicCategory(topic.category, topic.kind) === category)
-  )
-}
-
-// Toggle show all topics
-function toggleShowAll(categoryKey: string) {
-  hotspotShowAll.value[categoryKey] = !hotspotShowAll.value[categoryKey]
-}
-
-// Close specific dropdown
-function closeHotspotDropdown(categoryKey: string) {
-  hotspotDropdownOpen.value[categoryKey] = false
-}
-
-// Close all dropdowns when clicking outside
-function handleClickOutside(event: MouseEvent) {
-  const target = event.target as Node
-  
-  Object.keys(hotspotSearchRefs.value).forEach((key) => {
-    const container = hotspotSearchRefs.value[key]
-    if (container && !container.contains(target)) {
-      hotspotDropdownOpen.value[key] = false
-    }
-  })
-}
-
-// Add/remove click outside listener
-watch(() => Object.values(hotspotDropdownOpen.value).some(Boolean), (isAnyOpen) => {
-  if (isAnyOpen) {
-    document.addEventListener('click', handleClickOutside, true)
-  } else {
-    document.removeEventListener('click', handleClickOutside, true)
-  }
-})
-
-// Cleanup on unmount
-onBeforeUnmount(() => {
-  document.removeEventListener('click', handleClickOutside, true)
-})
-
-const hotspotCategories = computed(() => ([
-  {
-    key: 'event',
-    label: '事件',
-    icon: 'mdi:calendar-alert-outline',
-    headerClass: 'topic-category-header--event',
-    ...buildCategoryTopicState('event', hotspotSearchQueries.value.event || '', !!hotspotShowAll.value.event),
-  },
-  {
-    key: 'person',
-    label: '人物',
-    icon: 'mdi:account-voice-outline',
-    headerClass: 'topic-category-header--person',
-    ...buildCategoryTopicState('person', hotspotSearchQueries.value.person || '', !!hotspotShowAll.value.person),
-  },
-  {
-    key: 'keyword',
-    label: '关键词',
-    icon: 'mdi:key-variant',
-    headerClass: 'topic-category-header--keyword',
-    ...buildCategoryTopicState('keyword', hotspotSearchQueries.value.keyword || '', !!hotspotShowAll.value.keyword),
-  },
-]))
-const defaultGraphTopicSlugs = computed(() => {
-  const slugs = new Set<string>()
-  const lowQualitySlugs = new Set<string>()
-
-  viewModel.value.topTopics.forEach((topic) => {
-    if (topic.is_low_quality && topic.slug) {
-      lowQualitySlugs.add(topic.slug)
-    }
-  })
-
-  viewModel.value.graph.nodes.forEach((node) => {
-    if (node.kind === 'topic' && node.slug && !lowQualitySlugs.has(node.slug)) {
-      slugs.add(node.slug)
-    }
-  })
-
-  return slugs
-})
-const graphVisibleTopicSlugs = computed(() => {
-  const slugs = new Set(defaultGraphTopicSlugs.value)
-
-  expandedTopicSlugs.value.forEach(slug => slugs.add(slug))
-
-  Object.entries(graphVisibilityOverrides.value).forEach(([slug, visible]) => {
-    if (visible) {
-      slugs.add(slug)
-      return
-    }
-
-    slugs.delete(slug)
-  })
-
-  return slugs
-})
-const displayedGraph = computed(() => buildDisplayedTopicGraph({
-  graph: viewModel.value.graph,
-  visibleTopicSlugs: graphVisibleTopicSlugs.value,
-}))
-const timelineItems = computed((): TimelineDigest[] => {
-  const summaries = detail.value?.summaries || []
-
-  return summaries.map(summary => ({
-    id: String(summary.id),
-    title: summary.title,
-    summary: summary.summary,
-    createdAt: summary.created_at,
-    feedName: summary.feed_name,
-    feedIcon: summary.feed_icon,
-    categoryName: summary.category_name,
-    articleCount: summary.article_count,
-    tags: summary.aggregated_tags.map(topic => ({
-      slug: topic.slug,
-      label: topic.label,
-      category: normalizeTopicCategory(topic.category, topic.kind),
-    })),
-    articles: summary.articles.map(article => ({
-      id: article.id,
-      title: article.title,
-      link: article.link,
-    })),
-  }))
-})
-
-// Hotspot digests converted to TimelineDigest format for display
-const hotspotTimelineItems = computed((): TimelineDigest[] => {
-  if (!hotspotDigests.value.length) return []
-
-  return hotspotDigests.value.map(digest => ({
-      id: String(digest.id),
-      title: digest.title,
-      summary: digest.summary,
-      createdAt: digest.created_at,
-      feedName: digest.feed_name,
-      feedIcon: digest.feed_icon,
-      categoryName: digest.category_name,
-      articleCount: digest.article_count,
-      tags: (digest.aggregated_tags || []).map(tag => ({
-        slug: tag.slug,
-        label: tag.label,
-        category: normalizeTopicCategory(tag.category, tag.kind),
-      })),
-      articles: digest.matched_articles?.map(article => ({
-        id: article.id,
-        title: article.title,
-        link: '',
-        feedName: article.feed_name,
-        feedIcon: article.feed_icon,
-        feedColor: article.feed_color,
-      })) || [],
-    }))
-})
-
-// Effective timeline items: use hotspot digests when available, otherwise use topic detail summaries
-// This allows hotspot tag clicks to show digests containing articles with that tag
-const effectiveTimelineItems = computed((): TimelineDigest[] => {
-  // When a hotspot tag is selected and we have hotspot digests, prioritize them
-  if (selectedHotspotTag.value && hotspotDigests.value.length > 0) {
-    return hotspotTimelineItems.value
-  }
-  // Otherwise use the topic detail summaries
-  return timelineItems.value
-})
-const selectedDigest = computed<TimelineDigestSelection | null>(() => {
-  if (!selectedDigestId.value) return null
-  const digest = effectiveTimelineItems.value.find(item => item.id === selectedDigestId.value)
-  if (!digest) return null
-
-  // For hotspot digests, use hotspot tag to fetch matched articles
-  if (selectedHotspotTag.value && hotspotDigests.value.length > 0) {
-    const hotspotDigest = hotspotDigests.value.find(d => String(d.id) === selectedDigestId.value)
-    if (hotspotDigest) {
-      return {
-        ...digest,
-        matchedArticleIds: hotspotDigest.matched_articles?.map(a => a.id) || [],
-        matchedArticlesTags: hotspotDigest.matched_articles_tags?.map(tag => ({
-          slug: tag.slug,
-          label: tag.label,
-          category: normalizeTopicCategory(tag.category, tag.kind),
-        })),
-      }
-    }
-  }
-
-  // For topic detail digests, match against topic articles
-  if (!detail.value) return null
-  const topicArticleIds = new Set(detail.value.articles.map(article => article.id))
-  const matchedArticleIds = digest.articles
-    .map(article => article.id)
-    .filter(id => topicArticleIds.has(id))
-
-  return {
-    ...digest,
-    matchedArticleIds,
-  }
-})
-const previewDigest = computed(() => {
-  if (!previewDigestId.value) return null
-  return effectiveTimelineItems.value.find(item => item.id === previewDigestId.value) || null
-})
-function buildCurrentFilters(): TopicGraphFilters | undefined {
-  if (selectedFilterFeedId.value) return { feedId: selectedFilterFeedId.value }
-  if (selectedFilterCategoryId.value && selectedFilterCategoryId.value !== '__uncategorized__') {
-    return { categoryId: selectedFilterCategoryId.value }
-  }
-  return undefined
-}
-
-const pageState = computed(() => {
-  if (loadingGraph.value) return 'loading'
-  if (selectedPreviewArticle.value) return 'article-preview'
-  if (detail.value) return 'detail'
-  if (graphPayload.value) return 'graph-ready'
-  return 'empty'
-})
-
-const selectedTopicInfo = computed(() => {
-  if (detail.value?.topic) {
-    return {
-      id: detail.value.topic.id,
-      slug: detail.value.topic.slug,
-      label: detail.value.topic.label,
-      category: normalizeTopicCategory(detail.value.topic.category, detail.value.topic.kind),
-      description: detail.value.topic.description,
-    }
-  }
-
-  if (!selectedTopicSlug.value) return null
-
-  const topic = viewModel.value.topTopics.find(item => item.slug === selectedTopicSlug.value)
-  if (!topic) return null
-
-    return {
-      id: topic.id ?? 0,
-      slug: topic.slug,
-      label: topic.label,
-      category: normalizeTopicCategory(topic.category, topic.kind),
-      description: topic.description,
-    }
-})
-
-async function loadHotspots() {
-  loadingHotspots.value = true
-  try {
-    const response = await topicGraphApi.getTopicsByCategory(selectedType.value, selectedDate.value, buildCurrentFilters())
-    if (response.success && response.data) {
-      hotspotData.value = response.data
-    } else {
-      console.error('Failed to load hotspots:', response.error)
-      hotspotData.value = null
-    }
-  } catch (error) {
-    console.error('Failed to load hotspots:', error)
-    hotspotData.value = null
-  } finally {
-    loadingHotspots.value = false
-  }
-}
-
-async function loadGraph() {
-  loadingGraph.value = true
-  notice.value = null
-
-  try {
-    const response = await topicGraphApi.getGraph(selectedType.value, selectedDate.value, buildCurrentFilters())
-    if (!response.success || !response.data) {
-      notice.value = response.error || '主题图谱没拉下来'
-      graphPayload.value = null
-      detail.value = null
-      return
-    }
-
-    graphPayload.value = response.data
-    selectedTopicSlug.value = response.data.top_topics[0]?.slug || null
-    selectedCategory.value = response.data.top_topics[0]
-      ? normalizeTopicCategory(response.data.top_topics[0].category, response.data.top_topics[0].kind)
-      : null
-    selectedKeywordSlug.value = null
-    selectedDigestId.value = null
-    previewDigestId.value = null
-    expandedTopicSlugs.value = []
-
-    if (selectedTopicSlug.value) {
-      const firstTopic = response.data.top_topics[0]
-      selectedHotspotTag.value = {
-        slug: selectedTopicSlug.value,
-        label: firstTopic?.label || selectedTopicSlug.value,
-        category: selectedCategory.value || 'keyword',
-      }
-      void loadTopicDetail(selectedTopicSlug.value)
-      void loadHotspotDigests(selectedTopicSlug.value, selectedCategory.value || undefined)
-      void loadPendingArticles(selectedTopicSlug.value)
-    } else {
-      detail.value = null
-      selectedHotspotTag.value = null
-      hotspotDigests.value = []
-    }
-
-    // Load hotspot data in parallel
-    void loadHotspots()
-  } catch (error) {
-    console.error('Failed to load topic graph:', error)
-    notice.value = error instanceof Error ? error.message : '主题图谱加载失败'
-  } finally {
-    loadingGraph.value = false
-  }
-}
-
-async function loadTopicDetail(slug: string) {
-  selectedTopicSlug.value = slug
-  selectedKeywordSlug.value = null
-  selectedDigestId.value = null
-  previewDigestId.value = null
-  const topic = viewModel.value.topTopics.find(item => item.slug === slug) || null
-  if (topic?.category) {
-    selectedCategory.value = normalizeTopicCategory(topic.category, topic.kind)
-  }
-  loadingDetail.value = true
-
-  try {
-    const response = await topicGraphApi.getTopicDetail(slug, undefined, undefined, buildCurrentFilters())
-    if (response.success && response.data) {
-      detail.value = response.data
-      selectedCategory.value = normalizeTopicCategory(response.data.topic.category, response.data.topic.kind)
-      selectedDigestId.value = null
-      previewDigestId.value = null
-      return
-    }
-
-    detail.value = null
-    notice.value = response.error || '话题详情加载失败'
-  } catch (error) {
-    console.error('Failed to load topic detail:', error)
-    detail.value = null
-    notice.value = error instanceof Error ? error.message : '话题详情加载失败'
-  } finally {
-    loadingDetail.value = false
-  }
-}
-
-async function handleTagSelect(slug: string, category: TopicCategory) {
-  ensureTopicShownInGraph(slug)
-  expandRelatedTopics(slug)
-  graphFocusRequestKey.value += 1
-  selectedCategory.value = category
-  selectedTopicSlug.value = slug
-
-  // Find the tag label from hotspot data
-  let tagLabel = slug
-  const allTags = [
-    ...(hotspotData.value?.events || []),
-    ...(hotspotData.value?.people || []),
-    ...(hotspotData.value?.keywords || []),
-  ]
-  const foundTag = allTags.find(t => t.slug === slug)
-  if (foundTag) {
-    tagLabel = foundTag.label
-  }
-
-  // Check if this is an abstract tag
-  const isAbstract = foundTag?.is_abstract ?? false
-  const childSlugs = foundTag?.child_slugs ?? []
-  abstractNodeSlug.value = isAbstract ? slug : null
-  abstractNodeLabel.value = isAbstract ? tagLabel : null
-
-  // Update selected hotspot tag
-  selectedHotspotTag.value = { slug, label: tagLabel, category }
-
-  // Reset pending node selection when selecting a new tag
-  selectedPendingNode.value = false
-
-  // For abstract tags, load digests for all child tags
-  if (isAbstract && childSlugs.length > 0) {
-    await loadAbstractTagDigests(childSlugs)
-  } else {
-    // Load digests for this tag (reverse trace: tag -> articles -> digests)
-    await loadHotspotDigests(slug, category)
-  }
-
-  // Load pending articles for this tag
-  void loadPendingArticles(slug)
-
-  // Load aggregated articles for timeline
-  void loadAggregatedArticles(slug)
-
-  // Also load topic detail for the sidebar
-  void loadTopicDetail(slug)
-
-  timelineOpen.value = true
-}
-
-async function loadHotspotDigests(tagSlug: string, kind?: TopicCategory) {
-  loadingHotspotDigests.value = true
-  try {
-    const response = await topicGraphApi.getDigestsByArticleTag(
-      tagSlug,
-      undefined,
-      undefined,
-      20,
-      kind,
-    )
-    if (response.success && response.data) {
-      hotspotDigests.value = response.data.digests || []
-    } else {
-      hotspotDigests.value = []
-      console.error('Failed to load hotspot digests:', response.error)
-    }
-  } catch (error) {
-    console.error('Failed to load hotspot digests:', error)
-    hotspotDigests.value = []
-  } finally {
-    loadingHotspotDigests.value = false
-  }
-}
-
-async function loadAbstractTagDigests(childSlugs: string[]) {
-  loadingHotspotDigests.value = true
-  try {
-    const results = await Promise.all(
-      childSlugs.map(slug =>
-        topicGraphApi.getDigestsByArticleTag(slug, undefined, undefined, 20)
-      )
-    )
-    const seenIds = new Set<number>()
-    const merged: HotspotDigestCard[] = []
-    for (const response of results) {
-      if (!response.success || !response.data) continue
-      for (const digest of response.data.digests || []) {
-        if (!seenIds.has(digest.id)) {
-          seenIds.add(digest.id)
-          merged.push(digest)
-        }
-      }
-    }
-    merged.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
-    hotspotDigests.value = merged
-  } catch (error) {
-    console.error('Failed to load abstract tag digests:', error)
-    hotspotDigests.value = []
-  } finally {
-    loadingHotspotDigests.value = false
-  }
-}
-
-async function handleChildTagSelect(childSlug: string, childLabel: string) {
-  selectedChildTagSlug.value = childSlug
-
-  // Update selectedHotspotTag to child tag for proper filtering
-  selectedHotspotTag.value = {
-    slug: childSlug,
-    label: childLabel,
-    category: 'keyword',
-  }
-
-  // Load digests for the child tag (not the abstract parent)
-  await loadHotspotDigests(childSlug, selectedHotspotTag.value.category)
-
-  // Open timeline panel if not already open
-  if (!timelineOpen.value) {
-    timelineOpen.value = true
-  }
-
-  // Load pending articles for the child tag
-  void loadPendingArticles(childSlug)
-
-  // Load aggregated articles for timeline
-  void loadAggregatedArticles(childSlug)
-
-  // Load topic detail for the sidebar
-  void loadTopicDetail(childSlug)
-
-  // Ensure the child tag is shown in the graph
-  ensureTopicShownInGraph(childSlug)
-  expandRelatedTopics(childSlug)
-  graphFocusRequestKey.value += 1
-
-  // Reset pending node selection
-  selectedPendingNode.value = false
-}
-
-async function handleAbstractTagSelect(abstractSlug: string) {
-  selectedChildTagSlug.value = null
-
-  // Find abstract tag info
-  const allTags = [
-    ...(hotspotData.value?.events || []),
-    ...(hotspotData.value?.people || []),
-    ...(hotspotData.value?.keywords || []),
-  ]
-  const abstractTag = allTags.find(t => t.slug === abstractSlug)
-  const abstractLabel = abstractTag?.label || abstractSlug
-  const childSlugs = abstractTag?.child_slugs || []
-
-  // Update selectedHotspotTag to abstract tag
-  selectedHotspotTag.value = {
-    slug: abstractSlug,
-    label: abstractLabel,
-    category: abstractTag ? normalizeTopicCategory(abstractTag.category, abstractTag.kind) : 'keyword',
-  }
-
-  // Load digests for all child tags (aggregate view)
-  if (childSlugs.length > 0) {
-    await loadAbstractTagDigests(childSlugs)
-  } else {
-    await loadHotspotDigests(abstractSlug, selectedHotspotTag.value.category)
-  }
-
-  // Open timeline panel if not already open
-  if (!timelineOpen.value) {
-    timelineOpen.value = true
-  }
-
-  // Load pending articles for the abstract tag
-  void loadPendingArticles(abstractSlug)
-
-  // Load aggregated articles for timeline
-  void loadAggregatedArticles(abstractSlug)
-
-  // Load topic detail for the sidebar
-  void loadTopicDetail(abstractSlug)
-
-  // Ensure the abstract tag is shown in the graph
-  ensureTopicShownInGraph(abstractSlug)
-  expandRelatedTopics(abstractSlug)
-  graphFocusRequestKey.value += 1
-
-  // Reset pending node selection
-  selectedPendingNode.value = false
-}
-
-async function loadPendingArticles(tagSlug: string) {
-  loadingPendingArticles.value = true
-  try {
-    const response = await topicGraphApi.getPendingArticlesByTag(
-      tagSlug
-    )
-    if (response.success && response.data) {
-      pendingArticles.value = (response.data.articles || []).map(article => ({
-        id: article.id,
-        title: article.title,
-        link: article.link,
-        pubDate: (article as any).pub_date || article.pubDate,
-        feedName: (article as any).feed_name || article.feedName,
-        feedIcon: (article as any).feed_icon || article.feedIcon,
-        feedColor: (article as any).feed_color || article.feedColor,
-      }))
-    } else {
-      pendingArticles.value = []
-    }
-  } catch (error) {
-    console.error('Failed to load pending articles:', error)
-    pendingArticles.value = []
-  } finally {
-    loadingPendingArticles.value = false
-  }
-}
-
-async function loadAggregatedArticles(tagSlug: string) {
-  loadingAggregatedArticles.value = true
-  try {
-    const isAbstract = hotspotData.value && [
-      ...hotspotData.value.events,
-      ...hotspotData.value.people,
-      ...hotspotData.value.keywords,
-    ].find(t => t.slug === tagSlug)?.is_abstract
-
-    const childSlugs = hotspotData.value && [
-      ...hotspotData.value.events,
-      ...hotspotData.value.people,
-      ...hotspotData.value.keywords,
-    ].find(t => t.slug === tagSlug)?.child_slugs
-
-    const slugs = (isAbstract && childSlugs?.length) ? childSlugs : [tagSlug]
-
-    const allArticles: TimelineAggregationArticle[] = []
-    const seenIds = new Set<string>()
-
-    for (const slug of slugs) {
-      const response = await topicGraphApi.getTopicArticles({
-        slug,
-        page: 1,
-        pageSize: 100,
-      })
-      if (response.success && response.data) {
-        for (const article of response.data.articles) {
-          if (!seenIds.has(article.id)) {
-            seenIds.add(article.id)
-            allArticles.push({
-              id: article.id,
-              title: article.title,
-              link: article.link,
-              pubDate: article.pub_date,
-              feedName: article.feed_name,
-              feedIcon: article.image_url || '',
-              tags: (article.tags || []).map(t => ({
-                slug: t.slug,
-                label: t.label,
-                category: t.category,
-              })),
-            })
-          }
-        }
-      }
-    }
-
-    allArticles.sort((a, b) => new Date(b.pubDate).getTime() - new Date(a.pubDate).getTime())
-    aggregatedArticles.value = allArticles
-  } catch (error) {
-    console.error('Failed to load aggregated articles:', error)
-    aggregatedArticles.value = []
-  } finally {
-    loadingAggregatedArticles.value = false
-  }
-}
-
-const timelineAggregationGroups = computed((): TimelineAggregationGroup[] => {
-  if (!aggregatedArticles.value.length) return []
-
-  const groups: TimelineAggregationGroup[] = []
-  const groupMap = new Map<string, TimelineAggregationArticle[]>()
-
-  for (const article of aggregatedArticles.value) {
-    const date = new Date(article.pubDate)
-    if (Number.isNaN(date.getTime())) continue
-
-    let key: string
-    let startDate: Date
-    let endDate: Date
-    let label: string
-
-    if (aggregationMode.value === 'hour') {
-      const hour = date.getHours()
-      key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}-${hour}`
-      startDate = new Date(date.getFullYear(), date.getMonth(), date.getDate(), hour, 0, 0)
-      endDate = new Date(date.getFullYear(), date.getMonth(), date.getDate(), hour + 1, 0, 0)
-      const startFmt = `${String(hour).padStart(2, '0')}:00`
-      const endFmt = `${String(hour + 1).padStart(2, '0')}:00`
-      label = `${startFmt} - ${endFmt}`
-    } else {
-      key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
-      startDate = new Date(date.getFullYear(), date.getMonth(), date.getDate(), 0, 0, 0)
-      endDate = new Date(date.getFullYear(), date.getMonth(), date.getDate() + 1, 0, 0, 0)
-      label = new Intl.DateTimeFormat('zh-CN', {
-        month: 'short',
-        day: 'numeric',
-        weekday: 'short',
-      }).format(startDate)
-    }
-
-    if (!groupMap.has(key)) {
-      groupMap.set(key, [])
-    }
-    groupMap.get(key)!.push(article)
-  }
-
-  const sortedKeys = Array.from(groupMap.keys()).sort((a, b) => b.localeCompare(a))
-
-  for (const key of sortedKeys) {
-    const articles = groupMap.get(key)!
-    if (!articles.length) continue
-    const first = articles[0]!
-    const date = new Date(first.pubDate)
-
-    let startDate: Date
-    let endDate: Date
-
-    if (aggregationMode.value === 'hour') {
-      const hour = date.getHours()
-      startDate = new Date(date.getFullYear(), date.getMonth(), date.getDate(), hour, 0, 0)
-      endDate = new Date(date.getFullYear(), date.getMonth(), date.getDate(), hour + 1, 0, 0)
-    } else {
-      startDate = new Date(date.getFullYear(), date.getMonth(), date.getDate(), 0, 0, 0)
-      endDate = new Date(date.getFullYear(), date.getMonth(), date.getDate() + 1, 0, 0, 0)
-    }
-
-    groups.push({
-      key,
-      label: '',
-      startDate,
-      endDate,
-      articles,
-    })
-  }
-
-  return groups
-})
-
-const totalAggregatedCount = computed(() => aggregatedArticles.value.length)
-
-function handleTimelineGroupSelect(groupKey: string) {
-  selectedGroupKey.value = groupKey
-  selectedPendingNode.value = false
-  selectedDigestId.value = null
-}
-
-function handleAggregationModeChange(mode: TimelineAggregationMode) {
-  aggregationMode.value = mode
-  selectedGroupKey.value = null
-}
-
-const selectedGroupArticles = computed((): TimelineAggregationArticle[] => {
-  if (!selectedGroupKey.value) return aggregatedArticles.value
-  const group = timelineAggregationGroups.value.find(g => g.key === selectedGroupKey.value)
-  return group?.articles || []
-})
-
-function handleSelectPending() {
-  selectedPendingNode.value = true
-  selectedDigestId.value = null
-  previewDigestId.value = null
-}
-
-function handleNodeClick(node: { slug?: string; kind: string; category?: TopicCategory; label?: string; isAbstract?: boolean }) {
-  if (node.kind !== 'topic' || !node.slug) return
-
-  ensureTopicShownInGraph(node.slug)
-  expandRelatedTopics(node.slug)
-  graphFocusRequestKey.value += 1
-
-  if (node.category) {
-    selectedCategory.value = node.category
-  }
-
-  // Track whether this is an abstract tag node
-  abstractNodeSlug.value = node.isAbstract ? node.slug : null
-  abstractNodeLabel.value = node.isAbstract ? (node.label || node.slug) : null
-
-  // Set hotspot tag state for the clicked node and load its digests
-  selectedHotspotTag.value = {
-    slug: node.slug,
-    label: node.label || node.slug,
-    category: node.category || 'keyword',
-  }
-
-  // Reset pending node selection when clicking a node
-  selectedPendingNode.value = false
-
-  // Load digests for this node (similar to handleTagSelect)
-  void loadHotspotDigests(node.slug, node.category)
-
-  // Load pending articles for this node
-  void loadPendingArticles(node.slug)
-
-  // Load aggregated articles for timeline
-  void loadAggregatedArticles(node.slug)
-
-  void loadTopicDetail(node.slug)
-
-  timelineOpen.value = true
-}
-
-function handleKeywordHighlight(keywordSlug: string | null) {
-  if (!keywordSlug) {
-    selectedKeywordSlug.value = null
-    return
-  }
-
-  const existsInGraph = displayedGraph.value.nodes.some(node => node.kind === 'topic' && node.slug === keywordSlug)
-  selectedKeywordSlug.value = existsInGraph ? keywordSlug : null
-}
-
-function handleDigestSelect(digestId: string) {
-  selectedDigestId.value = digestId
-  selectedPendingNode.value = false
-}
-
-function handlePreviewDigest(digestId: string) {
-  selectedDigestId.value = digestId
-  previewDigestId.value = digestId
-  selectedPendingNode.value = false
-}
-
-function closeDigestPreview() {
-  previewDigestId.value = null
-}
-
-async function openArticlePreview(articleId: number) {
-  previewDigestId.value = null
-  loadingPreviewArticle.value = true
-
-  try {
-    const response = await articlesApi.getArticle(articleId)
-    if (!response.success || !response.data) {
-      notice.value = response.error || '文章预览加载失败'
-      return
-    }
-
-    selectedPreviewArticle.value = normalizeArticle(response.data as unknown as ArticlePayload)
-
-    if (detail.value?.summaries) {
-      const ids = detail.value.summaries.flatMap(summary => summary.articles.map(article => article.id))
-      const uniqueIds = Array.from(new Set(ids))
-      const articleResponses = await Promise.all(uniqueIds.slice(0, 12).map(id => articlesApi.getArticle(id)))
-      previewArticles.value = articleResponses
-        .filter(item => item.success && item.data)
-        .map(item => normalizeArticle(item.data as unknown as ArticlePayload))
-    }
-  } catch (error) {
-    console.error('Failed to open article preview:', error)
-    notice.value = error instanceof Error ? error.message : '文章预览加载失败'
-  } finally {
-    loadingPreviewArticle.value = false
-  }
-}
-
-function closeArticlePreview() {
-  selectedPreviewArticle.value = null
-}
-
-async function handleArticleFavorite(articleId: string) {
-  const currentFavorite = selectedPreviewArticle.value?.id === articleId
-    ? selectedPreviewArticle.value.favorite
-    : previewArticles.value.find(a => a.id === articleId)?.favorite
-
-  const response = await articlesApi.updateArticle(Number(articleId), { favorite: !currentFavorite })
-  if (!response.success) return
-
-  const target = previewArticles.value.find(article => article.id === articleId)
-  if (target) {
-    target.favorite = !target.favorite
-  }
-
-  if (selectedPreviewArticle.value?.id === articleId) {
-    selectedPreviewArticle.value = {
-      ...selectedPreviewArticle.value,
-      favorite: !selectedPreviewArticle.value.favorite,
-    }
-  }
-}
-
-function handleArticleUpdate(articleId: string, updates: Partial<Article>) {
-  const target = previewArticles.value.find(article => article.id === articleId)
-  if (target) {
-    Object.assign(target, updates)
-  }
-
-  if (selectedPreviewArticle.value?.id === articleId) {
-    Object.assign(selectedPreviewArticle.value, updates)
-  }
-}
-
-watch(selectedType, () => {
-  resetTimelinePanelPosition()
-  void loadGraph()
-})
-
-watch(selectedDate, () => {
-  resetTimelinePanelPosition()
-  void loadGraph()
-})
-
-watch([selectedFilterCategoryId, selectedFilterFeedId], () => {
-  void loadGraph()
-})
-
-watch(effectiveTimelineItems, (items) => {
-  if (!items.length) {
-    selectedDigestId.value = null
-    previewDigestId.value = null
-    selectedPendingNode.value = false
-    return
-  }
-
-  const currentExists = selectedDigestId.value && items.some(item => item.id === selectedDigestId.value)
-  if (!currentExists) {
-    selectedDigestId.value = items[0]?.id || null
-    selectedPendingNode.value = false
-  }
-}, { immediate: true })
-
-watch(timelineAggregationGroups, (groups) => {
-  if (!groups.length) {
-    selectedGroupKey.value = null
-    return
-  }
-  const currentExists = selectedGroupKey.value && groups.some(g => g.key === selectedGroupKey.value)
-  if (!currentExists) {
-    selectedGroupKey.value = groups[0]?.key || null
-  }
-})
-
-await loadGraph()
+const {
+  // Core state
+  selectedType, selectedDate, selectedFilterCategoryId, selectedFilterFeedId,
+  selectedCategory, selectedKeywordSlug, selectedDigestId, previewDigestId,
+  graphFocusRequestKey, detail, loadingGraph, loadingDetail, loadingPreviewArticle,
+  notice, selectedPreviewArticle, previewArticles, selectedTopicSlug, pageState, graphPayload,
+
+  // Hotspot
+  hotspotCategories, hotspotSearchQueries, hotspotDropdownOpen, hotspotShowAll,
+  hotspotSearchRefs, selectedHotspotTag,
+
+  // Pending
+  pendingArticles, selectedPendingNode,
+
+  // Timeline
+  aggregationMode, selectedGroupKey, selectedGroupArticles,
+  timelineAggregationGroups, totalAggregatedCount, timelineOpen,
+  selectedDigest, previewDigest,
+
+  // Abstract tag
+  abstractNodeSlug, abstractNodeLabel,
+
+  // Computed
+  viewModel, activeTopicNode, highlightedNodeIds, relatedEdgeIds, displayedGraph,
+  selectedTopicInfo,
+
+  // Timeline drag
+  timelinePanelRef, isDragging, timelinePosition, resetTimelinePanelPosition,
+
+  // Graph helpers
+  isTopicShownInGraph, toggleTopicGraphVisibility,
+
+  // Handlers
+  handleNodeClick, handleKeywordHighlight, handleDigestSelect, handlePreviewDigest,
+  closeDigestPreview, openArticlePreview, closeArticlePreview,
+  handleArticleFavorite, handleArticleUpdate, handleTagSelect,
+  handleChildTagSelect, handleAbstractTagSelect, handleTimelineGroupSelect,
+  handleAggregationModeChange, handleSelectPending,
+  toggleShowAll, closeHotspotDropdown, startTimelineDrag,
+
+  // Actions
+  loadGraph,
+} = useTopicGraph()
 </script>
 
 <template>
@@ -1229,7 +82,7 @@ await loadGraph()
                   <p class="text-xs uppercase tracking-[0.3em] text-white/42">Graph Field</p>
                   <h2 class="mt-2 font-serif text-2xl text-white md:text-[2.25rem]">{{ graphPayload?.period_label || '话题网络' }}</h2>
                   <p class="mt-3 text-sm leading-6 text-[rgba(255,255,255,0.68)]">
-                     事件、人物、关键词的热点题材默认全部进入拓扑图；底部可单独控制各节点的显示与隐藏。
+                    事件、人物、关键词的热点题材默认全部进入拓扑图；底部可单独控制各节点的显示与隐藏。
                   </p>
                 </div>
 
@@ -1239,14 +92,9 @@ await loadGraph()
                   @update:selected-category-id="selectedFilterCategoryId = $event"
                   @update:selected-feed-id="selectedFilterFeedId = $event"
                 />
-
-
-
-
               </aside>
 
               <div class="space-y-4">
-                <!-- Graph view -->
                 <TopicGraphCanvas
                   :nodes="displayedGraph.nodes"
                   :edges="displayedGraph.edges"
@@ -1289,7 +137,6 @@ await loadGraph()
                         <span class="topic-count">({{ category.topics.length }})</span>
                       </div>
 
-                        <!-- Search Input -->
                       <div :ref="el => { if (el) hotspotSearchRefs[category.key] = el as HTMLDivElement }" class="topic-search-wrapper mt-3">
                         <div class="topic-search-input-wrapper" @click="hotspotDropdownOpen[category.key] = true">
                           <Icon icon="mdi:magnify" width="14" class="topic-search-icon" />
@@ -1309,7 +156,6 @@ await loadGraph()
                           </button>
                         </div>
 
-                        <!-- Dropdown -->
                         <div
                           v-if="hotspotDropdownOpen[category.key] && category.filteredTopics.length > 0"
                           class="topic-search-dropdown"
@@ -1358,7 +204,6 @@ await loadGraph()
                           </button>
                         </div>
 
-                        <!-- No Results -->
                         <div
                           v-if="hotspotDropdownOpen[category.key] && hotspotSearchQueries[category.key] && category.filteredTopics.length === 0"
                           class="topic-search-no-results"
@@ -1373,7 +218,6 @@ await loadGraph()
                         </div>
                       </div>
 
-                      <!-- Quick Tags (show top 5 without search) -->
                       <div v-if="!hotspotSearchQueries[category.key]" class="topic-quick-tags mt-3">
                         <div
                           v-for="topic in category.topics.slice(0, 5)"
@@ -1426,11 +270,6 @@ await loadGraph()
             </div>
           </article>
 
-          <p v-if="notice" class="rounded-[24px] border border-[rgba(240,138,75,0.28)] bg-[rgba(240,138,75,0.1)] px-4 py-3 text-sm text-[rgba(255,233,220,0.88)]">
-            {{ notice }}
-          </p>
-
-          <!-- Timeline floating trigger -->
           <button
             type="button"
             class="timeline-fab"
@@ -1467,7 +306,6 @@ await loadGraph()
       </section>
     </div>
 
-    <!-- Timeline floating panel -->
     <Teleport to="body">
       <Transition name="timeline-slide">
         <div
@@ -1483,7 +321,7 @@ await loadGraph()
         >
           <header
             class="timeline-float-panel__header"
-            @mousedown="handleTimelineDragStart"
+            @mousedown="startTimelineDrag"
           >
             <div class="flex items-center gap-2">
               <Icon icon="mdi:drag-horizontal-variant" width="16" class="text-white/40 cursor-grab" />
@@ -1528,7 +366,6 @@ await loadGraph()
             <p class="truncate text-sm text-ink-medium">
               {{ loadingPreviewArticle ? '正在准备文章预览...' : '文章预览里保留项目已有的阅读、收藏和抓取动作。' }}
             </p>
-
             <button
               class="btn-ghost min-h-11 min-w-11 px-0"
               type="button"
@@ -1539,7 +376,6 @@ await loadGraph()
               <Icon icon="mdi:close" width="18" />
             </button>
           </header>
-
           <div class="topic-article-modal__body">
             <ArticleContentView
               :article="selectedPreviewArticle"

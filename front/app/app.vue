@@ -1,5 +1,6 @@
-﻿<script setup lang="ts">
+<script setup lang="ts">
 import { Icon } from '@iconify/vue'
+import NotifyContainer from '~/components/common/NotifyContainer.vue'
 
 const apiStore = useApiStore()
 const loading = ref(true)
@@ -37,4 +38,7 @@ onMounted(async () => {
   </div>
 
   <NuxtPage v-else />
+
+  <!-- 全局 Toast 通知 -->
+  <NotifyContainer />
 </template>

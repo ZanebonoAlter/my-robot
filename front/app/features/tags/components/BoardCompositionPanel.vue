@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref } from 'vue'
+import { useNotify } from '~/composables/useNotify'
 import { Icon } from '@iconify/vue'
 import { useSemanticBoardsApi, type AuxiliaryLabelItem } from '~/api/semanticBoards'
 import AuxiliaryLabelPicker from './AuxiliaryLabelPicker.vue'
@@ -15,6 +16,7 @@ const emit = defineEmits<{
   refresh: []
 }>()
 
+const { success: notifySuccess } = useNotify()
 const api = useSemanticBoardsApi()
 const showPicker = ref(false)
 const pendingIds = ref<number[]>([])
@@ -41,6 +43,7 @@ async function handleConfirmAdd() {
     }
     showPicker.value = false
     pendingIds.value = []
+    notifySuccess('已添加构成标签')
     notice.value = '已添加构成标签。历史标签归属不会自动回填，可手动触发 board 回填。'
     emit('refresh')
   } finally {

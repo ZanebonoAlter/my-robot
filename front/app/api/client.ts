@@ -1,4 +1,5 @@
 import { getApiBaseUrl } from '~/utils/api'
+import { buildQueryString } from '~/utils/api-helpers'
 import type { ApiResponse } from '~/types'
 
 let currentTraceId: string | null = null
@@ -145,16 +146,20 @@ class ApiClient {
     return response.blob()
   }
 
+  /**
+   * Build query string from params object.
+   * Returns empty string if no params, or string starting with `?`.
+   * Callers should NOT manually prepend `?`.
+   */
+  /**
+   * Build query string from params object.
+   * Delegates to buildQueryString for single implementation.
+   */
   buildQueryParams(params: unknown): string {
-    const searchParams = new URLSearchParams()
     if (params && typeof params === 'object') {
-      Object.entries(params as Record<string, unknown>).forEach(([key, value]) => {
-      if (value !== undefined && value !== null) {
-        searchParams.append(key, String(value))
-      }
-    })
+      return buildQueryString(params as Record<string, unknown>)
     }
-    return searchParams.toString()
+    return ''
   }
 }
 

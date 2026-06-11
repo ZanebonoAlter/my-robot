@@ -1,0 +1,9 @@
+/**
+ * TopicGraph feature — public facade
+ *
+ * 跨 feature 共享的稳定 Interface。
+ * 其他 feature 如需使用 topic-graph 的组件，必须通过此文件导入，
+ * 不得直接深 import features/topic-graph/components/ 内部。
+ */
+
+export { default as TagMergePreview } from './components/TagMergePreview.vue'

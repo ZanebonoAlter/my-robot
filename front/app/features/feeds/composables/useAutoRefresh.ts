@@ -33,7 +33,7 @@ export const useAutoRefresh = () => {
       try {
         await api.refreshFeed(Number(feedId))
         await apiStore.fetchFeeds({ per_page: 10000 })
-        await apiStore.fetchArticles({ per_page: 10000 })
+        const { useArticlesStore } = await import('~/stores/articles'); await useArticlesStore().fetchArticles({ per_page: 10000 })
       } catch (error) {
         console.error(`Auto-refresh failed for feed ${feedId}:`, error)
       }

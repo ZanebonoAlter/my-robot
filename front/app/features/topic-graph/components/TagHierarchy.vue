@@ -7,6 +7,7 @@ import type { TopicCategory } from '~/api/topicGraph'
 import { useOrganizeWebSocket } from '~/features/topic-graph/composables/useOrganizeWebSocket'
 import TagHierarchyRow from '~/features/topic-graph/components/TagHierarchyRow.vue'
 import type { TagHierarchyNode } from '~/types/topicTag'
+import { useNotify } from '~/composables/useNotify'
 
 const props = defineProps<{
   feedId?: string | null
@@ -28,6 +29,7 @@ const watchedTagsApi = useWatchedTagsApi()
 const nodes = ref<TagHierarchyNode[]>([])
 const loading = ref(true)
 const error = ref<string | null>(null)
+const { error: notifyError } = useNotify()
 const selectedCategory = ref<string>(props.category ?? '')
 const showUnclassified = ref(false)
 const unplacedTags = ref<TagHierarchyNode[]>([])
@@ -156,6 +158,7 @@ async function loadHierarchy() {
     if (response.success && response.data) {
       nodes.value = response.data.nodes ?? []
     } else {
+      notifyError(response.error || '加载层级数据失败')
       error.value = response.error || '加载层级数据失败'
     }
     const unplacedRes = await abstractTagApi.fetchHierarchy(
@@ -177,6 +180,7 @@ async function loadHierarchy() {
       unplacedTags.value = (unplacedRes.data.nodes ?? []).filter(n => !placedIds.has(n.id))
     }
   } catch (e) {
+    notifyError(e instanceof Error ? e.message : '加载失败')
     error.value = e instanceof Error ? e.message : '加载失败'
   } finally {
     loading.value = false
@@ -236,9 +240,11 @@ async function confirmEdit() {
     if (response.success) {
       await loadHierarchy()
     } else {
-      error.value = response.error || '更新失败'
+      notifyError(response.error || '更新失败')
+    error.value = response.error || '更新失败'
     }
   } catch (e) {
+    notifyError(e instanceof Error ? e.message : '更新失败')
     error.value = e instanceof Error ? e.message : '更新失败'
   } finally {
     saving.value = false
@@ -326,9 +332,11 @@ async function confirmDetach() {
     if (response.success) {
       await loadHierarchy()
     } else {
-      error.value = response.error || '分离失败'
+      notifyError(response.error || '分离失败')
+    error.value = response.error || '分离失败'
     }
   } catch (e) {
+    notifyError(e instanceof Error ? e.message : '分离失败')
     error.value = e instanceof Error ? e.message : '分离失败'
   } finally {
     confirmingDetach.value = null
@@ -353,10 +361,12 @@ async function organizeUnclassified() {
     const apiCategory = selectedCategory.value || undefined
     const response = await abstractTagApi.organizeTags(apiCategory)
     if (!response.success) {
-      error.value = response.error || '整理失败'
+      notifyError(response.error || '整理失败')
+    error.value = response.error || '整理失败'
       organizing.value = false
     }
   } catch (e) {
+    notifyError(e instanceof Error ? e.message : '整理失败')
     error.value = e instanceof Error ? e.message : '整理失败'
     organizing.value = false
   }
@@ -575,7 +585,7 @@ watch(() => props.sectorId, () => {
         @confirm-edit="void confirmEdit()"
         @detach="requestDetach"
         @reassign="requestReassign"
-        @select="handleSelectNode"
+        @select-node="handleSelectNode"
         @update:editing-value="handleUpdateEditingValue"
         @toggle-watch="toggleWatch"
       />
@@ -606,7 +616,7 @@ watch(() => props.sectorId, () => {
           @confirm-edit="void confirmEdit()"
           @detach="requestDetach"
           @reassign="requestReassign"
-          @select="handleSelectNode"
+          @select-node="handleSelectNode"
           @update:editing-value="handleUpdateEditingValue"
           @toggle-watch="toggleWatch"
         />

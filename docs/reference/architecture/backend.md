@@ -88,34 +88,50 @@ backend-go/
 ├── configs/
 ├── internal/
 │   ├── app/
-│   │   └── runtimeinfo/
-│   ├── domain/
-│   │   ├── aiadmin/
-│   │   ├── article/
-│   │   ├── category/
-│   │   ├── content/
-│   │   ├── feed/
-│   │   ├── models/
-│   │   ├── narrative/
-│   │   ├── preferences/
-│   │   ├── tagging/
-│   │   │   ├── analysis/
-│   │   │   ├── extraction/
-│   │   │   └── watched/
-│   │   └── topicgraph/
-│   ├── jobs/
-│   └── platform/
-│       ├── ai/
-│       ├── airouter/
-│       ├── aisettings/
+│   ├── models/                    # 共享 GORM 模型
+│   ├── admin/                     # 管理后台域
+│   │   ├── handler/               # AI/scheduler/preferences API
+│   │   ├── repository/
+│   │   ├── scheduler/             # BaseScheduler 工厂模式
+│   │   └── service/
+│   ├── reader/                    # 订阅与文章域
+│   │   ├── handler/               # feed/article/firecrawl/OPML API
+│   │   ├── repository/
+│   │   └── service/               # RSS 解析、内容补全、Firecrawl
+│   ├── tagmanagement/             # 标签系统域
+│   │   ├── handler/               # board/tag/merge/embedding API
+│   │   ├── repository/
+│   │   └── service/               # core/auxlabel/board/merge/watched
+│   ├── topicgraph/                # 主题图谱域
+│   │   ├── handler/               # daily_report/graph API
+│   │   ├── repository/
+│   │   └── service/
+│   └── platform/                  # 共享基础设施
+│       ├── airouter/              # AI provider/capability/failover 路由
+│       ├── aisettings/            # AI/Firecrawl 配置读写
 │       ├── config/
 │       ├── database/
+│       ├── jsonutil/
 │       ├── logging/
 │       ├── middleware/
-│       ├── opennotebook/
 │       ├── tracing/
-│       └── ws/
+│       └── ws/                    # WebSocket hub
 ```
+
+每个业务域统一遵循三层结构：
+
+```
+internal/<domain>/
+├── routes.go        # 路由注册（由 app/router.go 调用）
+├── wire.go          # 单例初始化 + 外部调用 re-export
+├── handler/         # Gin handler（package handler）
+├── service/         # 业务逻辑（package service）
+└── repository/      # 数据访问（package repository）
+```
+
+- 根包只放 `routes.go` 和 `wire.go`，不放 handler 文件。
+- `wire.go` re-export 外部包需要的类型和函数，调用方只需 import 根包。
+- `routes.go` import `handler/` 子包，将路由连接到 handler 函数。
 
 ## 分层职责
 
@@ -129,11 +145,10 @@ backend-go/
 
 ### `internal/app/`
 
-这是应用壳层，负责把平台能力、业务域和后台任务接起来。
+应用壳层，负责把平台能力、业务域和调度器接起来。
 
-- `router.go`：注册 HTTP API 和 WebSocket 路由
-- `runtime.go`：启动 scheduler、初始化内容补全服务、注册优雅退出
-- `runtimeinfo/`：临时保存运行时实例，给 handler 查询状态或触发任务
+- `router.go`：注册 HTTP API 和 WebSocket 路由（调用各域的 `RegisterRoutes`）
+- `runtime.go`：启动 scheduler、初始化服务、注册优雅退出
 
 这里要注意：`runtimeinfo` 还是过渡方案，它不是完整的 runtime container。
 
@@ -151,87 +166,89 @@ backend-go/
 - `aisettings/`：兼容旧配置表的 AI / Firecrawl / Open Notebook 配置读写
 - `opennotebook/`：Open Notebook 客户端能力
 
-### `internal/domain/`
+### `internal/admin/`
 
-业务能力按域组织，handler 和 service 主要都放在域目录里。
+管理后台域：AI 配置、调度器、偏好设置。
 
-- `aiadmin/`：AI provider 与 capability route 管理
-- `category/`：分类 CRUD
-- `feed/`：订阅 CRUD、刷新、OPML、RSS 解析
-- `article/`：文章列表、详情、状态更新、统计
-- `preferences/`：阅读行为记录与偏好分析
-- `content/`：内容补全、Firecrawl 配置与抓取、文章正文处理
-- `tagging/`：标签系统根包，共享类型和窗口工具、`StartAllWorkers`/`StopAllWorkers` 统一入口
-  - `tagging/analysis/`：主题分析任务与分析结果 API、embedding 向量化、标签合并、辅助标签入库
-  - `tagging/extraction/`：摘要/文章标签提取
-  - `tagging/watched/`：关注标签管理
-- `topicgraph/`：主题图谱、主题详情、主题相关文章查询
-- `models/`：共享 GORM 模型和部分格式化 helper
-- `narrative/`：叙事摘要生成、Board 管理、BoardConcept 匹配、按日期查询、历史版本
-  - 叙事域完整文件清单：
-    ```
-    narrative/
-    ├── service.go           # 服务编排
-    ├── handler.go           # REST API 路由
-    ├── collector.go         # 数据采集
-    ├── generator.go         # AI 叙事生成
-    ├── board_creation.go    # Board 创建
-    ├── board_generator.go   # Board 级叙事生成
-    ├── board_narrative_generator.go  # Board 叙事生成（概念上下文）
-    ├── board_collector.go   # Board 数据收集
-    ├── board_merge.go       # Board 合并（部分废弃）
-    ├── board_postprocess.go # Board 后处理
-    ├── concept_service.go   # Board Concept CRUD
-    ├── concept_handler.go   # Board Concept REST API
-    ├── concept_embedding.go # 概念 embedding 生成
-    ├── concept_matcher.go   # Embedding 匹配引擎
-    ├── concept_suggestion.go # LLM 冷启动建议
-    ├── watched_narrative.go # 关注标签叙事
-    ├── tag_feedback.go      # 叙事反馈到标签
-    └── *_test.go            # 测试
-    ```
+- `handler/`：AI provider 管理、scheduler 状态/手动触发、偏好 API
+- `repository/`：管理域数据访问
+- `scheduler/`：调度器核心，采用 `BaseScheduler` + `JobFunc` 工厂模式
+  - `base.go`：`BaseScheduler`、`JobFunc`、`Config`、`JobResult` 类型
+  - `job_*.go`：9 个调度任务（每个只需一个函数）
+  - `persistence.go`：可选的 `SchedulerTask` DB 状态持久化
+  - `registry.go`：调度器注册表
+- `service/`：管理域业务逻辑
+- `wire.go`：re-export 调度器工厂函数和 handler 初始化
 
-### `internal/jobs/`
+### `internal/reader/`
 
-这里是调度外壳，不放完整业务，只负责定时触发和运行状态记录。
+订阅与文章域：RSS 订阅、文章管理、内容补全、Firecrawl 抓取。
 
-- `auto_refresh.go`：扫描到点 feed 并异步触发刷新
-- `content_completion.go`：对 `firecrawl completed + summary incomplete` 的文章做内容补全
-- `firecrawl.go`：轮询待抓取文章并执行 Firecrawl
-- `tag_quality_score.go`：每小时重算 `topic_tags.quality_score`，支持统一 scheduler 状态查询和手动触发
-- `preference_update.go`：阅读偏好更新任务
-- `blocked_article_recovery.go`：恢复因 Firecrawl 配置变更等原因阻塞的文章
-- `narrative_summary.go`：基于活跃主题标签生成每日叙事摘要
-- `handler.go`：scheduler 状态查询与手动触发 API
+- `handler/`：feed、article、category、content_completion、firecrawl、OPML API
+- `service/`：RSS 解析、Feed 管理、内容补全、Firecrawl 服务
+- `repository/`：文章/Feed 数据访问、Firecrawl 任务队列
+
+### `internal/tagmanagement/`
+
+标签系统域：主题标签、语义板、辅助标签、合并、embedding。
+
+- `handler/`：board CRUD/match/upgrade、tag 管理、embedding 队列、合并 re-embedding
+- `service/core/`：标签提取、co-tag 扩展、元数据标注
+- `service/auxlabel/`：辅助标签管理
+- `service/board/`：语义板匹配与概念
+- `service/merge/`：标签合并
+- `service/watched/`：关注标签
+- `repository/`：标签域数据访问
+
+### `internal/topicgraph/`
+
+主题图谱域：每日报告、图谱可视化。
+
+- `handler/`：daily_report、graph API
+- `service/`：日报生成（LLM 调用、匹配、合并）
+- `repository/`：图谱域数据访问
+
+### `internal/models/`
+
+共享 GORM 模型和部分格式化 helper。所有域共用。
 
 ## 当前主要子系统
 
-### 订阅与文章
+### 订阅与文章（`reader` 域）
 
-`feed` 和 `article` 是基础数据面。
+`reader` 域负责 RSS 订阅、文章管理、内容补全和 Firecrawl 抓取。
 
-- feed 刷新负责拉 RSS、去重、入库 article
-- article 记录承接后续 Firecrawl、内容补全、摘要、主题分析
-- feed 上的 `firecrawl_enabled`、`article_summary_enabled` 会直接影响文章入库后的状态初始化
+- Feed 刷新负责拉 RSS、去重、入库 Article
+- Article 记录承接后续 Firecrawl、内容补全、摘要、标签分析
+- Feed 上的 `firecrawl_enabled`、`article_summary_enabled` 会直接影响文章入库后的状态初始化
+- Firecrawl 抓取正文 → 内容补全生成文章摘要
 
-### AI 与内容增强
+### AI 与管理后台（`admin` 域）
 
-这部分不再只是一个"AI 摘要开关"，而是两层叠加：
+`admin` 域负责 AI 配置管理和后台调度任务。
 
 - `platform/airouter`：管理 provider 和 capability route
-- `domain/content`：正文抓取、内容补全、Firecrawl 配置
+- 调度器采用 `BaseScheduler` + `JobFunc` 工厂模式：新增调度任务只需写一个 `JobFunc` 函数 + 一行注册
+- 9 个调度任务：`auto_refresh`、`aux_label_cleanup`、`blocked_article_recovery`、`content_completion`、`daily_report`、`firecrawl`、`log_cleanup`、`preference_update`、`tag_quality_score`
 
-### 主题图谱
+### 标签系统（`tagmanagement` 域）
 
-主题标签能力统一在 `tagging/` 包下，按子包拆分：
+标签能力统一在 `tagmanagement` 域下：
 
-- `tagging`（根包）：共享类型和窗口解析、`StartAllWorkers`/`StopAllWorkers` 统一入口
-- `tagging/extraction`：从摘要/文章提取 Tag
+- `service/core/`：主题标签提取、co-tag 扩展、元数据标注
+- `service/auxlabel/`：辅助标签管理与 GC
+- `service/board/`：语义板匹配与概念
+- `service/merge/`：标签合并
+- `service/watched/`：关注标签管理
+
+### 主题图谱（`topicgraph` 域）
+
+主题图谱、每日报告生成、图谱可视化。
 - `tagging/analysis`：生成并查询 topic analysis，同时承担 embedding 向量化、Tag 合并（源 DELETE）、辅助标签入库（L1/L2/L3 三级匹配）
 - `tagging/watched`：关注标签管理
 - `topicgraph`：返回图谱节点边、详情、相关文章、相关 digest
 
-#### 辅助标签入库三级匹配
+#### 辅助标签入库三级匹配（`tagmanagement/service/auxlabel`）
 
 `findOrCreateTag` 创建 Tag 后，辅助标签通过 `auxiliary_label_service.go` 入库：
 
@@ -241,7 +258,7 @@ backend-go/
 
 禁用标签 (status=disabled) 不参与 L1/L2 匹配。
 
-#### 标签创建流程（`findOrCreateTag`）
+#### 标签创建流程（`tagmanagement/service/core/findOrCreateTag`）
 
 `findOrCreateTag` 采用简化的三级匹配，不再调用 LLM 判断：
 
@@ -263,14 +280,14 @@ Event 标签采用多行 embedding 策略：
 
 生成时序：`findOrCreateTag` 创建 Tag → `generateTagDescription` 生成描述+关键词 → 保存到 `metadata.event_keywords` → 入队 embedding queue → 队列 worker 生成 identity + semantic + 所有 event_keyword embedding。
 
-#### Tag 合并（源 DELETE）
+#### Tag 合并（`tagmanagement/service/merge`）
 
 合并相似 Tag 时采用硬删除策略，不再使用 `status='merged'` 或 `status='inactive'`：
 
 - `HardMergeTags(sourceID, targetID)` 迁移 article_topic_tags → 迁移 topic_tag_relations (children) → DELETE topic_tag_embeddings → DELETE topic_tags 源行
 - AutoTagMerge 调度器基于 pgvector 余弦相似度 > 0.97 自动触发
 
-#### SemanticBoard 匹配
+#### SemanticBoard 匹配（`tagmanagement/service/board`）
 
 Tag 入库后，`semantic_board_matching.go` 执行 Tag → SemanticBoard 匹配：
 
@@ -284,7 +301,7 @@ Tag 入库后，`semantic_board_matching.go` 执行 Tag → SemanticBoard 匹配
 
 冷启动无 SemanticBoard 时不匹配、不报错。
 
-#### SemanticBoard 升级建议
+#### SemanticBoard 升级建议（`tagmanagement/service/board`）
 
 `semantic_board_upgrade.go` 实现两阶段升级：
 
@@ -294,7 +311,7 @@ Tag 入库后，`semantic_board_matching.go` 执行 Tag → SemanticBoard 匹配
 4. LLM 判断：create_new / skip
 5. 用户确认执行（支持前端 merge_into_existing 操作）
 
-#### 回填队列
+#### 回填队列（`tagmanagement/service/board`）
 
 `semantic_board_backfill.go` 支持三种回填模式：
 
@@ -307,17 +324,19 @@ Tag 入库后，`semantic_board_matching.go` 执行 Tag → SemanticBoard 匹配
 依赖方向大致是：
 
 ```text
-tagging (根包，含 topictypes 功能)
+tagmanagement (根包，routes + wire)
     ↑
     ├── topicgraph
-    ├── tagging/analysis (含 embedding、tag merge、辅助标签入库 L1/L2/L3)
-    ├── tagging/watched (关注标签)
-    └── tagging/extraction -> tagging/analysis
+    ├── service/board (SemanticBoard 匹配、升级、回填)
+    ├── service/auxlabel (辅助标签 GC、L1/L2/L3 匹配)
+    ├── service/merge (Tag 合并)
+    ├── service/watched (关注标签)
+    └── service/core (标签提取、co-tag 扩展)
 ```
 
-### 叙事摘要
+### 叙事摘要（`topicgraph` 域）
 
-叙事摘要（`narrative/`）基于 SemanticBoard 派生每日 NarrativeBoard。
+叙事摘要基于 SemanticBoard 派生每日 NarrativeBoard。核心概念不变，相关代码位于 `topicgraph` 域。
 
 核心概念：
 
@@ -345,27 +364,15 @@ topic_tag_board_labels 允许一个 tag 归属多个 SemanticBoard（默认最�
 
 LLM 生成叙事摘要时，使用 SemanticBoard 的 label 和 description 作为 board context，不再使用 abstract tag 或 board_concepts。
 
-#### 叙事域文件清单
+#### 叙事域文件清单（`topicgraph/service/`）
 
 ```
-narrative/
-├── service.go           # 服务编排
-├── handler.go           # REST API 路由
-├── collector.go         # 数据采集
-├── generator.go         # AI 叙事生成
-├── board_creation.go    # Board 创建
-├── board_generator.go   # Board 级叙事生成
-├── board_narrative_generator.go  # Board 叙事生成
-├── board_collector.go   # Board 数据收集
-├── board_postprocess.go # Board 后处理
-├── semantic_board_matching.go  # SemanticBoard 匹配
-├── semantic_board_upgrade.go   # 语义板块升级建议
-├── semantic_board_backfill.go # 语义板块回填
-├── auxiliary_label_service.go # 辅助标签服务
-├── board_handler.go     # SemanticBoard REST API
-├── watched_narrative.go # 关注标签叙事
-├── tag_feedback.go      # 叙事反馈到标签
-└── *_test.go            # 测试
+topicgraph/service/
+├── daily_report_llm.go       # AI 叙事生成
+├── daily_report_merge.go     # Board 合并
+├── daily_report_matching.go  # 数据采集与匹配
+├── graph_service.go          # 图谱查询
+└── *_test.go                 # 测试
 ```
 
 ## 数据模型重点
@@ -428,8 +435,8 @@ narrative/
 
 此外还有以下独立注册的路由组：
 
-- `/api/topic-tags`：关注标签、标签合并预览（由 `tagging/analysis` 包注册）
-- `/api/embedding`：embedding 配置与队列管理（由 `tagging/analysis` 包注册）
+- `/api/topic-tags`：关注标签、标签合并预览（由 `tagmanagement` 域注册）
+- `/api/embedding`：embedding 配置与队列管理（由 `tagmanagement` 域注册）
 - `/api/narratives`：叙事摘要时间线、列表、详情、历史、重新生成
 - `/api/narratives/boards`：Board 时间线和详情
 - `/api/semantic-boards`：SemanticBoard CRUD、升级建议、回填、匹配配置
@@ -447,8 +454,8 @@ narrative/
 
 链路：
 
-1. `internal/jobs/auto_refresh.go` 扫描 `refresh_interval > 0` 的 feed
-2. 到点 feed 调用 `feed.FeedService.RefreshFeed`
+1. `admin/scheduler/job_auto_refresh.go` 扫描 `refresh_interval > 0` 的 feed
+2. 到点 feed 调用 `reader/service.FeedService.RefreshFeed`
 3. `RefreshFeed` 通过 RSS parser 拉取源站内容并更新 feed 元信息
 4. 新 entry 去重后写入 `articles`
 5. `buildArticleFromEntry` 按 feed 配置初始化文章状态：
@@ -465,16 +472,16 @@ narrative/
 
 链路：
 
-1. `jobs.FirecrawlScheduler` 轮询待抓取文章
+1. `admin/scheduler/job_firecrawl.go` 轮询待抓取文章
 2. Firecrawl 成功后，文章被更新为：
    - `firecrawl_status = completed`
    - `firecrawl_content` 写入抓取正文
    - `summary_status = incomplete`
-3. `jobs.ContentCompletionScheduler` 定时查询：
+3. `admin/scheduler/job_content_completion.go` 定时查询：
    - `articles.firecrawl_status = completed`
    - `articles.summary_status = incomplete`
    - `feeds.article_summary_enabled = true`
-4. `content.ContentCompletionService.CompleteArticle` 基于 Firecrawl 正文生成 `ai_content_summary`
+4. `reader/service.ContentCompletionService.CompleteArticle` 基于 Firecrawl 正文生成 `ai_content_summary`
 5. 文章最终更新为完成态，并记录失败次数、错误信息、最近处理文章等状态
 6. 前端可通过 `/api/content-completion/overview` 和 `/api/content-completion/articles/:article_id/status` 看到结果
 
@@ -501,21 +508,18 @@ narrative/
 - `Content`
 - `Description`
 
-## 当前边界上的真实问题
+## 当前边界上的已知问题
 
-当前问题已经不是“目录乱”，而是这些边界还在过渡：
-
-- `runtimeinfo` 仍是全局变量式共享引用，适合过渡，不适合长期扩展
-- `domain/models` 仍是共享模型桶，后续还可以继续收敛 ownership
+- `models/` 仍是共享模型桶，后续可以继续收敛 ownership
 - `aisettings` 同时承担兼容旧配置和新配置落库，职责偏宽
-- `runtimeinfo` 仍是全局变量式共享引用，但当前至少已经把实际启动的 scheduler 全部挂进统一入口
-- `/api/tasks/status` 现在是聚合视图，不是通用任务编排系统；它反映的是 summary queue、内容补全、firecrawl 三类后台工作
+- 部分域仍使用全局单例（`database.DB`、`repository.Repo`）和函数变量桥接（`wire.go` 中的 re-export）
+- `scheduler/` 包缺少单元测试（工厂模式迁移时旧测试被删除）
 
 ## 推荐阅读顺序
 
-- 先看 `docs/architecture/backend-runtime.md`
+- 先看 `docs/reference/architecture/runtime.md`
 - 再看 `backend-go/cmd/server/main.go`
 - 再看 `backend-go/internal/app/router.go`
-- 再看 `backend-go/internal/app/runtime.go`
-- 再按用例追具体域：`feed` -> `content` -> `tagging` -> `topicgraph` -> `narrative`
-- 叙事域能力可以按以下顺序跟：`narrative/service.go` → `narrative/collector.go` → `narrative/board_creation.go` → `narrative/concept_matcher.go` → `narrative/concept_service.go`
+- 再看 `backend-go/internal/app/runtime.go`（调度器注册逻辑）
+- 再按域追具体包：`reader` → `admin` → `tagmanagement` → `topicgraph`
+- 每个域的入口都是 `routes.go` → `handler/` → `service/` → `repository/`

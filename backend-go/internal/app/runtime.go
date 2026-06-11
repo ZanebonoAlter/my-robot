@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"syntopica-backend/internal/admin"
+	"syntopica-backend/internal/admin/scheduler"
 	"syntopica-backend/internal/models"
 	"syntopica-backend/internal/platform/database"
 	"syntopica-backend/internal/platform/logging"
@@ -83,22 +84,86 @@ func StartRuntime() *Runtime {
 
 	registry := admin.NewSchedulerRegistry()
 
-	// Register each scheduler
-	registry.Register("auto_refresh", admin.NewAutoRefreshScheduler(60))
-	registry.Register("preference_update", admin.NewPreferenceUpdateScheduler(1800))
-	registry.Register("firecrawl", admin.NewFirecrawlScheduler())
+	// Register each scheduler using the BaseScheduler factory pattern.
+	// Each scheduler is configured with its JobFunc, interval, startup delay,
+	// and optional TaskPersistence for DB state tracking.
 
+	// Simple schedulers: no SchedulerTask DB persistence
+	registry.Register("log_cleanup", scheduler.New(scheduler.Config{
+		Name:         "Log Cleanup",
+		Interval:     86400 * time.Second,
+		StartupDelay: 5 * time.Minute,
+		Job:          admin.LogCleanupJob,
+	}))
+
+	registry.Register("aux_label_cleanup", scheduler.New(scheduler.Config{
+		Name:         "Aux Label Cleanup",
+		Interval:     3600 * time.Second,
+		StartupDelay: 10 * time.Minute,
+		Job:          admin.AuxLabelCleanupJob,
+	}))
+
+	registry.Register("blocked_article_recovery", scheduler.New(scheduler.Config{
+		Name:     "Blocked Article Recovery",
+		Interval: 3600 * time.Second,
+		Job:      admin.BlockedArticleRecoveryJob,
+	}))
+
+	// Medium schedulers: with SchedulerTask DB persistence
+	registry.Register("preference_update", scheduler.New(scheduler.Config{
+		Name:     "Preference Update",
+		Interval: 1800 * time.Second,
+		Job:      admin.PreferenceUpdateJob,
+		Persistence: admin.NewTaskPersistence("preference_update",
+			"Update reading preferences from behavior data"),
+	}))
+
+	registry.Register("tag_quality_score", scheduler.New(scheduler.Config{
+		Name:     "Tag Quality Score",
+		Interval: 3600 * time.Second,
+		Job:      admin.TagQualityScoreJob,
+		Persistence: admin.NewTaskPersistence("tag_quality_score",
+			"Recompute persistent quality scores for topic tags"),
+	}))
+
+	registry.Register("auto_refresh", scheduler.New(scheduler.Config{
+		Name:     "Auto Refresh",
+		Interval: 60 * time.Second,
+		Job:      admin.AutoRefreshJob,
+		Persistence: admin.NewTaskPersistence("auto_refresh",
+			"Auto-refresh RSS feeds"),
+	}))
+
+	// Complex schedulers
 	content.InitContentCompletionHandler()
-	registry.Register("content_completion", admin.NewContentCompletionScheduler(
-		content.GetContentCompletionService(),
-		60,
-	))
+	registry.Register("content_completion", scheduler.New(scheduler.Config{
+		Name:     "Content Completion",
+		Interval: 60 * time.Second,
+		Job:      admin.ContentCompletionJob(content.GetContentCompletionService()),
+		Persistence: admin.NewTaskPersistence("ai_summary",
+			"Complete article content and generate article summaries"),
+	}))
 
-	registry.Register("blocked_article_recovery", admin.NewBlockedArticleRecoveryScheduler(3600))
-	registry.Register("tag_quality_score", admin.NewTagQualityScoreScheduler(3600))
-	registry.Register("log_cleanup", admin.NewLogCleanupScheduler(86400))
-	registry.Register("daily_report", admin.NewDailyReportScheduler(86400))
-	registry.Register("aux_label_cleanup", admin.NewAuxLabelCleanupScheduler(3600))
+	// DailyReport: wrapped with TriggerNowWithDate support
+	dailyReportBase := scheduler.New(scheduler.Config{
+		Name:     "Daily Report",
+		Interval: 86400 * time.Second,
+		Job:      admin.DailyReportJob(), // uses current time at each execution
+		Persistence: admin.NewTaskPersistence("daily_report",
+			"Generate daily reports for all active semantic boards"),
+	})
+	dailyReportWrapper := admin.NewDailyReportSchedulerWrapper(dailyReportBase)
+	registry.Register("daily_report", dailyReportWrapper)
+
+	// Firecrawl: with custom status enricher
+	firecrawlQueue := content.NewFirecrawlJobQueue(database.DB)
+	registry.Register("firecrawl", scheduler.New(scheduler.Config{
+		Name:         "Firecrawl Crawler",
+		Interval:     300 * time.Second,
+		StartupDelay: 0,
+		Job:          admin.FirecrawlJob(firecrawlQueue, "scheduled"),
+		StatusDetail: admin.FirecrawlStatusEnricher(),
+	}))
 
 	// Set global registry for handler access
 	admin.SetRegistry(registry)

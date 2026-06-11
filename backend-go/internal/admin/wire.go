@@ -65,34 +65,41 @@ var (
 	TriggerPreferenceUpdate = handler.TriggerPreferenceUpdate
 )
 
-// Narrative route registration
-
 // ============================================================================
 // Scheduler re-exports (types and constructors used in internal/app/runtime.go)
 // ============================================================================
 
-type (
-	AutoRefreshScheduler            = scheduler.AutoRefreshScheduler
-	PreferenceUpdateScheduler       = scheduler.PreferenceUpdateScheduler
-	ContentCompletionScheduler      = scheduler.ContentCompletionScheduler
-	FirecrawlScheduler              = scheduler.FirecrawlScheduler
-	BlockedArticleRecoveryScheduler = scheduler.BlockedArticleRecoveryScheduler
-	TagQualityScoreScheduler        = scheduler.TagQualityScoreScheduler
-	DailyReportScheduler            = scheduler.DailyReportScheduler
-	LogCleanupScheduler             = scheduler.LogCleanupScheduler
-	AuxLabelCleanupScheduler        = scheduler.AuxLabelCleanupScheduler
-	SchedulerRegistry               = scheduler.Registry
-)
+// SchedulerRegistry is the registry that manages named scheduler instances.
+type SchedulerRegistry = scheduler.Registry
 
 var (
-	NewAutoRefreshScheduler            = scheduler.NewAutoRefreshScheduler
-	NewPreferenceUpdateScheduler       = scheduler.NewPreferenceUpdateScheduler
-	NewContentCompletionScheduler      = scheduler.NewContentCompletionScheduler
-	NewFirecrawlScheduler              = scheduler.NewFirecrawlScheduler
-	NewBlockedArticleRecoveryScheduler = scheduler.NewBlockedArticleRecoveryScheduler
-	NewTagQualityScoreScheduler        = scheduler.NewTagQualityScoreScheduler
-	NewDailyReportScheduler            = scheduler.NewDailyReportScheduler
-	NewLogCleanupScheduler             = scheduler.NewLogCleanupScheduler
-	NewAuxLabelCleanupScheduler        = scheduler.NewAuxLabelCleanupScheduler
-	NewSchedulerRegistry               = scheduler.NewRegistry
+	NewSchedulerRegistry = scheduler.NewRegistry
+)
+
+// BaseScheduler types and constructors for the factory pattern.
+// Runtime uses scheduler.New(scheduler.Config{...}) directly.
+var (
+	NewBaseScheduler   = scheduler.New
+	NewTaskPersistence = scheduler.NewTaskPersistence
+)
+
+// DailyReportSchedulerWrapper for TriggerNowWithDate support.
+type DailyReportScheduler = scheduler.DailyReportSchedulerWrapper
+
+var (
+	NewDailyReportSchedulerWrapper = scheduler.NewDailyReportSchedulerWrapper
+)
+
+// Job functions (for use in runtime.go when creating schedulers).
+var (
+	LogCleanupJob             = scheduler.LogCleanupJob
+	AuxLabelCleanupJob        = scheduler.AuxLabelCleanupJob
+	BlockedArticleRecoveryJob = scheduler.BlockedArticleRecoveryJob
+	PreferenceUpdateJob       = scheduler.PreferenceUpdateJob
+	TagQualityScoreJob        = scheduler.TagQualityScoreJob
+	AutoRefreshJob            = scheduler.AutoRefreshJob
+	ContentCompletionJob      = scheduler.ContentCompletionJob
+	DailyReportJob            = scheduler.DailyReportJob
+	FirecrawlJob              = scheduler.FirecrawlJob
+	FirecrawlStatusEnricher   = scheduler.FirecrawlStatusEnricher
 )

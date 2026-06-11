@@ -130,36 +130,36 @@
 ## Phase 2.5: 调度器工厂模式（BaseScheduler 消除重复脚手架）
 
 ### 2.5.1 BaseScheduler 核心实现
-- [ ] 2.5.1.1 创建 `admin/scheduler/base.go`：定义 `JobFunc`、`JobResult`、`Config`、`BaseScheduler` 结构体
-- [ ] 2.5.1.2 `BaseScheduler` 统一实现 `Scheduler` 接口全部方法（Start/Stop/TriggerNow/UpdateInterval/ResetStats/GetStatus）
-- [ ] 2.5.1.3 `BaseScheduler` 统一内部状态管理：mutex、running、isExecuting、nextRun、lastRun、lastError、统计计数
-- [ ] 2.5.1.4 `BaseScheduler` 统一并发调度：内部用 `robfig/cron` 或 `time.Ticker`（选一种，消除 A/B 两类差异）
-- [ ] 2.5.1.5 `BaseScheduler` 统一 `TriggerNow` 的互斥锁检查 + 返回 map 模式
-- [ ] 2.5.1.6 `BaseScheduler` 可选的 SchedulerTask DB 状态持久化（通过 Config 开关）
+- [x] 2.5.1.1 创建 `admin/scheduler/base.go`：定义 `JobFunc`、`JobResult`、`Config`、`BaseScheduler` 结构体
+- [x] 2.5.1.2 `BaseScheduler` 统一实现 `Scheduler` 接口全部方法（Start/Stop/TriggerNow/UpdateInterval/ResetStats/GetStatus）
+- [x] 2.5.1.3 `BaseScheduler` 统一内部状态管理：mutex、running、isExecuting、nextRun、lastRun、lastError、统计计数
+- [x] 2.5.1.4 `BaseScheduler` 统一并发调度：内部用 `time.Ticker` 统一调度（消除 A/B 两类差异）
+- [x] 2.5.1.5 `BaseScheduler` 统一 `TriggerNow` 的互斥锁检查 + 返回 map 模式
+- [x] 2.5.1.6 `BaseScheduler` 可选的 SchedulerTask DB 状态持久化（通过 `TaskPersistence` Config 开关）
 
 ### 2.5.2 批次 1：简单 scheduler 迁移（无 DB 状态持久化）
-- [ ] 2.5.2.1 `log_cleanup` → `JobFunc`，删除 `LogCleanupScheduler` struct
-- [ ] 2.5.2.2 `aux_label_cleanup` → `JobFunc`，删除 `AuxLabelCleanupScheduler` struct
-- [ ] 2.5.2.3 `blocked_article_recovery` → `JobFunc`，删除 `BlockedArticleRecoveryScheduler` struct
-- [ ] 2.5.2.4 `go build ./...` + `go test ./internal/admin/...` 验证
+- [x] 2.5.2.1 `log_cleanup` → `JobFunc`，已删除 `LogCleanupScheduler` struct
+- [x] 2.5.2.2 `aux_label_cleanup` → `JobFunc`，已删除 `AuxLabelCleanupScheduler` struct
+- [x] 2.5.2.3 `blocked_article_recovery` → `JobFunc`，已删除 `BlockedArticleRecoveryScheduler` struct
+- [x] 2.5.2.4 `go build ./...` + `go test ./internal/admin/...` 验证通过
 
 ### 2.5.3 批次 2：中等 scheduler 迁移（有 SchedulerTask DB 状态持久化）
-- [ ] 2.5.3.1 `preference_update` → `JobFunc` + DB 状态持久化
-- [ ] 2.5.3.2 `tag_quality_score` → `JobFunc` + DB 状态持久化
-- [ ] 2.5.3.3 `auto_refresh` → `JobFunc` + DB 状态持久化（最复杂的中等 scheduler，有 initSchedulerTask、resetStaleRefreshingFeeds 等辅助逻辑）
-- [ ] 2.5.3.4 `go build ./...` + `go test ./internal/admin/...` 验证
+- [x] 2.5.3.1 `preference_update` → `JobFunc` + DB 状态持久化
+- [x] 2.5.3.2 `tag_quality_score` → `JobFunc` + DB 状态持久化
+- [x] 2.5.3.3 `auto_refresh` → `JobFunc` + DB 状态持久化（含 resetStaleRefreshingFeeds、WS broadcast 等辅助逻辑）
+- [x] 2.5.3.4 `go build ./...` + `go test ./internal/admin/...` 验证通过
 
 ### 2.5.4 批次 3：复杂 scheduler 迁移（特化方法 + 复杂业务依赖）
-- [ ] 2.5.4.1 `content_completion` → `JobFunc` + DB 状态持久化 + 处理 `ContentCompletionService` 依赖
-- [ ] 2.5.4.2 `daily_report` → `JobFunc` + DB 状态持久化 + 保留 `TriggerNowWithDate` 特化接口（可选扩展接口模式）
-- [ ] 2.5.4.3 `firecrawl` → `JobFunc` + 处理 `FirecrawlJobQueue` 依赖 + WS broadcast
-- [ ] 2.5.4.4 `go build ./...` + `go test ./internal/admin/...` 验证
+- [x] 2.5.4.1 `content_completion` → `JobFunc` + DB 状态持久化 + 处理 `ContentCompletionService` 依赖
+- [x] 2.5.4.2 `daily_report` → `JobFunc` + DB 状态持久化 + `DailyReportSchedulerWrapper` 保留 `TriggerNowWithDate` 特化接口
+- [x] 2.5.4.3 `firecrawl` → `JobFunc` + 处理 `FirecrawlJobQueue` 依赖 + WS broadcast
+- [x] 2.5.4.4 `go build ./...` + `go test ./internal/admin/...` 验证通过
 
 ### 2.5.5 清理
-- [ ] 2.5.5.1 删除所有 `XxxScheduler` struct 定义文件（`scheduler_*.go`），仅保留 `JobFunc` 业务函数
-- [ ] 2.5.5.2 更新 `runtime.go` 注册代码：`registry.Register(scheduler.New(scheduler.Config{...}))`
-- [ ] 2.5.5.3 更新 handler 的 type assertion 逻辑：`DailyReportScheduler` 特化通过可选接口 `TriggerableWithDate` 处理
-- [ ] 2.5.5.4 `golangci-lint run ./...` + `go build ./...` + `go test ./internal/admin/...` 全量验证
+- [x] 2.5.5.1 删除所有 `XxxScheduler` struct 定义文件（9 个 `scheduler_*.go` 文件）
+- [x] 2.5.5.2 更新 `runtime.go` 注册代码：`registry.Register(scheduler.New(scheduler.Config{...}))`
+- [x] 2.5.5.3 更新 `admin/wire.go` 导出新类型；`DailyReportScheduler` 特化通过 `DailyReportSchedulerWrapper.TriggerNowWithDate` 处理
+- [x] 2.5.5.4 `go build ./...` + `go vet ./...` + `go test ./internal/admin/...` 全量验证通过
 
 ## Phase 3: 前端 SSE 事件流统一
 

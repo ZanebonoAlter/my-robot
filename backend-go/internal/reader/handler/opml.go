@@ -1,4 +1,4 @@
-package reader
+package handler
 
 import (
 	"encoding/xml"
@@ -8,6 +8,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 	"syntopica-backend/internal/models"
+	"syntopica-backend/internal/reader/repository"
 )
 
 type OPML struct {
@@ -89,7 +90,7 @@ func ImportOPML(c *gin.Context) {
 		}
 
 		var category models.Category
-		err := Repo.DB().Where("name = ?", categoryName).First(&category).Error
+		err := repository.Repo.DB().Where("name = ?", categoryName).First(&category).Error
 
 		if err == gorm.ErrRecordNotFound {
 			category = models.Category{
@@ -99,7 +100,7 @@ func ImportOPML(c *gin.Context) {
 				Color:       "#6366f1",
 				Description: "",
 			}
-			if err := Repo.DB().Create(&category).Error; err != nil {
+			if err := repository.Repo.DB().Create(&category).Error; err != nil {
 				errors = append(errors, "Error creating category '"+categoryName+"': "+err.Error())
 				continue
 			}
@@ -121,7 +122,7 @@ func ImportOPML(c *gin.Context) {
 			}
 
 			var existingFeed models.Feed
-			err := Repo.DB().Where("url = ?", xmlURL).First(&existingFeed).Error
+			err := repository.Repo.DB().Where("url = ?", xmlURL).First(&existingFeed).Error
 			if err == nil {
 				continue
 			}
@@ -137,7 +138,7 @@ func ImportOPML(c *gin.Context) {
 				LastUpdated: &now,
 			}
 
-			if err := Repo.DB().Create(&feed).Error; err != nil {
+			if err := repository.Repo.DB().Create(&feed).Error; err != nil {
 				errors = append(errors, "Error importing feed '"+title+"': "+err.Error())
 				continue
 			}
@@ -160,7 +161,7 @@ func ImportOPML(c *gin.Context) {
 
 func ExportOPML(c *gin.Context) {
 	var categories []models.Category
-	if err := Repo.DB().Preload("Feeds").Find(&categories).Error; err != nil {
+	if err := repository.Repo.DB().Preload("Feeds").Find(&categories).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"success": false,
 			"error":   err.Error(),
@@ -200,7 +201,7 @@ func ExportOPML(c *gin.Context) {
 	}
 
 	var uncategorizedFeeds []models.Feed
-	Repo.DB().Where("category_id IS NULL").Find(&uncategorizedFeeds)
+	repository.Repo.DB().Where("category_id IS NULL").Find(&uncategorizedFeeds)
 
 	for _, feed := range uncategorizedFeeds {
 		feedOutline := OPMLOutline{

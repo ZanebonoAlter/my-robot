@@ -1,4 +1,4 @@
-package reader
+package handler
 
 import (
 	"net/http"
@@ -8,13 +8,14 @@ import (
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 	"syntopica-backend/internal/models"
+	"syntopica-backend/internal/reader/repository"
 	tagging "syntopica-backend/internal/tagmanagement"
 	tagwatched "syntopica-backend/internal/tagmanagement/service/watched"
 )
 
 func loadArticleWithTagCount(articleID uint) (*models.Article, error) {
 	var article models.Article
-	if err := Repo.DB().Model(&models.Article{}).
+	if err := repository.Repo.DB().Model(&models.Article{}).
 		Joins("LEFT JOIN feeds ON articles.feed_id = feeds.id").
 		Select("articles.*, feeds.category_id AS category_id, (SELECT COUNT(*) FROM article_topic_tags att_cnt WHERE att_cnt.article_id = articles.id) AS tag_count").
 		First(&article, articleID).Error; err != nil {
@@ -45,7 +46,7 @@ func GetArticlesStats(c *gin.Context) {
 		Favorite int64
 	}
 	var result StatsResult
-	Repo.DB().Model(&models.Article{}).
+	repository.Repo.DB().Model(&models.Article{}).
 		Select("COUNT(*) as total, COALESCE(SUM(CASE WHEN NOT read THEN 1 ELSE 0 END), 0) as unread, COALESCE(SUM(CASE WHEN favorite THEN 1 ELSE 0 END), 0) as favorite").
 		Scan(&result)
 
@@ -86,7 +87,7 @@ func GetArticles(c *gin.Context) {
 	usingWatchedTags := false
 
 	if watchedTagsMode {
-		watchedIDs, children, err := tagwatched.GetWatchedTagIDsExpanded(Repo.DB())
+		watchedIDs, children, err := tagwatched.GetWatchedTagIDsExpanded(repository.Repo.DB())
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "failed to expand watched tags"})
 			return
@@ -112,7 +113,7 @@ func GetArticles(c *gin.Context) {
 	}
 
 	// Build base query with standard joins
-	query := Repo.DB().Model(&models.Article{}).
+	query := repository.Repo.DB().Model(&models.Article{}).
 		Joins("LEFT JOIN feeds ON articles.feed_id = feeds.id")
 
 	// Apply watched tag filter via JOIN
@@ -173,7 +174,7 @@ func GetArticles(c *gin.Context) {
 	}
 
 	if search != "" {
-		if Repo.DB().Name() == "postgres" {
+		if repository.Repo.DB().Name() == "postgres" {
 			query = query.Where("articles.search_vector @@ plainto_tsquery('simple', ?)", search)
 		} else {
 			searchTerm := "%" + search + "%"
@@ -199,7 +200,7 @@ func GetArticles(c *gin.Context) {
 	// Count — handle separately for watched tags to avoid JOIN inflation
 	var total int64
 	if usingWatchedTags {
-		countQuery := Repo.DB().Table("articles").
+		countQuery := repository.Repo.DB().Table("articles").
 			Joins("JOIN article_topic_tags att ON att.article_id = articles.id AND att.topic_tag_id IN ?", expandedTagIDs)
 		if feedID > 0 {
 			countQuery = countQuery.Where("articles.feed_id = ?", feedID)
@@ -223,7 +224,7 @@ func GetArticles(c *gin.Context) {
 			countQuery = countQuery.Where("articles.favorite = ?", favorite == "true")
 		}
 		if search != "" {
-			if Repo.DB().Name() == "postgres" {
+			if repository.Repo.DB().Name() == "postgres" {
 				countQuery = countQuery.Where("articles.search_vector @@ plainto_tsquery('simple', ?)", search)
 			} else {
 				searchTerm := "%" + search + "%"
@@ -239,7 +240,7 @@ func GetArticles(c *gin.Context) {
 		countQuery.Select("COUNT(DISTINCT articles.id)").Scan(&total)
 	} else {
 		if conceptID > 0 || auxiliaryLabelID > 0 {
-			cq := Repo.DB().Model(&models.Article{}).
+			cq := repository.Repo.DB().Model(&models.Article{}).
 				Select("COUNT(DISTINCT articles.id)")
 			if conceptID > 0 {
 				cq = cq.
@@ -323,7 +324,7 @@ func collectDescendantTagIDs(parentIDs []uint) []uint {
 
 	for len(queue) > 0 {
 		var relations []models.TopicTagRelation
-		if err := Repo.DB().Where("parent_id IN ?", queue).Find(&relations).Error; err != nil {
+		if err := repository.Repo.DB().Where("parent_id IN ?", queue).Find(&relations).Error; err != nil {
 			break
 		}
 
@@ -391,7 +392,7 @@ func RetagArticleHandler(c *gin.Context) {
 	}
 
 	var article models.Article
-	if err := Repo.DB().First(&article, uint(id)).Error; err != nil {
+	if err := repository.Repo.DB().First(&article, uint(id)).Error; err != nil {
 		if err == gorm.ErrRecordNotFound {
 			c.JSON(http.StatusNotFound, gin.H{"success": false, "error": "Article not found"})
 			return
@@ -401,12 +402,12 @@ func RetagArticleHandler(c *gin.Context) {
 	}
 
 	var feed models.Feed
-	if err := Repo.DB().Preload("Category").First(&feed, article.FeedID).Error; err != nil {
+	if err := repository.Repo.DB().Preload("Category").First(&feed, article.FeedID).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": err.Error()})
 		return
 	}
 
-	queue := tagging.NewTagJobQueue(Repo.DB())
+	queue := tagging.NewTagJobQueue(repository.Repo.DB())
 	if err := queue.Enqueue(tagging.TagJobRequest{
 		ArticleID:    article.ID,
 		FeedName:     feed.Title,
@@ -421,7 +422,7 @@ func RetagArticleHandler(c *gin.Context) {
 	// Query both pending and leased: Enqueue may reuse an existing leased job,
 	// or a worker may claim the job between Enqueue and this query.
 	var tagJob models.TagJob
-	if err := Repo.DB().Where("article_id = ? AND status IN ?", article.ID,
+	if err := repository.Repo.DB().Where("article_id = ? AND status IN ?", article.ID,
 		[]string{string(models.JobStatusPending), string(models.JobStatusLeased)}).
 		Order("id DESC").
 		First(&tagJob).Error; err != nil {
@@ -451,7 +452,7 @@ func UpdateArticle(c *gin.Context) {
 	}
 
 	var article models.Article
-	if err := Repo.DB().First(&article, uint(id)).Error; err != nil {
+	if err := repository.Repo.DB().First(&article, uint(id)).Error; err != nil {
 		if err == gorm.ErrRecordNotFound {
 			c.JSON(http.StatusNotFound, gin.H{
 				"success": false,
@@ -484,7 +485,7 @@ func UpdateArticle(c *gin.Context) {
 	}
 
 	if len(updates) > 0 {
-		if err := Repo.DB().Model(&article).Updates(updates).Error; err != nil {
+		if err := repository.Repo.DB().Model(&article).Updates(updates).Error; err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{
 				"success": false,
 				"error":   err.Error(),
@@ -493,7 +494,7 @@ func UpdateArticle(c *gin.Context) {
 		}
 	}
 
-	Repo.DB().Model(&models.Article{}).
+	repository.Repo.DB().Model(&models.Article{}).
 		Joins("LEFT JOIN feeds ON articles.feed_id = feeds.id").
 		Select("articles.*, feeds.category_id AS category_id, (SELECT COUNT(*) FROM article_topic_tags att_cnt WHERE att_cnt.article_id = articles.id) AS tag_count").
 		First(&article, uint(id))
@@ -538,7 +539,7 @@ func BulkUpdateArticles(c *gin.Context) {
 		return
 	}
 
-	query := Repo.DB().Model(&models.Article{})
+	query := repository.Repo.DB().Model(&models.Article{})
 
 	switch {
 	case len(req.IDs) > 0:

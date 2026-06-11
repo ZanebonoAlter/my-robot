@@ -1,4 +1,4 @@
-package reader
+package handler
 
 import (
 	"context"
@@ -13,6 +13,7 @@ import (
 	"gorm.io/gorm"
 	"syntopica-backend/internal/models"
 	"syntopica-backend/internal/platform/logging"
+	"syntopica-backend/internal/reader/repository"
 	"syntopica-backend/internal/reader/service"
 )
 
@@ -54,7 +55,7 @@ func GetFeeds(c *gin.Context) {
 	categoryID, _ := strconv.Atoi(c.Query("category_id"))
 	uncategorized := c.Query("uncategorized") == "true"
 
-	query := Repo.DB().Model(&models.Feed{})
+	query := repository.Repo.DB().Model(&models.Feed{})
 
 	if categoryID > 0 {
 		query = query.Where("category_id = ?", categoryID)
@@ -88,7 +89,7 @@ func GetFeeds(c *gin.Context) {
 	}
 	var statRows []FeedStatRow
 	if len(feedIDs) > 0 {
-		Repo.DB().Model(&models.Article{}).
+		repository.Repo.DB().Model(&models.Article{}).
 			Select("feed_id, COUNT(*) as article_count, SUM(CASE WHEN NOT read THEN 1 ELSE 0 END) as unread_count").
 			Where("feed_id IN ?", feedIDs).
 			Group("feed_id").
@@ -165,7 +166,7 @@ func GetFeed(c *gin.Context) {
 	}
 
 	var feed models.Feed
-	if err := Repo.DB().First(&feed, uint(id)).Error; err != nil {
+	if err := repository.Repo.DB().First(&feed, uint(id)).Error; err != nil {
 		if err == gorm.ErrRecordNotFound {
 			c.JSON(http.StatusNotFound, gin.H{
 				"success": false,
@@ -181,7 +182,7 @@ func GetFeed(c *gin.Context) {
 	}
 
 	var stats models.FeedStats
-	Repo.DB().Model(&models.Article{}).
+	repository.Repo.DB().Model(&models.Article{}).
 		Select("COUNT(*) as article_count, SUM(CASE WHEN NOT read THEN 1 ELSE 0 END) as unread_count").
 		Where("feed_id = ?", feed.ID).
 		Group("feed_id").
@@ -204,7 +205,7 @@ func CreateFeed(c *gin.Context) {
 	}
 
 	var existing models.Feed
-	if err := Repo.DB().Where("url = ?", req.URL).First(&existing).Error; err == nil {
+	if err := repository.Repo.DB().Where("url = ?", req.URL).First(&existing).Error; err == nil {
 		c.JSON(http.StatusConflict, gin.H{
 			"success": false,
 			"error":   "Feed with this URL already exists",
@@ -246,7 +247,7 @@ func CreateFeed(c *gin.Context) {
 		feed.RefreshInterval = 60
 	}
 
-	if err := Repo.DB().Create(&feed).Error; err != nil {
+	if err := repository.Repo.DB().Create(&feed).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"success": false,
 			"error":   err.Error(),
@@ -272,7 +273,7 @@ func UpdateFeed(c *gin.Context) {
 	}
 
 	var feed models.Feed
-	if err := Repo.DB().First(&feed, uint(id)).Error; err != nil {
+	if err := repository.Repo.DB().First(&feed, uint(id)).Error; err != nil {
 		if err == gorm.ErrRecordNotFound {
 			c.JSON(http.StatusNotFound, gin.H{
 				"success": false,
@@ -357,7 +358,7 @@ func UpdateFeed(c *gin.Context) {
 		updates["tagging_enabled"] = *req.TaggingEnabled
 	}
 
-	if err := Repo.DB().Model(&feed).Updates(updates).Error; err != nil {
+	if err := repository.Repo.DB().Model(&feed).Updates(updates).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"success": false,
 			"error":   err.Error(),
@@ -367,13 +368,13 @@ func UpdateFeed(c *gin.Context) {
 
 	// Trigger cleanup if MaxArticles was updated
 	if _, exists := bodyMap["max_articles"]; exists {
-		Repo.DB().First(&feed, feed.ID)
+		repository.Repo.DB().First(&feed, feed.ID)
 		feed.MaxArticles = req.MaxArticles
 		service.NewFeedService().CleanupOldArticles(&feed)
 	}
 
 	var stats models.FeedStats
-	Repo.DB().Model(&models.Article{}).
+	repository.Repo.DB().Model(&models.Article{}).
 		Select("COUNT(*) as article_count, SUM(CASE WHEN NOT read THEN 1 ELSE 0 END) as unread_count").
 		Where("feed_id = ?", feed.ID).
 		Group("feed_id").
@@ -396,7 +397,7 @@ func DeleteFeed(c *gin.Context) {
 	}
 
 	var feed models.Feed
-	if err := Repo.DB().First(&feed, uint(id)).Error; err != nil {
+	if err := repository.Repo.DB().First(&feed, uint(id)).Error; err != nil {
 		if err == gorm.ErrRecordNotFound {
 			c.JSON(http.StatusNotFound, gin.H{
 				"success": false,
@@ -411,7 +412,7 @@ func DeleteFeed(c *gin.Context) {
 		return
 	}
 
-	if err := Repo.DB().Where("feed_id = ?", feed.ID).Delete(&models.ReadingBehavior{}).Error; err != nil {
+	if err := repository.Repo.DB().Where("feed_id = ?", feed.ID).Delete(&models.ReadingBehavior{}).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"success": false,
 			"error":   err.Error(),
@@ -419,7 +420,7 @@ func DeleteFeed(c *gin.Context) {
 		return
 	}
 
-	if err := Repo.DB().Delete(&feed).Error; err != nil {
+	if err := repository.Repo.DB().Delete(&feed).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"success": false,
 			"error":   err.Error(),
@@ -444,7 +445,7 @@ func RefreshFeed(c *gin.Context) {
 	}
 
 	var feed models.Feed
-	if err := Repo.DB().First(&feed, uint(id)).Error; err != nil {
+	if err := repository.Repo.DB().First(&feed, uint(id)).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{
 			"success": false,
 			"error":   "Feed not found",
@@ -456,7 +457,7 @@ func RefreshFeed(c *gin.Context) {
 	feed.RefreshStatus = "refreshing"
 	feed.LastRefreshAt = &now
 	feed.RefreshError = ""
-	Repo.DB().Save(&feed)
+	repository.Repo.DB().Save(&feed)
 
 	go func() {
 		refreshFeedWorker(uint(id))
@@ -509,7 +510,7 @@ func FetchFeed(c *gin.Context) {
 
 func RefreshAllFeeds(c *gin.Context) {
 	var feeds []models.Feed
-	if err := Repo.DB().Find(&feeds).Error; err != nil {
+	if err := repository.Repo.DB().Find(&feeds).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"success": false,
 			"error":   err.Error(),
@@ -531,7 +532,7 @@ func RefreshAllFeeds(c *gin.Context) {
 	}
 
 	now := time.Now()
-	Repo.DB().Model(&models.Feed{}).Where("id IN ?", feedIDs).
+	repository.Repo.DB().Model(&models.Feed{}).Where("id IN ?", feedIDs).
 		Updates(map[string]interface{}{
 			"refresh_status":  "refreshing",
 			"last_refresh_at": &now,
@@ -582,7 +583,7 @@ func refreshAllFeedsWorker(feedIDs []uint) {
 // This avoids overwriting a concurrent status change (e.g. from auto-refresh completing it).
 func resetFeedStatus(feedID uint, errMsg string) {
 	now := time.Now().In(models.ShanghaiTZ)
-	Repo.DB().Model(&models.Feed{}).Where("id = ? AND refresh_status = ?", feedID, "refreshing").Updates(map[string]interface{}{
+	repository.Repo.DB().Model(&models.Feed{}).Where("id = ? AND refresh_status = ?", feedID, "refreshing").Updates(map[string]interface{}{
 		"refresh_status":  "error",
 		"refresh_error":   errMsg,
 		"last_refresh_at": &now,

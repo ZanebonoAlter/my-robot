@@ -1,4 +1,4 @@
-package reader
+package handler
 
 import (
 	"net/http"
@@ -7,6 +7,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"syntopica-backend/internal/models"
 	"syntopica-backend/internal/platform/aisettings"
+	"syntopica-backend/internal/reader/repository"
 	"syntopica-backend/internal/reader/service"
 	tagging "syntopica-backend/internal/tagmanagement"
 )
@@ -24,7 +25,7 @@ func CrawlArticle(c *gin.Context) {
 	articleID := c.Param("id")
 
 	var article models.Article
-	if err := Repo.DB().First(&article, articleID).Error; err != nil {
+	if err := repository.Repo.DB().First(&article, articleID).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{
 			"success": false,
 			"error":   "Article not found",
@@ -33,7 +34,7 @@ func CrawlArticle(c *gin.Context) {
 	}
 
 	var feed models.Feed
-	if err := Repo.DB().First(&feed, article.FeedID).Error; err != nil {
+	if err := repository.Repo.DB().First(&feed, article.FeedID).Error; err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"success": false,
 			"error":   "Feed not found",
@@ -69,13 +70,13 @@ func CrawlArticle(c *gin.Context) {
 	firecrawlService := service.NewFirecrawlService(config)
 
 	article.FirecrawlStatus = "processing"
-	Repo.DB().Save(&article)
+	repository.Repo.DB().Save(&article)
 
 	result, err := firecrawlService.ScrapePage(c.Request.Context(), article.Link)
 	if err != nil {
 		article.FirecrawlStatus = "failed"
 		article.FirecrawlError = err.Error()
-		Repo.DB().Save(&article)
+		repository.Repo.DB().Save(&article)
 
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"success": false,
@@ -90,9 +91,9 @@ func CrawlArticle(c *gin.Context) {
 	article.SummaryStatus = "incomplete"
 	now := time.Now()
 	article.FirecrawlCrawledAt = &now
-	Repo.DB().Save(&article)
+	repository.Repo.DB().Save(&article)
 	if feed.TaggingEnabled {
-		_ = tagging.NewTagJobQueue(Repo.DB()).Enqueue(tagging.TagJobRequest{
+		_ = tagging.NewTagJobQueue(repository.Repo.DB()).Enqueue(tagging.TagJobRequest{
 			ArticleID:    article.ID,
 			FeedName:     feed.Title,
 			CategoryName: tagging.FeedCategoryName(feed),
@@ -127,7 +128,7 @@ func EnableFeedFirecrawl(c *gin.Context) {
 	}
 
 	var feed models.Feed
-	if err := Repo.DB().First(&feed, feedID).Error; err != nil {
+	if err := repository.Repo.DB().First(&feed, feedID).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{
 			"success": false,
 			"error":   "Feed not found",
@@ -136,10 +137,10 @@ func EnableFeedFirecrawl(c *gin.Context) {
 	}
 
 	feed.FirecrawlEnabled = req.Enabled
-	Repo.DB().Save(&feed)
+	repository.Repo.DB().Save(&feed)
 
 	if req.Enabled {
-		Repo.DB().Model(&models.Article{}).
+		repository.Repo.DB().Model(&models.Article{}).
 			Where("feed_id = ?", feed.ID).
 			Where("(firecrawl_content IS NULL OR firecrawl_content = '') AND firecrawl_status <> ?", "processing").
 			Updates(map[string]interface{}{

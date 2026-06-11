@@ -1,4 +1,4 @@
-package reader
+package handler
 
 import (
 	"fmt"
@@ -7,6 +7,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"syntopica-backend/internal/models"
 	"syntopica-backend/internal/platform/airouter"
+	"syntopica-backend/internal/reader/repository"
 	"syntopica-backend/internal/reader/service"
 )
 
@@ -86,7 +87,7 @@ func CompleteFeedArticles(c *gin.Context) {
 	}
 
 	var articles []models.Article
-	if err := Repo.DB().Omit("tag_count", "relevance_score").Where("feed_id = ? AND summary_status IN ?", feedID, []string{"incomplete", "failed"}).Find(&articles).Error; err != nil {
+	if err := repository.Repo.DB().Omit("tag_count", "relevance_score").Where("feed_id = ? AND summary_status IN ?", feedID, []string{"incomplete", "failed"}).Find(&articles).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": err.Error()})
 		return
 	}
@@ -118,7 +119,7 @@ func GetCompletionStatus(c *gin.Context) {
 	}
 
 	var article models.Article
-	if err := Repo.DB().First(&article, id).Error; err != nil {
+	if err := repository.Repo.DB().First(&article, id).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"success": false, "error": "Article not found"})
 		return
 	}

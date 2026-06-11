@@ -2,6 +2,7 @@ package reader
 
 import (
 	"gorm.io/gorm"
+	"syntopica-backend/internal/reader/handler"
 	"syntopica-backend/internal/reader/repository"
 	"syntopica-backend/internal/reader/service"
 )
@@ -59,3 +60,16 @@ var NewContentCompletionService = service.NewContentCompletionService
 
 // GetFirecrawlConfig is a re-export.
 var GetFirecrawlConfig = service.GetFirecrawlConfig
+
+// ============================================================================
+// Re-exports from handler sub-package
+// ============================================================================
+
+// InitContentCompletionHandler is a re-export.
+var InitContentCompletionHandler = handler.InitContentCompletionHandler
+
+// SetSchedulerLookup is a re-export.
+var SetSchedulerLookup = handler.SetSchedulerLookup
+
+// GetContentCompletionService is a re-export.
+var GetContentCompletionService = handler.GetContentCompletionService

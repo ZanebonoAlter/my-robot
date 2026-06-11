@@ -1,4 +1,4 @@
-package reader
+package handler
 
 import (
 	"net/http"
@@ -7,6 +7,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 	"syntopica-backend/internal/models"
+	"syntopica-backend/internal/reader/repository"
 )
 
 type CreateCategoryRequest struct {
@@ -26,11 +27,11 @@ type UpdateCategoryRequest struct {
 }
 
 // ============================================================================
-// Category handlers — HTTP param parsing only, all DB via Repo
+// Category handlers — HTTP param parsing only, all DB via repository.Repo
 // ============================================================================
 
 func GetCategories(c *gin.Context) {
-	categories, err := Repo.ListCategories()
+	categories, err := repository.Repo.ListCategories()
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"success": false,
@@ -39,7 +40,7 @@ func GetCategories(c *gin.Context) {
 		return
 	}
 
-	feedCountMap, _ := Repo.GetFeedCountGroupedByCategory()
+	feedCountMap, _ := repository.Repo.GetFeedCountGroupedByCategory()
 
 	data := make([]map[string]interface{}, len(categories))
 	for i, cat := range categories {
@@ -64,7 +65,7 @@ func CreateCategory(c *gin.Context) {
 		return
 	}
 
-	if _, err := Repo.GetCategoryByName(req.Name); err == nil {
+	if _, err := repository.Repo.GetCategoryByName(req.Name); err == nil {
 		c.JSON(http.StatusConflict, gin.H{
 			"success": false,
 			"error":   "Category with this name already exists",
@@ -92,7 +93,7 @@ func CreateCategory(c *gin.Context) {
 		category.Color = "#6366f1"
 	}
 
-	if err := Repo.CreateCategory(&category); err != nil {
+	if err := repository.Repo.CreateCategory(&category); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"success": false,
 			"error":   err.Error(),
@@ -116,7 +117,7 @@ func UpdateCategory(c *gin.Context) {
 		return
 	}
 
-	category, err := Repo.GetCategory(uint(id))
+	category, err := repository.Repo.GetCategory(uint(id))
 	if err != nil {
 		if err == gorm.ErrRecordNotFound {
 			c.JSON(http.StatusNotFound, gin.H{
@@ -159,7 +160,7 @@ func UpdateCategory(c *gin.Context) {
 	}
 
 	if len(updates) > 0 {
-		if err := Repo.UpdateCategory(category, updates); err != nil {
+		if err := repository.Repo.UpdateCategory(category, updates); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{
 				"success": false,
 				"error":   err.Error(),
@@ -184,7 +185,7 @@ func DeleteCategory(c *gin.Context) {
 		return
 	}
 
-	category, err := Repo.GetCategory(uint(id))
+	category, err := repository.Repo.GetCategory(uint(id))
 	if err != nil {
 		if err == gorm.ErrRecordNotFound {
 			c.JSON(http.StatusNotFound, gin.H{
@@ -200,7 +201,7 @@ func DeleteCategory(c *gin.Context) {
 		return
 	}
 
-	if err := Repo.DeleteCategory(category); err != nil {
+	if err := repository.Repo.DeleteCategory(category); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"success": false,
 			"error":   err.Error(),

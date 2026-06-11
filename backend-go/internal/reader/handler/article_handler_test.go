@@ -1,4 +1,4 @@
-package reader
+package handler
 
 import (
 	"encoding/json"
@@ -14,6 +14,7 @@ import (
 	"gorm.io/gorm"
 	"syntopica-backend/internal/models"
 	"syntopica-backend/internal/platform/database"
+	"syntopica-backend/internal/reader/repository"
 	tagging "syntopica-backend/internal/tagmanagement"
 )
 
@@ -24,7 +25,7 @@ func setupArticlesHandlerTestDB(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, db.AutoMigrate(&models.Category{}, &models.Feed{}, &models.Article{}, &models.TopicTag{}, &models.ArticleTopicTag{}))
 	database.DB = db
-	InitRepository(database.DB)
+	repository.InitRepository(database.DB)
 	tagging.InitRepository(database.DB)
 }
 

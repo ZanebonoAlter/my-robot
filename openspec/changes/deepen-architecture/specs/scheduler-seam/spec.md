@@ -45,4 +45,52 @@
 
 #### Scenario: 触发 DailyReport 带日期参数
 - **WHEN** 请求 `POST /api/schedulers/daily_report/trigger?date=2026-06-01`
-- **THEN** handler 获取 scheduler 后通过 `scheduler.(*DailyReportScheduler)` 断言调用 `TriggerNowWithDate`——此方法不属于 `Scheduler` 接口，仅该具体类型支持
+- **THEN** handler 获取 scheduler 后通过可选扩展接口 `TriggerableWithDate` 断言调用 `TriggerNowWithDate`——此方法不属于 `Scheduler` 基础接口，仅该具体类型支持
+
+### Requirement: BaseScheduler 工厂模式
+系统 SHALL 提供一个 `BaseScheduler` 结构体，封装所有 scheduler 的公共脚手架（生命周期管理、互斥执行、状态追踪、统计计数），业务逻辑通过 `JobFunc` 注入。
+
+#### Scenario: 创建简单 scheduler
+- **WHEN** 调用 `scheduler.New(scheduler.Config{Name: "log_cleanup", Interval: 86400 * time.Second, Job: logCleanupJob})`
+- **THEN** 返回一个实现了完整 `Scheduler` 接口的 `BaseScheduler` 实例，无需手写 Start/Stop/TriggerNow/UpdateInterval/ResetStats/GetStatus
+
+#### Scenario: 业务函数执行
+- **WHEN** `BaseScheduler` 到达执行时间
+- **THEN** 调用注入的 `JobFunc(ctx)`，将返回的 `JobResult.Data` 合并到 `GetStatus()` 输出中
+
+#### Scenario: 业务函数互斥执行
+- **WHEN** 上一次 `JobFunc` 尚未返回，cron/ticker 又触发了一次
+- **THEN** 跳过本次执行，记录日志，不并发执行
+
+### Requirement: 新增 scheduler 只需一个函数
+新增 scheduler SHALL 只需要定义一个 `JobFunc` 函数并通过 `scheduler.New()` 注册，无需创建新的 struct 类型。
+
+#### Scenario: 新增日志清理 scheduler
+- **WHEN** 开发者定义 `func logCleanupJob(ctx context.Context) (*scheduler.JobResult, error) { ... }` 并注册
+- **THEN** 该 scheduler 自动拥有 Start/Stop/TriggerNow/GetStatus/UpdateInterval/ResetStats 全部能力
+
+#### Scenario: 代码量对比
+- **WHEN** 迁移 9 个现有 scheduler 到 `BaseScheduler` 模式
+- **THEN** 总代码量从 ~3320 行缩减至 ~850 行（base.go ~400 行 + 9 个 JobFunc × ~50 行）
+
+### Requirement: 可选的 DB 状态持久化
+`BaseScheduler` SHALL 支持可选的 `SchedulerTask` DB 状态持久化，通过 Config 配置开关。
+
+#### Scenario: 启用 DB 状态持久化
+- **WHEN** `Config.PersistStatus = true`
+- **THEN** 每次 job 执行后自动更新 `scheduler_tasks` 表的 status/last_error/total_executions 等字段
+
+#### Scenario: 不启用 DB 状态持久化
+- **WHEN** `Config.PersistStatus = false`（默认）
+- **THEN** 状态仅在内存中维护，适用于轻量级 cleanup 类 scheduler
+
+### Requirement: 可选扩展接口
+对需要特化行为的 scheduler（如 DailyReport 的 `TriggerNowWithDate`），SHALL 通过 Go 可选扩展接口（interface embedding）处理，而非在 `BaseScheduler` 上添加特殊方法。
+
+#### Scenario: DailyReport 扩展接口
+- **WHEN** `DailyReportScheduler` 需要支持带日期参数的触发
+- **THEN** 定义 `type TriggerableWithDate interface { TriggerNowWithDate(string) map[string]interface{} }`，handler 通过类型断言检查该扩展接口
+
+#### Scenario: 无扩展接口的 scheduler
+- **WHEN** `LogCleanupScheduler` 不需要任何特化方法
+- **THEN** handler 不做类型断言，仅使用基础 `Scheduler` 接口

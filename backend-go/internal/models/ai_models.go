@@ -136,10 +136,6 @@ func (AICallLog) TableName() string {
 	return "ai_call_logs"
 }
 
-
-
-
-
 func ToJSONValue(v interface{}) (string, error) {
 	data, err := json.Marshal(v)
 	if err != nil {

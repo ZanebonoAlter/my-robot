@@ -10,14 +10,14 @@ import (
 	"sync/atomic"
 	"time"
 
-	content "syntopica-backend/internal/reader"
+	adminhandler "syntopica-backend/internal/admin/handler"
+	"syntopica-backend/internal/admin/repository"
 	"syntopica-backend/internal/models"
-	tagging "syntopica-backend/internal/tagmanagement"
 	"syntopica-backend/internal/platform/logging"
 	"syntopica-backend/internal/platform/tracing"
 	"syntopica-backend/internal/platform/ws"
-	"syntopica-backend/internal/admin/repository"
-	adminhandler "syntopica-backend/internal/admin/handler"
+	content "syntopica-backend/internal/reader"
+	tagging "syntopica-backend/internal/tagmanagement"
 )
 
 type FirecrawlScheduler struct {

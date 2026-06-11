@@ -15,7 +15,7 @@ import (
 )
 
 type DatabaseSpanExporter struct {
-	db *gorm.DB
+	db  *gorm.DB
 	cfg Config
 	mu  sync.Mutex
 }

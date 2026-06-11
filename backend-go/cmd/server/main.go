@@ -7,16 +7,16 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"go.opentelemetry.io/contrib/instrumentation/github.com/gin-gonic/gin/otelgin"
-	appbootstrap "syntopica-backend/internal/app"
 	"syntopica-backend/internal/admin"
-	taggingdomain "syntopica-backend/internal/tagmanagement"
-	"syntopica-backend/internal/reader"
-	"syntopica-backend/internal/topicgraph"
+	appbootstrap "syntopica-backend/internal/app"
 	"syntopica-backend/internal/platform/config"
 	"syntopica-backend/internal/platform/database"
 	"syntopica-backend/internal/platform/logging"
 	"syntopica-backend/internal/platform/middleware"
 	"syntopica-backend/internal/platform/tracing"
+	"syntopica-backend/internal/reader"
+	taggingdomain "syntopica-backend/internal/tagmanagement"
+	"syntopica-backend/internal/topicgraph"
 )
 
 func main() {

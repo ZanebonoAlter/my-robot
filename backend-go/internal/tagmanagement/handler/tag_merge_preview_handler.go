@@ -12,8 +12,8 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 	"syntopica-backend/internal/models"
-	"syntopica-backend/internal/tagmanagement/service"
 	"syntopica-backend/internal/tagmanagement/repository"
+	"syntopica-backend/internal/tagmanagement/service"
 )
 
 // mergeGroupSuggestion is a single suggestion within a grouped merge preview.

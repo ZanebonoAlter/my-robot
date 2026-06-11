@@ -9,13 +9,13 @@ import (
 	"time"
 
 	"github.com/robfig/cron/v3"
-	feed "syntopica-backend/internal/reader"
+	adminhandler "syntopica-backend/internal/admin/handler"
+	"syntopica-backend/internal/admin/repository"
 	"syntopica-backend/internal/models"
 	"syntopica-backend/internal/platform/logging"
 	"syntopica-backend/internal/platform/tracing"
 	"syntopica-backend/internal/platform/ws"
-	"syntopica-backend/internal/admin/repository"
-	adminhandler "syntopica-backend/internal/admin/handler"
+	feed "syntopica-backend/internal/reader"
 )
 
 type AutoRefreshScheduler struct {

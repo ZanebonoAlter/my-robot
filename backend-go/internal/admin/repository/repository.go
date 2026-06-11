@@ -119,7 +119,8 @@ func (r *AdminRepository) SaveAISettings(settings []models.AISettings) error {
 	for _, s := range settings {
 		var existing models.AISettings
 		err := r.db.Where("key = ?", s.Key).First(&existing).Error
-		if err == nil {
+		switch err {
+		case nil:
 			existing.Value = s.Value
 			if s.Description != "" {
 				existing.Description = s.Description
@@ -127,7 +128,7 @@ func (r *AdminRepository) SaveAISettings(settings []models.AISettings) error {
 			if saveErr := r.db.Save(&existing).Error; saveErr != nil {
 				return saveErr
 			}
-		} else if err == gorm.ErrRecordNotFound {
+		case gorm.ErrRecordNotFound:
 			if createErr := r.db.Create(&models.AISettings{
 				Key:         s.Key,
 				Value:       s.Value,
@@ -135,7 +136,7 @@ func (r *AdminRepository) SaveAISettings(settings []models.AISettings) error {
 			}).Error; createErr != nil {
 				return createErr
 			}
-		} else {
+		default:
 			return err
 		}
 	}

@@ -10,13 +10,13 @@ import (
 
 	"github.com/robfig/cron/v3"
 
-	daily_report "syntopica-backend/internal/topicgraph"
+	adminhandler "syntopica-backend/internal/admin/handler"
+	"syntopica-backend/internal/admin/repository"
 	"syntopica-backend/internal/models"
 	"syntopica-backend/internal/platform/logging"
 	"syntopica-backend/internal/platform/tracing"
 	"syntopica-backend/internal/platform/ws"
-	"syntopica-backend/internal/admin/repository"
-	adminhandler "syntopica-backend/internal/admin/handler"
+	daily_report "syntopica-backend/internal/topicgraph"
 )
 
 type DailyReportScheduler struct {
@@ -293,10 +293,10 @@ func (s *DailyReportScheduler) runCycle(triggerSource string, targetDate time.Ti
 
 	// Broadcast completion
 	msg := map[string]interface{}{
-		"type":        "daily_report_complete",
+		"type":         "daily_report_complete",
 		"report_count": reportCount,
-		"date":        targetDate.Format("2006-01-02"),
-		"timestamp":   time.Now().Format(time.RFC3339),
+		"date":         targetDate.Format("2006-01-02"),
+		"timestamp":    time.Now().Format(time.RFC3339),
 	}
 	data, _ := json.Marshal(msg)
 	ws.GetHub().BroadcastRaw(data)
@@ -409,4 +409,3 @@ func (s *DailyReportScheduler) GetStatus() adminhandler.SchedulerStatusResponse 
 	}
 	return status
 }
-

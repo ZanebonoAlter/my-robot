@@ -9,7 +9,7 @@ import (
 	"gorm.io/gorm"
 	"syntopica-backend/internal/models"
 	tagging "syntopica-backend/internal/tagmanagement"
-	"syntopica-backend/internal/tagmanagement/watched"
+	tagwatched "syntopica-backend/internal/tagmanagement/service/watched"
 )
 
 func loadArticleWithTagCount(articleID uint) (*models.Article, error) {
@@ -86,7 +86,7 @@ func GetArticles(c *gin.Context) {
 	usingWatchedTags := false
 
 	if watchedTagsMode {
-		watchedIDs, children, err := watched.GetWatchedTagIDsExpanded(Repo.DB())
+		watchedIDs, children, err := tagwatched.GetWatchedTagIDsExpanded(Repo.DB())
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "failed to expand watched tags"})
 			return

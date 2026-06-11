@@ -37,14 +37,14 @@ func (TopicTagSemanticLabel) TableName() string {
 }
 
 type TopicTagBoardLabel struct {
-	TopicTagID      uint      `gorm:"primaryKey;not null" json:"topic_tag_id"`
-	SemanticBoardID uint      `gorm:"primaryKey;not null" json:"semantic_board_id"`
-	Score           float64   `gorm:"not null;default:0" json:"score"`
-	MatchReason     string    `gorm:"type:text" json:"match_reason"`
-	Downgraded      bool      `gorm:"not null;default:false" json:"downgraded"`
-	DirectionMismatch bool    `gorm:"not null;default:false" json:"direction_mismatch"`
-	CreatedAt       time.Time `json:"created_at"`
-	UpdatedAt       time.Time `json:"updated_at"`
+	TopicTagID        uint      `gorm:"primaryKey;not null" json:"topic_tag_id"`
+	SemanticBoardID   uint      `gorm:"primaryKey;not null" json:"semantic_board_id"`
+	Score             float64   `gorm:"not null;default:0" json:"score"`
+	MatchReason       string    `gorm:"type:text" json:"match_reason"`
+	Downgraded        bool      `gorm:"not null;default:false" json:"downgraded"`
+	DirectionMismatch bool      `gorm:"not null;default:false" json:"direction_mismatch"`
+	CreatedAt         time.Time `json:"created_at"`
+	UpdatedAt         time.Time `json:"updated_at"`
 
 	TopicTag      *TopicTag      `gorm:"foreignKey:TopicTagID;constraint:OnDelete:CASCADE" json:"topic_tag,omitempty"`
 	SemanticBoard *SemanticLabel `gorm:"foreignKey:SemanticBoardID;constraint:OnDelete:CASCADE" json:"semantic_board,omitempty"`

@@ -9,10 +9,10 @@ import (
 	otelCodes "go.opentelemetry.io/otel/codes"
 	"gorm.io/gorm"
 	"syntopica-backend/internal/models"
-	tagging "syntopica-backend/internal/tagmanagement"
 	"syntopica-backend/internal/platform/logging"
 	"syntopica-backend/internal/platform/tracing"
 	"syntopica-backend/internal/reader/repository"
+	tagging "syntopica-backend/internal/tagmanagement"
 )
 
 type FeedService struct {

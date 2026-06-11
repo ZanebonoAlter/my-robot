@@ -1,7 +1,6 @@
 package service
 
 import (
-
 	"syntopica-backend/internal/topicgraph/repository"
 	"testing"
 

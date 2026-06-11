@@ -18,11 +18,11 @@ var RegisterDailyReportRoutes = handler.RegisterDailyReportRoutes
 
 // Graph API handlers
 var (
-	GetTopicGraph                 = handler.GetTopicGraph
-	GetTopicDetail                = handler.GetTopicDetail
-	GetTopicsByCategory           = handler.GetTopicsByCategory
-	GetTopicArticles              = handler.GetTopicArticles
-	GetDigestsByArticleTagHandler = handler.GetDigestsByArticleTagHandler
+	GetTopicGraph                  = handler.GetTopicGraph
+	GetTopicDetail                 = handler.GetTopicDetail
+	GetTopicsByCategory            = handler.GetTopicsByCategory
+	GetTopicArticles               = handler.GetTopicArticles
+	GetDigestsByArticleTagHandler  = handler.GetDigestsByArticleTagHandler
 	GetPendingArticlesByTagHandler = handler.GetPendingArticlesByTagHandler
 
 	// Service layer re-exports (used by admin scheduler)

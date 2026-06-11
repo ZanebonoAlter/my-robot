@@ -12,12 +12,12 @@ import (
 
 	"github.com/robfig/cron/v3"
 	"gorm.io/gorm"
-	content "syntopica-backend/internal/reader"
+	adminhandler "syntopica-backend/internal/admin/handler"
+	"syntopica-backend/internal/admin/repository"
 	"syntopica-backend/internal/models"
 	"syntopica-backend/internal/platform/logging"
 	"syntopica-backend/internal/platform/tracing"
-	"syntopica-backend/internal/admin/repository"
-	adminhandler "syntopica-backend/internal/admin/handler"
+	content "syntopica-backend/internal/reader"
 )
 
 type ContentCompletionScheduler struct {

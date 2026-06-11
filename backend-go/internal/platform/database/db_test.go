@@ -61,15 +61,6 @@ func TestTopicTagAnalysisPayloadJSONExplicitlyStaysTextInModel(t *testing.T) {
 	}
 }
 
-func TestPostgresBootstrapExpandsLegacyShortIconColumns(t *testing.T) {
-	statements := postgresColumnAdjustmentStatements()
-	joined := strings.Join(statements, "\n")
-
-	if !strings.Contains(joined, "ALTER TABLE feeds ALTER COLUMN icon TYPE VARCHAR(1000)") {
-		t.Fatalf("expected feeds.icon widening statement, got %q", joined)
-	}
-}
-
 func TestSemanticLabelBoardSystemMigrationDocumentsSchemaCutover(t *testing.T) {
 	migration := mustFindMigration(t, postgresMigrations(), "20260521_0001")
 	if !strings.Contains(strings.ToLower(migration.Description), "semantic") {

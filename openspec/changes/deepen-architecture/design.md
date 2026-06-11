@@ -355,8 +355,76 @@ service/
 2. 后端 `platform/tracing/handler.go` 是否移到独立包（保持现状也行，它是基础设施）？
 3. `models/` 共享包拆分粒度：按功能包拆分 vs 保留共享？TopicTag 等类型被多个功能包使用。
 
+### D12: 调度器工厂模式（BaseScheduler 消除重复脚手架）
+
+**问题**：9 个 scheduler 文件共 ~3320 行，其中每个文件都重复实现了 Start/Stop、TriggerNow（互斥锁+返回 map）、UpdateInterval（stop→改 interval→restart）、ResetStats、GetStatus、状态字段（`mu`、`running`、`isExecuting`、`nextRun`、`lastRun`、`lastError`...）等脚手架代码。实际业务逻辑仅占 ~30%。
+
+此外，调度机制也不统一：A 类（auto_refresh、content_completion、daily_report）用 `robfig/cron`；B 类（firecrawl、log_cleanup、blocked_article_recovery 等）用 `time.Ticker` + goroutine。但对外接口完全一样——底层差异不应暴露。
+
+**方案**：引入 `BaseScheduler`，将脚手架统一到一处，业务逻辑收敛为 `JobFunc func(ctx context.Context) (*JobResult, error)`。
+
+```go
+// scheduler/base.go
+
+type JobFunc func(ctx context.Context) (*JobResult, error)
+
+type JobResult struct {
+    Data    map[string]interface{} // 业务指标（写入 GetStatus）
+    Summary string                  // 日志摘要
+}
+
+type Config struct {
+    Name         string
+    Interval     time.Duration
+    StartupDelay time.Duration
+    Job          JobFunc
+}
+
+type BaseScheduler struct {
+    // 封装所有公共状态：mutex, running, isExecuting, nextRun, lastRun,
+    // lastError, totalRuns, successRuns, failedRuns, cron/ticker...
+    // 实现 Scheduler 接口的全部方法
+    ...
+}
+
+func New(cfg Config) *BaseScheduler { ... }
+```
+
+注册新 job 从 250 行缩减为 ~30 行：
+
+```go
+// jobs/log_cleanup.go — 只写业务逻辑
+func logCleanupJob(ctx context.Context) (*scheduler.JobResult, error) {
+    cutoff := time.Now().AddDate(0, 0, -7)
+    aiDeleted := repository.Repo.DB().Exec("DELETE FROM ai_call_logs WHERE created_at < ?", cutoff).RowsAffected
+    otelDeleted := repository.Repo.DB().Exec("DELETE FROM otel_spans WHERE start_time_unix_nano < ?", cutoff.UnixNano()).RowsAffected
+    return &scheduler.JobResult{
+        Data: map[string]interface{}{
+            "ai_call_logs_deleted": aiDeleted,
+            "otel_spans_deleted":   otelDeleted,
+        },
+        Summary: fmt.Sprintf("ai_call_logs=%d, otel_spans=%d", aiDeleted, otelDeleted),
+    }, nil
+}
+```
+
+**迁移策略**：分三批，由简到难——
+1. 简单 scheduler（log_cleanup、aux_label_cleanup、blocked_article_recovery）：无状态持久化、无 TriggerNow 特殊逻辑
+2. 中等 scheduler（auto_refresh、preference_update、tag_quality_score）：有 SchedulerTask DB 状态持久化
+3. 复杂 scheduler（content_completion、daily_report、firecrawl）：有额外的特化方法（如 `TriggerNowWithDate`）和复杂业务依赖
+
+**收益估算**：
+
+| 指标 | 现在 | 工厂后 |
+|------|------|--------|
+| 代码量 | ~3320 行 | base.go ~400 行 + 9×50 行 ≈ 850 行 |
+| 新增 scheduler | 复制 250 行 | 写一个函数 ~30 行 |
+| GetStatus 不在接口中 | handler type assertion | BaseScheduler 统一实现 |
+| A/B 类并发差异 | 每个文件自己选 | BaseScheduler 内部统一 |
+
 ## 已决策
 
 - **D7 extraction 归属** → 同意方案 A：service 下的 extractor 移入已有 extraction/ 子包
 - **D8 垂直切片 → 水平分层** → 同意；analysis 包已确认为废弃代码，直接删除
 - **D9 Narrative 废弃** → Daily Report 已替代 Narrative 功能；后端 narrative 代码删除，前端组件重命名
+- **D12 调度器工厂模式** → 同意 BaseScheduler 方案；分三批迁移（简单→中等→复杂）

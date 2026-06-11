@@ -26,4 +26,3 @@ func TraceSchedulerTick(schedulerName, trigger string, fn func(ctx context.Conte
 
 	fn(ctx)
 }
-

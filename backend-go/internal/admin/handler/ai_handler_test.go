@@ -11,9 +11,9 @@ import (
 	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
+	"syntopica-backend/internal/admin/repository"
 	"syntopica-backend/internal/models"
 	"syntopica-backend/internal/platform/database"
-	"syntopica-backend/internal/admin/repository"
 )
 
 func setupAIAdminTestDB(t *testing.T) *gorm.DB {

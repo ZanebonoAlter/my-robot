@@ -6,10 +6,10 @@ import (
 	"sync"
 	"time"
 
-	tagging "syntopica-backend/internal/tagmanagement"
+	"syntopica-backend/internal/admin/repository"
 	"syntopica-backend/internal/platform/logging"
 	"syntopica-backend/internal/platform/tracing"
-	"syntopica-backend/internal/admin/repository"
+	tagging "syntopica-backend/internal/tagmanagement"
 )
 
 const auxLabelCleanupStartupDelay = 10 * time.Minute

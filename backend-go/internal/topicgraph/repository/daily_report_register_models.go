@@ -1,8 +1,8 @@
 package repository
 
 import (
-	tagging "syntopica-backend/internal/tagmanagement"
 	"syntopica-backend/internal/platform/database"
+	tagging "syntopica-backend/internal/tagmanagement"
 )
 
 func init() {

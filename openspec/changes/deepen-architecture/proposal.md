@@ -12,7 +12,7 @@ Phase 0–1 已完成（包重组 + Spring 式分层）。本轮聚焦 Phase 2+ 
 - **运行时统一管理**：将 `Runtime` 从 9 个具名字段改为调度器列表，启动/关闭遍历列表而非逐个硬编码。加一个调度器只需创建 + 塞列表。
 - **路由自注册**：每个业务包提供 `RegisterRoutes(rg)`，`router.go` 从 14 个 domain import 缩成薄薄的调用链。
 - **数据访问规范化**：只 `daily_report` 有 `repository.go`，其他包 handler 直连 `database.DB`。逐步统一到至少 service 层间接访问。
-- **清理 `platform/ai` 与 `airouter` 的混杂职责**：`platform/ai` 现在是 airouter 的 fallback + 工具库，仅一个消费者文件。其 prompt/parser 工具可归入 airouter。
+- **调度器工厂模式**：引入 `BaseScheduler` 封装全部公共脚手架（生命周期、互斥执行、状态追踪、统计计数），9 个 scheduler 的重复代码从 ~3320 行缩减至 ~850 行。业务逻辑收敛为 `JobFunc` 函数，新增 scheduler 从复制 250 行变成写 ~30 行函数。分三批迁移（简单→中等→复杂）。
 
 ### 前端
 
@@ -44,7 +44,7 @@ Phase 0–1 已完成（包重组 + Spring 式分层）。本轮聚焦 Phase 2+ 
 
 ### New Capabilities
 
-- `scheduler-seam`: 后端的调度器接口、注册中心、统一生命周期管理
+- `scheduler-seam`: 后端的调度器接口、注册中心、统一生命周期管理、BaseScheduler 工厂模式
 - `route-self-registration`: 业务包自注册路由，消除 router.go 上帝函数
 - `event-stream-client`: 前端统一 SSE 客户端，替代多连接各自为政
 - `error-notification`: 前端全局错误通知系统

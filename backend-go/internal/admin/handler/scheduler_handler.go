@@ -7,11 +7,18 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"syntopica-backend/internal/runtimeinfo"
+	"syntopica-backend/internal/admin/repository"
 	"syntopica-backend/internal/models"
 	"syntopica-backend/internal/platform/logging"
-	"syntopica-backend/internal/admin/repository"
 )
+
+// SchedulerRegistry is the minimal interface for the global scheduler registry.
+type SchedulerRegistry interface {
+	Get(name string) (interface{}, bool)
+}
+
+// Reg is the global scheduler registry, set by app.StartRuntime via admin.SetRegistry.
+var Reg SchedulerRegistry
 
 type UpdateSchedulerIntervalRequest struct {
 	Interval int `json:"interval" binding:"required"`
@@ -52,7 +59,8 @@ func schedulerDescriptors() []schedulerDescriptor {
 			Description: "Auto-refresh RSS feeds",
 			TaskName:    "auto_refresh",
 			Get: func() interface{} {
-				return runtimeinfo.AutoRefreshSchedulerInterface
+				s, _ := Reg.Get("auto_refresh")
+				return s
 			},
 		},
 		{
@@ -60,7 +68,8 @@ func schedulerDescriptors() []schedulerDescriptor {
 			DisplayName: "Preference Update",
 			Description: "Update reading preferences from behavior data",
 			Get: func() interface{} {
-				return runtimeinfo.PreferenceUpdateSchedulerInterface
+				s, _ := Reg.Get("preference_update")
+				return s
 			},
 		},
 		{
@@ -70,7 +79,8 @@ func schedulerDescriptors() []schedulerDescriptor {
 			Description: "Complete article content and generate article summaries",
 			TaskName:    "ai_summary",
 			Get: func() interface{} {
-				return runtimeinfo.ContentCompletionSchedulerInterface
+				s, _ := Reg.Get("content_completion")
+				return s
 			},
 		},
 		{
@@ -78,7 +88,8 @@ func schedulerDescriptors() []schedulerDescriptor {
 			DisplayName: "Firecrawl Crawler",
 			Description: "Auto-crawl full content for articles",
 			Get: func() interface{} {
-				return runtimeinfo.FirecrawlSchedulerInterface
+				s, _ := Reg.Get("firecrawl")
+				return s
 			},
 		},
 		{
@@ -86,7 +97,8 @@ func schedulerDescriptors() []schedulerDescriptor {
 			DisplayName: "Tag Quality Score",
 			Description: "Recompute persistent quality scores for topic tags",
 			Get: func() interface{} {
-				return runtimeinfo.TagQualityScoreSchedulerInterface
+				s, _ := Reg.Get("tag_quality_score")
+				return s
 			},
 		},
 		{
@@ -94,7 +106,8 @@ func schedulerDescriptors() []schedulerDescriptor {
 			DisplayName: "Log Cleanup",
 			Description: "Clean up expired ai_call_logs and otel_spans rows",
 			Get: func() interface{} {
-				return runtimeinfo.LogCleanupSchedulerInterface
+				s, _ := Reg.Get("log_cleanup")
+				return s
 			},
 		},
 		{
@@ -102,7 +115,8 @@ func schedulerDescriptors() []schedulerDescriptor {
 			DisplayName: "Daily Report",
 			Description: "Generate daily reports for all active semantic boards",
 			Get: func() interface{} {
-				return runtimeinfo.DailyReportSchedulerInterface
+				s, _ := Reg.Get("daily_report")
+				return s
 			},
 		},
 		{
@@ -110,7 +124,8 @@ func schedulerDescriptors() []schedulerDescriptor {
 			DisplayName: "Aux Label Cleanup",
 			Description: "Clean up auxiliary labels with no active topic_tag references",
 			Get: func() interface{} {
-				return runtimeinfo.AuxLabelCleanupSchedulerInterface
+				s, _ := Reg.Get("aux_label_cleanup")
+				return s
 			},
 		},
 	}
@@ -318,7 +333,7 @@ func GetTasksStatus(c *gin.Context) {
 	queueSize := 0
 	activeTasks := 0
 
-	if status := safeGetTaskStatus(runtimeinfo.ContentCompletionSchedulerInterface); status != nil {
+	if status := safeGetTaskStatus(func() interface{} { s, _ := Reg.Get("content_completion"); return s }()); status != nil {
 		if overview, ok := status["overview"].(map[string]interface{}); ok {
 			pendingCount := asInt(overview["pending_count"])
 			processingCount := asInt(overview["processing_count"])
@@ -336,7 +351,7 @@ func GetTasksStatus(c *gin.Context) {
 		}
 	}
 
-	if status := safeGetTaskStatus(runtimeinfo.FirecrawlSchedulerInterface); status != nil {
+	if status := safeGetTaskStatus(func() interface{} { s, _ := Reg.Get("firecrawl"); return s }()); status != nil {
 		queueCount := asInt(status["queue_size"])
 		processingCount := asInt(status["processing"])
 		if queueCount > 0 || processingCount > 0 {

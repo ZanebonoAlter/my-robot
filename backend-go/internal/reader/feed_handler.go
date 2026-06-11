@@ -12,8 +12,8 @@ import (
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 	"syntopica-backend/internal/models"
-	"syntopica-backend/internal/reader/service"
 	"syntopica-backend/internal/platform/logging"
+	"syntopica-backend/internal/reader/service"
 )
 
 type CreateFeedRequest struct {
@@ -583,8 +583,8 @@ func refreshAllFeedsWorker(feedIDs []uint) {
 func resetFeedStatus(feedID uint, errMsg string) {
 	now := time.Now().In(models.ShanghaiTZ)
 	Repo.DB().Model(&models.Feed{}).Where("id = ? AND refresh_status = ?", feedID, "refreshing").Updates(map[string]interface{}{
-		"refresh_status": "error",
-		"refresh_error":  errMsg,
+		"refresh_status":  "error",
+		"refresh_error":   errMsg,
 		"last_refresh_at": &now,
 	})
 }

@@ -98,8 +98,6 @@ func sanitizeUTF8(data []byte) []byte {
 
 var replacement = []byte("\uFFFD")
 
-
-
 func (p *RSSParser) convertGofeedToParsed(feed *gofeed.Feed) *ParsedFeed {
 	parsed := &ParsedFeed{
 		Title:       feed.Title,
@@ -190,8 +188,6 @@ func (p *RSSParser) FetchFaviconURL(feedURL string) string {
 	// Use Google's favicon service as it's more reliable
 	return fmt.Sprintf("https://www.google.com/s2/favicons?domain=%s&sz=32", parsedURL.Host)
 }
-
-
 
 func (p *RSSParser) FetchFeedMetadata(feedURL string) (title, description string, err error) {
 	parsed, err := p.ParseFeedURL(feedURL)

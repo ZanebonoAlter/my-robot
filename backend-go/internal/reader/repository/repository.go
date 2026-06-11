@@ -323,7 +323,7 @@ func (r *ReaderRepository) ClaimArticleForCompletion(ctx context.Context, articl
 		query = query.Where("summary_status IN ?", []string{"", "pending", "failed"})
 	}
 	updates := map[string]interface{}{
-		"summary_status":      "processing",
+		"summary_status":       "processing",
 		"summary_last_attempt": now,
 	}
 	result := query.Updates(updates)

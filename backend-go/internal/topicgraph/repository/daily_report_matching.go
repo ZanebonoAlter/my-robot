@@ -150,7 +150,7 @@ func buildDistMatrix(tx *gorm.DB, left, right []sectionInfo) map[[2]uint]float64
 	if err != nil {
 		return dist
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	for rows.Next() {
 		var leftID, rightID uint
@@ -240,7 +240,7 @@ func phase2SplitMerge(leftIDs, rightIDs []uint, dist map[[2]uint]float64, primar
 	// Split: unmatched right → closest matched left
 	for rightID := range unmatchedRight {
 		var bestLeftID uint
-		var bestDist float64 = math.MaxFloat64
+		var bestDist = math.MaxFloat64
 		for leftID := range leftPrimaryMatch {
 			if d, ok := dist[[2]uint{leftID, rightID}]; ok && d <= SplitCeiling && d < bestDist {
 				bestDist = d
@@ -260,7 +260,7 @@ func phase2SplitMerge(leftIDs, rightIDs []uint, dist map[[2]uint]float64, primar
 	// Merge: unmatched left → closest matched right
 	for leftID := range unmatchedLeft {
 		var bestRightID uint
-		var bestDist float64 = math.MaxFloat64
+		var bestDist = math.MaxFloat64
 		for rightID := range rightPrimaryMatch {
 			if d, ok := dist[[2]uint{leftID, rightID}]; ok && d <= SplitCeiling && d < bestDist {
 				bestDist = d
@@ -368,8 +368,12 @@ func RebuildBoardRelations(tx *gorm.DB, boardID uint) error {
 
 		leftIDs := make([]uint, len(left))
 		rightIDs := make([]uint, len(right))
-		for k, s := range left { leftIDs[k] = s.ID }
-		for k, s := range right { rightIDs[k] = s.ID }
+		for k, s := range left {
+			leftIDs[k] = s.ID
+		}
+		for k, s := range right {
+			rightIDs[k] = s.ID
+		}
 
 		// Phase 1
 		dist := buildDistMatrix(tx, left, right)

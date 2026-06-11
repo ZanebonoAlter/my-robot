@@ -20,7 +20,7 @@ func setupTaggerEmbeddingTestDB(t *testing.T) {
 
 	InitRepository(db)
 	t.Cleanup(func() {
-		
+
 	})
 
 	if err := Repo.DB().AutoMigrate(

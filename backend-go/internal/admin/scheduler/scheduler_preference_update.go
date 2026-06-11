@@ -7,11 +7,11 @@ import (
 	"sync"
 	"time"
 
-	"syntopica-backend/internal/platform/logging"
-	"syntopica-backend/internal/platform/tracing"
+	adminhandler "syntopica-backend/internal/admin/handler"
 	"syntopica-backend/internal/admin/repository"
 	adminservice "syntopica-backend/internal/admin/service"
-	adminhandler "syntopica-backend/internal/admin/handler"
+	"syntopica-backend/internal/platform/logging"
+	"syntopica-backend/internal/platform/tracing"
 )
 
 type PreferenceUpdateScheduler struct {
@@ -149,7 +149,6 @@ func (s *PreferenceUpdateScheduler) TriggerNow() map[string]interface{} {
 		"message":  "Preference update triggered",
 	}
 }
-
 
 func (s *PreferenceUpdateScheduler) GetStatus() adminhandler.SchedulerStatusResponse {
 	s.mu.Lock()

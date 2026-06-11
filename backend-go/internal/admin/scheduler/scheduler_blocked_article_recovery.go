@@ -6,10 +6,10 @@ import (
 	"sync"
 	"time"
 
+	"syntopica-backend/internal/admin/repository"
 	"syntopica-backend/internal/models"
 	"syntopica-backend/internal/platform/logging"
 	"syntopica-backend/internal/platform/tracing"
-	"syntopica-backend/internal/admin/repository"
 )
 
 const blockedArticleThreshold = 50

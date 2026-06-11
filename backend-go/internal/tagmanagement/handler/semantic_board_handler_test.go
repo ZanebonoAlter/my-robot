@@ -17,8 +17,8 @@ import (
 	"gorm.io/gorm"
 
 	"syntopica-backend/internal/models"
-	"syntopica-backend/internal/tagmanagement/service"
 	"syntopica-backend/internal/tagmanagement/repository"
+	"syntopica-backend/internal/tagmanagement/service"
 )
 
 type fakeSemanticBoardHandlerLLM struct {
@@ -41,12 +41,12 @@ func setupSemanticBoardHandlerRouter(t *testing.T) (*gorm.DB, *gin.Engine) {
 	semanticBoardLabelEmbedder = func(ctx context.Context, input string, mode service.AuxiliaryLabelEmbeddingMode) (string, []float64, error) {
 		return service.FloatsToPgVector([]float64{1, 0, 0}), []float64{1, 0, 0}, nil
 	}
-	 semanticBoardUpgradeLLMFactory = func() service.SemanticBoardUpgradeLLM {
+	semanticBoardUpgradeLLMFactory = func() service.SemanticBoardUpgradeLLM {
 		return fakeSemanticBoardHandlerLLM{suggestions: []service.SemanticBoardUpgradeSuggestion{{Decision: service.SemanticBoardUpgradeDecisionCreateNew, BoardLabel: "AI Board", Description: "AI stories", AuxiliaryLabelIDs: []uint{1}}}}
 	}
 	t.Cleanup(func() {
 		semanticBoardLabelEmbedder = service.DefaultAuxiliaryLabelEmbedder
-		 semanticBoardUpgradeLLMFactory = newSemanticBoardUpgradeLLM
+		semanticBoardUpgradeLLMFactory = newSemanticBoardUpgradeLLM
 	})
 
 	api := g.Group("/api")

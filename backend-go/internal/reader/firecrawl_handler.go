@@ -6,9 +6,9 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"syntopica-backend/internal/models"
+	"syntopica-backend/internal/platform/aisettings"
 	"syntopica-backend/internal/reader/service"
 	tagging "syntopica-backend/internal/tagmanagement"
-	"syntopica-backend/internal/platform/aisettings"
 )
 
 type SaveFirecrawlSettingsRequest struct {

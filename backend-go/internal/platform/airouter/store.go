@@ -27,12 +27,6 @@ const (
 	ProviderTypeOllama           string     = "ollama"
 )
 
-var defaultCapabilities = []Capability{
-	CapabilityArticleCompletion,
-	CapabilityTopicTagging,
-	CapabilityEmbedding,
-}
-
 var (
 	ErrRouteNotFound    = errors.New("ai route not found")
 	ErrNoProviders      = errors.New("ai route has no enabled providers")

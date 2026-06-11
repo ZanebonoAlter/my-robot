@@ -11,8 +11,8 @@ import (
 	"gorm.io/gorm"
 
 	"syntopica-backend/internal/models"
-	"syntopica-backend/internal/tagmanagement/service"
 	"syntopica-backend/internal/tagmanagement/repository"
+	"syntopica-backend/internal/tagmanagement/service"
 )
 
 var tagQueueStatusService *tagQueueStatusReader

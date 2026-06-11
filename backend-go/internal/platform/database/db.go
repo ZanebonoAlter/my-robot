@@ -17,7 +17,7 @@ var runDatabaseMigrations = RunMigrations
 
 func InitDB(cfg *config.Config) error {
 	gormCfg := &gorm.Config{
-		Logger:                                NewSlowLogger(200 * time.Millisecond),
+		Logger:                                   NewSlowLogger(200 * time.Millisecond),
 		DisableForeignKeyConstraintWhenMigrating: true,
 		NowFunc: func() time.Time {
 			return time.Now().In(models.ShanghaiTZ)
@@ -46,4 +46,3 @@ func InitDB(cfg *config.Config) error {
 	logging.Infof("Database initialized successfully")
 	return nil
 }
-

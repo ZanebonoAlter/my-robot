@@ -5,13 +5,20 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
-	"syntopica-backend/internal/runtimeinfo"
 	"syntopica-backend/internal/models"
-	"syntopica-backend/internal/reader/service"
 	"syntopica-backend/internal/platform/airouter"
+	"syntopica-backend/internal/reader/service"
 )
 
 var completionService *service.ContentCompletionService
+
+// schedulerLookup is set by StartRuntime to provide scheduler access.
+var schedulerLookup func(name string) interface{}
+
+// SetSchedulerLookup sets the function used to look up schedulers by name.
+func SetSchedulerLookup(fn func(name string) interface{}) {
+	schedulerLookup = fn
+}
 
 func InitContentCompletionHandler() {
 	completionService = service.NewContentCompletionService()
@@ -28,7 +35,6 @@ func loadCompletionAISettings() {
 		completionService.SetAICredentials(provider.BaseURL, provider.APIKey, provider.Model)
 	}
 }
-
 
 func CompleteArticleContent(c *gin.Context) {
 	id := c.Param("article_id")
@@ -161,11 +167,13 @@ func GetCompletionOverview(c *gin.Context) {
 		},
 	}
 
-	if scheduler, ok := runtimeinfo.ContentCompletionSchedulerInterface.(interface{ GetStatus() map[string]interface{} }); ok {
-		status := scheduler.GetStatus()
-		for _, key := range []string{"is_executing", "current_article", "last_processed", "next_run", "last_error", "database_state", "overview"} {
-			if value, exists := status[key]; exists {
-				data[key] = value
+	if schedulerLookup != nil {
+		if scheduler, ok := schedulerLookup("content_completion").(interface{ GetStatus() map[string]interface{} }); ok {
+			status := scheduler.GetStatus()
+			for _, key := range []string{"is_executing", "current_article", "last_processed", "next_run", "last_error", "database_state", "overview"} {
+				if value, exists := status[key]; exists {
+					data[key] = value
+				}
 			}
 		}
 	}

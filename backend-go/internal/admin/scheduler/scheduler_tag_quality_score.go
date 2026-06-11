@@ -10,12 +10,12 @@ import (
 
 	"github.com/robfig/cron/v3"
 
+	adminhandler "syntopica-backend/internal/admin/handler"
+	"syntopica-backend/internal/admin/repository"
 	"syntopica-backend/internal/models"
-	taggingextraction "syntopica-backend/internal/tagmanagement/extraction"
 	"syntopica-backend/internal/platform/logging"
 	"syntopica-backend/internal/platform/tracing"
-	"syntopica-backend/internal/admin/repository"
-	adminhandler "syntopica-backend/internal/admin/handler"
+	tagservice "syntopica-backend/internal/tagmanagement/service"
 )
 
 type TagQualityScoreScheduler struct {
@@ -27,12 +27,12 @@ type TagQualityScoreScheduler struct {
 }
 
 type TagQualityScoreRunSummary struct {
-	TriggerSource         string `json:"trigger_source"`
-	StartedAt             string `json:"started_at"`
-	FinishedAt            string `json:"finished_at"`
-	UpdatedCount          int    `json:"updated_count"`
-	OrphanAuxDeleted      int64  `json:"orphan_aux_deleted"`
-	Reason                string `json:"reason"`
+	TriggerSource    string `json:"trigger_source"`
+	StartedAt        string `json:"started_at"`
+	FinishedAt       string `json:"finished_at"`
+	UpdatedCount     int    `json:"updated_count"`
+	OrphanAuxDeleted int64  `json:"orphan_aux_deleted"`
+	Reason           string `json:"reason"`
 }
 
 func NewTagQualityScoreScheduler(checkInterval int) *TagQualityScoreScheduler {
@@ -220,7 +220,7 @@ func (s *TagQualityScoreScheduler) runComputeCycle(triggerSource string) {
 		updatedCount = 0
 	}
 
-	if err := taggingextraction.ComputeAllQualityScores(); err != nil {
+	if err := tagservice.ComputeAllQualityScores(); err != nil {
 		summary.FinishedAt = time.Now().Format(time.RFC3339)
 		summary.Reason = err.Error()
 		s.updateSchedulerStatus("failed", err.Error(), &startTime, summary)

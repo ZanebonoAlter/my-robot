@@ -10,15 +10,14 @@ import (
 	otelCodes "go.opentelemetry.io/otel/codes"
 	"gorm.io/gorm"
 	"syntopica-backend/internal/models"
-	tagging "syntopica-backend/internal/tagmanagement"
-	platformai "syntopica-backend/internal/platform/ai"
 	"syntopica-backend/internal/platform/airouter"
 	"syntopica-backend/internal/platform/tracing"
 	"syntopica-backend/internal/reader/repository"
+	tagging "syntopica-backend/internal/tagmanagement"
 )
 
 type ContentCompletionService struct {
-	aiService *platformai.AIService
+	aiService *airouter.AIService
 	router    *airouter.Router
 }
 
@@ -56,13 +55,13 @@ const (
 
 func NewContentCompletionService() *ContentCompletionService {
 	return &ContentCompletionService{
-		aiService: platformai.NewAIService("", "", ""),
+		aiService: airouter.NewAIService("", "", ""),
 		router:    airouter.NewRouter(),
 	}
 }
 
 func (s *ContentCompletionService) SetAICredentials(baseURL, apiKey, model string) {
-	s.aiService = platformai.NewAIService(baseURL, apiKey, model)
+	s.aiService = airouter.NewAIService(baseURL, apiKey, model)
 }
 
 func (s *ContentCompletionService) IsContentIncomplete(article *models.Article) bool {
@@ -205,8 +204,6 @@ func (s *ContentCompletionService) CompleteArticleWithMetadata(ctx context.Conte
 	return nil
 }
 
-
-
 func (s *ContentCompletionService) ListReadyArticles(limit int) ([]models.Article, error) {
 	var articles []models.Article
 	staleBefore := staleCompletionStartedBefore(currentCompletionTime())
@@ -229,8 +226,6 @@ func (s *ContentCompletionService) ListReadyArticles(limit int) ([]models.Articl
 
 	return articles, nil
 }
-
-
 
 func (s *ContentCompletionService) GetOverview() (*ContentCompletionOverview, error) {
 	overview := &ContentCompletionOverview{}
@@ -366,7 +361,7 @@ func (s *ContentCompletionService) hasRouteConfig() bool {
 	return err == nil && provider != nil && strings.TrimSpace(provider.APIKey) != ""
 }
 
-func (s *ContentCompletionService) summarizeContent(articleID uint, feedID uint, title, content string, metadata map[string]any) (*platformai.AISummaryResponse, error) {
+func (s *ContentCompletionService) summarizeContent(articleID uint, feedID uint, title, content string, metadata map[string]any) (*airouter.AISummaryResponse, error) {
 	requestMeta := map[string]any{
 		"article_id": articleID,
 		"feed_id":    feedID,
@@ -388,7 +383,7 @@ func (s *ContentCompletionService) summarizeContent(articleID uint, feedID uint,
 			Metadata:  requestMeta,
 		})
 		if err == nil {
-			return platformai.ParseSummaryMarkdown(result.Content), nil
+			return airouter.ParseSummaryMarkdown(result.Content), nil
 		}
 		if s.aiService == nil || s.aiService.BaseURL == "" || s.aiService.APIKey == "" {
 			return nil, err
@@ -459,7 +454,7 @@ func ToArticleRef(article models.Article) *ContentCompletionArticleRef {
 	}
 }
 
-func formatAISummary(summary *platformai.AISummaryResponse) string {
+func formatAISummary(summary *airouter.AISummaryResponse) string {
 	if summary == nil {
 		return ""
 	}

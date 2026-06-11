@@ -6,9 +6,9 @@ import (
 	"sync"
 	"time"
 
+	"syntopica-backend/internal/admin/repository"
 	"syntopica-backend/internal/platform/logging"
 	"syntopica-backend/internal/platform/tracing"
-	"syntopica-backend/internal/admin/repository"
 )
 
 const logCleanupRetentionDays = 7

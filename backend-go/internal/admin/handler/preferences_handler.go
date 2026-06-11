@@ -6,11 +6,10 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"syntopica-backend/internal/runtimeinfo"
-	"syntopica-backend/internal/models"
-	"syntopica-backend/internal/platform/logging"
 	"syntopica-backend/internal/admin/repository"
 	adminservice "syntopica-backend/internal/admin/service"
+	"syntopica-backend/internal/models"
+	"syntopica-backend/internal/platform/logging"
 )
 
 type TrackBehaviorRequest struct {
@@ -250,8 +249,8 @@ func GetUserPreferences(c *gin.Context) {
 }
 
 func TriggerPreferenceUpdate(c *gin.Context) {
-	if runtimeinfo.PreferenceUpdateSchedulerInterface != nil {
-		if scheduler, ok := runtimeinfo.PreferenceUpdateSchedulerInterface.(interface{ TriggerNow() map[string]interface{} }); ok {
+	if s, ok := Reg.Get("preference_update"); ok && s != nil {
+		if scheduler, ok := s.(interface{ TriggerNow() map[string]interface{} }); ok {
 			result := scheduler.TriggerNow()
 			message, _ := result["message"].(string)
 			accepted, _ := result["accepted"].(bool)

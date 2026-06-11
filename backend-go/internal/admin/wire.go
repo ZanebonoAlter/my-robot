@@ -21,30 +21,35 @@ func InitRepository(db *gorm.DB) {
 	repository.InitRepository(db)
 }
 
+// SetRegistry sets the global scheduler registry for handler access.
+func SetRegistry(reg handler.SchedulerRegistry) {
+	handler.Reg = reg
+}
+
 // ============================================================================
 // Handler re-exports (HTTP handlers registered in internal/app/router.go)
 // ============================================================================
 
 // AI provider / route / settings handlers
 var (
-	ListProviders     = handler.ListProviders
-	UpsertProvider    = handler.UpsertProvider
-	UpdateProvider    = handler.UpdateProvider
-	DeleteProvider    = handler.DeleteProvider
-	ListRoutes        = handler.ListRoutes
-	UpdateRoute       = handler.UpdateRoute
-	GetSettings       = handler.GetSettings
-	SaveSettings      = handler.SaveSettings
+	ListProviders  = handler.ListProviders
+	UpsertProvider = handler.UpsertProvider
+	UpdateProvider = handler.UpdateProvider
+	DeleteProvider = handler.DeleteProvider
+	ListRoutes     = handler.ListRoutes
+	UpdateRoute    = handler.UpdateRoute
+	GetSettings    = handler.GetSettings
+	SaveSettings   = handler.SaveSettings
 )
 
 // Scheduler handlers
 var (
-	GetSchedulersStatus    = handler.GetSchedulersStatus
-	GetSchedulerStatus     = handler.GetSchedulerStatus
-	TriggerScheduler       = handler.TriggerScheduler
-	ResetSchedulerStats    = handler.ResetSchedulerStats
+	GetSchedulersStatus     = handler.GetSchedulersStatus
+	GetSchedulerStatus      = handler.GetSchedulerStatus
+	TriggerScheduler        = handler.TriggerScheduler
+	ResetSchedulerStats     = handler.ResetSchedulerStats
 	UpdateSchedulerInterval = handler.UpdateSchedulerInterval
-	GetTasksStatus         = handler.GetTasksStatus
+	GetTasksStatus          = handler.GetTasksStatus
 )
 
 // Reading behavior handlers
@@ -61,7 +66,6 @@ var (
 )
 
 // Narrative route registration
-var RegisterNarrativeRoutes = handler.RegisterNarrativeRoutes
 
 // ============================================================================
 // Scheduler re-exports (types and constructors used in internal/app/runtime.go)
@@ -77,6 +81,7 @@ type (
 	DailyReportScheduler            = scheduler.DailyReportScheduler
 	LogCleanupScheduler             = scheduler.LogCleanupScheduler
 	AuxLabelCleanupScheduler        = scheduler.AuxLabelCleanupScheduler
+	SchedulerRegistry               = scheduler.Registry
 )
 
 var (
@@ -89,4 +94,5 @@ var (
 	NewDailyReportScheduler            = scheduler.NewDailyReportScheduler
 	NewLogCleanupScheduler             = scheduler.NewLogCleanupScheduler
 	NewAuxLabelCleanupScheduler        = scheduler.NewAuxLabelCleanupScheduler
+	NewSchedulerRegistry               = scheduler.NewRegistry
 )

@@ -5,10 +5,10 @@ import (
 	"testing"
 	"time"
 
-	"syntopica-backend/internal/models"
-	"syntopica-backend/internal/reader"
-	"syntopica-backend/internal/platform/database"
 	adminhandler "syntopica-backend/internal/admin/handler"
+	"syntopica-backend/internal/models"
+	"syntopica-backend/internal/platform/database"
+	"syntopica-backend/internal/reader"
 )
 
 func TestSchedulerStatusResponseDefinition(t *testing.T) {

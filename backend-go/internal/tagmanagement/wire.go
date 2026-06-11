@@ -28,31 +28,31 @@ func NewTagManagementRepository(db *gorm.DB) *repository.TagManagementRepository
 // ============================================================================
 
 type (
-	TopicTag              = service.TopicTag
-	AggregatedTopicTag    = service.AggregatedTopicTag
-	ExtractedTag          = service.ExtractedTag
-	ExtractionInput       = service.ExtractionInput
-	GraphNode             = service.GraphNode
-	GraphEdge             = service.GraphEdge
-	TopicArticleCard      = service.TopicArticleCard
-	TopicTagSummary       = service.TopicTagSummary
-	TopicHistoryPoint     = service.TopicHistoryPoint
-	TopicDetail           = service.TopicDetail
-	RelatedTag            = service.RelatedTag
-	TopicsByCategoryResult = service.TopicsByCategoryResult
-	PendingArticle        = service.PendingArticle
-	PendingArticlesResponse = service.PendingArticlesResponse
-	TopicGraphResponse    = service.TopicGraphResponse
-	GetTopicArticlesParams = service.GetTopicArticlesParams
-	TagResolutionRequest  = service.TagResolutionRequest
-	TagResolutionResponse = service.TagResolutionResponse
-	SimilarTagInfo        = service.SimilarTagInfo
-	SimilarityEdge        = service.SimilarityEdge
-	TagMatchResult        = service.TagMatchResult
-	TagCandidate          = service.TagCandidate
+	TopicTag                 = service.TopicTag
+	AggregatedTopicTag       = service.AggregatedTopicTag
+	ExtractedTag             = service.ExtractedTag
+	ExtractionInput          = service.ExtractionInput
+	GraphNode                = service.GraphNode
+	GraphEdge                = service.GraphEdge
+	TopicArticleCard         = service.TopicArticleCard
+	TopicTagSummary          = service.TopicTagSummary
+	TopicHistoryPoint        = service.TopicHistoryPoint
+	TopicDetail              = service.TopicDetail
+	RelatedTag               = service.RelatedTag
+	TopicsByCategoryResult   = service.TopicsByCategoryResult
+	PendingArticle           = service.PendingArticle
+	PendingArticlesResponse  = service.PendingArticlesResponse
+	TopicGraphResponse       = service.TopicGraphResponse
+	GetTopicArticlesParams   = service.GetTopicArticlesParams
+	TagResolutionRequest     = service.TagResolutionRequest
+	TagResolutionResponse    = service.TagResolutionResponse
+	SimilarTagInfo           = service.SimilarTagInfo
+	SimilarityEdge           = service.SimilarityEdge
+	TagMatchResult           = service.TagMatchResult
+	TagCandidate             = service.TagCandidate
 	SemanticBoardMatchResult = service.SemanticBoardMatchResult
-	AuxLabelGCMode        = service.AuxLabelGCMode
-	AuxLabelGCRequest     = service.AuxLabelGCRequest
+	AuxLabelGCMode           = service.AuxLabelGCMode
+	AuxLabelGCRequest        = service.AuxLabelGCRequest
 )
 
 const (
@@ -74,11 +74,11 @@ var (
 )
 
 var (
-	FeedCategoryName      = service.FeedCategoryName
-	GetArticleTags        = service.GetArticleTags
-	CleanupOrphanedTags   = service.CleanupOrphanedTags
-	NormalizeDisplayCategory = service.NormalizeDisplayCategory
-	RegisterVectorDimEnsurer = service.RegisterVectorDimEnsurer
+	FeedCategoryName          = service.FeedCategoryName
+	GetArticleTags            = service.GetArticleTags
+	CleanupOrphanedTags       = service.CleanupOrphanedTags
+	NormalizeDisplayCategory  = service.NormalizeDisplayCategory
+	RegisterVectorDimEnsurer  = service.RegisterVectorDimEnsurer
 	EnsureVectorDimensionOnce = service.EnsureVectorDimensionOnce
 )
 
@@ -100,11 +100,12 @@ var (
 // ============================================================================
 
 var (
-	RegisterTagManagementRoutes           = handler.RegisterTagManagementRoutes
-	RegisterTagMergePreviewRoutes         = handler.RegisterTagMergePreviewRoutes
-	RegisterTagQueueRoutes                = handler.RegisterTagQueueRoutes
-	RegisterSemanticBoardRoutes           = handler.RegisterSemanticBoardRoutes
-	RegisterEmbeddingConfigRoutes         = handler.RegisterEmbeddingConfigRoutes
-	RegisterEmbeddingQueueRoutes          = handler.RegisterEmbeddingQueueRoutes
-	RegisterMergeReembeddingQueueRoutes   = handler.RegisterMergeReembeddingQueueRoutes
+	RegisterWatchedTagsRoutes           = handler.RegisterWatchedTagsRoutes
+	RegisterTagManagementRoutes         = handler.RegisterTagManagementRoutes
+	RegisterTagMergePreviewRoutes       = handler.RegisterTagMergePreviewRoutes
+	RegisterTagQueueRoutes              = handler.RegisterTagQueueRoutes
+	RegisterSemanticBoardRoutes         = handler.RegisterSemanticBoardRoutes
+	RegisterEmbeddingConfigRoutes       = handler.RegisterEmbeddingConfigRoutes
+	RegisterEmbeddingQueueRoutes        = handler.RegisterEmbeddingQueueRoutes
+	RegisterMergeReembeddingQueueRoutes = handler.RegisterMergeReembeddingQueueRoutes
 )

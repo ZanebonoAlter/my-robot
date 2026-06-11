@@ -142,4 +142,3 @@ func loadAppliedMigrationVersions(db *gorm.DB) (map[string]bool, error) {
 
 	return applied, nil
 }
-

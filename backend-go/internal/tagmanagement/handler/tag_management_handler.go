@@ -6,8 +6,8 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"syntopica-backend/internal/models"
-	"syntopica-backend/internal/tagmanagement/service"
 	"syntopica-backend/internal/tagmanagement/repository"
+	"syntopica-backend/internal/tagmanagement/service"
 )
 
 func SearchTagsHandler(c *gin.Context) {

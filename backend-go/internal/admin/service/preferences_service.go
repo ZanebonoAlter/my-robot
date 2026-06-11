@@ -297,11 +297,3 @@ func (s *PreferenceService) calculatePreferenceScore(
 
 	return math.Max(0, math.Min(finalScore, 1.0))
 }
-
-
-
-
-
-
-
-

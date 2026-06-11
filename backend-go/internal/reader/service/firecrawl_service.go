@@ -141,5 +141,3 @@ func buildFirecrawlEndpoint(baseURL, path string) string {
 
 	return trimmedBaseURL + path
 }
-
-

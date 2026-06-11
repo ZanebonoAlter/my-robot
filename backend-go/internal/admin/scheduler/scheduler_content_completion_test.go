@@ -7,10 +7,10 @@ import (
 
 	"github.com/glebarez/sqlite"
 	"gorm.io/gorm"
-	content "syntopica-backend/internal/reader"
+	"syntopica-backend/internal/admin/repository"
 	"syntopica-backend/internal/models"
 	"syntopica-backend/internal/platform/database"
-	"syntopica-backend/internal/admin/repository"
+	content "syntopica-backend/internal/reader"
 )
 
 func setupSchedulersTestDB(t *testing.T) {

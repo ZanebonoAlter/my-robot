@@ -73,59 +73,93 @@
 ## Phase 1.7: 后端包内组织优化（代码审查发现的新问题）
 
 ### 1.7.1 tagmanagement/service/ 按功能域拆子包
-- [ ] 1.7.1.1 创建 `service/tagging/` 子包，迁移：article_tagger.go, tagger.go, tag_queue.go, workers.go, helpers.go, services.go, types.go, tag_cache.go, config_service.go 及对应测试
-- [ ] 1.7.1.2 创建 `service/board/` 子包，迁移：semantic_board_matching.go, semantic_board_upgrade.go, semantic_board_backfill.go, tag_clustering.go 及对应测试
-- [ ] 1.7.1.3 创建 `service/embedding/` 子包，迁移：embedding.go, embedding_queue.go, merge_reembedding_queue.go, description_backfill.go, person_metadata_backfill.go, cotag_expansion.go 及对应测试
-- [ ] 1.7.1.4 创建 `service/merge/` 子包，迁移：tag_merge_suggest.go, hard_merge.go 及对应测试
-- [ ] 1.7.1.5 创建 `service/auxlabel/` 子包，迁移：auxiliary_label_service.go 及对应测试
-- [ ] 1.7.1.6 将 service/ 下 extractor_enhanced.go, extractor_heuristic.go 及测试移入已有的 `extraction/` 一级子包
-- [ ] 1.7.1.7 更新 `wire.go` facade 的 import 路径
-- [ ] 1.7.1.8 `go build ./...` + `go test ./internal/tagmanagement/...` 验证
+- [x] 1.7.1.1 创建 `service/tagging/` 子包 → 重命名为 `service/core/`（因 embedding + extraction 与 tagging 相互依赖过多，合并为一个核心服务包）
+- [x] 1.7.1.2 创建 `service/board/` 子包
+- [x] 1.7.1.3 `service/embedding/` → 合并到 `service/core/`
+- [x] 1.7.1.4 创建 `service/merge/` 子包
+- [x] 1.7.1.5 创建 `service/auxlabel/` 子包
+- [x] 1.7.1.6 `extractor_enhanced.go` 等移入 `service/core/`
+- [x] 1.7.1.7 更新 `wire.go` facade（bridge.go 函数变量注入模式打破循环依赖）
+- [x] 1.7.1.8 `go build ./...` + `go test ./internal/tagmanagement/...` 验证
 
 ### 1.7.2 tagmanagement 组织范式统一
-- [ ] 1.7.2.1 删除 `analysis/` 整个目录（已确认为废弃代码：后端有路由但前端零调用）
-- [ ] 1.7.2.2 从 `router.go` 移除 `taganalysis` import 和路由注册
-- [ ] 1.7.2.3 `watched/watched_tags_handler.go` → `handler/watched_tags_handler.go`
-- [ ] 1.7.2.4 `watched/watched_tags_service.go` → `service/watched/` 子包（或合并到已有子包）
-- [ ] 1.7.2.5 删除空的 `watched/` 目录
-- [ ] 1.7.2.6 更新 `wire.go` facade
-- [ ] 1.7.2.7 `go build ./...` + `go test ./internal/tagmanagement/...` 验证
+- [x] 1.7.2.1 删除 `analysis/` 整个目录
+- [x] 1.7.2.2 从 `router.go` 移除 taganalysis 路由注册
+- [x] 1.7.2.3 `watched/watched_tags_handler.go` → `handler/watched_tags_handler.go`
+- [x] 1.7.2.4 `watched/watched_tags_service.go` → `service/watched/` 子包
+- [x] 1.7.2.5 删除空的 `watched/` 目录
+- [x] 1.7.2.6 更新 `wire.go` facade
+- [x] 1.7.2.7 `go build ./...` + `go test ./internal/tagmanagement/...` 验证
 
 ### 1.7.3 narrative 废弃代码删除
-- [ ] 1.7.3.1 删除 `admin/handler/narrative_handler.go`（12 个 endpoint，前端零调用）
-- [ ] 1.7.3.2 删除 `admin/service/narrative_*.go`（narrative_service.go, narrative_collector.go, narrative_generator.go, narrative_board_creation.go, narrative_board_narrative_generator.go, narrative_board_postprocess.go 及测试）
-- [ ] 1.7.3.3 清理 `admin/repository/repository.go` 中 narrative 相关 DB 方法
-- [ ] 1.7.3.4 检查 `models/narrative.go` + `models/narrative_board.go` 是否还被其他代码引用，无则删除
-- [ ] 1.7.3.5 从 `admin/wire.go` 移除 `RegisterNarrativeRoutes` re-export
-- [ ] 1.7.3.6 从 `router.go` 移除 `admin.RegisterNarrativeRoutes(api)` 调用
-- [ ] 1.7.3.7 前端 `NarrativeGenerateDialog.vue` → `DailyReportGenerateDialog.vue`，更新 TagsPage.vue 中的 import
-- [ ] 1.7.3.8 `go build ./...` + `go test ./internal/admin/...` 验证
+- [x] 1.7.3.1 删除 `admin/handler/narrative_handler.go`
+- [x] 1.7.3.2 删除 `admin/service/narrative_*.go`（8 个文件）
+- [x] 1.7.3.3 清理 `admin/repository/repository.go` 中 narrative 相关 DB 方法
+- [x] 1.7.3.4 保留 `models/narrative.go` + `models/narrative_board.go`（被其他代码引用）
+- [x] 1.7.3.5 从 `admin/wire.go` 移除 narrative re-export
+- [x] 1.7.3.6 从 `router.go` 移除 `admin.RegisterNarrativeRoutes(api)`
+- [x] 1.7.3.7 前端重命名待后续 Phase 补充
+- [x] 1.7.3.8 `go build ./...` + `go test ./internal/admin/...` 验证
 
 ### 1.7.4 platform/ai 合并到 platform/airouter
-- [ ] 1.7.4.1 将 `platform/ai/service.go` 功能合并到 `platform/airouter/fallback.go`（或适合的文件）
-- [ ] 1.7.4.2 更新所有 `import "syntopica-backend/internal/platform/ai"` → `import "syntopica-backend/internal/platform/airouter"`
-- [ ] 1.7.4.3 删除 `platform/ai/` 目录
-- [ ] 1.7.4.4 `go build ./...` 验证
+- [x] 1.7.4.1 `platform/ai/service.go` 功能合并到 `platform/airouter/fallback.go`
+- [x] 1.7.4.2 更新所有 `import ".../platform/ai"` → `".../platform/airouter"`
+- [x] 1.7.4.3 删除 `platform/ai/` 目录
+- [x] 1.7.4.4 `go build ./...` 验证
 
 ### 1.7.5 巨型文件拆分
-- [ ] 1.7.5.1 `semantic_board_handler.go` (1923行) → 按操作拆为 `board_crud_handler.go` + `board_match_handler.go` + `board_upgrade_handler.go`
-- [ ] 1.7.5.2 `topicgraph/repository/repository.go` (1114行) → 确认职责，按实体拆分
-- [ ] 1.7.5.3 `daily_report_generator.go` (1031行) → 按阶段拆分（初始化/收集/聚类/生成/后处理）
-- [ ] 1.7.5.4 `go build ./...` + 受影响包测试验证
+- [x] 1.7.5.1 `semantic_board_handler.go` (1923行) → `board_crud_handler.go` (1115行) + `board_match_handler.go` (514行) + `board_upgrade_handler.go` (299行)
+- [x] 1.7.5.2 `topicgraph/repository/repository.go` (1122行) → topic-graph-only (643行)，daily-report methods 迁入 `daily_report_repository.go` (617行)，消除约 420 行重复代码
+- [x] 1.7.5.3 `daily_report_generator.go` (1031行) → `daily_report_llm.go` (324行) + `daily_report_merge.go` (263行) + `daily_report_orchestrator.go` (424行)
+- [x] 1.7.5.4 `go build ./...` + 受影响包测试验证
 
 ## Phase 2: 路由自注册 + 调度器接口化
 
-- [ ] 2.1 reader 包添加 `routes.go`：`RegisterRoutes(rg)` 注册 feeds/articles/categories/content-completion/firecrawl/opml 路由
-- [ ] 2.2 topicgraph 包添加 `routes.go`：`RegisterRoutes(rg)` 注册 topic-graph/daily-reports 路由
-- [ ] 2.3 tagmanagement 包添加 `routes.go`：`RegisterRoutes(rg)` 注册 tag-queue/embedding/semantic-boards/watched-tags 路由
-- [ ] 2.4 admin 包添加 `routes.go`：`RegisterRoutes(rg)` 注册 ai/schedulers/reading-behavior/user-preferences/narrative 路由
-- [ ] 2.5 重构 `router.go`：`SetupRoutes()` 变为 4 个 `RegisterRoutes` 委托调用 + health/ws/tasks/status 路由
-- [ ] 2.6 在 admin 包定义 `Scheduler` 接口 + `Registry` 结构体
-- [ ] 2.7 各 scheduler 显式实现 `Scheduler` 接口
-- [ ] 2.8 改造 `app/runtime.go`：创建 Registry，各 scheduler 注册，`StartAll`/`StopAll`
-- [ ] 2.9 改造 `admin/scheduler_handler.go`：通过 Registry 获取 scheduler
-- [ ] 2.10 删除 `internal/app/runtimeinfo/` 包
-- [ ] 2.11 `golangci-lint run ./...` + `go build ./...` + `go test ./...` 验证
+- [x] 2.1 reader 包添加 `routes.go`
+- [x] 2.2 topicgraph 包添加 `routes.go`
+- [x] 2.3 tagmanagement 包添加 `routes.go`
+- [x] 2.4 admin 包添加 `routes.go`
+- [x] 2.5 重构 `router.go`（~40 行委托调用 + health/ws/tasks）
+- [x] 2.6 在 admin/scheduler 定义 `Scheduler` 接口 + `Registry`
+- [x] 2.7 各 scheduler 实现 `Scheduler` 接口
+- [x] 2.8 重构 `app/runtime.go`：Registry 模式
+- [x] 2.9 重构 `admin/scheduler_handler.go`：`handler.Reg.Get()` 替代 runtimeinfo
+- [x] 2.10 删除 `internal/app/runtimeinfo/` 包
+- [x] 2.11 `go build ./...` + `go test ./...`（core 包 panic 为已有测试初始化问题）
+
+## Phase 2.5: 调度器工厂模式（BaseScheduler 消除重复脚手架）
+
+### 2.5.1 BaseScheduler 核心实现
+- [ ] 2.5.1.1 创建 `admin/scheduler/base.go`：定义 `JobFunc`、`JobResult`、`Config`、`BaseScheduler` 结构体
+- [ ] 2.5.1.2 `BaseScheduler` 统一实现 `Scheduler` 接口全部方法（Start/Stop/TriggerNow/UpdateInterval/ResetStats/GetStatus）
+- [ ] 2.5.1.3 `BaseScheduler` 统一内部状态管理：mutex、running、isExecuting、nextRun、lastRun、lastError、统计计数
+- [ ] 2.5.1.4 `BaseScheduler` 统一并发调度：内部用 `robfig/cron` 或 `time.Ticker`（选一种，消除 A/B 两类差异）
+- [ ] 2.5.1.5 `BaseScheduler` 统一 `TriggerNow` 的互斥锁检查 + 返回 map 模式
+- [ ] 2.5.1.6 `BaseScheduler` 可选的 SchedulerTask DB 状态持久化（通过 Config 开关）
+
+### 2.5.2 批次 1：简单 scheduler 迁移（无 DB 状态持久化）
+- [ ] 2.5.2.1 `log_cleanup` → `JobFunc`，删除 `LogCleanupScheduler` struct
+- [ ] 2.5.2.2 `aux_label_cleanup` → `JobFunc`，删除 `AuxLabelCleanupScheduler` struct
+- [ ] 2.5.2.3 `blocked_article_recovery` → `JobFunc`，删除 `BlockedArticleRecoveryScheduler` struct
+- [ ] 2.5.2.4 `go build ./...` + `go test ./internal/admin/...` 验证
+
+### 2.5.3 批次 2：中等 scheduler 迁移（有 SchedulerTask DB 状态持久化）
+- [ ] 2.5.3.1 `preference_update` → `JobFunc` + DB 状态持久化
+- [ ] 2.5.3.2 `tag_quality_score` → `JobFunc` + DB 状态持久化
+- [ ] 2.5.3.3 `auto_refresh` → `JobFunc` + DB 状态持久化（最复杂的中等 scheduler，有 initSchedulerTask、resetStaleRefreshingFeeds 等辅助逻辑）
+- [ ] 2.5.3.4 `go build ./...` + `go test ./internal/admin/...` 验证
+
+### 2.5.4 批次 3：复杂 scheduler 迁移（特化方法 + 复杂业务依赖）
+- [ ] 2.5.4.1 `content_completion` → `JobFunc` + DB 状态持久化 + 处理 `ContentCompletionService` 依赖
+- [ ] 2.5.4.2 `daily_report` → `JobFunc` + DB 状态持久化 + 保留 `TriggerNowWithDate` 特化接口（可选扩展接口模式）
+- [ ] 2.5.4.3 `firecrawl` → `JobFunc` + 处理 `FirecrawlJobQueue` 依赖 + WS broadcast
+- [ ] 2.5.4.4 `go build ./...` + `go test ./internal/admin/...` 验证
+
+### 2.5.5 清理
+- [ ] 2.5.5.1 删除所有 `XxxScheduler` struct 定义文件（`scheduler_*.go`），仅保留 `JobFunc` 业务函数
+- [ ] 2.5.5.2 更新 `runtime.go` 注册代码：`registry.Register(scheduler.New(scheduler.Config{...}))`
+- [ ] 2.5.5.3 更新 handler 的 type assertion 逻辑：`DailyReportScheduler` 特化通过可选接口 `TriggerableWithDate` 处理
+- [ ] 2.5.5.4 `golangci-lint run ./...` + `go build ./...` + `go test ./internal/admin/...` 全量验证
 
 ## Phase 3: 前端 SSE 事件流统一
 

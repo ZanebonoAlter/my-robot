@@ -324,10 +324,10 @@ const flowSteps = computed<FlowStep[]>(() => {
 .match-detail-panel {
   height: 100%;
   min-height: 420px;
-  border-left: 1px solid rgba(255, 255, 255, 0.08);
+  border-left: 1px solid var(--color-border-medium);
   border-radius: 18px;
-  background: rgba(12, 18, 27, 0.86);
-  color: rgba(255, 255, 255, 0.76);
+  background: var(--color-bg-elevated);
+  color: var(--color-text-secondary);
   overflow: hidden;
   backdrop-filter: blur(18px);
 }
@@ -338,20 +338,20 @@ const flowSteps = computed<FlowStep[]>(() => {
   justify-content: space-between;
   gap: 0.75rem;
   padding: 1rem;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  border-bottom: 1px solid var(--color-border-subtle);
 }
 
 .match-detail-eyebrow {
   margin: 0 0 0.2rem;
   font-size: 0.65rem;
-  color: rgba(240, 138, 75, 0.75);
+  color: var(--color-accent);
 }
 
 .match-detail-header h3 {
   margin: 0;
   font-family: serif;
   font-size: 1rem;
-  color: rgba(255, 255, 255, 0.88);
+  color: var(--color-text-primary);
 }
 
 .match-detail-close {
@@ -360,10 +360,10 @@ const flowSteps = computed<FlowStep[]>(() => {
   justify-content: center;
   width: 28px;
   height: 28px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  border: 1px solid var(--color-border-medium);
   border-radius: 8px;
-  background: rgba(255, 255, 255, 0.04);
-  color: rgba(255, 255, 255, 0.45);
+  background: var(--color-bg-hover);
+  color: var(--color-text-muted);
   cursor: pointer;
 }
 
@@ -382,7 +382,7 @@ const flowSteps = computed<FlowStep[]>(() => {
 .match-detail-skeleton {
   height: 42px;
   border-radius: 10px;
-  background: rgba(255, 255, 255, 0.05);
+  background: var(--color-bg-hover);
   animation: pulse 1.4s ease-in-out infinite;
 }
 
@@ -395,7 +395,7 @@ const flowSteps = computed<FlowStep[]>(() => {
   display: flex;
   align-items: center;
   gap: 0.45rem;
-  color: rgba(255, 170, 140, 0.86);
+  color: var(--color-accent);
   font-size: 0.78rem;
 }
 
@@ -410,7 +410,7 @@ const flowSteps = computed<FlowStep[]>(() => {
   padding: 0.2rem 0.55rem;
   border: 1px solid;
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.04);
+  background: var(--color-bg-hover);
   font-size: 0.72rem;
   font-weight: 600;
 }
@@ -420,7 +420,7 @@ const flowSteps = computed<FlowStep[]>(() => {
   flex-wrap: wrap;
   gap: 0.4rem;
   font-size: 0.68rem;
-  color: rgba(255, 255, 255, 0.42);
+  color: var(--color-text-muted);
 }
 
 .match-detail-section {
@@ -430,14 +430,14 @@ const flowSteps = computed<FlowStep[]>(() => {
 .match-detail-section h4 {
   margin: 0 0 0.55rem;
   font-size: 0.72rem;
-  color: rgba(255, 220, 200, 0.78);
+  color: var(--color-accent);
 }
 
 .formula-card {
   padding: 0.65rem;
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  border: 1px solid var(--color-border-subtle);
   border-radius: 12px;
-  background: rgba(255, 255, 255, 0.035);
+  background: var(--color-bg-hover);
   font-size: 0.78rem;
 }
 
@@ -455,7 +455,7 @@ const flowSteps = computed<FlowStep[]>(() => {
   gap: 0.45rem;
   padding: 0.45rem 0.5rem;
   border-radius: 9px;
-  background: rgba(255, 255, 255, 0.035);
+  background: var(--color-bg-hover);
   font-size: 0.72rem;
 }
 
@@ -465,7 +465,7 @@ const flowSteps = computed<FlowStep[]>(() => {
 }
 
 .direct-hit-arrow {
-  color: rgba(255, 255, 255, 0.28);
+  color: var(--color-text-muted);
 }
 
 .pair-labels {
@@ -484,24 +484,24 @@ const flowSteps = computed<FlowStep[]>(() => {
 }
 
 .pair-labels small {
-  color: rgba(255, 255, 255, 0.38);
+  color: var(--color-text-muted);
 }
 
 .pair-row strong {
-  color: rgba(255, 255, 255, 0.75);
+  color: var(--color-text-secondary);
   font-size: 0.72rem;
 }
 
 .match-detail-empty {
   margin: 0;
-  color: rgba(255, 255, 255, 0.35);
+  color: var(--color-text-muted);
   font-size: 0.72rem;
 }
 
 .match-detail-config {
   margin-top: 1rem;
   font-size: 0.7rem;
-  color: rgba(255, 255, 255, 0.45);
+  color: var(--color-text-muted);
 }
 
 .match-detail-config summary {
@@ -530,7 +530,7 @@ const flowSteps = computed<FlowStep[]>(() => {
 .flow-hint {
   margin: 0 0 0.6rem;
   font-size: 0.63rem;
-  color: rgba(255, 255, 255, 0.32);
+  color: var(--color-text-muted);
 }
 
 .flow-steps {
@@ -547,14 +547,14 @@ const flowSteps = computed<FlowStep[]>(() => {
 .flow-connector-line {
   width: 1px;
   height: 100%;
-  background: rgba(255, 255, 255, 0.1);
+  background: var(--color-border-medium);
 }
 
 .flow-node {
   padding: 0.5rem 0.6rem;
   border-radius: 8px;
-  border: 1px solid rgba(255, 255, 255, 0.06);
-  background: rgba(255, 255, 255, 0.025);
+  border: 1px solid var(--color-border-subtle);
+  background: var(--color-bg-hover);
 }
 
 .flow-node--matched {
@@ -576,7 +576,7 @@ const flowSteps = computed<FlowStep[]>(() => {
 
 .flow-node-head strong {
   font-size: 0.7rem;
-  color: rgba(255, 255, 255, 0.8);
+  color: var(--color-text-secondary);
 }
 
 .flow-badge {
@@ -590,7 +590,7 @@ const flowSteps = computed<FlowStep[]>(() => {
 }
 
 .flow-node-desc {
-  color: rgba(255, 255, 255, 0.4);
+  color: var(--color-text-muted);
   font-size: 0.63rem;
   line-height: 1.45;
   margin: 0 0 0.25rem;
@@ -601,7 +601,7 @@ const flowSteps = computed<FlowStep[]>(() => {
   align-items: flex-start;
   gap: 0.28rem;
   font-size: 0.65rem;
-  color: rgba(255, 255, 255, 0.52);
+  color: var(--color-text-muted);
   line-height: 1.4;
 }
 
@@ -614,6 +614,6 @@ const flowSteps = computed<FlowStep[]>(() => {
 }
 
 .flow-node-result--failed {
-  color: rgba(255, 255, 255, 0.45);
+  color: var(--color-text-muted);
 }
 </style>

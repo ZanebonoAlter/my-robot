@@ -83,9 +83,9 @@ function handleClick(keyword: Keyword) {
   gap: 0.25rem;
   min-height: 2.25rem;
   border-radius: 9999px;
-  border: 1px solid rgba(141, 173, 214, 0.2);
-  background: linear-gradient(180deg, rgba(14, 21, 30, 0.82), rgba(9, 14, 21, 0.94));
-  color: rgba(241, 246, 250, 0.9);
+  border: 1px solid var(--color-border-medium);
+  background: linear-gradient(180deg, var(--color-bg-sunken), var(--color-bg-base));
+  color: var(--color-text-primary);
   cursor: pointer;
   transition: all 0.2s ease;
   user-select: none;
@@ -96,13 +96,13 @@ function handleClick(keyword: Keyword) {
 }
 
 .keyword-tag:hover {
-  border-color: rgba(240, 138, 75, 0.34);
-  background: linear-gradient(180deg, rgba(22, 33, 47, 0.92), rgba(12, 18, 27, 0.98));
+  border-color: var(--color-accent);
+  background: linear-gradient(180deg, var(--color-bg-elevated), var(--color-bg-sunken));
   transform: translateY(-1px);
 }
 
 .keyword-tag:focus-visible {
-  outline: 2px solid rgba(240, 138, 75, 0.4);
+  outline: 2px solid var(--color-accent);
   outline-offset: 2px;
 }
 
@@ -122,7 +122,7 @@ function handleClick(keyword: Keyword) {
 .keyword-count {
   font-size: 0.7em;
   opacity: 0.78;
-  background: rgba(255, 255, 255, 0.08);
+  background: var(--color-bg-hover);
   padding: 0.1rem 0.4rem;
   border-radius: 999px;
 }

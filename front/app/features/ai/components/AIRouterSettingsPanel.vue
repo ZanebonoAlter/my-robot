@@ -95,10 +95,10 @@ const {
               <input v-model.number="primaryProviderForm.time_range" type="number" min="60" step="60" class="input w-full text-sm">
             </div>
           </div>
-          <label class="flex items-center gap-2.5 cursor-pointer select-none">
-            <input v-model="primaryProviderForm.enable_thinking" type="checkbox" class="rounded">
+          <div class="flex items-center gap-2.5">
+            <AppToggle v-model="primaryProviderForm.enable_thinking" />
             <span class="text-sm text-gray-700">启用 Thinking（推理模型的思考过程，会消耗额外 token）</span>
-          </label>
+          </div>
         </div>
       </div>
 

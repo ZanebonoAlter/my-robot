@@ -187,15 +187,15 @@ function openArticle(article: TimelineAggregationArticle) {
   gap: 0.72rem;
   text-align: left;
   border-radius: 1.15rem;
-  border: 1px solid rgba(141, 173, 214, 0.14);
-  background: linear-gradient(180deg, rgba(20, 30, 42, 0.88), rgba(10, 16, 24, 0.94));
+  border: 1px solid var(--color-border-medium);
+  background: linear-gradient(180deg, var(--color-bg-elevated), var(--color-bg-sunken));
   padding: 1rem;
   box-shadow: 0 16px 36px rgba(0, 0, 0, 0.18);
 }
 
 .timeline-item__body--active {
-  border-color: rgba(240, 138, 75, 0.34);
-  background: linear-gradient(180deg, rgba(28, 39, 53, 0.94), rgba(13, 20, 29, 0.98));
+  border-color: var(--color-accent);
+  background: linear-gradient(180deg, var(--color-bg-elevated), var(--color-bg-sunken));
   box-shadow: 0 20px 44px rgba(0, 0, 0, 0.24);
 }
 
@@ -229,8 +229,8 @@ function openArticle(article: TimelineAggregationArticle) {
   align-items: center;
   gap: 0.4rem;
   border-radius: 999px;
-  border: 1px solid rgba(240, 138, 75, 0.2);
-  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--color-accent);
+  background: var(--color-accent-subtle);
   padding: 0.34rem 0.68rem;
   color: rgba(255, 231, 213, 0.88);
   font-size: 0.73rem;
@@ -239,8 +239,8 @@ function openArticle(article: TimelineAggregationArticle) {
 
 .timeline-item__article-btn:hover,
 .timeline-item__article-btn:focus-visible {
-  border-color: rgba(240, 138, 75, 0.4);
-  background: rgba(240, 138, 75, 0.1);
+  border-color: var(--color-accent);
+  background: var(--color-accent-subtle);
 }
 
 .timeline-item__article-title {
@@ -251,7 +251,7 @@ function openArticle(article: TimelineAggregationArticle) {
 }
 
 .timeline-item__article-feed {
-  color: rgba(214, 225, 235, 0.5);
+  color: var(--color-text-muted);
   font-size: 0.68rem;
 }
 
@@ -269,15 +269,15 @@ function openArticle(article: TimelineAggregationArticle) {
   border-radius: 999px;
   padding: 0.28rem 0.62rem;
   color: rgba(214, 225, 236, 0.68);
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: var(--color-bg-hover);
+  border: 1px solid var(--color-border-medium);
   font-size: 0.74rem;
 }
 
 .timeline-item__expand:hover,
 .timeline-item__expand:focus-visible {
   color: rgba(248, 252, 255, 0.92);
-  border-color: rgba(240, 138, 75, 0.28);
+  border-color: var(--color-accent);
 }
 
 @media (max-width: 640px) {

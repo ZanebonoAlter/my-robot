@@ -211,7 +211,7 @@ function handleToggleWatch(e: Event) {
   border-radius: 10px;
   transition: background 0.12s ease;
 }
-.th-row:hover { background: rgba(255, 255, 255, 0.04); }
+.th-row:hover { background: var(--color-bg-hover); }
 
 .th-toggle {
   display: flex;
@@ -221,15 +221,15 @@ function handleToggleWatch(e: Event) {
   height: 20px;
   border: none;
   background: none;
-  color: rgba(255, 255, 255, 0.4);
+  color: var(--color-text-muted);
   cursor: pointer;
   border-radius: 4px;
   transition: color 0.12s ease;
 }
-.th-toggle:hover { color: rgba(255, 255, 255, 0.7); }
+.th-toggle:hover { color: var(--color-text-secondary); }
 .th-toggle--blank { visibility: hidden; }
 
-.th-cat-icon { color: rgba(255, 255, 255, 0.35); flex-shrink: 0; }
+.th-cat-icon { color: var(--color-text-muted); flex-shrink: 0; }
 
 .th-watch-btn {
   display: flex;
@@ -240,7 +240,7 @@ function handleToggleWatch(e: Event) {
   border: none;
   border-radius: 4px;
   background: none;
-  color: rgba(255, 255, 255, 0.2);
+  color: var(--color-text-muted);
   cursor: pointer;
   flex-shrink: 0;
   transition: color 0.12s ease, background 0.12s ease;
@@ -252,7 +252,7 @@ function handleToggleWatch(e: Event) {
 .th-label {
   border: none;
   background: none;
-  color: rgba(255, 255, 255, 0.82);
+  color: var(--color-text-primary);
   font-size: 0.82rem;
   cursor: pointer;
   text-align: left;
@@ -260,7 +260,7 @@ function handleToggleWatch(e: Event) {
   border-radius: 6px;
   transition: color 0.12s ease, background 0.12s ease;
 }
-.th-label:hover { color: white; background: rgba(255, 255, 255, 0.06); }
+.th-label:hover { color: var(--color-text-primary); background: var(--color-bg-hover); }
 
 .th-inline-edit {
   display: flex;
@@ -272,9 +272,9 @@ function handleToggleWatch(e: Event) {
 
 .th-inline-input {
   flex: 1;
-  border: 1px solid rgba(255, 255, 255, 0.2);
+  border: 1px solid var(--color-border-medium);
   border-radius: 6px;
-  background: rgba(0, 0, 0, 0.3);
+  background: var(--color-input-bg);
   color: white;
   font-size: 0.82rem;
   padding: 0.2rem 0.5rem;
@@ -294,7 +294,7 @@ function handleToggleWatch(e: Event) {
   color: rgba(255, 255, 255, 0.6);
   cursor: pointer;
 }
-.th-action-btn:hover { background: rgba(255, 255, 255, 0.12); color: white; }
+.th-action-btn:hover { background: var(--color-bg-hover); color: var(--color-text-primary); }
 .th-action-btn--save { color: rgba(16, 185, 129, 0.9); }
 
 .th-badge {
@@ -305,8 +305,8 @@ function handleToggleWatch(e: Event) {
   height: 18px;
   padding: 0 5px;
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.08);
-  color: rgba(255, 255, 255, 0.5);
+  background: var(--color-bg-hover);
+  color: var(--color-text-muted);
   font-size: 0.65rem;
   font-weight: 500;
 }
@@ -325,7 +325,8 @@ function handleToggleWatch(e: Event) {
   border: none;
   border-radius: 6px;
   background: none;
-  color: rgba(255, 255, 255, 0.2);
+  background: var(--color-bg-hover);
+  color: var(--color-text-muted);
   cursor: pointer;
   opacity: 0;
   transition: opacity 0.12s ease, color 0.12s ease;
@@ -342,7 +343,7 @@ function handleToggleWatch(e: Event) {
   border: none;
   border-radius: 6px;
   background: none;
-  color: rgba(255, 255, 255, 0.2);
+  color: var(--color-text-muted);
   cursor: pointer;
   opacity: 0;
   transition: opacity 0.12s ease, color 0.12s ease;
@@ -351,7 +352,7 @@ function handleToggleWatch(e: Event) {
 .th-reassign-btn:hover { color: rgba(99, 102, 241, 0.9); background: rgba(99, 102, 241, 0.12); }
 
 .th-children {
-  border-left: 1px solid rgba(255, 255, 255, 0.06);
+  border-left: 1px solid var(--color-border-subtle);
   margin-left: 18px;
 }
 </style>

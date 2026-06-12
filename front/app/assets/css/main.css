@@ -1,5 +1,65 @@
 @import "tailwindcss";
 
+/* === Layer 1: Primitive Tokens === */
+:root {
+  /* Slate (蓝灰 — 替代旧 ink-*, 主文字/边框色系) */
+  --raw-slate-50:  #f0f4f8;
+  --raw-slate-100: #d9e2ec;
+  --raw-slate-200: #bcccdc;
+  --raw-slate-300: #9fb3c8;
+  --raw-slate-400: #829ab1;
+  --raw-slate-500: #627d98;
+  --raw-slate-600: #486581;
+  --raw-slate-700: #334e68;
+  --raw-slate-800: #243b53;
+  --raw-slate-900: #102a43;
+
+  /* Stone (暖灰 — 替代旧 paper-*, 背景色系) */
+  --raw-stone-50:  #faf7f2;
+  --raw-stone-100: #f5f0e6;
+  --raw-stone-200: #e8dfd1;
+  --raw-stone-300: #d4c9b8;
+  --raw-stone-400: #b8a994;
+  --raw-stone-500: #9a8a74;
+  --raw-stone-600: #7d6e5b;
+  --raw-stone-700: #5f5344;
+  --raw-stone-800: #43392f;
+  --raw-stone-900: #2a221b;
+
+  /* Red (红色 — 替代旧 print-red-*, 强调色系) */
+  --raw-red-50:  #fef2f2;
+  --raw-red-100: #fde6e6;
+  --raw-red-200: #f9c5c5;
+  --raw-red-300: #f29a9a;
+  --raw-red-400: #e87070;
+  --raw-red-500: #d94a4a;
+  --raw-red-600: #c12f2f;
+  --raw-red-700: #a41f1f;
+  --raw-red-800: #8a1818;
+  --raw-red-900: #721515;
+
+  /* Amber (琥珀 — dark 主题强调色) */
+  --raw-amber-400: #f0a24b;
+  --raw-amber-500: #d4883c;
+
+  /* Blue (蓝色 — 辅助色) */
+  --raw-blue-400: #63b3ed;
+  --raw-blue-500: #3f7cff;
+
+  /* Teal (青色 — 成功色系) */
+  --raw-teal-500: #2d8a7a;
+  --raw-teal-600: #3d8a4a;
+
+  /* Indigo (靛蓝 — 信息色系) */
+  --raw-indigo-500: #4a5d8a;
+
+  /* Semantic (语义色, 不随主题变) */
+  --raw-success: #3d8a4a;
+  --raw-warning: #c4883c;
+  --raw-error:   #c42f3c;
+  --raw-info:    #3d7a8a;
+}
+
 @theme {
   /* Editorial Magazine Theme - 杂志报纸风格 */
 
@@ -52,13 +112,6 @@
   --color-error: #c42f3c;
   --color-info: #3d7a8a;
 
-  /* Background variables */
-  --color-bg-primary: #faf7f2;
-  --color-bg-secondary: #f5f0e6;
-  --color-bg-tertiary: #e8dfd1;
-  --color-bg-card: rgba(255, 255, 255, 0.6);
-  --color-bg-hover: rgba(255, 255, 255, 0.85);
-
   /* Border variables */
   --color-border-subtle: rgba(26, 26, 26, 0.08);
   --color-border-medium: rgba(26, 26, 26, 0.15);
@@ -69,12 +122,94 @@
   --shadow-medium: 0 2px 8px rgba(26, 26, 26, 0.08);
   --shadow-strong: 0 4px 16px rgba(26, 26, 26, 0.12);
   --shadow-print: 0 1px 0 rgba(26, 26, 26, 0.1), 0 2px 4px rgba(26, 26, 26, 0.06);
+}
 
-  /* Text variables */
-  --text-primary: #1a1a1a;
-  --text-secondary: #5a5a5a;
-  --text-muted: #8a8a8a;
-  --text-inverted: #faf7f2;
+/* === Layer 2: Semantic Tokens (Editorial — 印刷厂暖白) === */
+[data-theme="editorial"] {
+  --color-bg-base:     var(--raw-stone-50);
+  --color-bg-elevated: var(--raw-stone-100);
+  --color-bg-sunken:   var(--raw-stone-200);
+  --color-bg-overlay:  rgba(26, 26, 26, 0.4);
+  --color-bg-hover:    rgba(255, 255, 255, 0.85);
+  --color-bg-active:   rgba(255, 255, 255, 0.6);
+
+  --color-text-primary:   #1a1a1a;
+  --color-text-secondary: #5a5a5a;
+  --color-text-muted:     #8a8a8a;
+  --color-text-inverted:  #faf7f2;
+
+  --color-border-subtle: rgba(26, 26, 26, 0.08);
+  --color-border-medium: rgba(26, 26, 26, 0.15);
+  --color-border-strong: rgba(26, 26, 26, 0.25);
+
+  --color-accent:       var(--raw-red-500);
+  --color-accent-hover: var(--raw-red-600);
+  --color-accent-subtle: rgba(217, 74, 74, 0.08);
+
+  --color-secondary: var(--raw-amber-500);
+  --color-tertiary:  var(--raw-blue-400);
+
+  --shadow-subtle: 0 1px 3px rgba(26, 26, 26, 0.06);
+  --shadow-medium: 0 2px 8px rgba(26, 26, 26, 0.08);
+  --shadow-strong: 0 4px 16px rgba(26, 26, 26, 0.12);
+  --shadow-print:  0 1px 0 rgba(26, 26, 26, 0.1), 0 2px 4px rgba(26, 26, 26, 0.06);
+
+  --color-success: var(--raw-success);
+  --color-warning: var(--raw-warning);
+  --color-error:   var(--raw-error);
+  --color-info:    var(--raw-info);
+
+  --color-input-bg:    rgba(255, 255, 255, 0.6);
+  --color-input-border: rgba(26, 26, 26, 0.12);
+  --color-input-focus:  var(--raw-red-500);
+
+  --color-dialog-bg:      rgba(255, 255, 255, 0.95);
+  --color-dialog-header:  transparent;
+  --color-dialog-divider: rgba(26, 26, 26, 0.06);
+}
+
+/* === Layer 2: Semantic Tokens (Dark — 调查风格深色) === */
+[data-theme="dark"] {
+  --color-bg-base:     #080c12;
+  --color-bg-elevated: rgba(17, 27, 38, 0.98);
+  --color-bg-sunken:   #0e161d;
+  --color-bg-overlay:  rgba(8, 12, 18, 0.75);
+  --color-bg-hover:    rgba(255, 255, 255, 0.06);
+  --color-bg-active:   rgba(255, 255, 255, 0.08);
+
+  --color-text-primary:   rgba(255, 255, 255, 0.9);
+  --color-text-secondary: rgba(255, 255, 255, 0.6);
+  --color-text-muted:     rgba(255, 255, 255, 0.35);
+  --color-text-inverted:  #1a1a1a;
+
+  --color-border-subtle: rgba(255, 255, 255, 0.06);
+  --color-border-medium: rgba(255, 255, 255, 0.10);
+  --color-border-strong: rgba(255, 255, 255, 0.18);
+
+  --color-accent:       rgba(240, 138, 75, 0.85);
+  --color-accent-hover: rgba(240, 138, 75, 1);
+  --color-accent-subtle: rgba(240, 138, 75, 0.08);
+
+  --color-secondary: rgba(99, 179, 237, 0.85);
+  --color-tertiary:  rgba(63, 124, 255, 0.85);
+
+  --shadow-subtle: 0 1px 3px rgba(0, 0, 0, 0.3);
+  --shadow-medium: 0 2px 8px rgba(0, 0, 0, 0.4);
+  --shadow-strong: 0 4px 16px rgba(0, 0, 0, 0.5);
+  --shadow-print:  0 1px 0 rgba(0, 0, 0, 0.2), 0 2px 4px rgba(0, 0, 0, 0.3);
+
+  --color-success: var(--raw-success);
+  --color-warning: var(--raw-warning);
+  --color-error:   var(--raw-error);
+  --color-info:    var(--raw-info);
+
+  --color-input-bg:    rgba(255, 255, 255, 0.04);
+  --color-input-border: rgba(255, 255, 255, 0.10);
+  --color-input-focus:  rgba(240, 138, 75, 0.85);
+
+  --color-dialog-bg:      rgba(17, 27, 38, 0.98);
+  --color-dialog-header:  rgba(255, 255, 255, 0.03);
+  --color-dialog-divider: rgba(255, 255, 255, 0.06);
 }
 
 /* Editorial Card Styles - 杂志卡片风格 */
@@ -94,7 +229,7 @@
   left: 0;
   right: 0;
   height: 3px;
-  background: linear-gradient(90deg, var(--color-ink-500) 0%, var(--color-print-red-500) 100%);
+  background: linear-gradient(90deg, var(--color-accent) 0%, var(--color-accent) 100%);
   opacity: 0;
   transition: opacity 0.25s ease;
 }
@@ -129,7 +264,7 @@
 }
 
 .article-preview:hover {
-  border-left-color: var(--color-ink-500);
+  border-left-color: var(--color-accent);
   background: linear-gradient(
     to bottom,
     rgba(255, 255, 255, 0.85) 0%,
@@ -138,7 +273,7 @@
 }
 
 .article-preview.unread {
-  border-left-color: var(--color-print-red-500);
+  border-left-color: var(--color-accent);
   background: linear-gradient(
     to bottom,
     rgba(255, 255, 255, 0.8) 0%,
@@ -151,7 +286,7 @@
 }
 
 .article-preview.favorite {
-  border-left-color: var(--color-accent-amber);
+  border-left-color: var(--raw-amber-500);
   background: linear-gradient(
     to bottom,
     rgba(255, 255, 255, 0.9) 0%,
@@ -161,7 +296,7 @@
 
 /* Primary Button - 印刷风格主按钮 */
 .btn-primary {
-  background: var(--color-ink-500);
+  background: var(--color-accent);
   color: white;
   font-weight: 600;
   border-radius: 0.5rem;
@@ -174,7 +309,7 @@
 }
 
 .btn-primary:hover {
-  background: var(--color-ink-600);
+  background: var(--color-accent-hover);
   box-shadow: var(--shadow-strong);
   transform: translateY(-1px);
 }
@@ -194,18 +329,18 @@
 /* Secondary Button - 次要按钮 */
 .btn-secondary {
   background: transparent;
-  color: var(--color-ink-500);
+  color: var(--color-accent);
   font-weight: 600;
   border-radius: 0.5rem;
   padding: 0.625rem 1.25rem;
-  border: 2px solid var(--color-ink-300);
+  border: 2px solid var(--color-border-medium);
   transition: all 0.2s ease;
 }
 
 .btn-secondary:hover {
-  background: var(--color-ink-50);
-  border-color: var(--color-ink-400);
-  color: var(--color-ink-600);
+  background: var(--color-bg-hover);
+  border-color: var(--color-input-focus);
+  color: var(--color-accent-hover);
 }
 
 .btn-secondary:active {
@@ -214,7 +349,7 @@
 
 /* Accent Button - 强调按钮（印刷红色） */
 .btn-accent {
-  background: var(--color-print-red-500);
+  background: var(--color-accent);
   color: white;
   font-weight: 600;
   border-radius: 0.5rem;
@@ -225,7 +360,7 @@
 }
 
 .btn-accent:hover {
-  background: var(--color-print-red-600);
+  background: var(--color-accent-hover);
   box-shadow: var(--shadow-strong);
   transform: translateY(-1px);
 }
@@ -237,7 +372,7 @@
 /* Ghost Button - 幽灵按钮 */
 .btn-ghost {
   background: transparent;
-  color: var(--color-ink-medium);
+  color: var(--color-text-secondary);
   font-weight: 500;
   border-radius: 0.5rem;
   padding: 0.5rem 1rem;
@@ -248,7 +383,7 @@
 .btn-ghost:hover {
   background: rgba(26, 26, 26, 0.04);
   border-color: var(--color-border-medium);
-  color: var(--color-ink-dark);
+  color: var(--color-text-primary);
 }
 
 .btn-ghost:active {
@@ -263,17 +398,17 @@
   padding: 0.75rem 1rem;
   transition: all 0.2s ease;
   outline: none;
-  color: var(--color-ink-black);
+  color: var(--color-text-primary);
 }
 
 .input:focus {
-  border-color: var(--color-ink-400);
+  border-color: var(--color-input-focus);
   box-shadow: 0 0 0 3px rgba(61, 124, 150, 0.1);
   background: rgba(255, 255, 255, 0.95);
 }
 
 .input::placeholder {
-  color: var(--color-ink-light);
+  color: var(--color-text-muted);
 }
 
 .input-with-icon {
@@ -288,13 +423,13 @@
   padding: 0.75rem 1rem;
   transition: all 0.2s ease;
   outline: none;
-  color: var(--color-ink-black);
+  color: var(--color-text-primary);
   resize: vertical;
   min-height: 100px;
 }
 
 .textarea:focus {
-  border-color: var(--color-ink-400);
+  border-color: var(--color-input-focus);
   box-shadow: 0 0 0 3px rgba(61, 124, 150, 0.1);
   background: rgba(255, 255, 255, 0.95);
 }
@@ -306,22 +441,22 @@
 }
 
 ::-webkit-scrollbar-track {
-  background: var(--color-paper-warm);
+  background: var(--color-bg-sunken);
   border-left: 1px solid var(--color-border-subtle);
 }
 
 ::-webkit-scrollbar-thumb {
-  background: var(--color-ink-300);
+  background: var(--color-border-medium);
   border-radius: 2px;
   transition: background 0.2s ease;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: var(--color-ink-400);
+  background: var(--raw-slate-400);
 }
 
 ::-webkit-scrollbar-corner {
-  background: var(--color-paper-warm);
+  background: var(--color-bg-sunken);
 }
 
 /* Subtle scrollbar for content areas */
@@ -355,11 +490,11 @@
 .editorial-bg {
   background: linear-gradient(
     125deg,
-    var(--color-paper-ivory) 0%,
-    var(--color-paper-cream) 25%,
-    var(--color-paper-ivory) 50%,
-    var(--color-paper-warm) 75%,
-    var(--color-paper-ivory) 100%
+    var(--color-bg-base) 0%,
+    var(--color-bg-elevated) 25%,
+    var(--color-bg-base) 50%,
+    var(--color-bg-sunken) 75%,
+    var(--color-bg-base) 100%
   );
   background-size: 400% 400%;
   animation: paper-drift 30s ease infinite;
@@ -398,7 +533,7 @@
   left: 0;
   width: 100%;
   height: 2px;
-  background: var(--color-ink-500);
+  background: var(--color-accent);
   transform: scaleX(0);
   transform-origin: right;
   transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
@@ -445,7 +580,7 @@
 
 /* Focus visible - 键盘焦点可见 */
 .focus-visible-ring:focus-visible {
-  outline: 2px solid var(--color-ink-400);
+  outline: 2px solid var(--color-input-focus);
   outline-offset: 2px;
 }
 
@@ -462,11 +597,11 @@
 .loading-shimmer {
   background: linear-gradient(
     90deg,
-    var(--color-paper-cream) 0%,
-    var(--color-paper-warm) 25%,
-    var(--color-paper-sand) 50%,
-    var(--color-paper-warm) 75%,
-    var(--color-paper-cream) 100%
+    var(--color-bg-elevated) 0%,
+    var(--color-bg-sunken) 25%,
+    var(--color-bg-sunken) 50%,
+    var(--color-bg-sunken) 75%,
+    var(--color-bg-elevated) 100%
   );
   background-size: 200% 100%;
   animation: shimmer 1.5s ease-in-out infinite;
@@ -534,7 +669,7 @@
   font-weight: 500;
   font-size: 0.875rem;
   line-height: 1.4;
-  color: var(--color-ink-medium);
+  color: var(--color-text-secondary);
 }
 
 /* Divider - 分隔线 */

@@ -245,7 +245,7 @@ const emit = defineEmits<{
   <div class="article-body">
     <div v-if="displayContent" class="markdown-body markdown-article" v-html="displayContent" />
     <div v-else class="empty-content">
-      <button class="btn btn-primary mt-4" @click="openOriginal">前往原文阅读</button>
+      <AppButton variant="primary" class="mt-4" @click="openOriginal">前往原文阅读</AppButton>
     </div>
   </div>
 </template>

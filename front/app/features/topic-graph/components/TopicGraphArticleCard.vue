@@ -51,7 +51,7 @@ const emit = defineEmits<{
   display: block;
   border-radius: 1.25rem;
   border: 1px solid var(--topic-border, rgba(123, 154, 192, 0.18));
-  background: linear-gradient(180deg, rgba(18, 27, 38, 0.96), rgba(10, 16, 24, 0.98));
+  background: linear-gradient(180deg, var(--color-bg-elevated), var(--color-bg-sunken));
   padding: 1rem 1rem 1.05rem;
   text-decoration: none;
   box-shadow:
@@ -76,14 +76,14 @@ const emit = defineEmits<{
 .topic-related-card:hover,
 .topic-related-card:focus-visible {
   transform: translateY(-2px);
-  border-color: rgba(240, 138, 75, 0.36);
-  background: linear-gradient(180deg, rgba(24, 35, 48, 0.98), rgba(12, 19, 28, 1));
+  border-color: var(--color-accent);
+  background: linear-gradient(180deg, var(--color-bg-elevated), var(--color-bg-sunken));
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.05),
     0 24px 48px rgba(3, 8, 14, 0.36);
 }
 .topic-related-card:focus-visible {
-  outline: 2px solid rgba(240, 138, 75, 0.45);
+  outline: 2px solid var(--color-accent);
   outline-offset: 2px;
 }
 .topic-related-card__meta,
@@ -107,9 +107,9 @@ const emit = defineEmits<{
   margin-top: 0.55rem;
   font-size: 0.78rem;
   line-height: 1.5;
-  color: rgba(255, 227, 203, 0.86);
+  color: var(--color-text-primary);
 }
 .topic-related-card__note--soft {
-  color: rgba(173, 193, 214, 0.72);
+  color: var(--color-text-muted);
 }
 </style>

@@ -41,7 +41,7 @@ const emit = defineEmits<{
       <div class="text-center text-gray-400">
         <Icon icon="mdi:web-off" width="64" height="64" class="mb-4 mx-auto" />
         <p>无法加载网页</p>
-        <button class="btn btn-primary mt-4" @click="emit('open-original')">在新窗口打开</button>
+        <AppButton variant="primary" class="mt-4" @click="emit('open-original')">在新窗口打开</AppButton>
       </div>
     </div>
   </div>

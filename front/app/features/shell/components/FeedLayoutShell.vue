@@ -142,21 +142,27 @@ async function hydrateSelectedArticle(article: Article) {
   try {
     const response = await articlesApi.getArticle(Number(article.id))
     if (response.success && response.data && selectedArticle.value?.id === article.id) {
-      selectedArticle.value = normalizeArticle(response.data as unknown as ArticlePayload)
+      const hydrated = normalizeArticle(response.data as unknown as ArticlePayload)
+      // 保留乐观更新（hydrate 期间可能已调用 markAsRead）
+      selectedArticle.value = {
+        ...hydrated,
+        read: selectedArticle.value.read || hydrated.read,
+      }
     }
   } catch (error) {
     console.error('Failed to load article detail:', error)
   }
 }
 
-function handleArticleClick(article: Article) {
+async function handleArticleClick(article: Article) {
   void hydrateSelectedArticle(article)
   if (!article.read) {
     updateArticle(article.id, { read: true })
     if (selectedArticle.value) {
       selectedArticle.value = { ...selectedArticle.value, read: true }
     }
-    articlesStore.markAsRead(article.id)
+    // 直接调 API 标记已读（store.markAsRead 搜的是空数组）
+    await articlesApi.updateArticle(Number(article.id), { read: true })
   }
 }
 
@@ -506,21 +512,21 @@ import '~/components/FeedLayout.css'
     </div>
 
     <!-- 添加订阅源对话框 -->
-    <DialogAddFeedDialog
+    <AddFeedDialog
       v-if="showAddFeedDialog"
       @close="showAddFeedDialog = false"
       @added="() => {}"
     />
 
     <!-- 添加分类对话框 -->
-    <DialogAddCategoryDialog
+    <AddCategoryDialog
       v-if="showAddCategoryDialog"
       @close="showAddCategoryDialog = false"
       @added="() => {}"
     />
 
     <!-- 编辑分类对话框 -->
-    <DialogEditCategoryDialog
+    <EditCategoryDialog
       v-if="editCategoryId && editingCategory"
       :category="editingCategory"
       @close="editCategoryId = null"
@@ -528,7 +534,7 @@ import '~/components/FeedLayout.css'
     />
 
     <!-- 编辑订阅源对话框 -->
-    <DialogEditFeedDialog
+    <EditFeedDialog
       v-if="editFeedId && editingFeed"
       :feed="editingFeed"
       @close="editFeedId = null"
@@ -537,14 +543,14 @@ import '~/components/FeedLayout.css'
     />
 
     <!-- 导入 OPML 对话框 -->
-    <DialogImportOpmlDialog
+    <ImportOpmlDialog
       v-if="showImportDialog"
       @close="showImportDialog = false"
       @imported="() => {}"
     />
 
     <!-- 全局设置对话框 -->
-    <DialogGlobalSettingsDialog :show="showGlobalSettings" @update:show="showGlobalSettings = $event" />
+    <GlobalSettingsDialog :show="showGlobalSettings" @update:show="showGlobalSettings = $event" />
   </div>
 </template>
 

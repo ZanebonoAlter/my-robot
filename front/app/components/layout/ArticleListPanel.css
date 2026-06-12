@@ -2,13 +2,9 @@
   display: flex;
   flex-direction: column;
   width: 20rem;
-  background: linear-gradient(
-    to bottom,
-    rgba(255, 255, 255, 0.6) 0%,
-    rgba(250, 247, 242, 0.5) 100%
-  );
+  background: var(--color-bg-elevated);
   backdrop-filter: blur(10px);
-  border-right: 1px solid rgba(26, 26, 26, 0.06);
+  border-right: 1px solid var(--color-border-subtle);
   flex-shrink: 0;
   margin: 0.5rem 0 0.5rem 0;
   border-radius: 0.75rem;
@@ -17,8 +13,8 @@
 
 .panel-header {
   padding: 0.75rem 1rem;
-  background: rgba(255, 255, 255, 0.5);
-  border-bottom: 1px solid rgba(26, 26, 26, 0.06);
+  background: var(--color-bg-hover);
+  border-bottom: 1px solid var(--color-border-subtle);
   flex-shrink: 0;
 }
 
@@ -30,12 +26,12 @@
 
 .header-title {
   font-weight: 600;
-  color: var(--color-ink-dark);
+  color: var(--color-text-primary);
 }
 
 .article-count {
   font-size: 0.875rem;
-  color: var(--color-ink-medium);
+  color: var(--color-text-secondary);
 }
 
 .panel-content {
@@ -70,10 +66,8 @@
   height: 100%;
   min-height: 12rem;
   padding: 1rem;
-  color: var(--color-ink-light);
+  color: var(--color-text-muted);
 }
-
-
 
 /* Filter Bar - 筛选栏 */
 .filter-bar {
@@ -81,8 +75,8 @@
   align-items: center;
   justify-content: space-between;
   padding: 10px 16px;
-  background: rgba(255, 255, 255, 0.4);
-  border-bottom: 1px solid rgba(26, 26, 26, 0.05);
+  background: var(--color-bg-hover);
+  border-bottom: 1px solid var(--color-border-subtle);
 }
 
 .filter-left {
@@ -94,8 +88,8 @@
 /* Date Filter Panel - 日期筛选展开面板 */
 .date-filter-panel {
   padding: 16px;
-  background: rgba(250, 247, 242, 0.8);
-  border-bottom: 1px solid rgba(26, 26, 26, 0.05);
+  background: var(--color-bg-hover);
+  border-bottom: 1px solid var(--color-border-subtle);
   display: flex;
   flex-direction: column;
   gap: 16px;
@@ -111,7 +105,7 @@
 .row-label {
   font-size: 11px;
   font-weight: 600;
-  color: var(--color-ink-medium);
+  color: var(--color-text-secondary);
   text-transform: uppercase;
   letter-spacing: 0.5px;
   white-space: nowrap;
@@ -127,27 +121,27 @@
 
 .quick-option-btn {
   padding: 8px 16px;
-  background: rgba(255, 255, 255, 0.7);
-  border: 1px solid rgba(26, 26, 26, 0.1);
+  background: var(--color-bg-hover);
+  border: 1px solid var(--color-border-subtle);
   border-radius: 0.5rem;
   font-size: 12px;
   font-weight: 500;
-  color: var(--color-ink-dark);
+  color: var(--color-text-primary);
   cursor: pointer;
   transition: all 0.2s ease;
 }
 
 .quick-option-btn:hover {
-  background: rgba(59, 107, 135, 0.1);
-  border-color: var(--color-ink-300);
-  color: var(--color-ink-600);
+  background: var(--color-accent-subtle);
+  border-color: var(--color-border-medium);
+  color: var(--color-accent);
 }
 
 .quick-option-btn.active {
-  background: var(--color-ink-500);
+  background: var(--color-accent);
   color: white;
   border-color: transparent;
-  box-shadow: 0 2px 8px rgba(59, 107, 135, 0.25);
+  box-shadow: var(--shadow-subtle);
 }
 
 /* Custom Date Row - 自定义日期行 */
@@ -169,16 +163,16 @@
 
 .input-label {
   font-size: 13px;
-  color: var(--color-ink-dark);
+  color: var(--color-text-primary);
   font-weight: 500;
 }
 
 .date-input {
   padding: 8px 12px;
   font-size: 13px;
-  color: var(--color-ink-black);
-  background: white;
-  border: 1px solid rgba(26, 26, 26, 0.12);
+  color: var(--color-text-primary);
+  background: var(--color-input-bg);
+  border: 1px solid var(--color-input-border);
   border-radius: 0.5rem;
   transition: all 0.2s ease;
   min-width: 120px;
@@ -186,8 +180,8 @@
 
 .date-input:focus {
   outline: none;
-  border-color: var(--color-ink-400);
-  box-shadow: 0 0 0 3px rgba(59, 107, 135, 0.08);
+  border-color: var(--color-input-focus);
+  box-shadow: 0 0 0 3px var(--color-accent-subtle);
 }
 
 /* Panel Actions - 面板操作按钮 */
@@ -196,28 +190,28 @@
   justify-content: flex-end;
   gap: 10px;
   padding-top: 12px;
-  border-top: 1px solid rgba(26, 26, 26, 0.05);
+  border-top: 1px solid var(--color-border-subtle);
 }
 
 .btn-secondary-sm {
   padding: 8px 16px;
-  background: rgba(255, 255, 255, 0.7);
-  border: 1px solid rgba(26, 26, 26, 0.12);
+  background: var(--color-bg-hover);
+  border: 1px solid var(--color-border-subtle);
   border-radius: 0.5rem;
   font-size: 12px;
   font-weight: 500;
-  color: var(--color-ink-dark);
+  color: var(--color-text-primary);
   cursor: pointer;
   transition: all 0.2s ease;
 }
 
 .btn-secondary-sm:hover {
-  background: rgba(26, 26, 26, 0.04);
+  background: var(--color-bg-active);
 }
 
 .btn-primary-sm {
   padding: 8px 16px;
-  background: var(--color-ink-500);
+  background: var(--color-accent);
   border: none;
   border-radius: 0.5rem;
   font-size: 12px;
@@ -225,11 +219,11 @@
   color: white;
   cursor: pointer;
   transition: all 0.2s ease;
-  box-shadow: 0 2px 8px rgba(59, 107, 135, 0.25);
+  box-shadow: var(--shadow-subtle);
 }
 
 .btn-primary-sm:hover {
-  box-shadow: 0 4px 12px rgba(59, 107, 135, 0.35);
+  box-shadow: var(--shadow-medium);
   transform: translateY(-1px);
 }
 
@@ -239,27 +233,27 @@
   align-items: center;
   gap: 6px;
   padding: 8px 14px;
-  background: rgba(255, 255, 255, 0.7);
-  border: 1px solid rgba(26, 26, 26, 0.12);
+  background: var(--color-bg-hover);
+  border: 1px solid var(--color-border-subtle);
   border-radius: 0.5rem;
   font-size: 13px;
   font-weight: 500;
-  color: var(--color-ink-dark);
+  color: var(--color-text-primary);
   cursor: pointer;
   transition: all 0.2s ease;
 }
 
 .filter-toggle-btn:hover {
-  background: rgba(59, 107, 135, 0.1);
-  border-color: var(--color-ink-300);
-  color: var(--color-ink-600);
+  background: var(--color-accent-subtle);
+  border-color: var(--color-border-medium);
+  color: var(--color-accent);
 }
 
 .filter-toggle-btn.active {
-  background: var(--color-ink-500);
+  background: var(--color-accent);
   color: white;
   border-color: transparent;
-  box-shadow: 0 2px 8px rgba(59, 107, 135, 0.25);
+  box-shadow: var(--shadow-subtle);
 }
 
 .toggle-icon {

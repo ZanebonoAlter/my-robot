@@ -335,15 +335,15 @@ function paginationRange(current: number, total: number): (number | 'ellipsis')[
 .alp-title {
   font-size: 0.78rem;
   font-weight: 600;
-  color: rgba(255, 255, 255, 0.7);
+  color: var(--color-text-secondary);
 }
 
 .alp-count {
   font-size: 0.65rem;
-  color: rgba(255, 255, 255, 0.3);
+  color: var(--color-text-muted);
   padding: 0.05rem 0.4rem;
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.06);
+  background: var(--color-bg-hover);
 }
 
 .alp-clusters {
@@ -351,7 +351,7 @@ function paginationRange(current: number, total: number): (number | 'ellipsis')[
   flex-wrap: wrap;
   gap: 0.35rem;
   padding-bottom: 0.5rem;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  border-bottom: 1px solid var(--color-border-subtle);
 }
 
 .alp-cluster-chip {
@@ -360,9 +360,9 @@ function paginationRange(current: number, total: number): (number | 'ellipsis')[
   gap: 0.3rem;
   padding: 0.25rem 0.55rem;
   border-radius: 8px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  border: 1px solid var(--color-border-medium);
   background: none;
-  color: rgba(255, 255, 255, 0.5);
+  color: var(--color-text-muted);
   font-size: 0.7rem;
   cursor: pointer;
   transition: all 0.12s ease;
@@ -370,15 +370,15 @@ function paginationRange(current: number, total: number): (number | 'ellipsis')[
 }
 
 .alp-cluster-chip:hover {
-  border-color: rgba(255, 255, 255, 0.18);
-  color: rgba(255, 255, 255, 0.7);
-  background: rgba(255, 255, 255, 0.03);
+  border-color: var(--color-border-strong);
+  color: var(--color-text-secondary);
+  background: var(--color-bg-hover);
 }
 
 .alp-cluster-chip--active {
-  border-color: rgba(240, 138, 75, 0.45);
-  color: rgba(255, 220, 200, 0.85);
-  background: rgba(240, 138, 75, 0.1);
+  border-color: var(--color-accent);
+  color: var(--color-accent);
+  background: var(--color-accent-subtle);
 }
 
 .alp-cluster-count {
@@ -393,28 +393,28 @@ function paginationRange(current: number, total: number): (number | 'ellipsis')[
 
 .alp-search {
   flex: 1;
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  border: 1px solid var(--color-border-medium);
   border-radius: 10px;
-  background: rgba(0, 0, 0, 0.2);
-  color: rgba(255, 255, 255, 0.8);
+  background: var(--color-input-bg);
+  color: var(--color-text-secondary);
   font-size: 0.75rem;
   padding: 0.4rem 0.7rem;
   outline: none;
 }
 
 .alp-search::placeholder {
-  color: rgba(255, 255, 255, 0.25);
+  color: var(--color-text-muted);
 }
 
 .alp-search:focus {
-  border-color: rgba(240, 138, 75, 0.4);
+  border-color: var(--color-accent);
 }
 
 .alp-select {
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  border: 1px solid var(--color-border-medium);
   border-radius: 10px;
-  background: rgba(0, 0, 0, 0.2);
-  color: rgba(255, 255, 255, 0.7);
+  background: var(--color-input-bg);
+  color: var(--color-text-secondary);
   font-size: 0.75rem;
   padding: 0.4rem 0.6rem;
   outline: none;
@@ -429,7 +429,7 @@ function paginationRange(current: number, total: number): (number | 'ellipsis')[
 .alp-skeleton-row {
   height: 36px;
   border-radius: 10px;
-  background: rgba(255, 255, 255, 0.03);
+  background: var(--color-bg-hover);
   animation: alpPulse 1.5s ease-in-out infinite;
 }
 
@@ -444,7 +444,7 @@ function paginationRange(current: number, total: number): (number | 'ellipsis')[
   align-items: center;
   gap: 0.4rem;
   padding: 2rem 0;
-  color: rgba(255, 255, 255, 0.25);
+  color: var(--color-text-muted);
   font-size: 0.75rem;
 }
 
@@ -465,7 +465,7 @@ function paginationRange(current: number, total: number): (number | 'ellipsis')[
 }
 
 .alp-row:hover {
-  background: rgba(255, 255, 255, 0.04);
+  background: var(--color-bg-hover);
 }
 
 .alp-row--disabled {
@@ -486,20 +486,20 @@ function paginationRange(current: number, total: number): (number | 'ellipsis')[
 
 .alp-row-label {
   font-size: 0.78rem;
-  color: rgba(255, 255, 255, 0.8);
+  color: var(--color-text-secondary);
 }
 
 .alp-row-aliases {
   font-size: 0.65rem;
-  color: rgba(255, 255, 255, 0.35);
+  color: var(--color-text-muted);
 }
 
 .alp-row-ref {
   font-size: 0.6rem;
-  color: rgba(255, 255, 255, 0.3);
+  color: var(--color-text-muted);
   padding: 0.05rem 0.35rem;
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.06);
+  background: var(--color-bg-hover);
 }
 
 .alp-row-actions {
@@ -518,28 +518,28 @@ function paginationRange(current: number, total: number): (number | 'ellipsis')[
   border-radius: 6px;
   border: none;
   background: none;
-  color: rgba(255, 255, 255, 0.35);
+  color: var(--color-text-muted);
   font-size: 0.65rem;
   cursor: pointer;
   transition: all 0.12s ease;
 }
 
 .alp-row-btn:hover {
-  background: rgba(255, 255, 255, 0.08);
-  color: rgba(255, 255, 255, 0.7);
+  background: var(--color-bg-hover);
+  color: var(--color-text-secondary);
 }
 
 .alp-row-btn--primary {
-  color: rgba(240, 138, 75, 0.8);
+  color: var(--color-accent);
 }
 
 .alp-row-btn--primary:hover {
-  background: rgba(240, 138, 75, 0.12);
+  background: var(--color-accent-subtle);
 }
 
 .alp-row-self {
   font-size: 0.6rem;
-  color: rgba(255, 255, 255, 0.25);
+  color: var(--color-text-muted);
   padding: 0.2rem 0.4rem;
 }
 
@@ -549,10 +549,10 @@ function paginationRange(current: number, total: number): (number | 'ellipsis')[
   justify-content: space-between;
   padding: 0.5rem 0.6rem;
   border-radius: 10px;
-  background: rgba(240, 138, 75, 0.08);
-  border: 1px solid rgba(240, 138, 75, 0.15);
+  background: var(--color-accent-subtle);
+  border: 1px solid var(--color-accent);
   font-size: 0.72rem;
-  color: rgba(255, 220, 200, 0.8);
+  color: var(--color-accent);
 }
 
 .alp-page-nav {
@@ -565,7 +565,7 @@ function paginationRange(current: number, total: number): (number | 'ellipsis')[
 
 .alp-page-nav--bottom {
   padding-top: 0.5rem;
-  border-top: 1px solid rgba(255, 255, 255, 0.05);
+  border-top: 1px solid var(--color-border-subtle);
   margin-top: 0.25rem;
 }
 
@@ -577,24 +577,24 @@ function paginationRange(current: number, total: number): (number | 'ellipsis')[
   height: 26px;
   padding: 0 0.3rem;
   border-radius: 6px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  border: 1px solid var(--color-border-medium);
   background: none;
-  color: rgba(255, 255, 255, 0.45);
+  color: var(--color-text-muted);
   font-size: 0.7rem;
   cursor: pointer;
   transition: all 0.12s ease;
 }
 
 .alp-page-btn:hover:not(:disabled) {
-  border-color: rgba(255, 255, 255, 0.18);
-  color: rgba(255, 255, 255, 0.7);
-  background: rgba(255, 255, 255, 0.03);
+  border-color: var(--color-border-strong);
+  color: var(--color-text-secondary);
+  background: var(--color-bg-hover);
 }
 
 .alp-page-btn--active {
-  border-color: rgba(240, 138, 75, 0.45);
-  color: rgba(255, 220, 200, 0.85);
-  background: rgba(240, 138, 75, 0.1);
+  border-color: var(--color-accent);
+  color: var(--color-accent);
+  background: var(--color-accent-subtle);
 }
 
 .alp-page-btn:disabled {
@@ -603,7 +603,7 @@ function paginationRange(current: number, total: number): (number | 'ellipsis')[
 }
 
 .alp-page-ellipsis {
-  color: rgba(255, 255, 255, 0.3);
+  color: var(--color-text-muted);
   font-size: 0.7rem;
   padding: 0 0.15rem;
 }

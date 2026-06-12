@@ -157,7 +157,8 @@ class ApiClient {
    */
   buildQueryParams(params: unknown): string {
     if (params && typeof params === 'object') {
-      return buildQueryString(params as Record<string, unknown>)
+      const qs = buildQueryString(params as Record<string, unknown>)
+      return qs.startsWith('?') ? qs.slice(1) : qs
     }
     return ''
   }

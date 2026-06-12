@@ -162,22 +162,22 @@ const categoryLabels: Record<TopicCategory, string> = {
   font-size: 0.75rem;
   padding: 0.28rem 0.65rem;
   border-radius: 999px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  border: 1px solid var(--color-border-medium);
   background: transparent;
-  color: rgba(255, 255, 255, 0.4);
+  color: var(--color-text-muted);
   cursor: pointer;
   transition: all 0.2s ease;
   font-weight: 500;
 
   &:hover {
-    border-color: rgba(240, 138, 75, 0.4);
-    color: rgba(240, 138, 75, 0.8);
+    border-color: var(--color-accent);
+    color: var(--color-accent);
   }
 
   &--active {
-    background: rgba(240, 138, 75, 0.15);
-    border-color: rgba(240, 138, 75, 0.5);
-    color: rgba(240, 165, 105, 0.95);
+    background: var(--color-accent-subtle);
+    border-color: var(--color-accent);
+    color: var(--color-text-primary);
   }
 }
 

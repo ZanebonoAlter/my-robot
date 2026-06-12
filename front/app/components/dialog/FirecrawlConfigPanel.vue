@@ -33,15 +33,7 @@ onMounted(() => {
           <h3 class="font-semibold text-gray-800">Firecrawl 爬虫</h3>
           <p class="text-sm text-gray-500 mt-0.5">使用 Firecrawl 获取文章正文内容以提高阅读体验</p>
         </div>
-        <label class="relative inline-flex items-center cursor-pointer">
-          <input
-            type="checkbox"
-            :checked="firecrawlEnabled"
-            class="sr-only peer"
-            @change="firecrawlEnabled = !firecrawlEnabled"
-          />
-          <div class="w-9 h-5 bg-gray-200 rounded-full peer peer-checked:bg-blue-600 peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all" />
-        </label>
+        <AppToggle v-model="firecrawlEnabled" />
       </div>
 
       <div class="grid grid-cols-1 md:grid-cols-2 gap-4">

@@ -120,7 +120,8 @@ const errorHint = computed(() => props.article.completionError || props.article.
 
               <div
                 v-if="hasError"
-                class="mt-2 text-xs text-rose-600 line-clamp-1"
+                class="mt-2 text-xs line-clamp-1"
+                style="color: var(--color-error)"
                 :title="errorHint"
               >
                 {{ errorHint }}
@@ -128,8 +129,8 @@ const errorHint = computed(() => props.article.completionError || props.article.
             </div>
 
             <button
-              class="flex-shrink-0 p-2 hover:bg-amber-50/80 rounded-xl transition-all"
-              :class="{ 'text-amber-500': article.favorite, 'text-ink-muted hover:text-amber-500': !article.favorite }"
+              class="flex-shrink-0 p-2 rounded-xl transition-all"
+              :style="{ color: article.favorite ? 'var(--color-accent)' : 'var(--color-text-muted)' }"
               @click.stop="emit('favorite', article.id)"
             >
               <Icon

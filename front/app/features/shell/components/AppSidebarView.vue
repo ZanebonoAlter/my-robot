@@ -6,6 +6,7 @@ import AppTooltip from '~/components/common/AppTooltip.vue'
 import FeedActionMenu from '~/components/feed/FeedActionMenu.vue'
 import type { WatchedTag } from '~/api/watchedTags'
 
+
 interface Props {
   sidebarCollapsed?: boolean
   sidebarWidth?: number
@@ -135,24 +136,24 @@ const navigateTo = useNuxtApp().$router ? (path: string) => useNuxtApp().$router
 .watched-tags-empty {
   padding: 0.5rem 0.5rem 0.75rem;
   border-radius: 10px;
-  background: rgba(59, 107, 135, 0.06);
+  background: var(--color-accent-subtle);
   margin: 0.25rem 0;
 }
 .watched-tags-go-btn {
   display: inline-block;
   margin-top: 0.35rem;
   padding: 0.2rem 0.6rem;
-  border: 1px solid rgba(59, 107, 135, 0.25);
+  border: 1px solid var(--color-border-medium);
   border-radius: 999px;
   background: none;
-  color: var(--color-ink-600);
+  color: var(--color-accent);
   font-size: 0.72rem;
   cursor: pointer;
   transition: all 0.12s ease;
 }
 .watched-tags-go-btn:hover {
-  background: rgba(59, 107, 135, 0.08);
-  border-color: rgba(59, 107, 135, 0.4);
+  background: var(--color-bg-hover);
+  border-color: var(--color-accent);
 }
 </style>
 
@@ -174,12 +175,12 @@ const navigateTo = useNuxtApp().$router ? (path: string) => useNuxtApp().$router
       </button>
 
       <button class="sidebar-item" :class="{ active: selectedCategory === 'topic-graph' }" @click="handleTopicGraphClick">
-        <Icon icon="mdi:graph-outline" width="20" height="20" class="text-ink-600" />
+        <Icon icon="mdi:graph-outline" width="20" height="20" class="text-[var(--color-text-secondary)]" />
         <span v-if="!sidebarCollapsed" class="flex-1 text-left font-medium">主题图谱</span>
       </button>
 
       <button class="sidebar-item" @click="navigateTo('/tags')">
-        <Icon icon="mdi:tag-multiple" width="20" height="20" class="text-ink-600" />
+        <Icon icon="mdi:tag-multiple" width="20" height="20" class="text-[var(--color-text-secondary)]" />
         <span v-if="!sidebarCollapsed" class="flex-1 text-left font-medium">标签管理</span>
       </button>
 
@@ -187,8 +188,8 @@ const navigateTo = useNuxtApp().$router ? (path: string) => useNuxtApp().$router
 
       <div v-if="!sidebarCollapsed" class="watched-tags-section">
         <div class="watched-tags-header">
-          <Icon icon="mdi:heart-outline" width="14" class="text-ink-400" />
-          <span class="text-xs text-ink-400 font-medium">关注标签</span>
+          <Icon icon="mdi:heart-outline" width="14" style="color: var(--color-text-muted)" />
+          <span class="text-xs font-medium" style="color: var(--color-text-muted)">关注标签</span>
         </div>
 
         <template v-if="watchedTags.length > 0">
@@ -197,7 +198,7 @@ const navigateTo = useNuxtApp().$router ? (path: string) => useNuxtApp().$router
             :class="{ active: selectedCategory === 'watched-tags' && !selectedWatchedTagId }"
             @click="emit('watchedTagsClick')"
           >
-            <Icon icon="mdi:heart-multiple" width="16" height="16" class="text-red-400" />
+            <Icon icon="mdi:heart-multiple" width="16" height="16" style="color: var(--color-accent)" />
             <span class="flex-1 text-left">全部关注</span>
           </button>
           <button
@@ -207,13 +208,13 @@ const navigateTo = useNuxtApp().$router ? (path: string) => useNuxtApp().$router
             :class="{ active: selectedCategory === 'watched-tags' && selectedWatchedTagId === String(tag.id) }"
             @click="emit('watchedTagClick', String(tag.id))"
           >
-            <Icon :icon="tag.isAbstract ? 'mdi:tag-multiple' : 'mdi:tag'" width="16" height="16" :class="tag.isAbstract ? 'text-indigo-500' : 'text-ink-400'" />
+            <Icon :icon="tag.isAbstract ? 'mdi:tag-multiple' : 'mdi:tag'" width="16" height="16" :style="{ color: tag.isAbstract ? 'var(--color-info)' : 'var(--color-text-muted)' }" />
             <span class="flex-1 text-left truncate">{{ tag.label }}</span>
           </button>
         </template>
 
         <div v-else class="watched-tags-empty">
-          <p class="text-xs text-ink-500">关注标签可获取个性化文章推送</p>
+          <p class="text-xs" style="color: var(--color-text-muted)">关注标签可获取个性化文章推送</p>
           <button class="watched-tags-go-btn" @click="navigateTo('/topics')">
             前往关注
           </button>
@@ -225,17 +226,17 @@ const navigateTo = useNuxtApp().$router ? (path: string) => useNuxtApp().$router
       <div v-if="!sidebarCollapsed" class="categories">
         <div v-for="category in feedsStore.categories" :key="category.id" class="category-group">
           <div class="category-item" :class="{ active: selectedCategory === category.id }">
-            <button class="category-btn" :class="{ 'text-ink-700': selectedCategory === category.id }" @click="handleCategoryClick(category.id)">
+            <button class="category-btn" :class="{ active: selectedCategory === category.id }" @click="handleCategoryClick(category.id)">
               <Icon :icon="category.icon" width="18" height="18" />
               <span class="text-sm font-medium">{{ category.name }}</span>
               <span class="count">{{ category.feedCount }}</span>
             </button>
             <div class="category-actions">
               <button class="action-btn" title="编辑分类" @click.stop="$emit('editCategory', category.id)">
-                <Icon icon="mdi:pencil" width="15" height="15" class="text-gray-500" />
+                <Icon icon="mdi:pencil" width="15" height="15" style="color: var(--color-text-muted)" />
               </button>
               <button class="action-btn" title="删除分类" @click.stop="$emit('deleteCategory', category.id, category.name)">
-                <Icon icon="mdi:delete" width="15" height="15" class="text-gray-500" />
+                <Icon icon="mdi:delete" width="15" height="15" style="color: var(--color-text-muted)" />
               </button>
             </div>
           </div>
@@ -264,7 +265,7 @@ const navigateTo = useNuxtApp().$router ? (path: string) => useNuxtApp().$router
 
         <div v-if="uncategorizedFeeds.length > 0" class="uncategorized">
           <div class="category-item" :class="{ active: selectedCategory === 'uncategorized' }">
-            <button class="category-btn" :class="{ 'text-ink-700': selectedCategory === 'uncategorized' }" @click="handleCategoryClick('uncategorized')">
+            <button class="category-btn" :class="{ active: selectedCategory === 'uncategorized' }" @click="handleCategoryClick('uncategorized')">
               <Icon icon="mdi:folder-off" width="18" height="18" />
               <span class="text-sm font-medium">未分类</span>
               <span class="count">{{ uncategorizedFeeds.length }}</span>

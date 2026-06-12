@@ -3,6 +3,31 @@ import { shallowRef, onMounted, onBeforeUnmount, ref, watch, computed, nextTick 
 import type { TopicGraphSceneEdge, TopicGraphSceneNode } from '~/features/topic-graph/utils/buildTopicGraphViewModel'
 import { isHighlightedTopicGraphEdge, resolveTopicGraphLinkOpacity } from '~/features/topic-graph/utils/topicGraphCanvasLinks'
 
+// Runtime color bridge: read CSS custom properties for Canvas rendering
+function getCSSVar(name: string): string {
+  return getComputedStyle(document.documentElement).getPropertyValue(name).trim()
+}
+
+// Lazy-resolved color palette from design tokens (resolved once per render cycle)
+let _tokenCache: Record<string, string> | null = null
+function tokenColors(): Record<string, string> {
+  if (_tokenCache) return _tokenCache
+  _tokenCache = {
+    accent: getCSSVar('--color-accent') || 'rgba(240,138,75,0.85)',
+    accentHover: getCSSVar('--color-accent-hover') || 'rgba(240,138,75,1)',
+    accentSubtle: getCSSVar('--color-accent-subtle') || 'rgba(240,138,75,0.08)',
+    bgElevated: getCSSVar('--color-bg-elevated') || 'rgba(17,27,38,0.98)',
+    bgSunken: getCSSVar('--color-bg-sunken') || '#0e161d',
+    textPrimary: getCSSVar('--color-text-primary') || 'rgba(255,255,255,0.9)',
+    textSecondary: getCSSVar('--color-text-secondary') || 'rgba(255,255,255,0.6)',
+    textMuted: getCSSVar('--color-text-muted') || 'rgba(255,255,255,0.35)',
+    borderSubtle: getCSSVar('--color-border-subtle') || 'rgba(255,255,255,0.05)',
+    borderMedium: getCSSVar('--color-border-medium') || 'rgba(255,255,255,0.1)',
+  }
+  return _tokenCache
+}
+function invalidateTokenCache() { _tokenCache = null }
+
 interface Props {
   nodes: TopicGraphSceneNode[]
   edges: TopicGraphSceneEdge[]
@@ -327,9 +352,9 @@ function buildNodeObject(node: TopicGraphSceneNode) {
 
 // Labels: Always show for all nodes, style varies by emphasis
   const label = new SpriteText(compactLabel(node.label, isTrunk ? 40 : 20))
-  label.color = '#ffffff'
+  label.color = tokenColors().textPrimary
   label.textHeight = isTrunk ? 9 : (isBranch ? 5.1 : 4.6)
-  label.backgroundColor = isTrunk ? 'rgba(15,24,33,0.78)' : 'rgba(15,24,33,0.34)'
+  label.backgroundColor = isTrunk ? `${tokenColors().bgSunken}c7` : `${tokenColors().bgSunken}57`
   label.padding = isTrunk ? 4 : 2
   label.borderRadius = 10
   label.position.set(0, radius + (isTrunk ? 12 : 8), 0)
@@ -357,15 +382,15 @@ function buildLinkWidth(link: TopicGraphSceneEdge) {
 function buildLinkColor(link: TopicGraphSceneEdge) {
   if (focusHighlightActive.value) {
     return isHighlightedEdge(link, highlightedNodeSet.value, highlightedEdgeSet.value)
-      ? 'rgba(240,138,75,0.72)'
-      : 'rgba(169,188,208,0.05)'
+      ? tokenColors().accent
+      : `${tokenColors().borderSubtle}`
   }
 
   if (!props.activeNodeId) {
     return link.kind === 'topic_topic' ? 'rgba(188,206,224,0.08)' : 'rgba(126,151,173,0.08)'
   }
 
-  return isFocusedEdge(link) ? 'rgba(240,138,75,0.82)' : 'rgba(169,188,208,0.03)'
+  return isFocusedEdge(link) ? tokenColors().accentHover : `${tokenColors().borderSubtle}`
 }
 
 function buildLinkParticles(link: TopicGraphSceneEdge) {
@@ -390,7 +415,7 @@ function buildLinkParticleColor(link: TopicGraphSceneEdge) {
     return '#f0a24b'
   }
 
-  return isFocusedEdge(link) ? '#f0a24b' : 'rgba(0,0,0,0)'
+  return isFocusedEdge(link) ? tokenColors().accentHover : 'rgba(0,0,0,0)'
 }
 
 function buildLinkParticleSpeed(link: TopicGraphSceneEdge) {
@@ -585,6 +610,7 @@ watch(() => [props.activeNodeId, props.focusRequestKey] as const, async ([newId]
 
 onMounted(() => {
   void setupGraph()
+  invalidateTokenCache()
 })
 
 onBeforeUnmount(() => {
@@ -614,7 +640,7 @@ onBeforeUnmount(() => {
   background:
     radial-gradient(circle at 18% 20%, rgba(240, 138, 75, 0.12), transparent 28%),
     radial-gradient(circle at 76% 18%, rgba(63, 124, 255, 0.12), transparent 26%),
-    linear-gradient(180deg, rgba(12, 18, 25, 0.98), rgba(17, 29, 39, 0.98));
+    linear-gradient(180deg, var(--color-bg-sunken), var(--color-bg-elevated));
 }
 
 .topic-canvas :deep(canvas) {

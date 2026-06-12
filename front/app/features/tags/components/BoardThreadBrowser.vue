@@ -479,8 +479,8 @@ watch(
   margin-top: 1rem;
   padding: 1rem;
   border-radius: 12px;
-  border: 1px solid rgba(255, 255, 255, 0.06);
-  background: rgba(255, 255, 255, 0.025);
+  border: 1px solid var(--color-border-subtle);
+  background: var(--color-bg-hover);
 }
 
 /* Controls */
@@ -500,7 +500,7 @@ watch(
 .btb-controls-title {
   font-size: 0.78rem;
   font-weight: 600;
-  color: rgba(255, 255, 255, 0.7);
+  color: var(--color-text-secondary);
 }
 
 .btb-days-toggle {
@@ -511,23 +511,23 @@ watch(
 .btb-days-btn {
   padding: 0.2rem 0.55rem;
   font-size: 0.65rem;
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  border: 1px solid var(--color-border-medium);
   border-radius: 4px;
   background: transparent;
-  color: rgba(255, 255, 255, 0.35);
+  color: var(--color-text-muted);
   cursor: pointer;
   transition: all 0.12s ease;
 }
 
 .btb-days-btn:hover {
-  color: rgba(255, 255, 255, 0.6);
-  border-color: rgba(255, 255, 255, 0.15);
+  color: var(--color-text-secondary);
+  border-color: var(--color-border-strong);
 }
 
 .btb-days-btn.active {
-  background: rgba(255, 255, 255, 0.1);
-  color: rgba(255, 255, 255, 0.85);
-  border-color: rgba(255, 255, 255, 0.2);
+  background: var(--color-bg-hover);
+  color: var(--color-text-primary);
+  border-color: var(--color-border-strong);
 }
 
 /* Loading */
@@ -540,7 +540,7 @@ watch(
 .btb-skeleton {
   height: 36px;
   border-radius: 6px;
-  background: rgba(255, 255, 255, 0.03);
+  background: var(--color-bg-hover);
   animation: btbPulse 1.5s ease-in-out infinite;
 }
 
@@ -556,7 +556,7 @@ watch(
   align-items: center;
   gap: 0.4rem;
   padding: 2.5rem 0;
-  color: rgba(255, 255, 255, 0.3);
+  color: var(--color-text-muted);
   font-size: 0.8rem;
 }
 
@@ -578,7 +578,7 @@ watch(
   position: absolute;
   transform: translateX(-50%);
   font-size: 0.6rem;
-  color: rgba(255, 255, 255, 0.3);
+  color: var(--color-text-muted);
   white-space: nowrap;
 }
 
@@ -664,12 +664,12 @@ watch(
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(0, 0, 0, 0.4);
+  background: var(--color-bg-overlay);
 }
 
 .btb-popup {
-  background: #1e1e2e;
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-border-medium);
   border-radius: 10px;
   padding: 1rem 1.2rem;
   max-width: 420px;
@@ -704,19 +704,19 @@ watch(
   border: none;
   border-radius: 4px;
   background: transparent;
-  color: rgba(255, 255, 255, 0.4);
+  color: var(--color-text-muted);
   cursor: pointer;
   transition: color 0.12s ease;
 }
 
 .btb-popup-close:hover {
-  color: rgba(255, 255, 255, 0.8);
+  color: var(--color-text-secondary);
 }
 
 .btb-popup-title {
   font-size: 0.9rem;
   font-weight: 600;
-  color: rgba(255, 255, 255, 0.85);
+  color: var(--color-text-primary);
   line-height: 1.4;
   margin-bottom: 0.3rem;
 }
@@ -726,20 +726,20 @@ watch(
   align-items: center;
   gap: 0.5rem;
   font-size: 0.65rem;
-  color: rgba(255, 255, 255, 0.3);
+  color: var(--color-text-muted);
 }
 
 /* Threads section */
 .btb-threads {
   margin-top: 0.7rem;
-  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  border-top: 1px solid var(--color-border-subtle);
   padding-top: 0.6rem;
 }
 
 .btb-threads-loading,
 .btb-threads-empty {
   font-size: 0.7rem;
-  color: rgba(255, 255, 255, 0.25);
+  color: var(--color-text-muted);
   text-align: center;
   padding: 0.5rem 0;
 }
@@ -747,7 +747,7 @@ watch(
 .btb-thread-skeleton {
   height: 28px;
   border-radius: 4px;
-  background: rgba(255, 255, 255, 0.03);
+  background: var(--color-bg-hover);
   margin-bottom: 0.3rem;
   animation: btbPulse 1.5s ease-in-out infinite;
 }
@@ -755,13 +755,13 @@ watch(
 .btb-thread {
   margin-bottom: 0.35rem;
   border-radius: 6px;
-  border: 1px solid rgba(255, 255, 255, 0.06);
-  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid var(--color-border-subtle);
+  background: var(--color-bg-hover);
   overflow: hidden;
 }
 
 .btb-thread--expanded {
-  border-color: rgba(255, 255, 255, 0.1);
+  border-color: var(--color-border-medium);
 }
 
 .btb-thread-header {
@@ -774,11 +774,11 @@ watch(
 }
 
 .btb-thread-header:hover {
-  background: rgba(255, 255, 255, 0.04);
+  background: var(--color-bg-hover);
 }
 
 .btb-thread-arrow {
-  color: rgba(255, 255, 255, 0.25);
+  color: var(--color-text-muted);
   transition: transform 0.15s ease;
   flex-shrink: 0;
 }
@@ -790,7 +790,7 @@ watch(
 .btb-thread-title {
   flex: 1;
   font-size: 0.72rem;
-  color: rgba(255, 255, 255, 0.7);
+  color: var(--color-text-secondary);
   line-height: 1.3;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -799,26 +799,26 @@ watch(
 
 .btb-thread-count {
   font-size: 0.6rem;
-  color: rgba(255, 255, 255, 0.2);
+  color: var(--color-text-muted);
   flex-shrink: 0;
 }
 
 .btb-thread-summary {
   font-size: 0.65rem;
-  color: rgba(255, 255, 255, 0.35);
+  color: var(--color-text-muted);
   line-height: 1.4;
   padding: 0 0.5rem 0.3rem 1.4rem;
 }
 
 /* Articles */
 .btb-articles {
-  border-top: 1px solid rgba(255, 255, 255, 0.04);
+  border-top: 1px solid var(--color-border-subtle);
   padding: 0.3rem 0.5rem 0.4rem;
 }
 
 .btb-articles-loading {
   font-size: 0.65rem;
-  color: rgba(255, 255, 255, 0.25);
+  color: var(--color-text-muted);
   padding: 0.2rem 0;
 }
 
@@ -833,39 +833,39 @@ watch(
 }
 
 .btb-article:hover {
-  background: rgba(255, 255, 255, 0.05);
+  background: var(--color-bg-hover);
 }
 
 .btb-article:hover .btb-article-title {
-  color: rgba(255, 255, 255, 0.9);
+  color: var(--color-text-primary);
 }
 
 .btb-article-icon {
-  color: rgba(255, 255, 255, 0.2);
+  color: var(--color-text-muted);
   flex-shrink: 0;
 }
 
 .btb-article-title {
   flex: 1;
   font-size: 0.65rem;
-  color: rgba(255, 255, 255, 0.5);
+  color: var(--color-text-muted);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .btb-article:hover .btb-article-title {
-  color: rgba(255, 255, 255, 0.9);
+  color: var(--color-text-primary);
 }
 
 .btb-article-external {
-  color: rgba(255, 255, 255, 0.15);
+  color: var(--color-text-muted);
   flex-shrink: 0;
 }
 
 .btb-articles-more {
   font-size: 0.6rem;
-  color: rgba(255, 255, 255, 0.2);
+  color: var(--color-text-muted);
   padding: 0.15rem 0.3rem;
 }
 

@@ -684,7 +684,7 @@ watch(() => props.sectorId, () => {
 .th-skeleton {
   height: 36px;
   border-radius: 12px;
-  background: rgba(255, 255, 255, 0.04);
+  background: var(--color-bg-hover);
   animation: pulse 1.5s ease-in-out infinite;
 }
 
@@ -699,9 +699,9 @@ watch(() => props.sectorId, () => {
   gap: 0.5rem;
   padding: 0.75rem 1rem;
   border-radius: 14px;
-  border: 1px solid rgba(240, 138, 75, 0.3);
-  background: rgba(240, 138, 75, 0.1);
-  color: rgba(255, 220, 200, 0.88);
+  border: 1px solid var(--color-accent);
+  background: var(--color-accent-subtle);
+  color: var(--color-text-primary);
   font-size: 0.82rem;
 }
 
@@ -711,24 +711,24 @@ watch(() => props.sectorId, () => {
   align-items: center;
   gap: 0.5rem;
   padding: 3rem 1rem;
-  color: rgba(255, 255, 255, 0.4);
+  color: var(--color-text-muted);
   font-size: 0.85rem;
 }
 
 .th-tree { display: flex; flex-direction: column; gap: 1px; }
 
 .th-category-btn {
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  border: 1px solid var(--color-border-medium);
   border-radius: 999px;
   background: none;
-  color: rgba(255, 255, 255, 0.5);
+  color: var(--color-text-muted);
   font-size: 0.7rem;
   padding: 0.2rem 0.65rem;
   cursor: pointer;
   transition: all 0.12s ease;
 }
-.th-category-btn:hover { border-color: rgba(255, 255, 255, 0.25); color: rgba(255, 255, 255, 0.8); }
-.th-category-btn--active { border-color: rgba(240, 138, 75, 0.5); background: rgba(240, 138, 75, 0.12); color: rgba(255, 220, 200, 0.9); }
+.th-category-btn:hover { border-color: var(--color-border-medium); color: var(--color-text-secondary); }
+.th-category-btn--active { border-color: var(--color-accent); background: var(--color-accent-subtle); color: var(--color-text-primary); }
 
 .th-organize-btn {
   border-color: rgba(99, 179, 237, 0.3);
@@ -771,17 +771,17 @@ watch(() => props.sectorId, () => {
 }
 .th-search-input {
   width: 100%;
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  border: 1px solid var(--color-border-medium);
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.04);
-  color: rgba(255, 255, 255, 0.85);
+  background: var(--color-bg-hover);
+  color: var(--color-text-primary);
   font-size: 0.72rem;
   padding: 0.25rem 1.5rem 0.25rem 1.75rem;
   outline: none;
   transition: border-color 0.12s ease;
 }
 .th-search-input::placeholder { color: rgba(255, 255, 255, 0.25); }
-.th-search-input:focus { border-color: rgba(240, 138, 75, 0.4); }
+.th-search-input:focus { border-color: var(--color-accent); }
 .th-search-clear {
   position: absolute;
   right: 4px;
@@ -792,22 +792,22 @@ watch(() => props.sectorId, () => {
   height: 18px;
   border: none;
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.08);
-  color: rgba(255, 255, 255, 0.4);
+  background: var(--color-bg-hover);
+  color: var(--color-text-muted);
   cursor: pointer;
 }
-.th-search-clear:hover { background: rgba(255, 255, 255, 0.15); color: rgba(255, 255, 255, 0.7); }
+.th-search-clear:hover { background: var(--color-border-medium); color: var(--color-text-secondary); }
 
 .th-date-input {
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  border: 1px solid var(--color-border-medium);
   border-radius: 8px;
-  background: rgba(255, 255, 255, 0.04);
-  color: rgba(255, 255, 255, 0.85);
+  background: var(--color-bg-hover);
+  color: var(--color-text-primary);
   font-size: 0.72rem;
   padding: 0.25rem 0.5rem;
   outline: none;
 }
-.th-date-input:focus { border-color: rgba(240, 138, 75, 0.4); }
+.th-date-input:focus { border-color: var(--color-accent); }
 .th-custom-range { margin-top: -0.25rem; }
 
 .th-confirm-overlay {
@@ -817,32 +817,32 @@ watch(() => props.sectorId, () => {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(8, 12, 18, 0.7);
+  background: var(--color-bg-overlay);
   backdrop-filter: blur(8px);
 }
 
 .th-confirm-dialog {
   width: min(400px, 90%);
   border-radius: 1.25rem;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  background: rgba(17, 27, 38, 0.98);
+  border: 1px solid var(--color-border-medium);
+  background: var(--color-bg-elevated);
   padding: 1.5rem;
   box-shadow: 0 20px 60px rgba(0, 0, 0, 0.4);
 }
 
 .th-btn {
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  border: 1px solid var(--color-border-medium);
   border-radius: 10px;
   background: none;
-  color: rgba(255, 255, 255, 0.7);
+  color: var(--color-text-secondary);
   font-size: 0.82rem;
   padding: 0.4rem 1rem;
   cursor: pointer;
   transition: all 0.12s ease;
 }
-.th-btn--ghost:hover { background: rgba(255, 255, 255, 0.06); }
-.th-btn--danger { border-color: rgba(240, 138, 75, 0.4); color: rgba(255, 200, 180, 0.9); }
-.th-btn--danger:hover { background: rgba(240, 138, 75, 0.15); }
+.th-btn--ghost:hover { background: var(--color-bg-hover); }
+.th-btn--danger { border-color: var(--color-accent); color: var(--color-text-primary); }
+.th-btn--danger:hover { background: var(--color-accent-subtle); }
 
 .th-reassign-list {
   max-height: 280px;
@@ -857,10 +857,10 @@ watch(() => props.sectorId, () => {
   align-items: center;
   gap: 0.5rem;
   padding: 0.5rem 0.75rem;
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  border: 1px solid var(--color-border-subtle);
   border-radius: 10px;
-  background: rgba(255, 255, 255, 0.02);
-  color: rgba(255, 255, 255, 0.75);
+  background: var(--color-bg-hover);
+  color: var(--color-text-secondary);
   font-size: 0.82rem;
   cursor: pointer;
   text-align: left;
@@ -890,7 +890,7 @@ watch(() => props.sectorId, () => {
 
 .th-unplaced-section {
   margin-top: 1rem;
-  border-top: 1px dashed rgba(255, 255, 255, 0.1);
+  border-top: 1px dashed var(--color-border-medium);
   padding-top: 0.5rem;
 }
 .th-unplaced-toggle {
@@ -907,8 +907,8 @@ watch(() => props.sectorId, () => {
   cursor: pointer;
   transition: background 0.2s;
 }
-.th-unplaced-toggle:hover { background: rgba(255, 255, 255, 0.04); }
-.th-unplaced-label { font-weight: 500; color: rgba(255, 255, 255, 0.7); }
+.th-unplaced-toggle:hover { background: var(--color-bg-hover); }
+.th-unplaced-label { font-weight: 500; color: var(--color-text-secondary); }
 .th-unplaced-count { font-size: 0.75rem; }
 .th-unplaced-list { padding-left: 0.5rem; }
 </style>

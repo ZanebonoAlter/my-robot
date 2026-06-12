@@ -238,7 +238,7 @@ function decisionStyle(d: string): { border: string; bg: string; color: string }
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(8, 12, 18, 0.75);
+  background: var(--color-bg-overlay);
   backdrop-filter: blur(8px);
   padding: 1rem;
 }
@@ -248,8 +248,8 @@ function decisionStyle(d: string): { border: string; bg: string; color: string }
   max-height: 80vh;
   overflow-y: auto;
   border-radius: 1.25rem;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  background: rgba(17, 27, 38, 0.98);
+  border: 1px solid var(--color-border-medium);
+  background: var(--color-bg-elevated);
   padding: 1.5rem;
   box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
   display: flex;
@@ -267,13 +267,13 @@ function decisionStyle(d: string): { border: string; bg: string; color: string }
 .usp-title {
   font-size: 0.95rem;
   font-weight: 600;
-  color: rgba(255, 255, 255, 0.9);
+  color: var(--color-text-primary);
 }
 
 .usp-subtitle {
   margin-top: 0.25rem;
   font-size: 0.72rem;
-  color: rgba(255, 255, 255, 0.4);
+  color: var(--color-text-muted);
 }
 
 .usp-close {
@@ -285,14 +285,14 @@ function decisionStyle(d: string): { border: string; bg: string; color: string }
   border: none;
   border-radius: 8px;
   background: none;
-  color: rgba(255, 255, 255, 0.4);
+  color: var(--color-text-muted);
   cursor: pointer;
   transition: all 0.12s ease;
 }
 
 .usp-close:hover {
-  background: rgba(255, 255, 255, 0.08);
-  color: rgba(255, 255, 255, 0.7);
+  background: var(--color-bg-hover);
+  color: var(--color-text-secondary);
 }
 
 .usp-loading {
@@ -301,7 +301,7 @@ function decisionStyle(d: string): { border: string; bg: string; color: string }
   align-items: center;
   gap: 0.5rem;
   padding: 2rem 0;
-  color: rgba(255, 255, 255, 0.4);
+  color: var(--color-text-muted);
   font-size: 0.8rem;
 }
 
@@ -311,7 +311,7 @@ function decisionStyle(d: string): { border: string; bg: string; color: string }
   align-items: center;
   gap: 0.75rem;
   padding: 2rem 0;
-  color: rgba(255, 255, 255, 0.4);
+  color: var(--color-text-muted);
   font-size: 0.8rem;
 }
 
@@ -321,16 +321,16 @@ function decisionStyle(d: string): { border: string; bg: string; color: string }
   gap: 0.4rem;
   padding: 0.5rem 1rem;
   border-radius: 10px;
-  border: 1px solid rgba(240, 138, 75, 0.3);
-  background: rgba(240, 138, 75, 0.1);
-  color: rgba(255, 220, 200, 0.9);
+  border: 1px solid var(--color-accent);
+  background: var(--color-accent-subtle);
+  color: var(--color-accent-hover);
   font-size: 0.8rem;
   cursor: pointer;
   transition: all 0.12s ease;
 }
 
 .usp-suggest-btn:hover:not(:disabled) {
-  background: rgba(240, 138, 75, 0.18);
+  background: var(--color-accent-subtle);
 }
 
 .usp-suggest-btn:disabled {
@@ -358,7 +358,7 @@ function decisionStyle(d: string): { border: string; bg: string; color: string }
 
 .usp-toolbar-text {
   font-size: 0.72rem;
-  color: rgba(255, 255, 255, 0.45);
+  color: var(--color-text-muted);
 }
 
 .usp-notice {
@@ -367,9 +367,9 @@ function decisionStyle(d: string): { border: string; bg: string; color: string }
   gap: 0.45rem;
   padding: 0.65rem 0.75rem;
   border-radius: 10px;
-  border: 1px solid rgba(96, 165, 250, 0.2);
-  background: rgba(96, 165, 250, 0.08);
-  color: rgba(191, 219, 254, 0.85);
+  border: 1px solid var(--color-secondary);
+  background: var(--color-secondary);
+  color: var(--color-secondary);
   font-size: 0.72rem;
   line-height: 1.5;
 }
@@ -395,24 +395,24 @@ function decisionStyle(d: string): { border: string; bg: string; color: string }
   font-weight: 600;
   padding: 0.15rem 0.4rem;
   border-radius: 6px;
-  background: rgba(0, 0, 0, 0.2);
+  background: var(--color-input-bg);
 }
 
 .usp-item-board {
   font-size: 0.8rem;
   font-weight: 500;
-  color: rgba(255, 255, 255, 0.85);
+  color: var(--color-text-primary);
 }
 
 .usp-item-desc {
   font-size: 0.75rem;
-  color: rgba(255, 255, 255, 0.55);
+  color: var(--color-text-muted);
   line-height: 1.5;
 }
 
 .usp-item-reason {
   font-size: 0.72rem;
-  color: rgba(255, 255, 255, 0.4);
+  color: var(--color-text-muted);
   line-height: 1.5;
 }
 
@@ -424,10 +424,10 @@ function decisionStyle(d: string): { border: string; bg: string; color: string }
 
 .usp-item-tag {
   font-size: 0.65rem;
-  color: rgba(255, 255, 255, 0.45);
+  color: var(--color-text-muted);
   padding: 0.1rem 0.35rem;
   border-radius: 6px;
-  background: rgba(255, 255, 255, 0.06);
+  background: var(--color-bg-hover);
 }
 
 .usp-item-actions {
@@ -442,9 +442,9 @@ function decisionStyle(d: string): { border: string; bg: string; color: string }
   gap: 0.3rem;
   padding: 0.35rem 0.7rem;
   border-radius: 8px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  border: 1px solid var(--color-border-medium);
   background: none;
-  color: rgba(255, 255, 255, 0.6);
+  color: var(--color-text-muted);
   font-size: 0.72rem;
   cursor: pointer;
   transition: all 0.12s ease;
@@ -466,22 +466,22 @@ function decisionStyle(d: string): { border: string; bg: string; color: string }
   align-items: center;
   gap: 0.35rem;
   font-size: 0.68rem;
-  color: rgba(255, 255, 255, 0.4);
+  color: var(--color-text-muted);
 }
 
 .usp-item-affinities-label {
-  color: rgba(255, 255, 255, 0.35);
+  color: var(--color-text-muted);
 }
 
 .usp-item-affinity {
   padding: 0.1rem 0.3rem;
   border-radius: 4px;
-  background: rgba(96, 165, 250, 0.08);
-  color: rgba(147, 197, 253, 0.8);
+  background: var(--color-secondary);
+  color: var(--color-secondary);
 }
 
 .usp-item-affinity-detail {
-  color: rgba(147, 197, 253, 0.5);
+  color: var(--color-secondary);
 }
 
 .usp-merge-wrapper {
@@ -489,13 +489,13 @@ function decisionStyle(d: string): { border: string; bg: string; color: string }
 }
 
 .usp-item-btn--merge {
-  border-color: rgba(96, 165, 250, 0.3);
-  background: rgba(96, 165, 250, 0.08);
-  color: rgba(147, 197, 253, 0.9);
+  border-color: var(--color-secondary);
+  background: var(--color-secondary);
+  color: var(--color-secondary);
 }
 
 .usp-item-btn--merge:hover {
-  background: rgba(96, 165, 250, 0.16);
+  background: var(--color-secondary);
 }
 
 .usp-merge-dropdown {
@@ -505,8 +505,8 @@ function decisionStyle(d: string): { border: string; bg: string; color: string }
   margin-bottom: 4px;
   min-width: 200px;
   border-radius: 8px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  background: rgba(25, 35, 50, 0.98);
+  border: 1px solid var(--color-border-medium);
+  background: var(--color-bg-elevated);
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
   z-index: 10;
   overflow: hidden;
@@ -520,18 +520,18 @@ function decisionStyle(d: string): { border: string; bg: string; color: string }
   padding: 0.45rem 0.65rem;
   border: none;
   background: none;
-  color: rgba(255, 255, 255, 0.8);
+  color: var(--color-text-secondary);
   font-size: 0.72rem;
   cursor: pointer;
   transition: background 0.1s ease;
 }
 
 .usp-merge-option:hover {
-  background: rgba(96, 165, 250, 0.12);
+  background: var(--color-secondary);
 }
 
 .usp-merge-option-detail {
-  color: rgba(255, 255, 255, 0.4);
+  color: var(--color-text-muted);
   font-size: 0.65rem;
 }
 </style>

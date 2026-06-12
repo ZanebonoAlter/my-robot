@@ -178,7 +178,7 @@ const isGroupAllSelected = computed(() => {
 }
 .tm-group__target-meta {
   font-size: 0.78rem;
-  color: rgba(255, 255, 255, 0.4);
+  color: var(--color-text-muted);
 }
 
 /* Checkbox */
@@ -189,9 +189,9 @@ const isGroupAllSelected = computed(() => {
   width: 1.25rem;
   height: 1.25rem;
   border-radius: 0.3rem;
-  border: 1.5px solid rgba(255, 255, 255, 0.25);
+  border: 1.5px solid var(--color-border-medium);
   background: transparent;
-  color: rgba(255, 255, 255, 0.6);
+  color: var(--color-text-muted);
   cursor: pointer;
   flex-shrink: 0;
   transition: all 0.15s ease;
@@ -207,7 +207,7 @@ const isGroupAllSelected = computed(() => {
   color: rgba(99, 179, 237, 0.95);
 }
 .tm-checkbox:hover {
-  border-color: rgba(255, 255, 255, 0.45);
+  border-color: var(--color-border-medium);
 }
 
 /* Buttons */
@@ -221,13 +221,13 @@ const isGroupAllSelected = computed(() => {
   font-weight: 500;
   cursor: pointer;
   transition: all 0.15s ease;
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  border: 1px solid var(--color-border-medium);
   background: transparent;
-  color: rgba(255, 255, 255, 0.6);
+  color: var(--color-text-muted);
   padding: 0.5rem 1.1rem;
 }
 .tm-btn:disabled { opacity: 0.4; cursor: not-allowed; }
-.tm-btn:hover:not(:disabled) { border-color: rgba(255, 255, 255, 0.25); color: rgba(255, 255, 255, 0.85); }
+.tm-btn:hover:not(:disabled) { border-color: var(--color-border-medium); color: var(--color-text-primary); }
 .tm-btn--sm { padding: 0.3rem 0.75rem; font-size: 0.78rem; min-height: 1.75rem; }
 
 /* Search */
@@ -245,13 +245,11 @@ const isGroupAllSelected = computed(() => {
 }
 .tm-search__input {
   flex: 1;
-  background: rgba(0, 0, 0, 0.2);
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: var(--color-input-bg);
+  border: 1px solid var(--color-border-medium);
   border-radius: 0.4rem;
   padding: 0.35rem 0.6rem;
-  color: rgba(255, 255, 255, 0.9);
-  font-size: 0.82rem;
-  outline: none;
+  color: var(--color-text-primary);
   transition: border-color 0.15s ease;
 }
 .tm-search__input:focus { border-color: rgba(99, 179, 237, 0.5); }
@@ -278,7 +276,7 @@ const isGroupAllSelected = computed(() => {
   text-align: left;
   transition: all 0.15s ease;
 }
-.tm-search__item:hover { background: rgba(255, 255, 255, 0.08); color: rgba(255, 255, 255, 0.95); }
+.tm-search__item:hover { background: var(--color-bg-hover); color: var(--color-text-primary); }
 .tm-search__item-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tm-search__item-meta { font-size: 0.72rem; color: rgba(255, 255, 255, 0.35); flex-shrink: 0; }
 .tm-search__loading, .tm-search__empty { padding: 0.4rem; font-size: 0.78rem; color: rgba(255, 255, 255, 0.35); }
@@ -299,7 +297,7 @@ const isGroupAllSelected = computed(() => {
   transition: background 0.15s ease;
   position: relative;
 }
-.tm-suggestion:hover { background: rgba(255, 255, 255, 0.04); }
+.tm-suggestion:hover { background: var(--color-bg-hover); }
 .tm-suggestion--selected {
   background: rgba(99, 179, 237, 0.06);
   border-left: 2px solid rgba(99, 179, 237, 0.5);
@@ -356,7 +354,7 @@ const isGroupAllSelected = computed(() => {
   border: 1px solid rgba(248, 113, 113, 0.25);
 }
 .tm-suggestion__arrow { color: rgba(240, 138, 75, 0.7); }
-.tm-suggestion__name { color: rgba(255, 255, 255, 0.85); font-weight: 500; }
+.tm-suggestion__name { color: var(--color-text-primary); font-weight: 500; }
 .tm-suggestion__reason {
   font-size: 0.78rem;
   color: rgba(255, 255, 255, 0.45);
@@ -376,7 +374,7 @@ const isGroupAllSelected = computed(() => {
   border-radius: 999px;
   border: none;
   background: transparent;
-  color: rgba(255, 255, 255, 0.2);
+  color: var(--color-text-muted);
   cursor: pointer;
   flex-shrink: 0;
   transition: all 0.15s ease;

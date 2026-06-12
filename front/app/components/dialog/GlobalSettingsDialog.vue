@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Icon } from '@iconify/vue'
+import { computed } from 'vue'
 import AIRouterSettingsPanel from '~/features/ai/components/AIRouterSettingsPanel.vue'
 import EmbeddingConfigPanel from '~/features/ai/components/EmbeddingConfigPanel.vue'
 import EmbeddingQueuePanel from '~/features/ai/components/EmbeddingQueuePanel.vue'
@@ -10,14 +10,18 @@ import FirecrawlConfigPanel from '~/components/dialog/FirecrawlConfigPanel.vue'
 import SchedulerStatusPanel from '~/components/dialog/SchedulerStatusPanel.vue'
 import { useGlobalSettings } from '~/composables/useGlobalSettings'
 
-interface Props {
+const props = defineProps<{
   show: boolean
-}
+}>()
 
-const props = defineProps<Props>()
 const emit = defineEmits<{
   'update:show': [value: boolean]
 }>()
+
+const showDialog = computed({
+  get: () => props.show,
+  set: (val: boolean) => { emit('update:show', val) }
+})
 
 const {
   activeTab, collapsedCategories, loading, error, success,
@@ -25,96 +29,117 @@ const {
   updateFeedSetting, refreshFeed,
   testAIConnection,
 } = useGlobalSettings()
-
-function close() {
-  emit('update:show', false)
-}
 </script>
 
 <template>
-  <div
-    v-if="props.show"
-    class="fixed inset-0 bg-black/50 flex items-center justify-center z-50"
-    @click.self="close"
-  >
-    <div
-      class="bg-white rounded-xl shadow-xl w-full max-w-4xl mx-4 overflow-hidden max-h-[90vh] flex flex-col"
-      style="max-height: calc(90vh - 2rem);"
-      @click.stop
-    >
-      <!-- Header -->
-      <div class="px-6 py-4 border-b border-gray-200 flex items-center justify-between flex-shrink-0">
-        <h2 class="text-xl font-bold text-gray-900">RSS 阅读器设置</h2>
-        <button class="p-2 hover:bg-gray-100 rounded-lg transition-colors" @click="close">
-          <Icon icon="mdi:close" width="20" height="20" />
-        </button>
+  <AppDialog v-model="showDialog" title="设置" width="900px">
+    <!-- Tabs -->
+    <nav class="settings-tabs">
+      <button
+        v-for="tab in ([
+          { key: 'feeds', label: '订阅源配置' },
+          { key: 'general', label: '通用设置' },
+          { key: 'queues', label: '标签 & 队列' },
+          { key: 'preferences', label: '阅读偏好' },
+          { key: 'firecrawl', label: 'Firecrawl' },
+          { key: 'schedulers', label: '定时任务' },
+        ] as const)"
+        :key="tab.key"
+        class="settings-tab"
+        :class="{ 'settings-tab--active': activeTab === tab.key }"
+        @click="activeTab = tab.key"
+      >
+        {{ tab.label }}
+      </button>
+    </nav>
+
+    <!-- Success/Error messages -->
+    <div v-if="success" class="msg msg--success">{{ success }}</div>
+    <div v-if="error" class="msg msg--error">{{ error }}</div>
+
+    <!-- Content -->
+    <div class="settings-content">
+      <FeedSettingsPanel
+        v-if="activeTab === 'feeds'"
+        :feeds-by-category="feedsByCategory"
+        :collapsed-categories="collapsedCategories"
+        :refresh-options="refreshOptions"
+        :max-articles-options="maxArticlesOptions"
+        :loading="loading"
+        @update-feed="updateFeedSetting"
+        @refresh-feed="refreshFeed"
+        @toggle-collapse="collapsedCategories[$event] = !collapsedCategories[$event]"
+      />
+
+      <ReadingPreferencesPanel v-if="activeTab === 'preferences'" />
+
+      <div v-if="activeTab === 'general'" class="space-y-6">
+        <AIRouterSettingsPanel />
+        <EmbeddingConfigPanel />
       </div>
 
-      <!-- Tabs -->
-      <div class="flex border-b border-gray-200 flex-shrink-0">
-        <button
-          v-for="tab in ([
-            { key: 'feeds', label: '订阅源配置' },
-            { key: 'general', label: '通用设置' },
-            { key: 'queues', label: '标签 & 队列' },
-            { key: 'preferences', label: '阅读偏好' },
-            { key: 'firecrawl', label: 'Firecrawl' },
-            { key: 'schedulers', label: '定时任务' },
-          ] as const)"
-          :key="tab.key"
-          class="px-6 py-3 text-sm font-medium transition-colors"
-          :class="activeTab === tab.key ? 'text-blue-600 border-b-2 border-blue-600' : 'text-gray-500 hover:text-gray-700'"
-          @click="activeTab = tab.key"
-        >
-          {{ tab.label }}
-        </button>
+      <div v-if="activeTab === 'queues'" class="space-y-6">
+        <EmbeddingQueuePanel />
+        <TagQueuePanel />
       </div>
 
-      <!-- Success/Error messages (dialog-level only) -->
-      <div
-        v-if="success"
-        class="mx-6 mt-4 p-3 bg-green-50 border border-green-200 rounded-lg text-sm text-green-600 flex-shrink-0"
-      >{{ success }}</div>
-      <div
-        v-if="error"
-        class="mx-6 mt-4 p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-600 flex-shrink-0"
-      >{{ error }}</div>
+      <FirecrawlConfigPanel v-if="activeTab === 'firecrawl'" />
 
-      <!-- Content -->
-      <div class="flex-1 overflow-y-auto p-6 min-h-0">
-        <FeedSettingsPanel
-          v-if="activeTab === 'feeds'"
-          :feeds-by-category="feedsByCategory"
-          :collapsed-categories="collapsedCategories"
-          :refresh-options="refreshOptions"
-          :max-articles-options="maxArticlesOptions"
-          :loading="loading"
-          @update-feed="updateFeedSetting"
-          @refresh-feed="refreshFeed"
-          @toggle-collapse="collapsedCategories[$event] = !collapsedCategories[$event]"
-        />
-
-        <ReadingPreferencesPanel v-if="activeTab === 'preferences'" />
-
-        <div v-if="activeTab === 'general'" class="space-y-6">
-          <AIRouterSettingsPanel />
-          <EmbeddingConfigPanel />
-        </div>
-
-        <div v-if="activeTab === 'queues'" class="space-y-6">
-          <EmbeddingQueuePanel />
-          <TagQueuePanel />
-        </div>
-
-        <FirecrawlConfigPanel v-if="activeTab === 'firecrawl'" />
-
-        <SchedulerStatusPanel v-if="activeTab === 'schedulers'" />
-      </div>
-
-      <!-- Footer -->
-      <div class="px-6 py-4 bg-gray-50 border-t border-gray-200 flex justify-end flex-shrink-0">
-        <button class="btn btn-primary" @click="close">完成</button>
-      </div>
+      <SchedulerStatusPanel v-if="activeTab === 'schedulers'" />
     </div>
-  </div>
+  </AppDialog>
 </template>
+
+<style scoped>
+.settings-tabs {
+  display: flex;
+  gap: 0;
+  border-bottom: 1px solid var(--color-border-subtle);
+  margin: -20px -20px 16px;
+  padding: 0 20px;
+}
+
+.settings-tab {
+  padding: 10px 24px;
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: var(--color-text-muted);
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s;
+}
+
+.settings-tab:hover {
+  color: var(--color-text-secondary);
+}
+
+.settings-tab--active {
+  color: var(--color-accent);
+  border-bottom-color: var(--color-accent);
+}
+
+.settings-content {
+  min-height: 0;
+}
+
+.msg {
+  padding: 0.75rem;
+  border-radius: 8px;
+  font-size: 0.875rem;
+  margin-bottom: 12px;
+}
+
+.msg--success {
+  background: rgba(74, 222, 128, 0.1);
+  border: 1px solid rgba(74, 222, 128, 0.2);
+  color: #4ade80;
+}
+
+.msg--error {
+  background: rgba(248, 113, 113, 0.1);
+  border: 1px solid rgba(248, 113, 113, 0.2);
+  color: #f87171;
+}
+</style>

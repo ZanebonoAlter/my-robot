@@ -330,7 +330,7 @@ const {
   display: flex;
   gap: 12px;
   font-size: 12px;
-  color: rgba(255, 255, 255, 0.5);
+  color: var(--color-text-muted);
   white-space: nowrap;
 }
 
@@ -346,10 +346,10 @@ const {
   align-items: center;
   gap: 0.5rem;
   border-radius: 0.75rem;
-  border: 1px solid rgba(240, 138, 75, 0.28);
-  background: rgba(240, 138, 75, 0.1);
+  border: 1px solid var(--color-accent);
+  background: var(--color-accent-subtle);
   padding: 0.75rem 1rem;
-  color: rgba(255, 220, 200, 0.9);
+  color: var(--color-text-primary);
   font-size: 0.85rem;
   margin-bottom: 1rem;
 }

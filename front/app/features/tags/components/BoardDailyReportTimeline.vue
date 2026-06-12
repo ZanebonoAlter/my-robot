@@ -537,8 +537,8 @@ watch(() => props.boardId, () => {
   margin-top: 1rem;
   padding: 1rem;
   border-radius: 12px;
-  border: 1px solid rgba(255, 255, 255, 0.06);
-  background: rgba(255, 255, 255, 0.025);
+  border: 1px solid var(--color-border-subtle);
+  background: var(--color-bg-hover);
 }
 
 .drt-header {
@@ -550,15 +550,15 @@ watch(() => props.boardId, () => {
 .drt-title {
   font-size: 0.78rem;
   font-weight: 600;
-  color: rgba(255, 255, 255, 0.7);
+  color: var(--color-text-secondary);
 }
 
 .drt-count {
   font-size: 0.65rem;
-  color: rgba(255, 255, 255, 0.3);
+  color: var(--color-text-muted);
   padding: 0.05rem 0.4rem;
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.06);
+  background: var(--color-bg-hover);
 }
 
 .drt-loading {
@@ -570,7 +570,7 @@ watch(() => props.boardId, () => {
 .drt-skeleton {
   height: 72px;
   border-radius: 10px;
-  background: rgba(255, 255, 255, 0.03);
+  background: var(--color-bg-hover);
   animation: drtPulse 1.5s ease-in-out infinite;
 }
 
@@ -585,7 +585,7 @@ watch(() => props.boardId, () => {
   align-items: center;
   gap: 0.4rem;
   padding: 2.5rem 0;
-  color: rgba(255, 255, 255, 0.3);
+  color: var(--color-text-muted);
   font-size: 0.8rem;
 }
 
@@ -619,7 +619,7 @@ watch(() => props.boardId, () => {
 }
 
 .drt-summary-card:hover {
-  background: rgba(255, 255, 255, 0.03);
+  background: var(--color-bg-hover);
 }
 
 .drt-summary-top {
@@ -630,7 +630,7 @@ watch(() => props.boardId, () => {
 
 .drt-summary-date {
   font-size: 0.7rem;
-  color: rgba(255, 255, 255, 0.3);
+  color: var(--color-text-muted);
 }
 
 .drt-summary-status {
@@ -643,13 +643,13 @@ watch(() => props.boardId, () => {
 
 .drt-summary-text {
   font-size: 0.8rem;
-  color: rgba(255, 255, 255, 0.6);
+  color: var(--color-text-secondary);
   line-height: 1.4;
 }
 
 .drt-summary-meta {
   font-size: 0.65rem;
-  color: rgba(255, 255, 255, 0.2);
+  color: var(--color-text-muted);
 }
 
 .drt-more {
@@ -661,13 +661,13 @@ watch(() => props.boardId, () => {
   padding: 0.2rem 0;
   border: none;
   background: none;
-  color: rgba(255, 255, 255, 0.3);
+  color: var(--color-text-muted);
   cursor: pointer;
   transition: color 0.12s ease;
 }
 
 .drt-more-btn:hover {
-  color: rgba(255, 255, 255, 0.55);
+  color: var(--color-text-secondary);
 }
 
 .drt-browser-toggle {
@@ -676,18 +676,18 @@ watch(() => props.boardId, () => {
   gap: 0.3rem;
   margin-left: auto;
   padding: 0.15rem 0.5rem;
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  border: 1px solid var(--color-border-medium);
   border-radius: 4px;
   background: none;
-  color: rgba(255, 255, 255, 0.4);
+  color: var(--color-text-muted);
   font-size: 0.68rem;
   cursor: pointer;
   transition: all 0.15s ease;
 }
 
 .drt-browser-toggle:hover {
-  background: rgba(255, 255, 255, 0.05);
-  color: rgba(255, 255, 255, 0.7);
+  background: var(--color-bg-hover);
+  color: var(--color-text-secondary);
 }
 
 /* === Newspaper Modal === */
@@ -698,7 +698,7 @@ watch(() => props.boardId, () => {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(0, 0, 0, 0.7);
+  background: var(--color-bg-overlay);
 }
 
 .np-paper {

@@ -219,18 +219,18 @@ const {
 </template>
 
 <style scoped>
-.tags-page { display: flex; flex-direction: column; height: 100vh; background: #080c12; color: rgba(255, 255, 255, 0.85); }
-.tags-topbar { position: sticky; top: 0; z-index: 30; border-bottom: 1px solid rgba(255, 255, 255, 0.06); background: rgba(8, 12, 18, 0.92); backdrop-filter: blur(16px); }
+.tags-page { display: flex; flex-direction: column; height: 100vh; background: var(--color-bg-base); color: var(--color-text-primary); }
+.tags-topbar { position: sticky; top: 0; z-index: 30; border-bottom: 1px solid var(--color-border-subtle); background: var(--color-bg-overlay); backdrop-filter: blur(16px); }
 .tags-topbar-inner { display: flex; align-items: center; justify-content: space-between; max-width: min(1800px, 95vw); margin: 0 auto; padding: 0.75rem 1.5rem; }
-.tags-back-btn { display: flex; align-items: center; justify-content: center; width: 28px; height: 28px; border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 8px; color: rgba(255, 255, 255, 0.35); text-decoration: none; transition: all 0.12s ease; }
-.tags-back-btn:hover { border-color: rgba(255, 255, 255, 0.2); color: rgba(255, 255, 255, 0.6); background: rgba(255, 255, 255, 0.04); }
-.tags-page-title { font-family: serif; font-size: 1.1rem; font-weight: 600; color: rgba(255, 255, 255, 0.9); letter-spacing: 0.02em; }
+.tags-back-btn { display: flex; align-items: center; justify-content: center; width: 28px; height: 28px; border: 1px solid var(--color-border-medium); border-radius: 8px; color: var(--color-text-muted); text-decoration: none; transition: all 0.12s ease; }
+.tags-back-btn:hover { border-color: var(--color-border-strong); color: var(--color-text-secondary); background: var(--color-bg-hover); }
+.tags-page-title { font-family: serif; font-size: 1.1rem; font-weight: 600; color: var(--color-text-primary); letter-spacing: 0.02em; }
 .tags-main { display: flex; flex: 1; min-height: 0; max-width: min(1800px, 95vw); width: 100%; margin: 0 auto; }
 .tags-content { flex: 1; min-width: 0; padding: 1.25rem 1.5rem 3.5rem; overflow-y: auto; }
-.tags-content-tabs { display: flex; gap: 0.25rem; padding: 0 0 0.75rem; margin-bottom: 1rem; border-bottom: 1px solid rgba(255, 255, 255, 0.06); }
-.tags-content-tab { display: flex; align-items: center; gap: 0.35rem; padding: 0.4rem 0.75rem; border: none; border-radius: 8px 8px 0 0; background: none; color: rgba(255, 255, 255, 0.4); font-size: 0.75rem; cursor: pointer; transition: all 0.12s ease; position: relative; }
-.tags-content-tab:hover { color: rgba(255, 255, 255, 0.65); background: rgba(255, 255, 255, 0.03); }
-.tags-content-tab--active { color: rgba(255, 220, 200, 0.85); background: rgba(240, 138, 75, 0.08); }
-.tags-content-tab--active::after { content: ''; position: absolute; bottom: -1px; left: 0; right: 0; height: 2px; background: rgba(240, 138, 75, 0.6); border-radius: 1px; }
-.tags-bottombar { position: fixed; bottom: 0; left: 0; right: 0; z-index: 40; display: flex; align-items: center; justify-content: flex-end; gap: 0.75rem; padding: 0.45rem 1.25rem; border-top: 1px solid rgba(255, 255, 255, 0.04); background: rgba(8, 12, 18, 0.88); backdrop-filter: blur(12px); }
+.tags-content-tabs { display: flex; gap: 0.25rem; padding: 0 0 0.75rem; margin-bottom: 1rem; border-bottom: 1px solid var(--color-border-subtle); }
+.tags-content-tab { display: flex; align-items: center; gap: 0.35rem; padding: 0.4rem 0.75rem; border: none; border-radius: 8px 8px 0 0; background: none; color: var(--color-text-muted); font-size: 0.75rem; cursor: pointer; transition: all 0.12s ease; position: relative; }
+.tags-content-tab:hover { color: var(--color-text-secondary); background: var(--color-bg-hover); }
+.tags-content-tab--active { color: var(--color-accent); background: var(--color-accent-subtle); }
+.tags-content-tab--active::after { content: ''; position: absolute; bottom: -1px; left: 0; right: 0; height: 2px; background: var(--color-accent); border-radius: 1px; }
+.tags-bottombar { position: fixed; bottom: 0; left: 0; right: 0; z-index: 40; display: flex; align-items: center; justify-content: flex-end; gap: 0.75rem; padding: 0.45rem 1.25rem; border-top: 1px solid var(--color-border-subtle); background: var(--color-bg-overlay); backdrop-filter: blur(12px); }
 </style>

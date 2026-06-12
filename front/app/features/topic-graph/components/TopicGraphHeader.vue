@@ -78,24 +78,24 @@ function updateDate(event: Event) {
   display: grid;
   gap: 0.75rem;
   padding-top: 1rem;
-  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  border-top: 1px solid var(--color-border-subtle);
 }
 
 .topic-toolbar__eyebrow {
   font-size: 0.65rem;
   letter-spacing: 0.24em;
   text-transform: uppercase;
-  color: rgba(255, 255, 255, 0.4);
+  color: var(--color-text-muted);
 }
 
 .topic-toolbar__switcher {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 0.35rem;
-  background: rgba(0, 0, 0, 0.2);
+  background: var(--color-input-bg);
   padding: 0.25rem;
   border-radius: 999px;
-  border: 1px solid rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--color-border-subtle);
 }
 
 .topic-toolbar__switch,
@@ -107,13 +107,13 @@ function updateDate(event: Event) {
 }
 
 .topic-toolbar__switch {
-  color: rgba(255, 255, 255, 0.6);
+  color: var(--color-text-secondary);
   transition: all 0.2s ease;
 }
 
 .topic-toolbar__switch--active {
-  background: rgba(255, 255, 255, 0.1);
-  color: white;
+  background: var(--color-bg-hover);
+  color: var(--color-text-primary);
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
 }
 
@@ -124,9 +124,9 @@ function updateDate(event: Event) {
 
 .topic-toolbar__input {
   width: 100%;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  background: rgba(0, 0, 0, 0.15);
-  color: white;
+  border: 1px solid var(--color-border-medium);
+  background: var(--color-input-bg);
+  color: var(--color-text-primary);
   padding: 0 1rem;
 }
 
@@ -135,16 +135,16 @@ function updateDate(event: Event) {
 }
 
 .topic-toolbar__button {
-  border: 1px solid rgba(240, 138, 75, 0.3);
-  background: rgba(240, 138, 75, 0.15);
-  color: rgba(255, 233, 220, 0.9);
+  border: 1px solid var(--color-accent);
+  background: var(--color-accent-subtle);
+  color: var(--color-text-primary);
   font-weight: 600;
   transition: all 0.2s ease;
 }
 
 .topic-toolbar__button:hover:not(:disabled) {
-  background: rgba(240, 138, 75, 0.25);
-  border-color: rgba(240, 138, 75, 0.5);
+  background: var(--color-accent);
+  border-color: var(--color-accent);
 }
 
 .topic-toolbar__button:disabled {
@@ -160,9 +160,9 @@ function updateDate(event: Event) {
   width: fit-content;
   min-height: 2.35rem;
   border-radius: 999px;
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  background: rgba(255, 255, 255, 0.04);
-  color: rgba(255, 255, 255, 0.82);
+  border: 1px solid var(--color-border-medium);
+  background: var(--color-bg-hover);
+  color: var(--color-text-primary);
   padding: 0 0.9rem;
   font-size: 0.78rem;
   text-decoration: none;
@@ -176,8 +176,8 @@ function updateDate(event: Event) {
 .topic-toolbar__home-button:hover,
 .topic-toolbar__home-button:focus-visible {
   transform: translateY(-1px);
-  border-color: rgba(240, 138, 75, 0.4);
-  background: rgba(240, 138, 75, 0.12);
-  color: rgba(255, 235, 223, 0.95);
+  border-color: var(--color-accent);
+  background: var(--color-accent-subtle);
+  color: var(--color-text-primary);
 }
 </style>

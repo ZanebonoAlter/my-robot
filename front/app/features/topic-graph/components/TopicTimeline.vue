@@ -104,10 +104,10 @@ function handleModeChange(mode: TimelineAggregationMode) {
   justify-content: center;
   gap: 0.75rem;
   border-radius: 1.2rem;
-  border: 1px dashed rgba(255, 255, 255, 0.1);
-  background: rgba(255, 255, 255, 0.02);
+  border: 1px dashed var(--color-border-medium);
+  background: var(--color-bg-hover);
   padding: 2rem 1rem;
-  color: rgba(255, 255, 255, 0.52);
+  color: var(--color-text-muted);
   text-align: center;
 }
 

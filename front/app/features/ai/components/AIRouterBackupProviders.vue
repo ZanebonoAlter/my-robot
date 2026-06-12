@@ -62,9 +62,9 @@ const ctx = inject<AIRouterCtx>('ai-router-ctx')!
             </button>
           </div>
           <div v-else class="md:col-span-2 rounded-lg bg-amber-50 border border-amber-200/80 px-3 py-2 text-xs text-amber-700">Ollama 模式无需 API Key</div>
-          <label class="flex items-center gap-2 text-sm text-gray-700 self-center">
-            <input v-model="ctx.newProviderForm.enable_thinking" type="checkbox" class="rounded"> Thinking
-          </label>
+          <div class="flex items-center gap-2 text-sm text-gray-700">
+            <AppToggle v-model="ctx.newProviderForm.enable_thinking" /> Thinking
+          </div>
         </div>
         <div class="flex justify-end">
           <button class="px-3 py-1.5 text-xs font-medium text-white bg-teal-600 rounded-lg hover:bg-teal-700 transition-colors disabled:opacity-50" :disabled="ctx.saving" @click="ctx.saveNewProvider">添加</button>
@@ -123,12 +123,12 @@ const ctx = inject<AIRouterCtx>('ai-router-ctx')!
               </div>
               <div v-else class="md:col-span-2 rounded-lg bg-amber-50 border border-amber-200/80 px-3 py-2 text-xs text-amber-700">Ollama 模式无需 API Key</div>
               <input v-model.number="ctx.editProviderForm.timeout_seconds" type="number" min="30" class="input w-full text-sm" placeholder="Timeout (秒)">
-              <label class="flex items-center gap-2 text-sm text-gray-700 self-center">
-                <input v-model="ctx.editProviderForm.enabled" type="checkbox" class="rounded"> 启用
-              </label>
-              <label class="flex items-center gap-2 text-sm text-gray-700 self-center">
-                <input v-model="ctx.editProviderForm.enable_thinking" type="checkbox" class="rounded"> Thinking
-              </label>
+              <div class="flex items-center gap-2 text-sm text-gray-700">
+                <AppToggle v-model="ctx.editProviderForm.enabled" /> 启用
+              </div>
+              <div class="flex items-center gap-2 text-sm text-gray-700">
+                <AppToggle v-model="ctx.editProviderForm.enable_thinking" /> Thinking
+              </div>
             </div>
             <div class="flex justify-end gap-2">
               <button class="px-3 py-1.5 text-xs rounded-lg border border-gray-200 text-gray-700 hover:bg-gray-50" @click="ctx.cancelEditingProvider">取消</button>

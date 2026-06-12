@@ -5,14 +5,11 @@
   margin: 0.5rem;
   border-radius: 0.75rem;
   overflow: hidden;
-  background: linear-gradient(
-    to bottom,
-    rgba(255, 255, 255, 0.7) 0%,
-    rgba(250, 247, 242, 0.6) 100%
-  );
+  background: var(--color-bg-elevated);
   backdrop-filter: blur(10px);
-  border: 1px solid rgba(26, 26, 26, 0.06);
-  box-shadow: 0 2px 8px rgba(26, 26, 26, 0.06);
+  border: 1px solid var(--color-border-subtle);
+  box-shadow: var(--shadow-subtle);
+  color: var(--color-text-primary);
 }
 
 .resize-handle {
@@ -34,14 +31,14 @@
   transform: translate(-50%, -50%);
   width: 0.0625rem;
   height: 2rem;
-  background: var(--color-ink-400);
+  background: var(--color-input-focus);
   border-radius: 9999px;
   opacity: 0;
   transition: opacity 0.2s ease;
 }
 
 .resize-handle:hover {
-  background: rgba(59, 107, 135, 0.15);
+  background: var(--color-bg-hover);
 }
 
 .resize-handle:hover::after {
@@ -49,7 +46,7 @@
 }
 
 .resize-handle.active {
-  background: rgba(59, 107, 135, 0.15);
+  background: var(--color-bg-hover);
 }
 
 .sidebar-content {
@@ -68,12 +65,12 @@
 }
 
 .sidebar-content::-webkit-scrollbar-thumb {
-  background: rgba(26, 26, 26, 0.1);
+  background: var(--color-border-medium);
   border-radius: 4px;
 }
 
 .sidebar-content::-webkit-scrollbar-thumb:hover {
-  background: rgba(26, 26, 26, 0.18);
+  background: var(--color-border-strong);
 }
 
 /* Sidebar Items - 侧边栏项目 */
@@ -89,17 +86,17 @@
   background: transparent;
   border: none;
   cursor: pointer;
-  color: var(--color-ink-dark);
+  color: var(--color-text-primary);
 }
 
 .sidebar-item:hover {
-  background: rgba(255, 255, 255, 0.6);
+  background: var(--color-bg-hover);
 }
 
 .sidebar-item.active {
-  background: rgba(59, 107, 135, 0.12);
-  color: var(--color-ink-700);
-  box-shadow: 0 1px 2px rgba(26, 26, 26, 0.04);
+  background: var(--color-accent-subtle);
+  color: var(--color-accent);
+  box-shadow: var(--shadow-subtle);
 }
 
 .badge {
@@ -107,13 +104,13 @@
   font-weight: 600;
   padding: 0.125rem 0.625rem;
   border-radius: 9999px;
-  background: rgba(59, 107, 135, 0.12);
-  color: var(--color-ink-600);
+  background: var(--color-accent-subtle);
+  color: var(--color-accent);
 }
 
 .badge-amber {
-  background: rgba(212, 136, 60, 0.12);
-  color: var(--color-accent-amber);
+  background: var(--color-accent-subtle);
+  color: var(--color-accent);
 }
 
 .badge-sm {
@@ -124,7 +121,7 @@
 
 .divider {
   margin: 0.625rem 0;
-  border-top: 1px solid rgba(26, 26, 26, 0.08);
+  border-top: 1px solid var(--color-border-subtle);
 }
 
 /* Categories - 分类 */
@@ -148,11 +145,11 @@
 }
 
 .category-item:hover {
-  background: rgba(255, 255, 255, 0.6);
+  background: var(--color-bg-hover);
 }
 
 .category-item.active {
-  background: rgba(59, 107, 135, 0.12);
+  background: var(--color-accent-subtle);
 }
 
 .category-btn {
@@ -164,7 +161,7 @@
   background: transparent;
   border: none;
   cursor: pointer;
-  color: var(--color-ink-dark);
+  color: var(--color-text-primary);
 }
 
 .count {
@@ -191,12 +188,12 @@
   background: transparent;
   border: none;
   cursor: pointer;
-  color: var(--color-ink-medium);
+  color: var(--color-text-secondary);
 }
 
 .action-btn:hover {
-  background: rgba(255, 255, 255, 0.6);
-  color: var(--color-ink-dark);
+  background: var(--color-bg-hover);
+  color: var(--color-text-primary);
 }
 
 /* Feeds List - 订阅源列表 */
@@ -219,12 +216,12 @@
 }
 
 .feed-item:hover {
-  background: rgba(255, 255, 255, 0.6);
+  background: var(--color-bg-hover);
 }
 
 .feed-item.active {
-  background: rgba(59, 107, 135, 0.12);
-  color: var(--color-ink-700);
+  background: var(--color-accent-subtle);
+  color: var(--color-accent);
 }
 
 .feed-btn {

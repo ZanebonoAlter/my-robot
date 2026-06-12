@@ -55,27 +55,27 @@ const panelTitle = computed(() => {
   font-size: 0.72rem;
   letter-spacing: 0.18em;
   text-transform: uppercase;
-  color: rgba(186, 206, 226, 0.72);
+  color: var(--color-text-secondary);
 }
 
 .topic-footer-intro__title {
   font-size: 0.95rem;
   line-height: 1.55;
-  color: rgba(241, 247, 252, 0.9);
+  color: var(--color-text-primary);
 }
 
 .topic-footer-placeholder {
   padding: 1.5rem;
   border-radius: 12px;
-  background: rgba(255, 255, 255, 0.03);
-  border: 1px dashed rgba(186, 206, 226, 0.24);
+  background: var(--color-bg-hover);
+  border: 1px dashed var(--color-border-medium);
 }
 
 .topic-footer-placeholder__text {
   margin: 0;
   font-size: 0.85rem;
   line-height: 1.6;
-  color: rgba(186, 206, 226, 0.64);
+  color: var(--color-text-muted);
   text-align: center;
 }
 </style>

@@ -149,11 +149,9 @@ watch([label, search], () => { page.value = 1 })
         class="alp-item"
         :class="{ 'alp-item--selected': internalSelected.has(item.id) }"
       >
-        <input
-          type="checkbox"
-          class="alp-checkbox"
-          :checked="internalSelected.has(item.id)"
-          @change="toggleItem(item.id)"
+        <AppToggle
+          :model-value="internalSelected.has(item.id)"
+          @update:model-value="toggleItem(item.id)"
         />
         <span class="alp-item-label">{{ item.label }}</span>
         <span class="alp-item-sim">{{ similarityPercent(item.similarity) }}</span>
@@ -205,10 +203,10 @@ watch([label, search], () => { page.value = 1 })
 .alp-input {
   flex: 1;
   width: 100%;
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  border: 1px solid var(--color-border-medium);
   border-radius: 8px;
-  background: rgba(0, 0, 0, 0.2);
-  color: rgba(255, 255, 255, 0.88);
+  background: var(--color-input-bg);
+  color: var(--color-text-primary);
   font-size: 0.78rem;
   padding: 0.4rem 0.65rem;
   outline: none;
@@ -217,11 +215,11 @@ watch([label, search], () => { page.value = 1 })
 }
 
 .alp-input::placeholder {
-  color: rgba(255, 255, 255, 0.2);
+  color: var(--color-text-muted);
 }
 
 .alp-input:focus {
-  border-color: rgba(240, 138, 75, 0.4);
+  border-color: var(--color-accent);
 }
 
 .alp-input--sm {
@@ -235,9 +233,9 @@ watch([label, search], () => { page.value = 1 })
   gap: 0.3rem;
   padding: 0.3rem 0.7rem;
   border-radius: 8px;
-  border: 1px solid rgba(99, 179, 237, 0.25);
-  background: rgba(99, 179, 237, 0.08);
-  color: rgba(147, 197, 253, 0.8);
+  border: 1px solid var(--color-secondary);
+  background: var(--color-secondary);
+  color: var(--color-secondary);
   font-size: 0.72rem;
   cursor: pointer;
   transition: all 0.12s ease;
@@ -245,8 +243,8 @@ watch([label, search], () => { page.value = 1 })
 }
 
 .alp-fetch-btn:hover:not(:disabled) {
-  background: rgba(99, 179, 237, 0.15);
-  border-color: rgba(99, 179, 237, 0.4);
+  background: var(--color-secondary);
+  border-color: var(--color-secondary);
 }
 
 .alp-fetch-btn:disabled {
@@ -262,7 +260,7 @@ watch([label, search], () => { page.value = 1 })
 
 .alp-selected-label {
   font-size: 0.65rem;
-  color: rgba(255, 255, 255, 0.4);
+  color: var(--color-text-muted);
 }
 
 .alp-chips {
@@ -277,10 +275,10 @@ watch([label, search], () => { page.value = 1 })
   gap: 0.25rem;
   padding: 0.15rem 0.4rem;
   border-radius: 6px;
-  border: 1px solid rgba(240, 138, 75, 0.25);
-  background: rgba(240, 138, 75, 0.08);
+  border: 1px solid var(--color-accent);
+  background: var(--color-accent-subtle);
   font-size: 0.68rem;
-  color: rgba(255, 220, 200, 0.85);
+  color: var(--color-accent);
 }
 
 .alp-chip-x {
@@ -292,7 +290,7 @@ watch([label, search], () => { page.value = 1 })
   border: none;
   border-radius: 3px;
   background: none;
-  color: rgba(255, 255, 255, 0.3);
+  color: var(--color-text-muted);
   cursor: pointer;
   transition: color 0.1s;
 }
@@ -310,7 +308,7 @@ watch([label, search], () => { page.value = 1 })
 .alp-skeleton {
   height: 28px;
   border-radius: 6px;
-  background: rgba(255, 255, 255, 0.03);
+  background: var(--color-bg-hover);
   animation: alpPulse 1.5s ease-in-out infinite;
 }
 
@@ -324,7 +322,7 @@ watch([label, search], () => { page.value = 1 })
   align-items: center;
   gap: 0.4rem;
   padding: 1rem 0;
-  color: rgba(255, 255, 255, 0.25);
+  color: var(--color-text-muted);
   font-size: 0.72rem;
 }
 
@@ -347,47 +345,40 @@ watch([label, search], () => { page.value = 1 })
 }
 
 .alp-item:hover {
-  background: rgba(255, 255, 255, 0.04);
+  background: var(--color-bg-hover);
 }
 
 .alp-item--selected {
-  background: rgba(240, 138, 75, 0.08);
-  border: 1px solid rgba(240, 138, 75, 0.15);
-}
-
-.alp-checkbox {
-  width: 14px;
-  height: 14px;
-  accent-color: rgba(240, 138, 75, 0.8);
-  flex-shrink: 0;
+  background: var(--color-accent-subtle);
+  border: 1px solid var(--color-accent);
 }
 
 .alp-item-label {
   flex: 1;
   font-size: 0.75rem;
-  color: rgba(255, 255, 255, 0.75);
+  color: var(--color-text-secondary);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
 .alp-item--selected .alp-item-label {
-  color: rgba(255, 220, 200, 0.9);
+  color: var(--color-accent);
 }
 
 .alp-item-sim {
   font-size: 0.62rem;
-  color: rgba(147, 197, 253, 0.6);
+  color: var(--color-secondary);
   min-width: 32px;
   text-align: right;
 }
 
 .alp-item-ref {
   font-size: 0.58rem;
-  color: rgba(255, 255, 255, 0.3);
+  color: var(--color-text-muted);
   padding: 0 0.25rem;
   border-radius: 4px;
-  background: rgba(255, 255, 255, 0.05);
+  background: var(--color-bg-hover);
 }
 
 .alp-pagination {
@@ -404,17 +395,17 @@ watch([label, search], () => { page.value = 1 })
   justify-content: center;
   width: 24px;
   height: 24px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  border: 1px solid var(--color-border-medium);
   border-radius: 6px;
   background: none;
-  color: rgba(255, 255, 255, 0.5);
+  color: var(--color-text-muted);
   cursor: pointer;
   transition: all 0.1s;
 }
 
 .alp-page-btn:hover:not(:disabled) {
-  background: rgba(255, 255, 255, 0.06);
-  color: rgba(255, 255, 255, 0.8);
+  background: var(--color-bg-hover);
+  color: var(--color-text-secondary);
 }
 
 .alp-page-btn:disabled {
@@ -424,6 +415,6 @@ watch([label, search], () => { page.value = 1 })
 
 .alp-page-info {
   font-size: 0.65rem;
-  color: rgba(255, 255, 255, 0.4);
+  color: var(--color-text-muted);
 }
 </style>

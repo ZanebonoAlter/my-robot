@@ -425,8 +425,8 @@ watch(() => props.sectorId, () => {
     <div class="flex items-center justify-between gap-3 mb-2">
       <div class="flex items-center gap-2">
         <div>
-          <h3 class="font-serif text-lg text-white">标签层级</h3>
-          <p class="text-xs text-white/50 mt-0.5">
+          <h3 class="font-serif text-lg" style="color: var(--color-text-primary)">标签层级</h3>
+          <p class="text-xs mt-0.5" style="color: var(--color-text-muted)">
             {{ totalCount }} 个标签
           </p>
         </div>
@@ -495,7 +495,7 @@ watch(() => props.sectorId, () => {
 
     <!-- Time filter -->
     <div class="flex items-center gap-1.5 mb-3 flex-wrap">
-      <span class="text-xs text-white/40 mr-0.5">时间</span>
+      <span class="text-xs mr-0.5" style="color: var(--color-text-muted)">时间</span>
       <button
         type="button"
         class="th-category-btn"
@@ -540,7 +540,7 @@ watch(() => props.sectorId, () => {
     </div>
     <div v-if="showCustomRange" class="flex items-center gap-2 mb-3 th-custom-range">
       <input v-model="customStartDate" type="date" class="th-date-input" />
-      <span class="text-white/30 text-xs">至</span>
+      <span class="text-xs" style="color: var(--color-text-muted)">至</span>
       <input v-model="customEndDate" type="date" class="th-date-input" />
       <button type="button" class="th-category-btn th-category-btn--active" @click="applyCustomRange">确定</button>
     </div>
@@ -558,16 +558,16 @@ watch(() => props.sectorId, () => {
 
     <!-- Empty -->
     <div v-else-if="sortedNodes.length === 0 && props.sectorId" class="th-empty">
-      <Icon icon="mdi:filter-variant-remove" width="32" class="text-white/20" />
+      <Icon icon="mdi:filter-variant-remove" width="32" style="color: var(--color-text-muted); opacity: 0.5" />
       <p>该板块暂无标签</p>
-      <p class="text-xs text-white/30 mt-1">此板块下没有匹配的标签层级关系</p>
+      <p class="text-xs mt-1" style="color: var(--color-text-muted)">此板块下没有匹配的标签层级关系</p>
     </div>
 
     <!-- Empty: no data -->
     <div v-else-if="sortedNodes.length === 0" class="th-empty">
-      <Icon icon="mdi:file-tree-outline" width="32" class="text-white/20" />
+      <Icon icon="mdi:file-tree-outline" width="32" style="color: var(--color-text-muted); opacity: 0.5" />
       <p>暂无标签层级关系</p>
-      <p class="text-xs text-white/30 mt-1">当新文章入库时，中间相似度标签将自动提取抽象概念</p>
+      <p class="text-xs mt-1" style="color: var(--color-text-muted)">当新文章入库时，中间相似度标签将自动提取抽象概念</p>
     </div>
 
     <!-- Tree -->
@@ -627,7 +627,7 @@ watch(() => props.sectorId, () => {
     <Teleport to="body">
       <div v-if="confirmingDetach" class="th-confirm-overlay" @click.self="cancelDetach">
         <div class="th-confirm-dialog">
-          <p class="text-sm text-white/80">确认将 <strong class="text-white">{{ confirmingDetach.childLabel }}</strong> 从抽象标签中分离？</p>
+          <p class="text-sm" style="color: var(--color-text-secondary)">确认将 <strong style="color: var(--color-text-primary)">{{ confirmingDetach.childLabel }}</strong> 从抽象标签中分离？</p>
           <div class="flex gap-2 mt-4 justify-end">
             <button type="button" class="th-btn th-btn--ghost" @click="cancelDetach">取消</button>
             <button type="button" class="th-btn th-btn--danger" @click="void confirmDetach()">分离</button>
@@ -640,17 +640,17 @@ watch(() => props.sectorId, () => {
     <Teleport to="body">
       <div v-if="reassignModal" class="th-confirm-overlay" @click.self="cancelReassign">
         <div class="th-confirm-dialog" style="width: min(480px, 90%);">
-          <p class="text-sm text-white/60 mb-1">归类标签</p>
-          <p class="text-base text-white font-medium mb-3">{{ reassignModal.tagLabel }}</p>
+          <p class="text-sm mb-1" style="color: var(--color-text-secondary)">归类标签</p>
+          <p class="text-base font-medium mb-3" style="color: var(--color-text-primary)">{{ reassignModal.tagLabel }}</p>
 
           <div v-if="reassignError" class="th-error mb-3">
             <Icon icon="mdi:alert-circle-outline" width="14" />
             <span>{{ reassignError }}</span>
           </div>
 
-          <p class="text-xs text-white/40 mb-2">选择目标抽象标签：</p>
+          <p class="text-xs mb-2" style="color: var(--color-text-muted)">选择目标抽象标签：</p>
 
-          <div v-if="reassignCandidates.length === 0" class="text-xs text-white/30 py-4 text-center">
+          <div v-if="reassignCandidates.length === 0" class="text-xs py-4 text-center" style="color: var(--color-text-muted)">
             暂无可选的抽象标签
           </div>
 

@@ -275,7 +275,7 @@ function handleToggleWatch(e: Event) {
   border: 1px solid var(--color-border-medium);
   border-radius: 6px;
   background: var(--color-input-bg);
-  color: white;
+  color: var(--color-text-primary);
   font-size: 0.82rem;
   padding: 0.2rem 0.5rem;
   outline: none;

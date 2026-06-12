@@ -87,8 +87,8 @@ const {
                 />
 
                 <div class="mt-6">
-                  <p class="text-xs uppercase tracking-[0.3em] text-white/42">Graph Field</p>
-                  <h2 class="mt-2 font-serif text-2xl text-white md:text-[2.25rem]">{{ graphPayload?.period_label || '话题网络' }}</h2>
+                  <p class="text-xs uppercase tracking-[0.3em]" style="color: var(--color-text-muted)">Graph Field</p>
+                  <h2 class="mt-2 font-serif text-2xl md:text-[2.25rem]" style="color: var(--color-text-primary)">{{ graphPayload?.period_label || '话题网络' }}</h2>
                   <p class="mt-3 text-sm leading-6 text-[var(--color-text-secondary)]">
                     事件、人物、关键词的热点题材默认全部进入拓扑图；底部可单独控制各节点的显示与隐藏。
                   </p>
@@ -127,8 +127,8 @@ const {
                 <section class="topic-hotspot-strip rounded-[30px] p-4 md:p-5">
                   <div class="topic-hotspot-strip__header">
                     <div>
-                      <p class="text-xs uppercase tracking-[0.24em] text-white/42">热点题材</p>
-                      <h3 class="mt-2 font-serif text-xl text-white">把最热的话题平铺到底部，避免和左侧控制重复。</h3>
+                      <p class="text-xs uppercase tracking-[0.24em]" style="color: var(--color-text-muted)">热点题材</p>
+                      <h3 class="mt-2 font-serif text-xl" style="color: var(--color-text-primary)">把最热的话题平铺到底部，避免和左侧控制重复。</h3>
                     </div>
                   </div>
 
@@ -188,7 +188,7 @@ const {
                                 <Icon v-else-if="topic.icon" :icon="topic.icon" width="14" />
                                 <span>{{ topic.label }}</span>
                                 <span v-if="topic.is_abstract" class="ml-1 text-[10px] text-amber-400/60">({{ topic.child_slugs?.length ?? 0 }})</span>
-                                <span v-else-if="topic.is_low_quality" class="ml-1 text-[10px] text-white/35">低质量</span>
+                                <span v-else-if="topic.is_low_quality" class="ml-1 text-[10px]" style="color: var(--color-text-muted)">低质量</span>
                               </button>
                               <button
                                 type="button"
@@ -248,7 +248,7 @@ const {
                             <Icon v-else-if="topic.icon" :icon="topic.icon" width="14" />
                             {{ topic.label }}
                             <span v-if="topic.is_abstract" class="ml-1 text-[10px] text-amber-400/60">({{ topic.child_slugs?.length ?? 0 }})</span>
-                            <span v-else-if="topic.is_low_quality" class="ml-1 text-[10px] text-white/35">低质量</span>
+                            <span v-else-if="topic.is_low_quality" class="ml-1 text-[10px]" style="color: var(--color-text-muted)">低质量</span>
                           </button>
                           <button
                             type="button"
@@ -332,10 +332,10 @@ const {
             @mousedown="startTimelineDrag"
           >
             <div class="flex items-center gap-2">
-              <Icon icon="mdi:drag-horizontal-variant" width="16" class="text-white/40 cursor-grab" />
+              <Icon icon="mdi:drag-horizontal-variant" width="16" class="cursor-grab" style="color: var(--color-text-muted)" />
               <Icon icon="mdi:timeline-clock-outline" width="16" class="text-[var(--color-accent)]" />
-              <span class="font-serif text-sm text-white">时间线</span>
-              <span v-if="totalAggregatedCount" class="text-xs text-white/40">{{ totalAggregatedCount }} 篇</span>
+              <span class="font-serif text-sm" style="color: var(--color-text-primary)">时间线</span>
+              <span v-if="totalAggregatedCount" class="text-xs" style="color: var(--color-text-muted)">{{ totalAggregatedCount }} 篇</span>
             </div>
             <button
               type="button"

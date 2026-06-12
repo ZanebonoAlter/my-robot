@@ -31,9 +31,9 @@ function updateDate(event: Event) {
   <header class="topic-hero">
     <div class="flex flex-col gap-5">
       <div class="space-y-2">
-        <p class="text-[0.65rem] uppercase tracking-[0.34em] text-white/50">Topic Field</p>
-        <h1 class="font-serif text-2xl text-white md:text-3xl">{{ heroLabel }}</h1>
-        <p class="text-xs leading-5 text-white/60">{{ heroSubline }}</p>
+        <p class="text-[0.65rem] uppercase tracking-[0.34em]" style="color: var(--color-text-muted)">Topic Field</p>
+        <h1 class="font-serif text-2xl md:text-3xl" style="color: var(--color-text-primary)">{{ heroLabel }}</h1>
+        <p class="text-xs leading-5" style="color: var(--color-text-secondary)">{{ heroSubline }}</p>
       </div>
 
       <div class="topic-toolbar">
@@ -131,7 +131,7 @@ function updateDate(event: Event) {
 }
 
 .topic-toolbar__input::-webkit-calendar-picker-indicator {
-  filter: invert(1) opacity(0.6);
+  filter: opacity(0.6);
 }
 
 .topic-toolbar__button {

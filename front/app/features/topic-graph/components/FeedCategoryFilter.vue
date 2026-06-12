@@ -82,8 +82,8 @@ function selectFeed(feedId: string) {
 <template>
   <div class="feed-category-filter space-y-1">
     <button
-      class="flex items-center gap-2 px-3 py-1.5 rounded-full text-sm cursor-pointer transition-colors text-white/60 hover:text-white hover:bg-white/10"
-      :class="{ 'bg-white/10 text-white': !props.selectedCategoryId && !props.selectedFeedId }"
+      class="fcf-item"
+      :class="{ 'fcf-item--active': !props.selectedCategoryId && !props.selectedFeedId }"
       @click="selectAll"
     >
       <Icon icon="mdi:view-grid-outline" class="text-base" />
@@ -95,21 +95,21 @@ function selectFeed(feedId: string) {
       :key="category.id"
     >
       <button
-        class="flex items-center gap-2 px-3 py-2 rounded-xl cursor-pointer transition-colors w-full text-left"
-        :class="{ 'bg-white/10': props.selectedCategoryId === category.id }"
+        class="fcf-item fcf-item--category"
+        :class="{ 'fcf-item--active': props.selectedCategoryId === category.id }"
         @click="toggleCategory(category.id)"
       >
         <Icon :icon="category.icon || 'mdi:folder-outline'" class="text-lg" :style="{ color: category.color || undefined }" />
-        <span class="text-white/80 flex-1">{{ category.name }}</span>
+        <span class="fcf-item__label">{{ category.name }}</span>
         <span
-          class="text-xs px-1.5 py-0.5 rounded-full text-white/50"
+          class="fcf-item__count"
           :style="{ backgroundColor: category.color ? `${category.color}22` : 'var(--color-bg-hover)' }"
         >
           {{ feedsByCategory.grouped.get(category.id)?.length || 0 }}
         </span>
         <Icon
           icon="mdi:chevron-down"
-          class="text-white/30 transition-transform"
+          class="fcf-item__chevron"
           :class="{ 'rotate-180': expandedCategoryId === category.id }"
         />
       </button>
@@ -118,30 +118,30 @@ function selectFeed(feedId: string) {
         <button
           v-for="feed in feedsByCategory.grouped.get(category.id) || []"
           :key="feed.id"
-          class="flex items-center gap-2 px-3 py-1.5 pl-8 rounded-lg cursor-pointer transition-colors text-sm w-full text-left"
-          :class="{ 'bg-white/10': props.selectedFeedId === feed.id }"
+          class="fcf-item fcf-item--feed"
+          :class="{ 'fcf-item--active': props.selectedFeedId === feed.id }"
           @click="selectFeed(feed.id)"
         >
-          <Icon :icon="feed.icon || 'mdi:rss'" class="text-base text-white/40" />
-          <span class="text-white/60 truncate">{{ feed.title }}</span>
+          <Icon :icon="feed.icon || 'mdi:rss'" class="text-base fcf-item__icon-muted" />
+          <span class="fcf-item__label-muted truncate">{{ feed.title }}</span>
         </button>
       </div>
     </div>
 
     <div v-if="feedsByCategory.uncategorized.length > 0">
       <button
-        class="flex items-center gap-2 px-3 py-2 rounded-xl cursor-pointer transition-colors w-full text-left"
-        :class="{ 'bg-white/10': props.selectedCategoryId === '__uncategorized__' }"
+        class="fcf-item fcf-item--category"
+        :class="{ 'fcf-item--active': props.selectedCategoryId === '__uncategorized__' }"
         @click="toggleCategory('__uncategorized__')"
       >
-        <Icon icon="mdi:help-circle-outline" class="text-lg text-white/40" />
-        <span class="text-white/80 flex-1">未分类</span>
-        <span class="text-xs px-1.5 py-0.5 rounded-full text-white/50 bg-white/5">
+        <Icon icon="mdi:help-circle-outline" class="text-lg fcf-item__icon-muted" />
+        <span class="fcf-item__label">未分类</span>
+        <span class="fcf-item__count" style="background: var(--color-bg-hover)">
           {{ feedsByCategory.uncategorized.length }}
         </span>
         <Icon
           icon="mdi:chevron-down"
-          class="text-white/30 transition-transform"
+          class="fcf-item__chevron"
           :class="{ 'rotate-180': expandedCategoryId === '__uncategorized__' }"
         />
       </button>
@@ -150,14 +150,78 @@ function selectFeed(feedId: string) {
         <button
           v-for="feed in feedsByCategory.uncategorized"
           :key="feed.id"
-          class="flex items-center gap-2 px-3 py-1.5 pl-8 rounded-lg cursor-pointer transition-colors text-sm w-full text-left"
-          :class="{ 'bg-white/10': props.selectedFeedId === feed.id }"
+          class="fcf-item fcf-item--feed"
+          :class="{ 'fcf-item--active': props.selectedFeedId === feed.id }"
           @click="selectFeed(feed.id)"
         >
-          <Icon :icon="feed.icon || 'mdi:rss'" class="text-base text-white/40" />
-          <span class="text-white/60 truncate">{{ feed.title }}</span>
+          <Icon :icon="feed.icon || 'mdi:rss'" class="text-base fcf-item__icon-muted" />
+          <span class="fcf-item__label-muted truncate">{{ feed.title }}</span>
         </button>
       </div>
     </div>
   </div>
 </template>
+
+<style scoped>
+.fcf-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  border-radius: 9999px;
+  font-size: 13px;
+  cursor: pointer;
+  border: none;
+  background: transparent;
+  color: var(--color-text-secondary);
+  transition: background 0.15s, color 0.15s;
+  width: 100%;
+  text-align: left;
+}
+
+.fcf-item:hover {
+  color: var(--color-text-primary);
+  background: var(--color-bg-hover);
+}
+
+.fcf-item--active {
+  background: var(--color-accent-subtle);
+  color: var(--color-accent);
+}
+
+.fcf-item--category {
+  padding: 8px 12px;
+  border-radius: 12px;
+}
+
+.fcf-item--feed {
+  padding: 6px 12px 6px 32px;
+  border-radius: 8px;
+  font-size: 13px;
+}
+
+.fcf-item__label {
+  flex: 1;
+  color: var(--color-text-primary);
+}
+
+.fcf-item__label-muted {
+  color: var(--color-text-secondary);
+}
+
+.fcf-item__count {
+  font-size: 11px;
+  padding: 2px 6px;
+  border-radius: 9999px;
+  color: var(--color-text-muted);
+}
+
+.fcf-item__chevron {
+  color: var(--color-text-muted);
+  transition: transform 0.15s;
+}
+
+.fcf-item__icon-muted {
+  color: var(--color-text-muted);
+}
+</style>

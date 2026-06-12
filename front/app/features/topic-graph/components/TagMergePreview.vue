@@ -39,7 +39,7 @@ const {
         <!-- Header -->
         <header class="tm-header">
           <div>
-            <h2 class="text-lg font-semibold text-white">
+            <h2 class="text-lg font-semibold" style="color: var(--color-text-primary)">
               标签合并预览
               <span v-if="groups.length" class="ml-2 text-sm font-normal text-[var(--color-text-muted)]">
                 ({{ groups.length }} 组)

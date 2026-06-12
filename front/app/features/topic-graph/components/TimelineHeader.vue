@@ -74,7 +74,7 @@ const categoryLabels: Record<TopicCategory, string> = {
   padding: 1rem 1.25rem;
   border-radius: 1.25rem;
   border: 1px solid var(--color-border-subtle);
-  background: linear-gradient(180deg, rgba(20, 30, 42, 0.9), rgba(12, 18, 26, 0.95));
+  background: var(--color-bg-elevated);
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
 }
 
@@ -114,19 +114,19 @@ const categoryLabels: Record<TopicCategory, string> = {
 .timeline-header__category--event {
   background: var(--color-tag-event-bg);
   border: 1px solid var(--color-tag-event-border);
-  color: rgba(252, 211, 77, 0.9);
+  color: var(--color-tag-event);
 }
 
 .timeline-header__category--person {
   background: var(--color-tag-person-bg);
   border: 1px solid var(--color-tag-person-border);
-  color: rgba(110, 231, 183, 0.9);
+  color: var(--color-tag-person);
 }
 
 .timeline-header__category--keyword {
   background: var(--color-tag-keyword-bg);
   border: 1px solid var(--color-tag-keyword-border);
-  color: rgba(165, 180, 252, 0.9);
+  color: var(--color-tag-keyword);
 }
 
 .timeline-header__count {

@@ -1,10 +1,12 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { Icon } from '@iconify/vue'
 import { useGlobalSettings } from '~/composables/useGlobalSettings'
+import { useApiStore } from '~/stores/api'
 import FeedMasterList from './FeedMasterList.vue'
 import FeedDetailEditor from './FeedDetailEditor.vue'
 
+const apiStore = useApiStore()
 const {
   collapsedCategories, loading, error, success,
   feedsByCategory, refreshOptions, maxArticlesOptions,
@@ -12,6 +14,11 @@ const {
 } = useGlobalSettings()
 
 const selectedFeedId = ref<string | undefined>()
+
+// Fetch ALL feeds when entering settings (main page may have filtered by category)
+onMounted(() => {
+  apiStore.fetchFeeds({ per_page: 10000 })
+})
 
 const allFeeds = computed(() =>
   Object.values(feedsByCategory.value).flat()

@@ -43,10 +43,10 @@ function decisionLabel(d: string): string {
 
 function decisionStyle(d: string): { border: string; bg: string; color: string } {
   switch (d) {
-    case 'create_new': return { border: 'rgba(52,211,153,0.3)', bg: 'rgba(52,211,153,0.08)', color: 'rgba(134,239,172,0.9)' }
-    case 'merge_into_existing': return { border: 'rgba(96,165,250,0.3)', bg: 'rgba(96,165,250,0.08)', color: 'rgba(147,197,253,0.9)' }
-    case 'skip': return { border: 'rgba(107,114,128,0.3)', bg: 'rgba(107,114,128,0.08)', color: 'rgba(209,213,219,0.7)' }
-    default: return { border: 'rgba(255,255,255,0.1)', bg: 'rgba(255,255,255,0.04)', color: 'rgba(255,255,255,0.6)' }
+    case 'create_new': return { border: 'var(--color-success-border, rgba(61,138,74,0.3))', bg: 'var(--color-success-bg, rgba(61,138,74,0.08))', color: 'var(--color-success)' }
+    case 'merge_into_existing': return { border: 'var(--color-link-border)', bg: 'var(--color-link-subtle)', color: 'var(--color-link)' }
+    case 'skip': return { border: 'var(--color-border-medium)', bg: 'var(--color-bg-sunken)', color: 'var(--color-text-muted)' }
+    default: return { border: 'var(--color-border-subtle)', bg: 'var(--color-bg-hover)', color: 'var(--color-text-secondary)' }
   }
 }
 </script>
@@ -367,9 +367,9 @@ function decisionStyle(d: string): { border: string; bg: string; color: string }
   gap: 0.45rem;
   padding: 0.65rem 0.75rem;
   border-radius: 10px;
-  border: 1px solid var(--color-secondary);
-  background: var(--color-secondary);
-  color: var(--color-secondary);
+  border: 1px solid var(--color-info-bg, rgba(61,122,138,0.25));
+  background: var(--color-info-bg, rgba(61,122,138,0.08));
+  color: var(--color-info);
   font-size: 0.72rem;
   line-height: 1.5;
 }
@@ -451,13 +451,13 @@ function decisionStyle(d: string): { border: string; bg: string; color: string }
 }
 
 .usp-item-btn--primary {
-  border-color: rgba(52, 211, 153, 0.3);
-  background: rgba(52, 211, 153, 0.1);
-  color: rgba(134, 239, 172, 0.9);
+  border-color: var(--color-success-border, rgba(61,138,74,0.3));
+  background: var(--color-success-bg, rgba(61,138,74,0.1));
+  color: var(--color-success);
 }
 
 .usp-item-btn--primary:hover {
-  background: rgba(52, 211, 153, 0.18);
+  background: var(--color-success-bg, rgba(61,138,74,0.18));
 }
 
 .usp-item-affinities {
@@ -476,12 +476,12 @@ function decisionStyle(d: string): { border: string; bg: string; color: string }
 .usp-item-affinity {
   padding: 0.1rem 0.3rem;
   border-radius: 4px;
-  background: var(--color-secondary);
-  color: var(--color-secondary);
+  background: var(--color-link-subtle);
+  color: var(--color-link);
 }
 
 .usp-item-affinity-detail {
-  color: var(--color-secondary);
+  color: var(--color-text-muted);
 }
 
 .usp-merge-wrapper {
@@ -489,13 +489,13 @@ function decisionStyle(d: string): { border: string; bg: string; color: string }
 }
 
 .usp-item-btn--merge {
-  border-color: var(--color-secondary);
-  background: var(--color-secondary);
-  color: var(--color-secondary);
+  border-color: var(--color-link-border);
+  background: var(--color-link-subtle);
+  color: var(--color-link);
 }
 
 .usp-item-btn--merge:hover {
-  background: var(--color-secondary);
+  background: var(--color-link-border);
 }
 
 .usp-merge-dropdown {
@@ -527,7 +527,7 @@ function decisionStyle(d: string): { border: string; bg: string; color: string }
 }
 
 .usp-merge-option:hover {
-  background: var(--color-secondary);
+  background: var(--color-bg-hover);
 }
 
 .usp-merge-option-detail {

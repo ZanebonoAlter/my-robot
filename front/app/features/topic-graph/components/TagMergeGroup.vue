@@ -349,9 +349,9 @@ const isGroupAllSelected = computed(() => {
   border: 1px solid var(--color-tag-person-border);
 }
 .tm-suggestion__badge--no {
-  background: rgba(248, 113, 113, 0.12);
-  color: rgba(248, 113, 113, 0.8);
-  border: 1px solid rgba(248, 113, 113, 0.25);
+  background: var(--color-error-bg, rgba(196,47,60,0.12));
+  color: var(--color-error);
+  border: 1px solid var(--color-error-border, rgba(196,47,60,0.25));
 }
 .tm-suggestion__arrow { color: var(--color-accent); }
 .tm-suggestion__name { color: var(--color-text-primary); font-weight: 500; }
@@ -381,5 +381,5 @@ const isGroupAllSelected = computed(() => {
   opacity: 0;
 }
 .tm-suggestion:hover .tm-suggestion__remove { opacity: 1; }
-.tm-suggestion__remove:hover { color: rgba(248, 113, 113, 0.9); background: rgba(248, 113, 113, 0.1); }
+.tm-suggestion__remove:hover { color: var(--color-error); background: var(--color-error-bg, rgba(196,47,60,0.1)); }
 </style>

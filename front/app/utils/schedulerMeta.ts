@@ -24,6 +24,11 @@ export function getSchedulerDisplayName(name: string): string {
     'firecrawl': '全文爬取',
     'tag_hierarchy_cleanup': '标签清理',
     'aux_label_cleanup': '辅助标签清理',
+    'preference_update': '阅读偏好更新',
+    'tag_quality_score': '标签质量评分',
+    'log_cleanup': '日志清理',
+    'daily_report': '每日报告',
+    'blocked_article_recovery': '阻塞文章恢复',
   }
 
   return names[name] || name
@@ -39,6 +44,11 @@ export function getSchedulerIcon(name: string): string {
     'firecrawl': 'mdi:spider-web',
     'tag_hierarchy_cleanup': 'mdi:tag-remove-outline',
     'aux_label_cleanup': 'mdi:tag-minus-outline',
+    'preference_update': 'mdi:account-cog-outline',
+    'tag_quality_score': 'mdi:tag-star-outline',
+    'log_cleanup': 'mdi:broom',
+    'daily_report': 'mdi:newspaper-variant-outline',
+    'blocked_article_recovery': 'mdi:file-restore-outline',
   }
 
   return icons[name] || 'mdi:cog'
@@ -54,6 +64,11 @@ export function getSchedulerColor(name: string): string {
     'firecrawl': 'from-rose-500 to-orange-500',
     'tag_hierarchy_cleanup': 'from-violet-500 to-purple-600',
     'aux_label_cleanup': 'from-teal-500 to-emerald-500',
+    'preference_update': 'from-indigo-500 to-blue-500',
+    'tag_quality_score': 'from-purple-500 to-pink-500',
+    'log_cleanup': 'from-slate-500 to-gray-500',
+    'daily_report': 'from-amber-500 to-yellow-500',
+    'blocked_article_recovery': 'from-orange-500 to-red-500',
   }
 
   return colors[name] || 'from-gray-500 to-gray-600'
@@ -66,10 +81,24 @@ export function shouldShowContentCompletionPanel(scheduler: ContentCompletionPan
 
 export function getSchedulerStatusLabel(scheduler: SchedulerStatusLike): string | undefined {
   if (isContentCompletionScheduler(scheduler.name) && scheduler.is_executing !== true && scheduler.status) {
-    return scheduler.status
+    return mapStatusToChinese(scheduler.status)
   }
 
-  return scheduler.database_state?.status || scheduler.status
+  const raw = scheduler.database_state?.status || scheduler.status
+  return raw ? mapStatusToChinese(raw) : raw
+}
+
+export function mapStatusToChinese(status: string): string {
+  const map: Record<string, string> = {
+    'idle': '空闲',
+    'running': '执行中',
+    'error': '失败',
+    'triggered': '已触发',
+    'stopped': '已停用',
+    'disabled': '已停用',
+    'failed': '失败',
+  }
+  return map[status] || status
 }
 
 export function getCurrentContentCompletionArticle(scheduler: ContentCompletionArticleStatus): SchedulerArticleRef | null | undefined {

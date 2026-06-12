@@ -74,10 +74,10 @@ async function handleAdd() {
     <div class="space-y-5">
       <!-- URL Input -->
       <div class="space-y-2">
-        <label class="flex items-center gap-2 text-sm font-semibold text-gray-700">
+        <label class="flex items-center gap-2 text-sm font-semibold" style="color: var(--color-text-primary)">
           <Icon icon="mdi:link-variant" width="16" height="16" class="text-[var(--color-text-secondary)]" />
           RSS 订阅地址
-          <span class="text-red-500">*</span>
+          <span style="color: var(--color-error)">*</span>
         </label>
         <div class="flex gap-2" @keydown.enter="handlePreview">
           <AppInput v-model="url" type="url" placeholder="https://example.com/feed.xml" class="flex-1" />
@@ -94,10 +94,10 @@ async function handleAdd() {
 
       <!-- Category Select -->
       <div class="space-y-2">
-        <label class="flex items-center gap-2 text-sm font-semibold text-gray-700">
+        <label class="flex items-center gap-2 text-sm font-semibold" style="color: var(--color-text-primary)">
           <Icon icon="mdi:folder" width="16" height="16" class="text-[var(--color-text-secondary)]" />
           分类
-          <span class="text-xs font-normal text-gray-400">(可选)</span>
+          <span class="text-xs font-normal" style="color: var(--color-text-muted)">(可选)</span>
         </label>
         <select
           v-model="categoryId"
@@ -132,10 +132,10 @@ async function handleAdd() {
               <Icon icon="mdi:rss" class="text-white" width="22" height="22" />
             </div>
             <div class="flex-1 min-w-0">
-              <h3 class="font-semibold text-gray-900 mb-1 truncate">
+              <h3 class="font-semibold mb-1 truncate" style="color: var(--color-text-primary)">
                 {{ preview.title || '无标题' }}
               </h3>
-              <p class="text-sm text-gray-600 mb-2.5 line-clamp-2">
+              <p class="text-sm mb-2.5 line-clamp-2" style="color: var(--color-text-secondary)">
                 {{ preview.description || '无描述' }}
               </p>
               <div class="flex items-center gap-2">
@@ -160,10 +160,11 @@ async function handleAdd() {
       >
         <div
           v-if="error"
-          class="flex items-start gap-3 p-4 bg-red-50/80 backdrop-blur-sm border-2 border-red-200 rounded-lg"
+          class="flex items-start gap-3 p-4 rounded-lg"
+          style="background: var(--color-error-bg, rgba(196, 47, 60, 0.08)); border: 2px solid var(--color-error-border, rgba(196, 47, 60, 0.3))"
         >
-          <Icon icon="mdi:alert-circle" width="20" height="20" class="text-red-500 shrink-0 mt-0.5" />
-          <p class="text-sm font-medium text-red-700">{{ error }}</p>
+          <Icon icon="mdi:alert-circle" width="20" height="20" class="shrink-0 mt-0.5" style="color: var(--color-error)" />
+          <p class="text-sm font-medium" style="color: var(--color-error)">{{ error }}</p>
         </div>
       </Transition>
     </div>

@@ -171,7 +171,7 @@
 - [x] 队列历史增加分页、窗口化或“查看全部”
 - [x] 阅读偏好来源列表增加搜索、排序和分页
 - [x] 阅读统计固定在 section 顶部，不随长列表滚走
-- [ ] 提升队列时间、进度说明和偏好辅助文字的 dark 对比度
+- [x] 提升队列时间、进度说明和偏好辅助文字的 dark 对比度
 
 #### 13.7 Firecrawl 与定时任务
 - [x] Firecrawl 保持短表单，迁移为独立 section
@@ -205,23 +205,23 @@
 ### 14. 第三轮浏览器回归修正（2026-06-12）
 
 #### 14.1 AI 设置去重
-- [ ] 将提供商管理从完整 `AIRouterSettingsPanel` 中拆出独立组件
-- [ ] `AI 模型` section 只挂载主模型和备用提供商管理
-- [ ] `能力路由` section 独占能力路由编辑器，不与 AI 模型重复
-- [ ] `Embedding` section 独占 Embedding 配置和板块匹配阈值
-- [ ] 验证三个 section 切换时非当前大型组件已卸载
+- [x] 将提供商管理从完整 `AIRouterSettingsPanel` 中拆出独立组件
+- [x] `AI 模型` section 只挂载主模型和备用提供商管理
+- [x] `能力路由` section 独占能力路由编辑器，不与 AI 模型重复
+- [x] `Embedding` section 独占 Embedding 配置和板块匹配阈值
+- [x] 验证三个 section 切换时非当前大型组件已卸载
 
 #### 14.2 长列表真实分页
-- [ ] 队列 section 默认只渲染摘要和当前类型的最近一页记录
-- [ ] 切换 Embedding / 标签队列时卸载非活动列表
-- [ ] 阅读偏好搜索、排序和分页作用于完整来源数据
+- [x] 队列 section 默认只渲染摘要和当前类型的最近一页记录
+- [x] 切换 Embedding / 标签队列时卸载非活动列表
+- [x] 阅读偏好搜索、排序和分页作用于完整来源数据
 - [ ] 增加 DOM 行数或首屏记录数测试，防止分页控件存在但完整列表仍被渲染
 - [ ] 浏览器确认队列和阅读偏好不再产生约 `2276px` / `2044px` 的默认长页面
 
 #### 14.3 定时任务可读性
-- [ ] 为 `preference_update`、`tag_quality_score`、`log_cleanup`、`daily_report` 补充中文标题
-- [ ] 将 `idle`、`running`、`failed`、`disabled` 映射为中文状态
-- [ ] 技术标识降为次要文本，提升 dark 状态文字对比度
+- [x] 为 `preference_update`、`tag_quality_score`、`log_cleanup`、`daily_report` 补充中文标题
+- [x] 将 `idle`、`running`、`failed`、`disabled` 映射为中文状态
+- [x] 技术标识降为次要文本，提升 dark 状态文字对比度
 
 #### 14.4 TopicGraph Canvas 验收
 - [ ] 增加 Canvas 主题颜色映射测试或可截图测试模式
@@ -232,5 +232,5 @@
 - [x] 验证设置路由刷新恢复当前 section
 - [x] 验证 600px 下使用抽屉导航且无横向溢出
 - [x] 验证 Feed reader、Tags 和设置工作区无明显固定亮色 surface
-- [ ] 验证 AI 模型页面不再出现“能力路由”和“板块匹配阈值”
+- [x] 验证 AI 模型页面不再出现“能力路由”和“板块匹配阈值”
 - [ ] 验证八个设置 section 的 editorial/dark 和长列表行为

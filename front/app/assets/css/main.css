@@ -406,6 +406,16 @@
   color: var(--color-text-muted);
 }
 
+select option {
+  background: inherit;
+  color: inherit;
+}
+
+[data-theme="dark"] select option {
+  background: #1a2736;
+  color: rgba(255, 255, 255, 0.9);
+}
+
 .input-with-icon {
   padding-left: 2.75rem;
 }

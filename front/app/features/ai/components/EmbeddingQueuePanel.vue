@@ -239,8 +239,8 @@ onUnmounted(() => {
                 {{ getStatusLabel(task.status) }}
               </span>
             </td>
-            <td class="py-2 px-3" style="color: var(--color-text-muted)">{{ formatDate(task.created_at) }}</td>
-            <td class="py-2 px-3" style="color: var(--color-text-muted)">{{ formatDate(task.completed_at) }}</td>
+            <td class="py-2 px-3" style="color: var(--color-text-secondary)">{{ formatDate(task.created_at) }}</td>
+            <td class="py-2 px-3" style="color: var(--color-text-secondary)">{{ formatDate(task.completed_at) }}</td>
             <td class="py-2 px-3 text-xs max-w-xs truncate" style="color: var(--color-error)">
               {{ task.error_message || '-' }}
             </td>

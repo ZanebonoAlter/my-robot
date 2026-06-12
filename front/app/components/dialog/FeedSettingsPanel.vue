@@ -79,7 +79,8 @@ function getIntervalColor(minutes: number): string {
         <div
           v-for="feed in feeds"
           :key="feed.id"
-          class="border border-gray-200 rounded-lg p-4 hover:border-gray-300 transition-colors"
+          class="rounded-lg p-4 transition-colors"
+          style="border: 1px solid var(--color-border-subtle)"
         >
           <div class="flex items-start gap-3">
             <div
@@ -118,10 +119,11 @@ function getIntervalColor(minutes: number): string {
 
               <div class="grid grid-cols-2 gap-3">
                 <div>
-                  <label class="block text-xs font-medium text-gray-600 mb-1">自动刷新</label>
+                  <label class="block text-xs font-medium mb-1" style="color: var(--color-text-secondary)">自动刷新</label>
                   <select
                     :value="feed.refreshInterval"
-                    class="w-full text-xs px-2 py-1.5 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    class="w-full text-xs px-2 py-1.5 rounded-lg outline-none"
+                    style="border: 1px solid var(--color-input-border); background: var(--color-input-bg); color: var(--color-text-primary)"
                     @change="emit('update-feed', feed.id, 'refresh_interval', Number(($event.target as HTMLSelectElement).value))"
                   >
                     <option v-for="option in refreshOptions" :key="option.value" :value="option.value">
@@ -130,10 +132,11 @@ function getIntervalColor(minutes: number): string {
                   </select>
                 </div>
                 <div>
-                  <label class="block text-xs font-medium text-gray-600 mb-1">最大文章数</label>
+                  <label class="block text-xs font-medium mb-1" style="color: var(--color-text-secondary)">最大文章数</label>
                   <select
                     :value="feed.maxArticles"
-                    class="w-full text-xs px-2 py-1.5 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    class="w-full text-xs px-2 py-1.5 rounded-lg outline-none"
+                    style="border: 1px solid var(--color-input-border); background: var(--color-input-bg); color: var(--color-text-primary)"
                     @change="emit('update-feed', feed.id, 'max_articles', Number(($event.target as HTMLSelectElement).value))"
                   >
                     <option v-for="option in maxArticlesOptions" :key="option.value" :value="option.value">
@@ -143,7 +146,7 @@ function getIntervalColor(minutes: number): string {
                 </div>
               </div>
 
-              <div class="space-y-2 mt-3 pt-3 border-t border-gray-100">
+              <div class="space-y-2 mt-3 pt-3" style="border-top: 1px solid var(--color-border-subtle)">
                 <div class="flex items-center justify-between">
                   <div class="flex items-center gap-2">
                     <Icon icon="mdi:web" width="14" height="14" class="text-blue-500" />

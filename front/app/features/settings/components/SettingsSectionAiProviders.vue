@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import AIRouterSettingsPanel from '~/features/ai/components/AIRouterSettingsPanel.vue'
+import AIProviderManagement from '~/features/ai/components/AIProviderManagement.vue'
 </script>
 
 <template>
-  <AIRouterSettingsPanel />
+  <AIProviderManagement />
 </template>

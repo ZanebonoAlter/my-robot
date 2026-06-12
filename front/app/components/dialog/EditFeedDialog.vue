@@ -114,8 +114,8 @@ async function handleDelete() {
               <Icon icon="mdi:rss" class="text-white" width="22" height="22" />
             </div>
             <div class="min-w-0 flex-1">
-              <h3 class="truncate font-semibold text-gray-900">{{ title }}</h3>
-              <p class="mt-1 line-clamp-2 text-sm text-gray-600">
+              <h3 class="truncate font-semibold" style="color: var(--color-text-primary)">{{ title }}</h3>
+              <p class="mt-1 line-clamp-2 text-sm" style="color: var(--color-text-secondary)">
                 {{ description || '暂无描述' }}
               </p>
             </div>
@@ -123,19 +123,19 @@ async function handleDelete() {
         </div>
 
         <div class="space-y-2">
-          <label class="flex items-center gap-2 text-sm font-semibold text-gray-700">
+          <label class="flex items-center gap-2 text-sm font-semibold" style="color: var(--color-text-primary)">
             <Icon icon="mdi:link-variant" width="16" height="16" class="text-[var(--color-text-secondary)]" />
             RSS 地址
-            <span class="text-red-500">*</span>
+            <span style="color: var(--color-error)">*</span>
           </label>
           <AppInput v-model="url" type="url" placeholder="https://example.com/feed.xml" />
         </div>
 
         <div class="space-y-2">
-          <label class="flex items-center gap-2 text-sm font-semibold text-gray-700">
+          <label class="flex items-center gap-2 text-sm font-semibold" style="color: var(--color-text-primary)">
             <Icon icon="mdi:folder" width="16" height="16" class="text-[var(--color-text-secondary)]" />
             分类
-            <span class="text-xs font-normal text-gray-400">可选</span>
+            <span class="text-xs font-normal" style="color: var(--color-text-muted)">可选</span>
           </label>
           <select v-model="categoryId" class="input w-full cursor-pointer">
             <option :value="undefined">未分类</option>
@@ -149,44 +149,44 @@ async function handleDelete() {
           </select>
         </div>
 
-        <div class="space-y-4 rounded-2xl border border-blue-200 bg-blue-50/60 p-4">
-          <div class="flex items-center gap-2 text-sm font-semibold text-blue-900">
+        <div class="space-y-4 rounded-2xl p-4" style="border: 1px solid var(--color-link-border); background: var(--color-link-subtle)">
+          <div class="flex items-center gap-2 text-sm font-semibold" style="color: var(--color-link)">
             <Icon icon="mdi:brain" width="16" height="16" />
             自动总结设置
           </div>
 
           <div class="flex cursor-pointer items-center justify-between gap-4">
             <div>
-              <div class="text-sm font-medium text-gray-800">启用自动总结</div>
-              <div class="text-xs text-gray-500">Firecrawl 完成后进入总结队列</div>
+              <div class="text-sm font-medium" style="color: var(--color-text-primary)">启用自动总结</div>
+              <div class="text-xs" style="color: var(--color-text-muted)">Firecrawl 完成后进入总结队列</div>
             </div>
             <AppToggle v-model="articleSummaryEnabled" />
           </div>
 
           <div class="flex cursor-pointer items-center justify-between gap-4">
             <div>
-              <div class="text-sm font-medium text-gray-800">刷新后自动总结</div>
-              <div class="text-xs text-gray-500">新文章创建后自动进入处理链路</div>
+              <div class="text-sm font-medium" style="color: var(--color-text-primary)">刷新后自动总结</div>
+              <div class="text-xs" style="color: var(--color-text-muted)">新文章创建后自动进入处理链路</div>
             </div>
             <AppToggle v-model="completionOnRefresh" />
           </div>
 
           <div class="space-y-2">
-            <label class="text-sm font-medium text-gray-800">最大重试次数</label>
+            <label class="text-sm font-medium" style="color: var(--color-text-primary)">最大重试次数</label>
             <AppInput v-model="maxCompletionRetries" type="number" min="1" max="10" />
           </div>
         </div>
 
-        <div class="space-y-4 rounded-2xl border border-sky-200 bg-sky-50/60 p-4">
-          <div class="flex items-center gap-2 text-sm font-semibold text-sky-900">
+        <div class="space-y-4 rounded-2xl p-4" style="border: 1px solid var(--color-info-bg, rgba(61, 122, 138, 0.2)); background: var(--color-info-bg, rgba(61, 122, 138, 0.08))">
+          <div class="flex items-center gap-2 text-sm font-semibold" style="color: var(--color-info)">
             <Icon icon="mdi:spider-web" width="16" height="16" />
             全文抓取设置
           </div>
 
           <div class="flex cursor-pointer items-center justify-between gap-4">
             <div>
-              <div class="text-sm font-medium text-gray-800">启用全文抓取</div>
-              <div class="text-xs text-gray-500">使用 Firecrawl 抓取文章全文后再交给总结能力</div>
+              <div class="text-sm font-medium" style="color: var(--color-text-primary)">启用全文抓取</div>
+              <div class="text-xs" style="color: var(--color-text-muted)">使用 Firecrawl 抓取文章全文后再交给总结能力</div>
             </div>
             <AppToggle v-model="firecrawlEnabled" />
           </div>
@@ -194,21 +194,23 @@ async function handleDelete() {
 
         <div
           v-if="error"
-          class="flex items-start gap-3 rounded-xl border-2 border-red-200 bg-red-50/80 p-4"
+          class="flex items-start gap-3 rounded-xl p-4"
+          style="border: 2px solid var(--color-error-border, rgba(196, 47, 60, 0.3)); background: var(--color-error-bg, rgba(196, 47, 60, 0.08))"
         >
-          <Icon icon="mdi:alert-circle" width="20" height="20" class="mt-0.5 shrink-0 text-red-500" />
-          <p class="text-sm font-medium text-red-700">{{ error }}</p>
+          <Icon icon="mdi:alert-circle" width="20" height="20" class="mt-0.5 shrink-0" style="color: var(--color-error)" />
+          <p class="text-sm font-medium" style="color: var(--color-error)">{{ error }}</p>
         </div>
 
         <div
           v-if="showDeleteConfirm"
-          class="rounded-xl border-2 border-red-200 bg-red-50/80 p-4"
+          class="rounded-xl p-4"
+          style="border: 2px solid var(--color-error-border, rgba(196, 47, 60, 0.3)); background: var(--color-error-bg, rgba(196, 47, 60, 0.08))"
         >
           <div class="flex items-start gap-3">
-            <Icon icon="mdi:alert-circle" class="mt-0.5 shrink-0 text-red-600" width="22" height="22" />
+            <Icon icon="mdi:alert-circle" class="mt-0.5 shrink-0" style="color: var(--color-error)" width="22" height="22" />
             <div class="flex-1">
-              <h4 class="mb-1 font-semibold text-red-900">确认删除订阅源？</h4>
-              <p class="mb-3 text-sm text-red-700">
+              <h4 class="mb-1 font-semibold" style="color: var(--color-text-primary)">确认删除订阅源？</h4>
+              <p class="mb-3 text-sm" style="color: var(--color-text-secondary)">
                 删除"{{ title }}"后，该订阅源下的文章也会一起删除，这个操作不可撤销。
               </p>
               <div class="flex gap-2">
@@ -235,22 +237,25 @@ async function handleDelete() {
           <div
             v-for="item in capabilityItems"
             :key="item.label"
-            class="flex items-center justify-between gap-3 rounded-xl border border-white/70 bg-white/80 px-3 py-2"
+            class="flex items-center justify-between gap-3 rounded-xl px-3 py-2"
+            style="border: 1px solid var(--color-border-subtle); background: var(--color-bg-sunken)"
           >
-            <div class="flex items-center gap-2 text-sm text-[var(--color-text-primary)]">
+            <div class="flex items-center gap-2 text-sm" style="color: var(--color-text-primary)">
               <Icon :icon="item.icon" width="16" height="16" />
               <span>{{ item.label }}</span>
             </div>
             <span
-              class="inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-semibold"
-              :class="item.enabled ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-stone-200 bg-stone-100 text-stone-500'"
+              class="inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold"
+              :style="item.enabled
+                ? 'background: rgba(61, 138, 74, 0.12); color: var(--color-success); border: 1px solid rgba(61, 138, 74, 0.25)'
+                : 'background: var(--color-bg-hover); color: var(--color-text-muted); border: 1px solid var(--color-border-subtle)'"
             >
               {{ item.enabled ? '已开启' : '未开启' }}
             </span>
           </div>
         </div>
 
-        <div class="rounded-xl border border-dashed border-[var(--color-border-subtle)] bg-white/80 p-4">
+        <div class="rounded-xl border border-dashed p-4" style="border-color: var(--color-border-medium); background: var(--color-bg-sunken)">
           <div class="text-xs uppercase tracking-[0.08em] text-[var(--color-text-muted)]">重试策略</div>
           <div class="mt-2 text-2xl font-semibold text-[var(--color-text-primary)]">{{ maxCompletionRetries }}</div>
           <div class="mt-1 text-sm text-[var(--color-text-secondary)]">自动总结失败后最多重试 {{ maxCompletionRetries }} 次。</div>
@@ -262,7 +267,8 @@ async function handleDelete() {
       <div class="flex w-full items-center justify-between">
         <button
           v-if="!showDeleteConfirm"
-          class="flex items-center gap-2 rounded-xl px-4 py-2.5 font-semibold text-red-600 transition-all hover:bg-red-50/80 active:scale-95"
+          class="flex items-center gap-2 rounded-xl px-4 py-2.5 font-semibold transition-all active:scale-95"
+          style="color: var(--color-error)"
           @click="showDeleteConfirm = true"
         >
           <Icon icon="mdi:delete" width="18" height="18" />

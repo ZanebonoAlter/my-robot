@@ -8,6 +8,7 @@ import {
   getSchedulerIcon,
   getSchedulerStatusLabel,
   isContentCompletionScheduler,
+  mapStatusToChinese,
   shouldShowContentCompletionPanel,
 } from '~/utils/schedulerMeta'
 
@@ -79,7 +80,7 @@ function getStatusDotStyle(status: string) {
                 <Icon v-if="getSchedulerIcon(scheduler.name)" :icon="getSchedulerIcon(scheduler.name)!" width="16" class="inline mr-1.5 -mt-0.5" />
                 {{ getSchedulerDisplayName(scheduler.name) }}
               </h4>
-              <p class="text-xs mt-0.5 truncate" style="color: var(--color-text-muted)">{{ scheduler.name }}</p>
+              <p class="text-[11px] mt-0.5 truncate font-mono" style="color: var(--color-text-muted); opacity: 0.7">{{ scheduler.name }}</p>
               <div v-if="shouldShowContentCompletionPanel(scheduler) && scheduler.current_article" class="mt-2 text-xs rounded-lg px-2 py-1" style="background: var(--color-link-subtle); color: var(--color-link)">
                 当前处理：{{ scheduler.current_article.title || '无标题' }}
               </div>

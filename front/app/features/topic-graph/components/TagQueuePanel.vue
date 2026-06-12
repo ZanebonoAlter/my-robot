@@ -290,10 +290,10 @@ onUnmounted(() => {
                 {{ getStatusLabel(task.status) }}
               </span>
             </td>
-            <td class="py-2 px-3" style="color: var(--color-text-muted)">
+            <td class="py-2 px-3" style="color: var(--color-text-secondary)">
               {{ task.attempt_count }}/{{ task.max_attempts }}
             </td>
-            <td class="py-2 px-3 whitespace-nowrap" style="color: var(--color-text-muted)">
+            <td class="py-2 px-3 whitespace-nowrap" style="color: var(--color-text-secondary)">
               {{ formatDate(task.created_at) }}
             </td>
             <td class="py-2 px-3 text-xs max-w-[200px] truncate" style="color: var(--color-error)" :title="task.last_error">

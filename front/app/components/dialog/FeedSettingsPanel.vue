@@ -49,7 +49,7 @@ function getIntervalColor(minutes: number): string {
   if (minutes === 0) return 'text-gray-500'
   if (minutes <= 30) return 'text-green-600'
   if (minutes <= 120) return 'text-blue-600'
-  return 'text-ink-600'
+  return 'text-[var(--color-text-secondary)]'
 }
 </script>
 

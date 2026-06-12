@@ -150,14 +150,14 @@ const isGroupAllSelected = computed(() => {
 
 <style scoped>
 .tm-group {
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  border: 1px solid var(--color-border-subtle);
   border-radius: 1rem;
   padding: 1rem;
-  background: rgba(255, 255, 255, 0.02);
+  background: var(--color-bg-hover);
   transition: border-color 0.15s ease;
 }
 .tm-group:hover {
-  border-color: rgba(255, 255, 255, 0.12);
+  border-color: var(--color-border-medium);
 }
 .tm-group__header {
   display: flex;
@@ -174,7 +174,7 @@ const isGroupAllSelected = computed(() => {
 .tm-group__target-name {
   font-size: 1rem;
   font-weight: 600;
-  color: rgba(99, 179, 237, 0.92);
+  color: var(--color-link);
 }
 .tm-group__target-meta {
   font-size: 0.78rem;
@@ -202,9 +202,9 @@ const isGroupAllSelected = computed(() => {
   border-radius: 0.25rem;
 }
 .tm-checkbox--checked {
-  border-color: rgba(99, 179, 237, 0.7);
-  background: rgba(99, 179, 237, 0.2);
-  color: rgba(99, 179, 237, 0.95);
+  border-color: var(--color-link);
+  background: var(--color-link-border);
+  color: var(--color-link-hover);
 }
 .tm-checkbox:hover {
   border-color: var(--color-border-medium);
@@ -234,9 +234,9 @@ const isGroupAllSelected = computed(() => {
 .tm-search {
   margin-bottom: 0.5rem;
   padding: 0.6rem;
-  border: 1px solid rgba(99, 179, 237, 0.2);
+  border: 1px solid var(--color-link-border);
   border-radius: 0.5rem;
-  background: rgba(99, 179, 237, 0.04);
+  background: var(--color-link-subtle);
 }
 .tm-search__input-row {
   display: flex;
@@ -252,8 +252,8 @@ const isGroupAllSelected = computed(() => {
   color: var(--color-text-primary);
   transition: border-color 0.15s ease;
 }
-.tm-search__input:focus { border-color: rgba(99, 179, 237, 0.5); }
-.tm-search__input::placeholder { color: rgba(255, 255, 255, 0.3); }
+.tm-search__input:focus { border-color: var(--color-link-border-hover); }
+.tm-search__input::placeholder { color: var(--color-text-muted); }
 .tm-search__results {
   display: flex;
   flex-direction: column;
@@ -269,7 +269,7 @@ const isGroupAllSelected = computed(() => {
   border-radius: 0.3rem;
   border: none;
   background: transparent;
-  color: rgba(255, 255, 255, 0.7);
+  color: var(--color-text-secondary);
   font-size: 0.82rem;
   cursor: pointer;
   width: 100%;
@@ -278,8 +278,8 @@ const isGroupAllSelected = computed(() => {
 }
 .tm-search__item:hover { background: var(--color-bg-hover); color: var(--color-text-primary); }
 .tm-search__item-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.tm-search__item-meta { font-size: 0.72rem; color: rgba(255, 255, 255, 0.35); flex-shrink: 0; }
-.tm-search__loading, .tm-search__empty { padding: 0.4rem; font-size: 0.78rem; color: rgba(255, 255, 255, 0.35); }
+.tm-search__item-meta { font-size: 0.72rem; color: var(--color-text-muted); flex-shrink: 0; }
+.tm-search__loading, .tm-search__empty { padding: 0.4rem; font-size: 0.78rem; color: var(--color-text-muted); }
 
 /* Suggestions */
 .tm-suggestions {
@@ -299,8 +299,8 @@ const isGroupAllSelected = computed(() => {
 }
 .tm-suggestion:hover { background: var(--color-bg-hover); }
 .tm-suggestion--selected {
-  background: rgba(99, 179, 237, 0.06);
-  border-left: 2px solid rgba(99, 179, 237, 0.5);
+  background: var(--color-link-subtle);
+  border-left: 2px solid var(--color-link-border-hover);
   padding-left: calc(0.6rem - 2px);
 }
 .tm-suggestion__main {
@@ -310,7 +310,7 @@ const isGroupAllSelected = computed(() => {
   min-width: 0;
 }
 .tm-suggestion__label {
-  color: rgba(255, 255, 255, 0.7);
+  color: var(--color-text-secondary);
   font-size: 0.88rem;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -319,15 +319,15 @@ const isGroupAllSelected = computed(() => {
 .tm-suggestion__similarity {
   font-size: 0.72rem;
   border-radius: 999px;
-  background: rgba(16, 185, 129, 0.18);
-  border: 1px solid rgba(16, 185, 129, 0.35);
+  background: var(--color-tag-person-bg);
+  border: 1px solid var(--color-tag-person-border);
   padding: 0.1rem 0.45rem;
-  color: rgba(110, 231, 183, 0.92);
+  color: var(--color-tag-person);
   flex-shrink: 0;
 }
 .tm-suggestion__articles {
   font-size: 0.75rem;
-  color: rgba(255, 255, 255, 0.35);
+  color: var(--color-text-muted);
   flex-shrink: 0;
 }
 .tm-suggestion__verdict {
@@ -344,20 +344,20 @@ const isGroupAllSelected = computed(() => {
   flex-shrink: 0;
 }
 .tm-suggestion__badge--yes {
-  background: rgba(16, 185, 129, 0.15);
-  color: rgba(110, 231, 183, 0.9);
-  border: 1px solid rgba(16, 185, 129, 0.3);
+  background: var(--color-tag-person-bg);
+  color: var(--color-tag-person);
+  border: 1px solid var(--color-tag-person-border);
 }
 .tm-suggestion__badge--no {
   background: rgba(248, 113, 113, 0.12);
   color: rgba(248, 113, 113, 0.8);
   border: 1px solid rgba(248, 113, 113, 0.25);
 }
-.tm-suggestion__arrow { color: rgba(240, 138, 75, 0.7); }
+.tm-suggestion__arrow { color: var(--color-accent); }
 .tm-suggestion__name { color: var(--color-text-primary); font-weight: 500; }
 .tm-suggestion__reason {
   font-size: 0.78rem;
-  color: rgba(255, 255, 255, 0.45);
+  color: var(--color-text-muted);
   padding-left: 1.5rem;
   line-height: 1.4;
   white-space: normal;

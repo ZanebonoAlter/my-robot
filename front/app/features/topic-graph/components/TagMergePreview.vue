@@ -41,7 +41,7 @@ const {
           <div>
             <h2 class="text-lg font-semibold text-white">
               标签合并预览
-              <span v-if="groups.length" class="ml-2 text-sm font-normal text-[rgba(255,255,255,0.5)]">
+              <span v-if="groups.length" class="ml-2 text-sm font-normal text-[var(--color-text-muted)]">
                 ({{ groups.length }} 组)
               </span>
             </h2>
@@ -148,15 +148,15 @@ const {
 
         <!-- Loading -->
         <div v-if="loading" class="tm-loading">
-          <Icon icon="mdi:loading" width="32" class="animate-spin text-[rgba(240,138,75,0.9)]" />
-          <p class="mt-4 text-sm text-[rgba(255,255,255,0.65)]">加载中...</p>
+          <Icon icon="mdi:loading" width="32" class="animate-spin text-[var(--color-accent)]" />
+          <p class="mt-4 text-sm text-[var(--color-text-secondary)]">加载中...</p>
         </div>
 
         <!-- Empty -->
         <div v-else-if="groups.length === 0 && !error" class="tm-empty">
-          <Icon icon="mdi:tag-check-outline" width="32" class="text-[rgba(255,255,255,0.3)]" />
-          <p class="mt-3 text-sm text-[rgba(255,255,255,0.5)]">没有发现相似标签</p>
-          <p class="mt-1 text-xs text-[rgba(255,255,255,0.3)]">试试「全量扫描」查找更多相似对</p>
+          <Icon icon="mdi:tag-check-outline" width="32" class="text-[var(--color-text-muted)]" />
+          <p class="mt-3 text-sm text-[var(--color-text-muted)]">没有发现相似标签</p>
+          <p class="mt-1 text-xs text-[var(--color-text-muted)]">试试「全量扫描」查找更多相似对</p>
         </div>
 
         <!-- Groups -->
@@ -197,7 +197,7 @@ const {
   align-items: center;
   justify-content: center;
   padding: 1rem;
-  background: rgba(8, 12, 18, 0.7);
+  background: var(--color-bg-overlay);
   backdrop-filter: blur(10px);
 }
 .tag-merge-modal {
@@ -205,7 +205,7 @@ const {
   max-height: calc(100vh - 2rem);
   overflow-y: auto;
   border-radius: 1.75rem;
-  background: linear-gradient(180deg, rgba(17, 27, 38, 0.98), rgba(9, 15, 23, 1));
+  background: linear-gradient(180deg, var(--color-bg-elevated), var(--color-bg-sunken));
   box-shadow: 0 30px 100px rgba(0, 0, 0, 0.32);
   padding: 1.5rem;
 }
@@ -217,8 +217,8 @@ const {
   max-height: 60vh;
   overflow-y: auto;
   border-radius: 1rem;
-  background: linear-gradient(180deg, rgba(17, 27, 38, 0.98), rgba(9, 15, 23, 1));
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: linear-gradient(180deg, var(--color-bg-elevated), var(--color-bg-sunken));
+  border: 1px solid var(--color-border-subtle);
   padding: 1.5rem;
 }
 
@@ -236,16 +236,16 @@ const {
   justify-content: center;
   min-height: 2.75rem;
   min-width: 2.75rem;
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  border: 1px solid var(--color-border-subtle);
   border-radius: 999px;
   background: transparent;
-  color: rgba(255, 255, 255, 0.5);
+  color: var(--color-text-muted);
   cursor: pointer;
   transition: all 0.15s ease;
 }
 .tm-close-btn:hover {
-  border-color: rgba(255, 255, 255, 0.2);
-  color: rgba(255, 255, 255, 0.85);
+  border-color: var(--color-border-medium);
+  color: var(--color-text-primary);
 }
 
 /* --- Batch bar --- */
@@ -257,12 +257,12 @@ const {
   padding: 0.6rem 1rem;
   margin-bottom: 0.75rem;
   border-radius: 0.75rem;
-  background: rgba(99, 179, 237, 0.1);
-  border: 1px solid rgba(99, 179, 237, 0.25);
+  background: var(--color-link-subtle);
+  border: 1px solid var(--color-link-border);
 }
 .tm-batch-bar__count {
   font-size: 0.85rem;
-  color: rgba(99, 179, 237, 0.9);
+  color: var(--color-link);
   font-weight: 500;
 }
 
@@ -277,30 +277,30 @@ const {
   font-weight: 500;
   cursor: pointer;
   transition: all 0.15s ease;
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  border: 1px solid var(--color-border-medium);
   background: transparent;
-  color: rgba(255, 255, 255, 0.6);
+  color: var(--color-text-secondary);
   padding: 0.5rem 1.1rem;
 }
 .tm-btn:disabled { opacity: 0.4; cursor: not-allowed; }
-.tm-btn:hover:not(:disabled) { border-color: rgba(255, 255, 255, 0.25); color: rgba(255, 255, 255, 0.85); }
+.tm-btn:hover:not(:disabled) { border-color: var(--color-border-medium); color: var(--color-text-primary); }
 .tm-btn--primary {
-  background: linear-gradient(135deg, rgba(240, 138, 75, 0.85), rgba(220, 110, 55, 0.9));
+  background: linear-gradient(135deg, var(--color-accent), var(--color-accent-hover));
   color: rgba(255, 245, 235, 0.95);
   border-color: rgba(240, 138, 75, 0.4);
 }
 .tm-btn--primary:hover:not(:disabled) {
-  background: linear-gradient(135deg, rgba(240, 138, 75, 1), rgba(220, 110, 55, 1));
+  background: linear-gradient(135deg, var(--color-accent-hover), var(--color-accent-hover));
   box-shadow: 0 6px 20px rgba(240, 138, 75, 0.25);
 }
 .tm-btn--accent {
-  border-color: rgba(99, 179, 237, 0.3);
-  color: rgba(99, 179, 237, 0.9);
+  border-color: var(--color-link-border);
+  color: var(--color-link);
 }
 .tm-btn--accent:hover:not(:disabled) {
-  border-color: rgba(99, 179, 237, 0.5);
-  color: rgba(99, 179, 237, 1);
-  background: rgba(99, 179, 237, 0.08);
+  border-color: var(--color-link-border);
+  color: var(--color-link);
+  background: var(--color-link-subtle);
 }
 .tm-btn--sm { padding: 0.3rem 0.75rem; font-size: 0.78rem; min-height: 1.75rem; }
 
@@ -308,7 +308,7 @@ const {
 .tm-progress {
   padding: 12px 16px;
   margin-bottom: 12px;
-  background: rgba(255, 255, 255, 0.05);
+  background: var(--color-bg-hover);
   border-radius: 8px;
   display: flex;
   align-items: center;
@@ -317,13 +317,13 @@ const {
 .tm-progress__bar {
   flex: 1;
   height: 4px;
-  background: rgba(255, 255, 255, 0.1);
+  background: var(--color-border-medium);
   border-radius: 2px;
   overflow: hidden;
 }
 .tm-progress__fill {
   height: 100%;
-  background: rgba(240, 138, 75, 0.9);
+  background: var(--color-accent);
   transition: width 0.3s ease;
 }
 .tm-progress__info {

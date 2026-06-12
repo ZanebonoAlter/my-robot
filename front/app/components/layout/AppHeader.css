@@ -3,9 +3,9 @@
   align-items: center;
   justify-content: space-between;
   padding: 0.625rem 1rem;
-  background: rgba(255, 255, 255, 0.75);
+  background: var(--color-bg-elevated);
   backdrop-filter: blur(12px);
-  border-bottom: 1px solid rgba(26, 26, 26, 0.08);
+  border-bottom: 1px solid var(--color-border-subtle);
   flex-shrink: 0;
 }
 
@@ -34,7 +34,7 @@
 }
 
 .menu-btn:hover {
-  background: rgba(26, 26, 26, 0.04);
+  background: var(--color-bg-hover);
   color: var(--color-text-primary);
 }
 
@@ -70,14 +70,14 @@
 }
 
 .header-btn:hover {
-  background: rgba(26, 26, 26, 0.04);
+  background: var(--color-bg-hover);
   color: var(--color-text-primary);
 }
 
 .header-divider {
   width: 1px;
   height: 1.5rem;
-  background: rgba(26, 26, 26, 0.12);
+  background: var(--color-border-medium);
   margin: 0 0.25rem;
 }
 
@@ -96,11 +96,11 @@
   align-items: center;
   gap: 0.75rem;
   padding: 0.875rem 1.125rem;
-  background: rgba(255, 255, 255, 0.9);
+  background: var(--color-bg-elevated);
   backdrop-filter: blur(12px);
   border-radius: 0.5rem;
-  box-shadow: 0 4px 16px rgba(26, 26, 26, 0.12);
-  border: 1px solid rgba(26, 26, 26, 0.08);
+  box-shadow: var(--shadow-strong);
+  border: 1px solid var(--color-border-subtle);
 }
 
 .toast-content.toast-success {
@@ -142,6 +142,6 @@
 }
 
 .toast-close:hover {
-  background: rgba(26, 26, 26, 0.06);
+  background: var(--color-bg-hover);
   color: var(--color-text-secondary);
 }

@@ -145,6 +145,24 @@
   --color-dialog-bg:      rgba(255, 255, 255, 0.95);
   --color-dialog-header:  transparent;
   --color-dialog-divider: rgba(26, 26, 26, 0.06);
+
+  /* Tag category colors */
+  --color-tag-event:          rgba(196, 136, 60, 0.85);
+  --color-tag-event-bg:       rgba(196, 136, 60, 0.12);
+  --color-tag-event-border:   rgba(196, 136, 60, 0.25);
+  --color-tag-person:         rgba(45, 138, 122, 0.85);
+  --color-tag-person-bg:      rgba(45, 138, 122, 0.12);
+  --color-tag-person-border:  rgba(45, 138, 122, 0.25);
+  --color-tag-keyword:        rgba(74, 93, 138, 0.85);
+  --color-tag-keyword-bg:     rgba(74, 93, 138, 0.12);
+  --color-tag-keyword-border: rgba(74, 93, 138, 0.25);
+
+  /* Interactive/link blue */
+  --color-link:            rgba(63, 124, 255, 0.9);
+  --color-link-hover:      rgba(63, 124, 255, 1);
+  --color-link-subtle:     rgba(63, 124, 255, 0.08);
+  --color-link-border:     rgba(63, 124, 255, 0.2);
+  --color-link-border-hover: rgba(63, 124, 255, 0.4);
 }
 ```
 
@@ -201,6 +219,24 @@
   --color-dialog-bg:      rgba(17, 27, 38, 0.98);
   --color-dialog-header:  rgba(255, 255, 255, 0.03);
   --color-dialog-divider: rgba(255, 255, 255, 0.06);
+
+  /* Tag category colors */
+  --color-tag-event:          rgba(245, 158, 11, 0.72);
+  --color-tag-event-bg:       rgba(245, 158, 11, 0.18);
+  --color-tag-event-border:   rgba(245, 158, 11, 0.32);
+  --color-tag-person:         rgba(16, 185, 129, 0.72);
+  --color-tag-person-bg:      rgba(16, 185, 129, 0.18);
+  --color-tag-person-border:  rgba(16, 185, 129, 0.32);
+  --color-tag-keyword:        rgba(99, 102, 241, 0.72);
+  --color-tag-keyword-bg:     rgba(99, 102, 241, 0.18);
+  --color-tag-keyword-border: rgba(99, 102, 241, 0.32);
+
+  /* Interactive/link blue */
+  --color-link:            rgba(99, 179, 237, 0.9);
+  --color-link-hover:      rgba(99, 179, 237, 1);
+  --color-link-subtle:     rgba(99, 179, 237, 0.1);
+  --color-link-border:     rgba(99, 179, 237, 0.25);
+  --color-link-border-hover: rgba(99, 179, 237, 0.5);
 }
 ```
 
@@ -441,3 +477,177 @@ components/ui/AppSectionHeader.vue → 统一标题
 - 主题切换不需要 transition 动画（会闪烁），直接切换即可
 - Nuxt SSR 兼容：`useTheme()` 初始化应通过 `useHead({ htmlAttrs: { 'data-theme': ... } })` 设置 html 属性，避免 FOUC；`onMounted` 做客户端同步
 - GlobalSettingsDialog 的面板迁移在本 change 中完成，但各面板的内部逻辑不改动
+
+## Browser Regression Follow-up (2026-06-12)
+
+### Updated Theme Model
+
+新增顶部主题切换后，主题由用户全局选择，不再由页面强制决定：
+
+```text
+localStorage / SSR default
+          |
+          v
+<html data-theme="editorial|dark">
+          |
+          +--> Feed reader
+          +--> Tags
+          +--> Topic graph
+          +--> Global Settings
+```
+
+- 删除 TagsPage / TopicGraphPage 的进入时强制 `setTheme('dark')` 和离开时恢复逻辑
+- TagsPage、TopicGraphPage 提供与主 Header 一致的主题切换入口
+- 主题值只由 `useTheme()` 维护，页面组件只消费，不覆盖用户选择
+
+### Findings and Solutions
+
+| 区域 | 浏览器发现 | 解决方案 |
+|---|---|---|
+| TopicGraph | `/topics` 因 `.topic-stage` 缺少 `}` 返回 500 | 先修复 CSS 语法并增加页面烟雾验证；页面可加载是后续主题验收前置条件 |
+| Feed Header | dark 下仍是白色半透明 Header | 背景、边框、hover 全部改用 `--color-bg-elevated`、`--color-border-*`、`--color-bg-hover` |
+| Feed article cards | dark 下文章卡仍使用 `rgba(255,255,255,0.7)` | `.paper-card` / hover / strong 使用语义 surface token；必要时增加 `--color-bg-card` 语义 token，不复用 overlay |
+| Feed empty/fullscreen | 未选文章和全屏容器使用 `bg-white` | 改为 `--color-bg-base` / `--color-bg-elevated`，标题和说明使用语义文字 token |
+| Feed preview | 文章顶部占位条在 dark 下近白 | 骨架、占位和加载态使用 `--color-bg-sunken` 与 `--color-border-subtle` |
+| Theme toggle | dark 下提示“切换为编辑模式” | aria-label/title 统一为“切换为浅色模式”或“切换为深色模式” |
+| Global Settings / General | 主模型区域保留亮白渐变，表单层级失真 | 删除 `from-*-50/via-white/to-*` 主题色 Tailwind；卡片、header、input、button 改用语义 token / 统一组件 |
+| Global Settings / Preferences | 统计卡和来源评分卡仍为亮色 | 为统计卡定义主题响应的状态 surface；来源行使用 elevated/sunken surface，保留状态色但降低 dark 下亮度 |
+| Global Settings / Queues | 统计卡和筛选胶囊偏亮 | 使用状态色的低透明背景 + 语义文字；筛选器使用 AppButton 或统一 chip token |
+| Global Settings / Schedulers | 任务名过暗，idle/执行按钮过亮 | 任务名使用 primary/secondary text；状态 badge 使用状态 token；执行按钮使用 secondary/ghost 变体 |
+| Global Settings / Firecrawl | 辅助文字和字段标签对比度不足 | 标签至少使用 `--color-text-secondary`，说明使用 `--color-text-muted`，避免额外 opacity 叠加 |
+| Tags top bar | editorial 下使用 overlay token 导致整栏发灰 | 普通栏背景使用 elevated/半透明 surface；`--color-bg-overlay` 仅用于模态遮罩 |
+| Tags board detail | “添加”按钮文字与背景同色 | primary 按钮文字必须使用 `--color-text-inverted`，增加 computed-style / 视觉回归检查 |
+| MatchingConfigDialog | editorial 下公式区灰底白字，对比度不足 | 公式容器使用 sunken surface，公式文字使用 primary/secondary token；数学渲染不得固定白色 |
+| Tags dark list | 引用数和右侧操作图标过暗 | 提升到 muted/secondary token；交互图标 hover/focus 必须有可辨识反馈 |
+| Tags navigation | 页面内无主题切换入口 | 在独立页 topbar 放置共享 ThemeToggle，不复制主题状态逻辑 |
+| Theme initialization | 首次加载时 `data-theme` 短暂为 null | SSR/head 阶段设置默认主题；客户端在首绘前读取持久值并同步，禁止等待普通 `onMounted` 才设置 |
+
+### Token Usage Rules
+
+- `--color-bg-overlay` 仅表示覆盖页面内容的模态遮罩，不得作为 header、toolbar、card 或 panel 背景。
+- 页面 surface 按层级使用 `base -> elevated -> sunken`；hover/active 只用于短暂交互状态。
+- 状态卡可以保留蓝、绿、黄、红色相，但背景必须使用低透明度状态 token，不能直接使用 Tailwind `*-50`。
+- dark 主题中的普通内容面不得出现接近纯白的大面积背景；反色白底仅允许明确的媒体内容或第三方 iframe。
+- SVG、Canvas 和 CSS gradient 的颜色必须由当前主题 token 派生；切换主题后应刷新运行时色值。
+
+### Verification Matrix
+
+浏览器验收覆盖以下组合：
+
+| 页面/区域 | editorial | dark |
+|---|---:|---:|
+| Feed 空状态、文章列表、文章正文、全屏阅读 | required | required |
+| Global Settings 六个 tab | required | required |
+| Tags 列表、板块详情、MatchingConfigDialog | required | required |
+| TopicGraph 主画布、侧栏、时间线、弹窗 | required | required |
+
+每个组合检查：
+
+1. 页面可加载且无 Vite/Nuxt 编译覆盖层。
+2. 无非媒体用途的大面积固定白色或固定深色 surface。
+3. 文字、图标、按钮和输入框在静态、hover、focus、disabled 状态下可辨识。
+4. 主题切换后页面不跳回另一主题，刷新后选择保持。
+5. 首次绘制时 `<html>` 已包含有效 `data-theme`，无明显主题闪烁。
+
+## Settings Workspace Follow-up (2026-06-12)
+
+### Decision
+
+Global Settings 不再继续扩展 `AppDialog`。设置入口迁移到独立路由，建议使用 `/settings`，并通过查询参数或子路由保存当前位置：
+
+```text
+/settings?section=feeds
+/settings?section=ai-providers
+/settings?section=capability-routes
+/settings?section=embedding
+/settings?section=queues
+/settings?section=preferences
+/settings?section=firecrawl
+/settings?section=schedulers
+```
+
+选择查询参数可以在不拆散现有设置 composable 的前提下完成迁移；如果后续需要每个模块独立加载，再升级为 `/settings/<section>` 子路由。
+
+### Layout
+
+```text
+┌──────────────────────────────────────────────────────────────┐
+│ Settings Header                         Theme     Back/Home   │
+├──────────────────┬───────────────────────────────────────────┤
+│ 订阅源           │ Section title / description / actions     │
+│ AI 模型          ├───────────────────────────────────────────┤
+│ 能力路由         │                                           │
+│ Embedding        │             Section content               │
+│ 队列             │                                           │
+│ 阅读偏好         │                                           │
+│ Firecrawl        │                                           │
+│ 定时任务         │                                           │
+└──────────────────┴───────────────────────────────────────────┘
+```
+
+- 桌面端使用固定宽度侧栏 + 独立内容滚动。
+- 窄屏使用顶部 section selector 或抽屉导航，不压缩八个横向 tab。
+- 页面容器保持稳定高度，不因 Firecrawl 等短内容切换而跳动。
+- section 名称、说明和主操作固定在内容顶部；长内容仅滚动内容区。
+
+### Information Architecture
+
+| Section | 内容 | 迁移策略 |
+|---|---|---|
+| 订阅源 | 分类、搜索、单项刷新与抓取配置 | 左侧分类/订阅源列表，右侧选中订阅源编辑器；默认不渲染所有表单 |
+| AI 模型 | 主模型、备用模型池 | 提供商列表 + 详情编辑；保存和连接测试属于当前详情 |
+| 能力路由 | 各能力的模型降级顺序 | 独立 section，按能力折叠；拖拽/排序仅渲染展开项 |
+| Embedding | 模型配置与匹配阈值 | 合并相关配置，拆成“模型”和“匹配参数”两个卡片组 |
+| 队列 | Embedding 队列、标签打标队列 | 两个独立子 tab；默认显示摘要和最近记录，完整记录分页 |
+| 阅读偏好 | 统计、来源/分类评分 | 统计固定顶部；列表支持搜索、排序和分页 |
+| Firecrawl | 服务地址、密钥、抓取参数 | 保持单页短表单 |
+| 定时任务 | 任务状态与手动执行 | 紧凑表格/列表；展示名称、技术标识、状态、最近执行和操作 |
+
+### Feed Settings Master-detail
+
+原订阅源配置一次渲染约 31 张卡片、124 个按钮，内容高度约 `8652px`。改为：
+
+```text
+Category/search list -> selected feed id -> FeedSettingsEditor
+```
+
+- 列表项只展示图标、名称、分类、启用状态和最近刷新状态。
+- 编辑器只挂载当前选中的订阅源。
+- 分类默认折叠，并提供搜索。
+- 批量配置作为独立显式操作，不通过同时展开全部表单实现。
+- 未选择订阅源时展示说明空状态。
+
+### Performance and State
+
+- section 路由状态写入 URL，刷新和浏览器返回后可恢复。
+- 各 section 按需挂载，离开后不保留不必要的大型 DOM。
+- 队列和偏好列表必须分页、窗口化或限制默认条数。
+- 保存状态由各 section 自行管理，避免一个全局 saving 阻塞无关模块。
+- 从旧 `GlobalSettingsDialog` 迁移时复用现有 API/composable，不改变后端契约。
+
+### AppDialog Boundary
+
+`AppDialog` 继续用于：
+
+- 新增/编辑订阅源
+- 新增/编辑分类
+- 新增/编辑模型提供商
+- 删除确认
+- 少量参数确认
+
+`AppDialog` 不用于：
+
+- 多 section 设置导航
+- 超过一个视口的管理列表
+- 需要 URL 定位或浏览器前进/后退的工作流
+- 同时包含几十个表单控件的配置中心
+
+### TopicGraph Readability Follow-up
+
+第二轮浏览器回归确认 TopicGraph 已可加载并支持双主题，但仍需视觉可读性收尾：
+
+- editorial 下 `.topic-canvas-shell` 和 `.topic-note` 不得使用 overlay token 作为普通 surface。
+- Canvas 节点标签需设置最小字号/对比度，并随缩放维持可读范围。
+- 边宽应按权重设上下限，避免单条连线覆盖主要画布。
+- 初始 camera fit 应包含合理 padding，避免节点过小或焦点被推到画布边缘。
+- 两种主题均需验证焦点节点、普通节点、边和标签的对比度。

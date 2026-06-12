@@ -159,18 +159,17 @@ async function handleConfirmAdd() {
   gap: 0.25rem;
   padding: 0.2rem 0.5rem;
   border-radius: 6px;
-  border: 1px solid var(--color-secondary);
-  background: var(--color-secondary);
-  color: var(--color-secondary);
+  border: 1px solid var(--color-border-medium);
+  background: var(--color-bg-sunken);
+  color: var(--color-text-primary);
   font-size: 0.68rem;
   cursor: pointer;
   transition: all 0.12s ease;
 }
 
 .bcp-add-btn:hover {
-  background: var(--color-secondary);
-  border-color: var(--color-secondary);
-  color: var(--color-secondary);
+  background: var(--color-bg-hover);
+  border-color: var(--color-border-strong);
 }
 
 .bcp-notice {

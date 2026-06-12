@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { onMounted, onUnmounted } from 'vue'
+
 import { Icon } from '@iconify/vue'
+import ThemeToggle from '~/components/ui/ThemeToggle.vue'
 import { useTopicGraph } from '~/features/topic-graph/composables/useTopicGraph'
 import { normalizeTopicCategory } from '~/features/topic-graph/utils/normalizeTopicCategory'
 import { ArticleContentView } from '~/features/articles/public'
@@ -54,17 +55,6 @@ const {
   // Actions
   loadGraph,
 } = useTopicGraph()
-
-const { setTheme, theme } = useTheme()
-let saved: string
-
-onMounted(() => {
-  saved = theme.value
-  setTheme('dark')
-})
-onUnmounted(() => {
-  setTheme(saved as any)
-})
 </script>
 
 <template>
@@ -74,6 +64,12 @@ onUnmounted(() => {
     :data-state="pageState"
   >
     <div class="topic-shell mx-auto w-full">
+      <div class="topic-topbar flex items-center justify-between px-4 py-3">
+        <NuxtLink to="/" class="topic-back-btn flex items-center justify-center w-8 h-8 rounded-lg border border-[var(--color-border-medium)] text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-hover)] transition-all" title="返回首页">
+          <Icon icon="mdi:arrow-left" width="16" />
+        </NuxtLink>
+        <ThemeToggle />
+      </div>
       <section class="topic-layout grid gap-5 2xl:grid-cols-[minmax(0,2.15fr)_minmax(430px,0.95fr)]">
         <div class="space-y-5">
           <article class="topic-canvas-shell rounded-[34px] p-4 md:p-5">
@@ -375,7 +371,7 @@ onUnmounted(() => {
       >
         <div class="topic-article-modal__panel">
           <header class="topic-article-modal__header">
-            <p class="truncate text-sm text-ink-medium">
+            <p class="truncate text-sm text-[var(--color-text-secondary)]">
               {{ loadingPreviewArticle ? '正在准备文章预览...' : '文章预览里保留项目已有的阅读、收藏和抓取动作。' }}
             </p>
             <button
@@ -407,10 +403,10 @@ onUnmounted(() => {
 <style scoped>
 .topic-stage {
   background:
-    radial-gradient(circle at top left, rgba(240, 138, 75, 0.18), transparent 24%),
-    radial-gradient(circle at 85% 12%, rgba(63, 124, 255, 0.18), transparent 24%),
+    radial-gradient(circle at top left, var(--color-accent-subtle), transparent 24%),
+    radial-gradient(circle at 85% 12%, var(--color-link-subtle), transparent 24%),
     linear-gradient(180deg, var(--color-bg-sunken) 0%, var(--color-bg-elevated) 54%, var(--color-bg-sunken) 100%);
->
+}
 
 .topic-shell {
   width: min(100%, calc(100vw - 1.5rem));
@@ -438,9 +434,9 @@ onUnmounted(() => {
   overflow: visible;
   border: 1px solid var(--color-border-medium);
   background:
-    radial-gradient(circle at 12% 18%, rgba(240, 138, 75, 0.12), transparent 24%),
+    radial-gradient(circle at 12% 18%, var(--color-accent-subtle), transparent 24%),
     var(--color-bg-elevated);
-  box-shadow: 0 24px 80px rgba(6, 10, 16, 0.22);
+  box-shadow: var(--shadow-strong);
 }
 
 .topic-hotspot-strip__header {
@@ -468,7 +464,7 @@ onUnmounted(() => {
   flex-direction: column;
   border: 1px solid var(--color-border-subtle);
   background: linear-gradient(180deg, var(--color-bg-sunken), var(--color-bg-base));
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  box-shadow: inset 0 1px 0 var(--color-border-subtle);
 }
 
 .topic-stat-card {
@@ -635,18 +631,19 @@ onUnmounted(() => {
   transform: translateY(-1px);
   color: var(--color-text-primary);
 }
-  border-color: rgba(245, 158, 11, 0.72);
-  background: rgba(245, 158, 11, 0.18);
+.topic-badge--event {
+  border-color: var(--color-tag-event);
+  background: var(--color-tag-event-bg);
 }
 
 .topic-badge--person {
-  border-color: rgba(16, 185, 129, 0.72);
-  background: rgba(16, 185, 129, 0.18);
+  border-color: var(--color-tag-person);
+  background: var(--color-tag-person-bg);
 }
 
 .topic-badge--keyword {
-  border-color: rgba(99, 102, 241, 0.72);
-  background: rgba(99, 102, 241, 0.18);
+  border-color: var(--color-tag-keyword);
+  background: var(--color-tag-keyword-bg);
 }
 
 .topic-badge--active {
@@ -666,7 +663,7 @@ onUnmounted(() => {
   overflow: visible;
   border: 1px solid var(--color-border-medium);
   background: linear-gradient(180deg, var(--color-bg-elevated), var(--color-bg-sunken));
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  box-shadow: inset 0 1px 0 var(--color-border-subtle);
 }
 
 .topic-category-header {
@@ -688,7 +685,7 @@ onUnmounted(() => {
 
 .topic-category-header--button:hover,
 .topic-category-header--button:focus-visible {
-  border-color: rgba(255, 255, 255, 0.28);
+  border-color: var(--color-border-medium);
 }
 
 .topic-category-header--active {
@@ -697,15 +694,15 @@ onUnmounted(() => {
 }
 
 .topic-category-header--event {
-  color: rgba(252, 211, 77, 0.9);
+  color: var(--color-tag-event);
 }
 
 .topic-category-header--person {
-  color: rgba(110, 231, 183, 0.9);
+  color: var(--color-tag-person);
 }
 
 .topic-category-header--keyword {
-  color: rgba(165, 180, 252, 0.92);
+  color: var(--color-tag-keyword);
 }
 
 .topic-category-tags {
@@ -1028,7 +1025,7 @@ onUnmounted(() => {
   font-size: 0.78rem;
   padding: 0.55rem 1rem;
   cursor: pointer;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.35), 0 0 0 1px rgba(240, 138, 75, 0.08);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.35), 0 0 0 1px var(--color-accent-subtle);
   backdrop-filter: blur(16px);
   transition: all 0.2s ease;
 }

@@ -731,13 +731,13 @@ watch(() => props.sectorId, () => {
 .th-category-btn--active { border-color: var(--color-accent); background: var(--color-accent-subtle); color: var(--color-text-primary); }
 
 .th-organize-btn {
-  border-color: rgba(99, 179, 237, 0.3);
-  color: rgba(147, 197, 253, 0.8);
+  border-color: var(--color-link-border);
+  color: var(--color-link);
 }
 .th-organize-btn:hover:not(:disabled) {
-  border-color: rgba(99, 179, 237, 0.5);
-  background: rgba(99, 179, 237, 0.1);
-  color: rgba(191, 219, 254, 0.95);
+  border-color: var(--color-link-border-hover);
+  background: var(--color-link-subtle);
+  color: var(--color-link);
 }
 .th-organize-btn:disabled {
   opacity: 0.5;
@@ -749,7 +749,7 @@ watch(() => props.sectorId, () => {
   align-items: center;
   gap: 0.35rem;
   font-size: 0.68rem;
-  color: rgba(134, 239, 172, 0.8);
+  color: var(--color-tag-person);
   animation: fadeIn 0.3s ease;
 }
 
@@ -766,7 +766,7 @@ watch(() => props.sectorId, () => {
 .th-search-icon {
   position: absolute;
   left: 8px;
-  color: rgba(255, 255, 255, 0.3);
+  color: var(--color-text-muted);
   pointer-events: none;
 }
 .th-search-input {
@@ -780,7 +780,7 @@ watch(() => props.sectorId, () => {
   outline: none;
   transition: border-color 0.12s ease;
 }
-.th-search-input::placeholder { color: rgba(255, 255, 255, 0.25); }
+.th-search-input::placeholder { color: var(--color-text-muted); }
 .th-search-input:focus { border-color: var(--color-accent); }
 .th-search-clear {
   position: absolute;
@@ -867,9 +867,9 @@ watch(() => props.sectorId, () => {
   transition: all 0.12s ease;
 }
 .th-reassign-item:hover {
-  border-color: rgba(99, 102, 241, 0.4);
-  background: rgba(99, 102, 241, 0.08);
-  color: white;
+  border-color: var(--color-tag-keyword-border);
+  background: var(--color-tag-keyword-bg);
+  color: var(--color-text-primary);
 }
 .th-reassign-item:disabled {
   opacity: 0.5;
@@ -878,14 +878,14 @@ watch(() => props.sectorId, () => {
 .th-reassign-item-label { flex: 1; }
 .th-reassign-item-cat {
   font-size: 0.65rem;
-  color: rgba(255, 255, 255, 0.35);
+  color: var(--color-text-muted);
   padding: 0.1rem 0.4rem;
   border-radius: 999px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  border: 1px solid var(--color-border-subtle);
 }
 .th-reassign-item-count {
   font-size: 0.65rem;
-  color: rgba(255, 255, 255, 0.3);
+  color: var(--color-text-muted);
 }
 
 .th-unplaced-section {
@@ -902,7 +902,7 @@ watch(() => props.sectorId, () => {
   border: none;
   border-radius: 10px;
   background: none;
-  color: rgba(255, 255, 255, 0.5);
+  color: var(--color-text-muted);
   font-size: 0.8rem;
   cursor: pointer;
   transition: background 0.2s;

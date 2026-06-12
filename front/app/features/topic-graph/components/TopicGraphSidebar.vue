@@ -209,24 +209,24 @@ const {
             <!-- Abstract tag itself (returns to parent) -->
             <button
               type="button"
-              class="flex items-center gap-2 rounded-xl px-2.5 py-1.5 text-left transition-all hover:border-[rgba(240,138,75,0.2)]"
-              :class="'bg-[rgba(10,16,23,0.56)] border border-[rgba(240,138,75,0.3)]'"
+              class="flex items-center gap-2 rounded-xl px-2.5 py-1.5 text-left transition-all hover:border-[var(--color-accent-subtle)]"
+              :class="'bg-[var(--color-bg-sunken)] border border-[var(--color-accent)]'"
               @click="handleAbstractTagClick"
             >
-              <span class="w-2 h-2 rounded-full shrink-0 bg-[rgba(240,138,75,0.8)]"></span>
+              <span class="w-2 h-2 rounded-full shrink-0 bg-[var(--color-accent)]"></span>
               <span class="text-sm text-[var(--topic-ink-strong)] truncate">{{ props.abstractNodeLabel || '全部' }}</span>
-              <span class="ml-auto text-xs text-[rgba(240,138,75,0.7)] shrink-0">全部</span>
+              <span class="ml-auto text-xs text-[var(--color-accent)] shrink-0">全部</span>
             </button>
             <!-- Child tags -->
             <button
                 v-for="child in abstractChildren"
                 :key="child.slug"
                 type="button"
-                class="flex items-center gap-2 rounded-xl px-2.5 py-1.5 text-left transition-all hover:border-[rgba(240,138,75,0.2)]"
-                :class="'bg-[rgba(10,16,23,0.56)] border border-[var(--topic-border)]'"
+                class="flex items-center gap-2 rounded-xl px-2.5 py-1.5 text-left transition-all hover:border-[var(--color-accent-subtle)]"
+                :class="'bg-[var(--color-bg-sunken)] border border-[var(--topic-border)]'"
                 @click="handleChildTagClick(child)"
               >
-              <span class="w-2 h-2 rounded-full shrink-0" :class="`bg-[#6366f1]`"></span>
+              <span class="w-2 h-2 rounded-full shrink-0" :class="`bg-[var(--color-tag-keyword)]`"></span>
               <span class="text-sm text-[var(--topic-ink-strong)] truncate">{{ child.label }}</span>
               <span class="ml-auto text-xs text-[var(--topic-ink-soft)] shrink-0">{{ child.articleCount }} 篇</span>
             </button>
@@ -269,21 +269,21 @@ const {
   --topic-card-raised: linear-gradient(180deg, var(--color-bg-elevated), var(--color-bg-sunken));
   --topic-chip: var(--color-bg-overlay);
   background:
-    radial-gradient(circle at 16% 14%, rgba(240, 138, 75, 0.18), transparent 26%),
+    radial-gradient(circle at 16% 14%, var(--color-accent-subtle), transparent 26%),
     radial-gradient(circle at 82% 10%, rgba(74, 129, 219, 0.16), transparent 24%),
     linear-gradient(180deg, var(--color-bg-elevated), var(--color-bg-base));
   border: 1px solid var(--color-border-medium);
   box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.05),
-    0 28px 90px rgba(2, 6, 12, 0.4);
+    inset 0 1px 0 var(--color-border-subtle),
+    0 28px 90px rgba(0, 0, 0, 0.4);
 }
 .topic-sidebar::before {
   content: '';
   position: absolute;
   inset: 0;
   background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.05), transparent 18%),
-    linear-gradient(90deg, rgba(255, 255, 255, 0.03), transparent 28%);
+    linear-gradient(180deg, var(--color-border-subtle), transparent 18%),
+    linear-gradient(90deg, var(--color-border-subtle), transparent 28%);
   pointer-events: none;
 }
 .topic-sidebar::after {
@@ -331,8 +331,8 @@ const {
   border: 1px solid var(--topic-border);
   background: var(--topic-card);
   box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.04),
-    0 22px 60px rgba(2, 6, 12, 0.24);
+    inset 0 1px 0 var(--color-border-subtle),
+    0 22px 60px rgba(0, 0, 0, 0.24);
   backdrop-filter: blur(16px);
 }
 .topic-panel::before {
@@ -365,11 +365,11 @@ const {
 }
 .topic-sidebar__news-scroll--bounded::-webkit-scrollbar-track {
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.05);
+  background: var(--color-bg-hover);
 }
 .topic-sidebar__news-scroll--bounded::-webkit-scrollbar-thumb {
   border-radius: 999px;
-  background: rgba(240, 138, 75, 0.28);
+  background: var(--color-accent);
 }
 .topic-pill {
   border-radius: 999px;
@@ -377,17 +377,17 @@ const {
   padding: 0.45rem 0.85rem;
   font-size: 0.78rem;
   font-weight: 600;
-  color: rgba(248, 251, 255, 0.9);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  color: var(--color-text-primary);
+  box-shadow: inset 0 1px 0 var(--color-border-subtle);
 }
-.topic-pill--event { border: 1px solid rgba(245, 158, 11, 0.32); }
-.topic-pill--person { border: 1px solid rgba(16, 185, 129, 0.32); }
-.topic-pill--keyword { border: 1px solid rgba(99, 102, 241, 0.32); }
+.topic-pill--event { border: 1px solid var(--color-tag-event-border); }
+.topic-pill--person { border: 1px solid var(--color-tag-person-border); }
+.topic-pill--keyword { border: 1px solid var(--color-tag-keyword-border); }
 .topic-related-card__context {
   font-size: 0.74rem;
   letter-spacing: 0.12em;
   text-transform: uppercase;
-  color: var(--topic-ink-soft, rgba(148, 168, 188, 0.7));
+  color: var(--topic-ink-soft, var(--color-text-secondary));
 }
 .topic-related-card__context {
   margin-top: 0.65rem;
@@ -410,7 +410,7 @@ const {
   background: var(--color-accent-subtle);
   padding: 0.32rem 0.7rem;
   font-size: 0.75rem;
-  color: rgba(255, 228, 209, 0.88);
+  color: var(--color-text-primary);
 }
 .keywords-hint {
   font-size: 0.72rem;
@@ -427,7 +427,7 @@ const {
   border-radius: 999px;
   border: 1px solid var(--color-border-medium);
   background: var(--color-bg-sunken);
-  color: rgba(241, 246, 250, 0.7);
+  color: var(--color-text-secondary);
   cursor: pointer;
   transition: all 0.2s ease;
 }

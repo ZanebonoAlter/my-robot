@@ -280,7 +280,7 @@ function handleToggleWatch(e: Event) {
   padding: 0.2rem 0.5rem;
   outline: none;
 }
-.th-inline-input:focus { border-color: rgba(240, 138, 75, 0.6); }
+.th-inline-input:focus { border-color: var(--color-accent); }
 
 .th-action-btn {
   display: flex;
@@ -290,12 +290,12 @@ function handleToggleWatch(e: Event) {
   height: 22px;
   border: none;
   border-radius: 6px;
-  background: rgba(255, 255, 255, 0.06);
-  color: rgba(255, 255, 255, 0.6);
+  background: var(--color-bg-hover);
+  color: var(--color-text-secondary);
   cursor: pointer;
 }
 .th-action-btn:hover { background: var(--color-bg-hover); color: var(--color-text-primary); }
-.th-action-btn--save { color: rgba(16, 185, 129, 0.9); }
+.th-action-btn--save { color: var(--color-success); }
 
 .th-badge {
   display: inline-flex;
@@ -311,8 +311,8 @@ function handleToggleWatch(e: Event) {
   font-weight: 500;
 }
 .th-badge--low-quality {
-  background: rgba(240, 138, 75, 0.15);
-  color: rgba(255, 220, 200, 0.7);
+  background: var(--color-accent-subtle);
+  color: var(--color-text-primary);
   border: 1px solid rgba(240, 138, 75, 0.2);
 }
 
@@ -332,7 +332,7 @@ function handleToggleWatch(e: Event) {
   transition: opacity 0.12s ease, color 0.12s ease;
 }
 .th-row:hover .th-detach-btn { opacity: 1; }
-.th-detach-btn:hover { color: rgba(240, 138, 75, 0.9); background: rgba(240, 138, 75, 0.12); }
+.th-detach-btn:hover { color: var(--color-accent); background: var(--color-accent-subtle); }
 
 .th-reassign-btn {
   display: flex;
@@ -349,7 +349,7 @@ function handleToggleWatch(e: Event) {
   transition: opacity 0.12s ease, color 0.12s ease;
 }
 .th-row:hover .th-reassign-btn { opacity: 1; }
-.th-reassign-btn:hover { color: rgba(99, 102, 241, 0.9); background: rgba(99, 102, 241, 0.12); }
+.th-reassign-btn:hover { color: var(--color-tag-keyword); background: var(--color-tag-keyword-bg); }
 
 .th-children {
   border-left: 1px solid var(--color-border-subtle);

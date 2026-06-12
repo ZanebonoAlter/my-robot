@@ -8,9 +8,22 @@ function getCSSVar(name: string): string {
   return getComputedStyle(document.documentElement).getPropertyValue(name).trim()
 }
 
+interface TokenColors {
+  accent: string
+  accentHover: string
+  accentSubtle: string
+  bgElevated: string
+  bgSunken: string
+  textPrimary: string
+  textSecondary: string
+  textMuted: string
+  borderSubtle: string
+  borderMedium: string
+}
+
 // Lazy-resolved color palette from design tokens (resolved once per render cycle)
-let _tokenCache: Record<string, string> | null = null
-function tokenColors(): Record<string, string> {
+let _tokenCache: TokenColors | null = null
+function tokenColors(): TokenColors {
   if (_tokenCache) return _tokenCache
   _tokenCache = {
     accent: getCSSVar('--color-accent') || 'rgba(240,138,75,0.85)',
@@ -46,6 +59,16 @@ const props = withDefaults(defineProps<Props>(), {
   selectedCategory: null,
   highlightedNodeIds: () => [],
   relatedEdgeIds: () => [],
+})
+
+// Watch for theme changes and refresh token cache
+const { theme } = useTheme()
+watch(theme, () => {
+  invalidateTokenCache()
+  // Force re-render of the graph with new colors
+  nextTick(() => {
+    applyGraphData()
+  })
 })
 
 const emit = defineEmits<{
@@ -198,7 +221,7 @@ function calculateRelatedLinks(
  */
 function blendColors(color1: string, color2: string): string {
   // 简化实现：返回橙色系渐变
-  return 'rgba(240,138,75,0.85)'
+  return tokenColors().accent
 }
 
 /**
@@ -320,7 +343,7 @@ function buildNodeObject(node: TopicGraphSceneNode) {
     const halo = new THREE.Mesh(
       new THREE.SphereGeometry(radius * (isTrunk ? 1.9 : 1.45), 24, 24),
       new THREE.MeshBasicMaterial({
-        color: isTrunk ? '#f0a24b' : node.accent,
+        color: isTrunk ? tokenColors().accent : node.accent,
         transparent: true,
         opacity: isTrunk ? 0.13 : 0.08,
       }),
@@ -331,7 +354,7 @@ function buildNodeObject(node: TopicGraphSceneNode) {
       const focusRing = new THREE.Mesh(
         new THREE.SphereGeometry(radius * 2.55, 32, 32),
         new THREE.MeshBasicMaterial({
-          color: '#f0a24b',
+          color: tokenColors().accent,
           transparent: true,
           opacity: 0.08,
         }),
@@ -341,7 +364,7 @@ function buildNodeObject(node: TopicGraphSceneNode) {
       const innerHalo = new THREE.Mesh(
         new THREE.SphereGeometry(radius * 1.4, 24, 24),
         new THREE.MeshBasicMaterial({
-          color: '#ffffff',
+          color: tokenColors().textPrimary,
           transparent: true,
           opacity: 0.2,
         }),
@@ -412,7 +435,7 @@ function buildLinkParticleWidth(link: TopicGraphSceneEdge) {
 
 function buildLinkParticleColor(link: TopicGraphSceneEdge) {
   if (focusHighlightActive.value && isHighlightedEdge(link, highlightedNodeSet.value, highlightedEdgeSet.value)) {
-    return '#f0a24b'
+    return tokenColors().accent
   }
 
   return isFocusedEdge(link) ? tokenColors().accentHover : 'rgba(0,0,0,0)'
@@ -638,8 +661,8 @@ onBeforeUnmount(() => {
   min-height: 34rem;
   overflow: hidden;
   background:
-    radial-gradient(circle at 18% 20%, rgba(240, 138, 75, 0.12), transparent 28%),
-    radial-gradient(circle at 76% 18%, rgba(63, 124, 255, 0.12), transparent 26%),
+    radial-gradient(circle at 18% 20%, var(--color-accent-subtle), transparent 28%),
+    radial-gradient(circle at 76% 18%, var(--color-link-subtle), transparent 26%),
     linear-gradient(180deg, var(--color-bg-sunken), var(--color-bg-elevated));
 }
 

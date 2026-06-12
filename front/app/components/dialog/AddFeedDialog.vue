@@ -75,7 +75,7 @@ async function handleAdd() {
       <!-- URL Input -->
       <div class="space-y-2">
         <label class="flex items-center gap-2 text-sm font-semibold text-gray-700">
-          <Icon icon="mdi:link-variant" width="16" height="16" class="text-ink-500" />
+          <Icon icon="mdi:link-variant" width="16" height="16" class="text-[var(--color-text-secondary)]" />
           RSS 订阅地址
           <span class="text-red-500">*</span>
         </label>
@@ -95,7 +95,7 @@ async function handleAdd() {
       <!-- Category Select -->
       <div class="space-y-2">
         <label class="flex items-center gap-2 text-sm font-semibold text-gray-700">
-          <Icon icon="mdi:folder" width="16" height="16" class="text-ink-500" />
+          <Icon icon="mdi:folder" width="16" height="16" class="text-[var(--color-text-secondary)]" />
           分类
           <span class="text-xs font-normal text-gray-400">(可选)</span>
         </label>
@@ -125,10 +125,10 @@ async function handleAdd() {
       >
         <div
           v-if="preview && !previewing"
-          class="p-4 bg-gradient-to-br from-ink-50 to-paper-cream rounded-lg border-2 border-ink-200"
+          class="p-4 bg-gradient-to-br from-[var(--color-bg-hover)] to-[var(--color-bg-elevated)] rounded-lg border-2 border-[var(--color-border-subtle)]"
         >
           <div class="flex items-start gap-3">
-          <div class="w-11 h-11 rounded-lg bg-gradient-to-br from-ink-500 to-ink-700 flex items-center justify-center shrink-0 shadow-md">
+          <div class="w-11 h-11 rounded-lg bg-gradient-to-br from-[var(--color-bg-sunken)] to-[var(--color-bg-sunken)] flex items-center justify-center shrink-0 shadow-md">
               <Icon icon="mdi:rss" class="text-white" width="22" height="22" />
             </div>
             <div class="flex-1 min-w-0">
@@ -139,7 +139,7 @@ async function handleAdd() {
                 {{ preview.description || '无描述' }}
               </p>
               <div class="flex items-center gap-2">
-                <span class="inline-flex items-center px-3 py-1.5 rounded-lg bg-ink-100 text-ink-700 text-xs font-semibold">
+                <span class="inline-flex items-center px-3 py-1.5 rounded-lg bg-[var(--color-bg-elevated)] text-[var(--color-text-primary)] text-xs font-semibold">
                   <Icon icon="mdi:article" width="14" height="14" class="mr-1.5" />
                   {{ preview.article_count || 0 }} 篇文章
                 </span>

@@ -347,7 +347,7 @@ function handleSave() {
 }
 
 .mc-formula {
-  background: rgba(0, 0, 0, 0.2);
+  background: var(--color-bg-sunken);
   border-radius: 6px;
   padding: 0.35rem 0.6rem;
   margin-bottom: 0.55rem;
@@ -356,6 +356,7 @@ function handleSave() {
 
 .mc-formula :deep(.katex-render) {
   font-size: 0.82rem;
+  color: var(--color-text-primary);
 }
 
 .mc-grid {

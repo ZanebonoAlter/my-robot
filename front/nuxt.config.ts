@@ -24,9 +24,18 @@ export default defineNuxtConfig({
   app: {
     head: {
       title: 'Syntopica',
+      htmlAttrs: {
+        'data-theme': 'editorial',
+      },
       link: [
         { rel: 'icon', type: 'image/png', href: '/favicon.png' },
         { rel: 'stylesheet', href: 'https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@300;400;500;600;700&display=swap' },
+      ],
+      script: [
+        {
+          innerHTML: `(function(){try{var t=localStorage.getItem('syntopica-theme');if(t==='editorial'||t==='dark'){document.documentElement.setAttribute('data-theme',t)}else{document.documentElement.setAttribute('data-theme','editorial')}}catch(e){document.documentElement.setAttribute('data-theme','editorial')}})()`,
+          tagPosition: 'head',
+        },
       ],
     },
   },

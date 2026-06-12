@@ -25,15 +25,7 @@ const ctx = inject<AIRouterCtx>('ai-router-ctx')!
 <template>
   <div class="rounded-xl border border-gray-200 bg-white overflow-hidden">
     <div class="px-5 py-3.5 border-b border-gray-100 flex items-center justify-between">
-      <div class="flex items-center gap-2.5">
-        <div class="w-8 h-8 rounded-lg bg-gradient-to-br from-teal-500 to-teal-700 flex items-center justify-center shadow-sm">
-          <Icon icon="mdi:server-network" width="16" height="16" class="text-white" />
-        </div>
-        <div>
-          <h3 class="text-sm font-semibold text-gray-900">备用模型池</h3>
-          <p class="text-[11px] text-gray-500">挂到能力路由做 failover，主模型挂了自动切</p>
-        </div>
-      </div>
+      <AppSectionHeader title="备用模型池" description="挂到能力路由做 failover，主模型挂了自动切" icon-name="mdi:server-network" />
       <button
         class="px-3 py-1.5 text-xs font-medium rounded-lg border border-gray-200 text-gray-700 hover:bg-gray-50 transition-colors flex items-center gap-1"
         @click="ctx.showNewProviderForm = !ctx.showNewProviderForm"
@@ -47,16 +39,16 @@ const ctx = inject<AIRouterCtx>('ai-router-ctx')!
       <!-- New Provider Form -->
       <div v-if="ctx.showNewProviderForm" class="rounded-lg border border-dashed border-gray-300 p-4 bg-gray-50/60 space-y-3">
         <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
-          <input v-model="ctx.newProviderForm.name" type="text" class="input w-full text-sm" placeholder="名称">
-          <input v-model="ctx.newProviderForm.model" type="text" class="input w-full text-sm" placeholder="模型名">
+          <AppInput v-model="ctx.newProviderForm.name" type="text" placeholder="名称" />
+          <AppInput v-model="ctx.newProviderForm.model" type="text" placeholder="模型名" />
           <select v-model="ctx.newProviderForm.provider_type" class="input w-full text-sm">
             <option value="openai_compatible">OpenAI Compatible</option>
             <option value="ollama">Ollama (本地)</option>
           </select>
-          <input v-model="ctx.newProviderForm.base_url" type="text" class="input w-full text-sm"
-            :placeholder="ctx.newProviderForm.provider_type === 'ollama' ? 'http://localhost:11434/v1' : 'https://api.example.com/v1'">
+          <AppInput v-model="ctx.newProviderForm.base_url" type="text"
+            :placeholder="ctx.newProviderForm.provider_type === 'ollama' ? 'http://localhost:11434/v1' : 'https://api.example.com/v1'" />
           <div v-if="ctx.newProviderForm.provider_type !== 'ollama'" class="relative md:col-span-2">
-            <input v-model="ctx.newProviderForm.api_key" :type="ctx.showNewProviderApiKey ? 'text' : 'password'" class="input w-full text-sm pr-10" placeholder="API Key">
+            <AppInput v-model="ctx.newProviderForm.api_key" :type="ctx.showNewProviderApiKey ? 'text' : 'password'" placeholder="API Key" />
             <button class="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600" @click="ctx.showNewProviderApiKey = !ctx.showNewProviderApiKey">
               <Icon :icon="ctx.showNewProviderApiKey ? 'mdi:eye-off' : 'mdi:eye'" width="15" height="15" />
             </button>
@@ -107,22 +99,22 @@ const ctx = inject<AIRouterCtx>('ai-router-ctx')!
           <!-- Edit Form -->
           <div v-if="ctx.editingProviderId === provider.id" class="mt-3 pt-3 border-t border-gray-200 space-y-3">
             <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
-              <input v-model="ctx.editProviderForm.name" type="text" class="input w-full text-sm" placeholder="名称">
-              <input v-model="ctx.editProviderForm.model" type="text" class="input w-full text-sm" placeholder="模型名">
+              <AppInput v-model="ctx.editProviderForm.name" type="text" placeholder="名称" />
+              <AppInput v-model="ctx.editProviderForm.model" type="text" placeholder="模型名" />
               <select v-model="ctx.editProviderForm.provider_type" class="input w-full text-sm">
                 <option value="openai_compatible">OpenAI Compatible</option>
                 <option value="ollama">Ollama (本地)</option>
               </select>
-              <input v-model="ctx.editProviderForm.base_url" type="text" class="input w-full text-sm"
-                :placeholder="ctx.editProviderForm.provider_type === 'ollama' ? 'http://localhost:11434/v1' : 'https://api.example.com/v1'">
+              <AppInput v-model="ctx.editProviderForm.base_url" type="text"
+                :placeholder="ctx.editProviderForm.provider_type === 'ollama' ? 'http://localhost:11434/v1' : 'https://api.example.com/v1'" />
               <div v-if="ctx.editProviderForm.provider_type !== 'ollama'" class="relative md:col-span-2">
-                <input v-model="ctx.editProviderForm.api_key" :type="ctx.showEditProviderApiKey ? 'text' : 'password'" class="input w-full text-sm pr-10" placeholder="留空表示沿用已保存密钥">
+                <AppInput v-model="ctx.editProviderForm.api_key" :type="ctx.showEditProviderApiKey ? 'text' : 'password'" placeholder="留空表示沿用已保存密钥" />
                 <button class="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600" @click="ctx.showEditProviderApiKey = !ctx.showEditProviderApiKey">
                   <Icon :icon="ctx.showEditProviderApiKey ? 'mdi:eye-off' : 'mdi:eye'" width="15" height="15" />
                 </button>
               </div>
               <div v-else class="md:col-span-2 rounded-lg bg-amber-50 border border-amber-200/80 px-3 py-2 text-xs text-amber-700">Ollama 模式无需 API Key</div>
-              <input v-model.number="ctx.editProviderForm.timeout_seconds" type="number" min="30" class="input w-full text-sm" placeholder="Timeout (秒)">
+              <AppInput v-model="ctx.editProviderForm.timeout_seconds" type="number" min="30" placeholder="Timeout (秒)" />
               <div class="flex items-center gap-2 text-sm text-gray-700">
                 <AppToggle v-model="ctx.editProviderForm.enabled" /> 启用
               </div>
@@ -132,7 +124,7 @@ const ctx = inject<AIRouterCtx>('ai-router-ctx')!
             </div>
             <div class="flex justify-end gap-2">
               <button class="px-3 py-1.5 text-xs rounded-lg border border-gray-200 text-gray-700 hover:bg-gray-50" @click="ctx.cancelEditingProvider">取消</button>
-              <button class="px-3 py-1.5 text-xs rounded-lg bg-ink-700 text-white hover:bg-ink-800 disabled:opacity-50" :disabled="ctx.saving" @click="ctx.saveEditedProvider">保存</button>
+              <button class="px-3 py-1.5 text-xs rounded-lg bg-[var(--color-bg-sunken)] text-white hover:bg-[var(--color-bg-sunken)] disabled:opacity-50" :disabled="ctx.saving" @click="ctx.saveEditedProvider">保存</button>
             </div>
           </div>
         </div>

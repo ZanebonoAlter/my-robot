@@ -70,7 +70,7 @@ import '~/components/layout/AppHeader.css'
       <button class="header-btn" title="设置" @click="$emit('settings')">
         <Icon icon="mdi:cog" width="20" height="20" class="text-gray-600" />
       </button>
-      <button class="header-btn" :title="isDark ? '切换为编辑模式' : '切换为深色模式'" @click="toggleTheme">
+      <button class="header-btn" :title="isDark ? '切换为浅色模式' : '切换为深色模式'" @click="toggleTheme">
         <Icon :icon="isDark ? 'mdi:white-balance-sunny' : 'mdi:weather-night'" width="20" height="20" class="text-gray-600" />
       </button>
     </div>

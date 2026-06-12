@@ -76,8 +76,8 @@ const showDialog = computed({
   color: var(--color-text-muted);
 }
 
-.merge-status--error { color: #f87171; }
-.merge-status--success { color: #4ade80; }
+.merge-status--error { color: var(--color-error); }
+.merge-status--success { color: var(--color-success); }
 
 .merge-results {
   margin-top: 0.75rem;

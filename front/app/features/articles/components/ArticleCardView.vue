@@ -47,7 +47,7 @@ const errorHint = computed(() => props.article.completionError || props.article.
   >
     <div
       v-if="article.imageUrl && !compact"
-      class="aspect-video w-full overflow-hidden bg-paper-warm"
+      class="aspect-video w-full overflow-hidden bg-[var(--color-bg-sunken)]"
     >
       <img
         :src="article.imageUrl"
@@ -76,7 +76,7 @@ const errorHint = computed(() => props.article.completionError || props.article.
           <div class="flex items-start justify-between gap-2">
             <div class="flex-1 min-w-0">
               <h3
-                class="font-semibold text-ink-black group-hover:text-ink-500 transition-colors line-clamp-2"
+                class="font-semibold text-[var(--color-text-primary)] group-hover:text-[var(--color-text-secondary)] transition-colors line-clamp-2"
                 :class="{ 'text-sm': compact, 'text-base': !compact }"
               >
                 {{ article.title }}
@@ -141,7 +141,7 @@ const errorHint = computed(() => props.article.completionError || props.article.
             </button>
           </div>
 
-          <div class="flex flex-wrap items-center gap-2 mt-3 text-xs text-ink-light">
+          <div class="flex flex-wrap items-center gap-2 mt-3 text-xs text-[var(--color-text-muted)]">
             <span
               v-if="category"
               class="px-2.5 py-1 rounded-full"
@@ -149,10 +149,10 @@ const errorHint = computed(() => props.article.completionError || props.article.
             >
               {{ category.name }}
             </span>
-            <span v-if="feed" class="text-ink-medium">{{ feed.title }}</span>
+            <span v-if="feed" class="text-[var(--color-text-secondary)]">{{ feed.title }}</span>
             <span>{{ $dayjs(article.pubDate).fromNow() }}</span>
             <span v-if="article.author">{{ article.author }}</span>
-            <span v-if="article.read" class="text-ink-muted">已读</span>
+            <span v-if="article.read" class="text-[var(--color-text-muted)]">已读</span>
           </div>
         </div>
       </div>

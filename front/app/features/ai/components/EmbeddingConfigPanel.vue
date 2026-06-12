@@ -111,15 +111,7 @@ onMounted(() => {
 <template>
   <div class="space-y-4">
     <div class="flex items-center justify-between gap-4">
-      <div class="flex items-center gap-3">
-        <div class="w-10 h-10 rounded-lg bg-gradient-to-br from-teal-500 to-teal-700 flex items-center justify-center">
-          <Icon icon="mdi:vector-square" width="20" height="20" class="text-white" />
-        </div>
-        <div>
-          <h3 class="font-semibold text-gray-900">Embedding 配置</h3>
-          <p class="text-xs text-gray-500">向量搜索阈值与维度，模型在 AI 路由中配置</p>
-        </div>
-      </div>
+      <AppSectionHeader title="Embedding 配置" description="向量搜索阈值与维度，模型在 AI 路由中配置" icon-name="mdi:vector-square" />
       <button
         class="px-4 py-2 text-sm font-medium text-white bg-teal-600 rounded-lg hover:bg-teal-700 transition-colors disabled:opacity-50"
         :disabled="saving || dirtyKeys.size === 0"
@@ -139,13 +131,11 @@ onMounted(() => {
           <label class="block text-sm font-medium text-gray-700">{{ getLabel(config.key) }}</label>
           <span v-if="getUnit(config.key)" class="text-xs text-gray-400">{{ getUnit(config.key) }}</span>
         </div>
-        <input
+        <AppInput
           v-model="editValues[config.key]"
           type="text"
-          class="input w-full"
-          :class="dirtyKeys.has(config.key) ? 'border-teal-400 ring-1 ring-teal-200' : ''"
           @input="markDirty(config.key)"
-        >
+        />
         <p class="mt-1 text-xs text-gray-500">{{ getHint(config.key) }}</p>
       </div>
     </div>

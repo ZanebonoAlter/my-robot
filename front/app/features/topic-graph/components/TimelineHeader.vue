@@ -73,7 +73,7 @@ const categoryLabels: Record<TopicCategory, string> = {
 .timeline-header {
   padding: 1rem 1.25rem;
   border-radius: 1.25rem;
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  border: 1px solid var(--color-border-subtle);
   background: linear-gradient(180deg, rgba(20, 30, 42, 0.9), rgba(12, 18, 26, 0.95));
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
 }
@@ -94,12 +94,12 @@ const categoryLabels: Record<TopicCategory, string> = {
 .timeline-header__title {
   font-size: 1.35rem;
   font-weight: 700;
-  color: rgba(255, 255, 255, 0.95);
+  color: var(--color-text-primary);
   line-height: 1.3;
 }
 
 .timeline-header__title--placeholder {
-  color: rgba(255, 255, 255, 0.4);
+  color: var(--color-text-muted);
   font-weight: 500;
 }
 
@@ -112,20 +112,20 @@ const categoryLabels: Record<TopicCategory, string> = {
 }
 
 .timeline-header__category--event {
-  background: rgba(245, 158, 11, 0.2);
-  border: 1px solid rgba(245, 158, 11, 0.4);
+  background: var(--color-tag-event-bg);
+  border: 1px solid var(--color-tag-event-border);
   color: rgba(252, 211, 77, 0.9);
 }
 
 .timeline-header__category--person {
-  background: rgba(16, 185, 129, 0.2);
-  border: 1px solid rgba(16, 185, 129, 0.4);
+  background: var(--color-tag-person-bg);
+  border: 1px solid var(--color-tag-person-border);
   color: rgba(110, 231, 183, 0.9);
 }
 
 .timeline-header__category--keyword {
-  background: rgba(99, 102, 241, 0.2);
-  border: 1px solid rgba(99, 102, 241, 0.4);
+  background: var(--color-tag-keyword-bg);
+  border: 1px solid var(--color-tag-keyword-border);
   color: rgba(165, 180, 252, 0.9);
 }
 
@@ -134,17 +134,17 @@ const categoryLabels: Record<TopicCategory, string> = {
   align-items: center;
   gap: 0.35rem;
   font-size: 0.8rem;
-  color: rgba(255, 255, 255, 0.55);
+  color: var(--color-text-secondary);
   padding: 0.3rem 0.65rem;
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: var(--color-bg-hover);
+  border: 1px solid var(--color-border-subtle);
 }
 
 .timeline-header__description {
   font-size: 0.82rem;
   line-height: 1.5;
-  color: rgba(255, 255, 255, 0.5);
+  color: var(--color-text-muted);
   margin: 0;
   padding-left: 0.1rem;
 }

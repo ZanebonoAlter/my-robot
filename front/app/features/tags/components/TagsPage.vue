@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { Icon } from '@iconify/vue'
+import ThemeToggle from '~/components/ui/ThemeToggle.vue'
 import AddSemanticBoardDialog from './AddSemanticBoardDialog.vue'
 import BoardCompositionPanel from './BoardCompositionPanel.vue'
 import AuxiliaryLabelPool from './AuxiliaryLabelPool.vue'
@@ -69,6 +70,9 @@ const {
           </NuxtLink>
           <Icon icon="mdi:view-grid" width="18" class="text-white/50" />
           <h1 class="tags-page-title">语义板块管理</h1>
+        </div>
+        <div class="flex items-center gap-2">
+          <ThemeToggle />
         </div>
       </div>
     </div>
@@ -220,7 +224,7 @@ const {
 
 <style scoped>
 .tags-page { display: flex; flex-direction: column; height: 100vh; background: var(--color-bg-base); color: var(--color-text-primary); }
-.tags-topbar { position: sticky; top: 0; z-index: 30; border-bottom: 1px solid var(--color-border-subtle); background: var(--color-bg-overlay); backdrop-filter: blur(16px); }
+.tags-topbar { position: sticky; top: 0; z-index: 30; border-bottom: 1px solid var(--color-border-subtle); background: var(--color-bg-elevated); backdrop-filter: blur(16px); }
 .tags-topbar-inner { display: flex; align-items: center; justify-content: space-between; max-width: min(1800px, 95vw); margin: 0 auto; padding: 0.75rem 1.5rem; }
 .tags-back-btn { display: flex; align-items: center; justify-content: center; width: 28px; height: 28px; border: 1px solid var(--color-border-medium); border-radius: 8px; color: var(--color-text-muted); text-decoration: none; transition: all 0.12s ease; }
 .tags-back-btn:hover { border-color: var(--color-border-strong); color: var(--color-text-secondary); background: var(--color-bg-hover); }
@@ -232,5 +236,5 @@ const {
 .tags-content-tab:hover { color: var(--color-text-secondary); background: var(--color-bg-hover); }
 .tags-content-tab--active { color: var(--color-accent); background: var(--color-accent-subtle); }
 .tags-content-tab--active::after { content: ''; position: absolute; bottom: -1px; left: 0; right: 0; height: 2px; background: var(--color-accent); border-radius: 1px; }
-.tags-bottombar { position: fixed; bottom: 0; left: 0; right: 0; z-index: 40; display: flex; align-items: center; justify-content: flex-end; gap: 0.75rem; padding: 0.45rem 1.25rem; border-top: 1px solid var(--color-border-subtle); background: var(--color-bg-overlay); backdrop-filter: blur(12px); }
+.tags-bottombar { position: fixed; bottom: 0; left: 0; right: 0; z-index: 40; display: flex; align-items: center; justify-content: flex-end; gap: 0.75rem; padding: 0.45rem 1.25rem; border-top: 1px solid var(--color-border-subtle); background: var(--color-bg-elevated); backdrop-filter: blur(12px); }
 </style>

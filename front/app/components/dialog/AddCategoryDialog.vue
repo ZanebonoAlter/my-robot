@@ -68,7 +68,7 @@ async function handleSubmit() {
       <!-- Name -->
       <div class="space-y-2">
         <label class="flex items-center gap-2 text-sm font-semibold text-gray-700">
-          <Icon icon="mdi:label" width="16" height="16" class="text-ink-500" />
+          <Icon icon="mdi:label" width="16" height="16" class="text-[var(--color-text-secondary)]" />
           分类名称
           <span class="text-red-500">*</span>
         </label>
@@ -84,7 +84,7 @@ async function handleSubmit() {
         <!-- Icon -->
         <div class="space-y-2">
           <label class="flex items-center gap-2 text-sm font-semibold text-gray-700">
-            <Icon icon="mdi:emoticon-happy" width="16" height="16" class="text-ink-500" />
+            <Icon icon="mdi:emoticon-happy" width="16" height="16" class="text-[var(--color-text-secondary)]" />
             图标
           </label>
           <div class="grid grid-cols-5 gap-2">
@@ -92,10 +92,10 @@ async function handleSubmit() {
               v-for="iconOption in iconOptions"
               :key="iconOption"
               class="p-2.5 rounded-xl border-2 transition-all hover:shadow-md"
-              :class="icon === iconOption ? 'border-ink-500 bg-ink-50 shadow-md scale-105' : 'border-gray-200 hover:border-ink-300 hover:bg-ink-50/50'"
+              :class="icon === iconOption ? 'border-[var(--color-border-strong)] bg-[var(--color-bg-hover)] shadow-md scale-105' : 'border-gray-200 hover:border-[var(--color-border-medium)] hover:bg-[var(--color-bg-hover)]/50'"
               @click="icon = iconOption"
             >
-              <Icon :icon="iconOption" width="20" height="20" :class="icon === iconOption ? 'text-ink-600' : 'text-gray-600'" />
+              <Icon :icon="iconOption" width="20" height="20" :class="icon === iconOption ? 'text-[var(--color-text-secondary)]' : 'text-gray-600'" />
             </button>
           </div>
           <!-- Preview -->
@@ -110,7 +110,7 @@ async function handleSubmit() {
         <!-- Color -->
         <div class="space-y-2">
           <label class="flex items-center gap-2 text-sm font-semibold text-gray-700">
-            <Icon icon="mdi:palette" width="16" height="16" class="text-ink-500" />
+            <Icon icon="mdi:palette" width="16" height="16" class="text-[var(--color-text-secondary)]" />
             颜色
           </label>
           <div class="grid grid-cols-4 gap-2.5">
@@ -137,7 +137,7 @@ async function handleSubmit() {
       <!-- Description -->
       <div class="space-y-2">
         <label class="flex items-center gap-2 text-sm font-semibold text-gray-700">
-          <Icon icon="mdi:text-box" width="16" height="16" class="text-ink-500" />
+          <Icon icon="mdi:text-box" width="16" height="16" class="text-[var(--color-text-secondary)]" />
           描述
           <span class="text-xs font-normal text-gray-400">(可选)</span>
         </label>

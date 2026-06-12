@@ -50,12 +50,12 @@ const emit = defineEmits<{
   text-align: left;
   display: block;
   border-radius: 1.25rem;
-  border: 1px solid var(--topic-border, rgba(123, 154, 192, 0.18));
+  border: 1px solid var(--color-border-subtle);
   background: linear-gradient(180deg, var(--color-bg-elevated), var(--color-bg-sunken));
   padding: 1rem 1rem 1.05rem;
   text-decoration: none;
   box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.04),
+    inset 0 1px 0 var(--color-border-subtle),
     0 16px 40px rgba(3, 8, 14, 0.28);
   transition:
     transform 0.22s ease,
@@ -70,7 +70,7 @@ const emit = defineEmits<{
   inset: 0 auto 0 0;
   width: 3px;
   border-radius: 999px;
-  background: linear-gradient(180deg, rgba(240, 138, 75, 0.9), rgba(92, 143, 226, 0.52));
+  background: linear-gradient(180deg, var(--color-accent), rgba(92, 143, 226, 0.52));
   opacity: 0.7;
 }
 .topic-related-card:hover,
@@ -79,7 +79,7 @@ const emit = defineEmits<{
   border-color: var(--color-accent);
   background: linear-gradient(180deg, var(--color-bg-elevated), var(--color-bg-sunken));
   box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.05),
+    inset 0 1px 0 var(--color-border-subtle),
     0 24px 48px rgba(3, 8, 14, 0.36);
 }
 .topic-related-card:focus-visible {
@@ -91,14 +91,14 @@ const emit = defineEmits<{
   font-size: 0.74rem;
   letter-spacing: 0.12em;
   text-transform: uppercase;
-  color: var(--topic-ink-soft, rgba(148, 168, 188, 0.7));
+  color: var(--color-text-secondary);
 }
 .topic-related-card__title {
   margin-top: 0.45rem;
   font-size: 1rem;
   font-weight: 700;
   line-height: 1.45;
-  color: var(--topic-ink-strong, rgba(248, 251, 255, 0.96));
+  color: var(--color-text-primary);
 }
 .topic-related-card__context {
   margin-top: 0.65rem;

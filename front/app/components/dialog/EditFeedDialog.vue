@@ -108,9 +108,9 @@ async function handleDelete() {
   <AppDialog :model-value="true" @update:model-value="emit('close')" title="编辑订阅源" width="672px">
     <div class="grid gap-6 lg:grid-cols-[minmax(0,1fr)_280px]">
       <div class="space-y-5">
-        <div class="rounded-2xl border-2 border-ink-200 bg-linear-to-br from-ink-50 to-paper-cream p-4">
+        <div class="rounded-2xl border-2 border-[var(--color-border-subtle)] bg-linear-to-br from-[var(--color-bg-hover)] to-[var(--color-bg-elevated)] p-4">
           <div class="flex items-start gap-3">
-            <div class="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-linear-to-br from-ink-500 to-ink-700 shadow-md">
+            <div class="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-linear-to-br from-[var(--color-bg-sunken)] to-[var(--color-bg-sunken)] shadow-md">
               <Icon icon="mdi:rss" class="text-white" width="22" height="22" />
             </div>
             <div class="min-w-0 flex-1">
@@ -124,7 +124,7 @@ async function handleDelete() {
 
         <div class="space-y-2">
           <label class="flex items-center gap-2 text-sm font-semibold text-gray-700">
-            <Icon icon="mdi:link-variant" width="16" height="16" class="text-ink-500" />
+            <Icon icon="mdi:link-variant" width="16" height="16" class="text-[var(--color-text-secondary)]" />
             RSS 地址
             <span class="text-red-500">*</span>
           </label>
@@ -133,7 +133,7 @@ async function handleDelete() {
 
         <div class="space-y-2">
           <label class="flex items-center gap-2 text-sm font-semibold text-gray-700">
-            <Icon icon="mdi:folder" width="16" height="16" class="text-ink-500" />
+            <Icon icon="mdi:folder" width="16" height="16" class="text-[var(--color-text-secondary)]" />
             分类
             <span class="text-xs font-normal text-gray-400">可选</span>
           </label>
@@ -225,10 +225,10 @@ async function handleDelete() {
         </div>
       </div>
 
-      <aside class="space-y-4 rounded-2xl border border-ink-200 bg-paper-cream/70 p-4">
+      <aside class="space-y-4 rounded-2xl border border-[var(--color-border-subtle)] bg-[var(--color-bg-elevated)]/70 p-4">
         <div>
-          <h3 class="text-sm font-semibold text-ink-800">当前能力状态</h3>
-          <p class="mt-1 text-xs leading-5 text-ink-medium">这里展示这个订阅源会不会进入全文抓取和自动总结链路。</p>
+          <h3 class="text-sm font-semibold text-[var(--color-text-primary)]">当前能力状态</h3>
+          <p class="mt-1 text-xs leading-5 text-[var(--color-text-secondary)]">这里展示这个订阅源会不会进入全文抓取和自动总结链路。</p>
         </div>
 
         <div class="space-y-3">
@@ -237,7 +237,7 @@ async function handleDelete() {
             :key="item.label"
             class="flex items-center justify-between gap-3 rounded-xl border border-white/70 bg-white/80 px-3 py-2"
           >
-            <div class="flex items-center gap-2 text-sm text-ink-dark">
+            <div class="flex items-center gap-2 text-sm text-[var(--color-text-primary)]">
               <Icon :icon="item.icon" width="16" height="16" />
               <span>{{ item.label }}</span>
             </div>
@@ -250,10 +250,10 @@ async function handleDelete() {
           </div>
         </div>
 
-        <div class="rounded-xl border border-dashed border-ink-200 bg-white/80 p-4">
-          <div class="text-xs uppercase tracking-[0.08em] text-ink-light">重试策略</div>
-          <div class="mt-2 text-2xl font-semibold text-ink-black">{{ maxCompletionRetries }}</div>
-          <div class="mt-1 text-sm text-ink-medium">自动总结失败后最多重试 {{ maxCompletionRetries }} 次。</div>
+        <div class="rounded-xl border border-dashed border-[var(--color-border-subtle)] bg-white/80 p-4">
+          <div class="text-xs uppercase tracking-[0.08em] text-[var(--color-text-muted)]">重试策略</div>
+          <div class="mt-2 text-2xl font-semibold text-[var(--color-text-primary)]">{{ maxCompletionRetries }}</div>
+          <div class="mt-1 text-sm text-[var(--color-text-secondary)]">自动总结失败后最多重试 {{ maxCompletionRetries }} 次。</div>
         </div>
       </aside>
     </div>

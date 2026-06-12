@@ -63,49 +63,6 @@
 @theme {
   /* Editorial Magazine Theme - 杂志报纸风格 */
 
-  /* Ink Blue - 墨水蓝（主色，替代普通蓝色） */
-  --color-ink-50: #e8eef4;
-  --color-ink-100: #d0dde8;
-  --color-ink-200: #a8bdd0;
-  --color-ink-300: #7a9cb5;
-  --color-ink-400: #56839c;
-  --color-ink-500: #3b6b87;
-  --color-ink-600: #2d5670;
-  --color-ink-700: #25465c;
-  --color-ink-800: #1f3b4d;
-  --color-ink-900: #1a3140;
-
-  /* Print Red - 印刷红（强调色，替代紫色） */
-  --color-print-red-50: #fef2f2;
-  --color-print-red-100: #fde6e6;
-  --color-print-red-200: #f9c5c5;
-  --color-print-red-300: #f29a9a;
-  --color-print-red-400: #e87070;
-  --color-print-red-500: #d94a4a;
-  --color-print-red-600: #c12f2f;
-  --color-print-red-700: #a41f1f;
-  --color-print-red-800: #8a1818;
-  --color-print-red-900: #721515;
-
-  /* Paper Warmth - 纸张暖色调（背景色） */
-  --color-paper-ivory: #faf7f2;
-  --color-paper-cream: #f5f0e6;
-  --color-paper-warm: #f0e8dc;
-  --color-paper-sand: #e8dfd1;
-
-  /* Ink tones - 文字墨色 */
-  --color-ink-black: #1a1a1a;
-  --color-ink-dark: #2d2d2d;
-  --color-ink-medium: #5a5a5a;
-  --color-ink-light: #8a8a8a;
-  --color-ink-muted: #b5b5b5;
-
-  /* Accent Colors - 强调色系 */
-  --color-accent-teal: #2d8a7a;
-  --color-accent-amber: #d4883c;
-  --color-accent-indigo: #4a5d8a;
-  --color-accent-forest: #3d7a4a;
-
   /* Semantic Colors - 语义色 */
   --color-success: #3d8a4a;
   --color-warning: #c4883c;
@@ -132,6 +89,7 @@
   --color-bg-overlay:  rgba(26, 26, 26, 0.4);
   --color-bg-hover:    rgba(255, 255, 255, 0.85);
   --color-bg-active:   rgba(255, 255, 255, 0.6);
+  --color-bg-elevated-strong: #e8dfd1; /* ink-100 深色 elevated */
 
   --color-text-primary:   #1a1a1a;
   --color-text-secondary: #5a5a5a;
@@ -141,6 +99,8 @@
   --color-border-subtle: rgba(26, 26, 26, 0.08);
   --color-border-medium: rgba(26, 26, 26, 0.15);
   --color-border-strong: rgba(26, 26, 26, 0.25);
+  --color-border-soft:   #d0dde8; /* ink-100 浅蓝灰边框 */
+  --color-border-faint:  #e8eef4; /* ink-50 极浅边框 */
 
   --color-accent:       var(--raw-red-500);
   --color-accent-hover: var(--raw-red-600);
@@ -166,6 +126,24 @@
   --color-dialog-bg:      rgba(255, 255, 255, 0.95);
   --color-dialog-header:  transparent;
   --color-dialog-divider: rgba(26, 26, 26, 0.06);
+
+  /* Tag category colors */
+  --color-tag-event:          rgba(196, 136, 60, 0.85);
+  --color-tag-event-bg:       rgba(196, 136, 60, 0.12);
+  --color-tag-event-border:   rgba(196, 136, 60, 0.25);
+  --color-tag-person:         rgba(45, 138, 122, 0.85);
+  --color-tag-person-bg:      rgba(45, 138, 122, 0.12);
+  --color-tag-person-border:  rgba(45, 138, 122, 0.25);
+  --color-tag-keyword:        rgba(74, 93, 138, 0.85);
+  --color-tag-keyword-bg:     rgba(74, 93, 138, 0.12);
+  --color-tag-keyword-border: rgba(74, 93, 138, 0.25);
+
+  /* Interactive/link blue */
+  --color-link:            rgba(63, 124, 255, 0.9);
+  --color-link-hover:      rgba(63, 124, 255, 1);
+  --color-link-subtle:     rgba(63, 124, 255, 0.08);
+  --color-link-border:     rgba(63, 124, 255, 0.2);
+  --color-link-border-hover: rgba(63, 124, 255, 0.4);
 }
 
 /* === Layer 2: Semantic Tokens (Dark — 调查风格深色) === */
@@ -176,6 +154,7 @@
   --color-bg-overlay:  rgba(8, 12, 18, 0.75);
   --color-bg-hover:    rgba(255, 255, 255, 0.06);
   --color-bg-active:   rgba(255, 255, 255, 0.08);
+  --color-bg-elevated-strong: rgba(255, 255, 255, 0.10); /* ink-100 深色 elevated */
 
   --color-text-primary:   rgba(255, 255, 255, 0.9);
   --color-text-secondary: rgba(255, 255, 255, 0.6);
@@ -185,6 +164,8 @@
   --color-border-subtle: rgba(255, 255, 255, 0.06);
   --color-border-medium: rgba(255, 255, 255, 0.10);
   --color-border-strong: rgba(255, 255, 255, 0.18);
+  --color-border-soft:   rgba(255, 255, 255, 0.12); /* ink-100 */
+  --color-border-faint:  rgba(255, 255, 255, 0.08); /* ink-50 */
 
   --color-accent:       rgba(240, 138, 75, 0.85);
   --color-accent-hover: rgba(240, 138, 75, 1);
@@ -210,11 +191,29 @@
   --color-dialog-bg:      rgba(17, 27, 38, 0.98);
   --color-dialog-header:  rgba(255, 255, 255, 0.03);
   --color-dialog-divider: rgba(255, 255, 255, 0.06);
+
+  /* Tag category colors */
+  --color-tag-event:          rgba(245, 158, 11, 0.72);
+  --color-tag-event-bg:       rgba(245, 158, 11, 0.18);
+  --color-tag-event-border:   rgba(245, 158, 11, 0.32);
+  --color-tag-person:         rgba(16, 185, 129, 0.72);
+  --color-tag-person-bg:      rgba(16, 185, 129, 0.18);
+  --color-tag-person-border:  rgba(16, 185, 129, 0.32);
+  --color-tag-keyword:        rgba(99, 102, 241, 0.72);
+  --color-tag-keyword-bg:     rgba(99, 102, 241, 0.18);
+  --color-tag-keyword-border: rgba(99, 102, 241, 0.32);
+
+  /* Interactive/link blue */
+  --color-link:            rgba(99, 179, 237, 0.9);
+  --color-link-hover:      rgba(99, 179, 237, 1);
+  --color-link-subtle:     rgba(99, 179, 237, 0.1);
+  --color-link-border:     rgba(99, 179, 237, 0.25);
+  --color-link-border-hover: rgba(99, 179, 237, 0.5);
 }
 
 /* Editorial Card Styles - 杂志卡片风格 */
 .paper-card {
-  background: rgba(255, 255, 255, 0.7);
+  background: var(--color-bg-elevated);
   border: 1px solid var(--color-border-subtle);
   box-shadow: var(--shadow-subtle);
   transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
@@ -235,7 +234,7 @@
 }
 
 .paper-card:hover {
-  background: rgba(255, 255, 255, 0.9);
+  background: var(--color-bg-hover);
   border-color: var(--color-border-medium);
   box-shadow: var(--shadow-medium);
   transform: translateY(-1px);
@@ -246,17 +245,13 @@
 }
 
 .paper-card-strong {
-  background: rgba(255, 255, 255, 0.95);
+  background: var(--color-bg-elevated);
   border: 1px solid var(--color-border-medium);
   box-shadow: var(--shadow-print);
 }
 
 .article-preview {
-  background: linear-gradient(
-    to bottom,
-    rgba(255, 255, 255, 0.6) 0%,
-    rgba(245, 240, 230, 0.4) 100%
-  );
+  background: var(--color-bg-sunken);
   border-left: 3px solid transparent;
   border-right: 1px solid var(--color-border-subtle);
   border-bottom: 1px solid var(--color-border-subtle);
@@ -392,7 +387,7 @@
 
 /* Input Styles - 编辑器风格输入框 */
 .input {
-  background: rgba(255, 255, 255, 0.85);
+  background: var(--color-input-bg);
   border: 2px solid var(--color-border-medium);
   border-radius: 0.5rem;
   padding: 0.75rem 1rem;
@@ -404,7 +399,7 @@
 .input:focus {
   border-color: var(--color-input-focus);
   box-shadow: 0 0 0 3px rgba(61, 124, 150, 0.1);
-  background: rgba(255, 255, 255, 0.95);
+  background: var(--color-input-bg);
 }
 
 .input::placeholder {
@@ -417,7 +412,7 @@
 
 /* Textarea Styles */
 .textarea {
-  background: rgba(255, 255, 255, 0.85);
+  background: var(--color-input-bg);
   border: 2px solid var(--color-border-medium);
   border-radius: 0.5rem;
   padding: 0.75rem 1rem;

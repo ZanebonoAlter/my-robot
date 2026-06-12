@@ -119,7 +119,7 @@ function paginationRange(current: number, total: number): (number | 'ellipsis')[
 <template>
   <div class="alp-panel">
     <div class="alp-header">
-      <Icon icon="mdi:tag-multiple-outline" width="15" class="text-white/50" />
+      <Icon icon="mdi:tag-multiple-outline" width="15" style="color: var(--color-text-muted)" />
       <span class="alp-title">辅助标签池</span>
       <span class="alp-count">{{ pagination?.total ?? labels.length }}</span>
     </div>
@@ -175,7 +175,7 @@ function paginationRange(current: number, total: number): (number | 'ellipsis')[
 
     <!-- Empty -->
     <div v-else-if="displayedLabels.length === 0" class="alp-empty">
-      <Icon icon="mdi:tag-off-outline" width="24" class="text-white/15" />
+      <Icon icon="mdi:tag-off-outline" width="24" style="color: var(--color-text-muted)" />
       <span>暂无辅助标签</span>
     </div>
 

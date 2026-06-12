@@ -119,7 +119,7 @@ function openArticle(article: TimelineAggregationArticle) {
 }
 
 .timeline-item--first .timeline-item__dot {
-  background: linear-gradient(135deg, rgba(240, 138, 75, 0.94), rgba(255, 182, 123, 0.98));
+  background: linear-gradient(135deg, var(--color-accent), var(--color-accent-hover));
   box-shadow: 0 0 12px rgba(240, 138, 75, 0.34);
 }
 
@@ -134,8 +134,8 @@ function openArticle(article: TimelineAggregationArticle) {
   width: 12px;
   height: 12px;
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.28);
-  border: 2px solid rgba(255, 255, 255, 0.16);
+  background: var(--color-text-muted);
+  border: 2px solid var(--color-border-medium);
   flex-shrink: 0;
 }
 
@@ -144,7 +144,7 @@ function openArticle(article: TimelineAggregationArticle) {
   flex: 1;
   min-height: 24px;
   margin-top: 4px;
-  background: linear-gradient(180deg, rgba(240, 138, 75, 0.28), rgba(255, 255, 255, 0.03));
+  background: linear-gradient(180deg, rgba(240, 138, 75, 0.28), var(--color-border-subtle));
 }
 
 .timeline-item__content {
@@ -167,7 +167,7 @@ function openArticle(article: TimelineAggregationArticle) {
 .timeline-item__label {
   font-size: 0.75rem;
   font-weight: 600;
-  color: rgba(240, 138, 75, 0.92);
+  color: var(--color-accent);
   letter-spacing: 0.04em;
 }
 
@@ -176,10 +176,10 @@ function openArticle(article: TimelineAggregationArticle) {
   padding: 0.22rem 0.58rem;
   border-radius: 999px;
   border: 1px solid rgba(240, 138, 75, 0.2);
-  background: rgba(240, 138, 75, 0.08);
+  background: var(--color-accent-subtle);
   font-size: 0.72rem;
   font-weight: 600;
-  color: rgba(240, 138, 75, 0.88);
+  color: var(--color-accent);
 }
 
 .timeline-item__body {
@@ -210,12 +210,12 @@ function openArticle(article: TimelineAggregationArticle) {
 .timeline-item__info-text {
   font-size: 0.72rem;
   letter-spacing: 0.12em;
-  color: rgba(241, 223, 208, 0.76);
+  color: var(--color-text-secondary);
 }
 
 .timeline-item__info-range {
   font-size: 0.72rem;
-  color: rgba(171, 194, 217, 0.74);
+  color: var(--color-text-secondary);
 }
 
 .timeline-item__articles {
@@ -232,7 +232,7 @@ function openArticle(article: TimelineAggregationArticle) {
   border: 1px solid var(--color-accent);
   background: var(--color-accent-subtle);
   padding: 0.34rem 0.68rem;
-  color: rgba(255, 231, 213, 0.88);
+  color: var(--color-text-primary);
   font-size: 0.73rem;
   transition: all 0.18s ease;
 }
@@ -268,7 +268,7 @@ function openArticle(article: TimelineAggregationArticle) {
   gap: 0.25rem;
   border-radius: 999px;
   padding: 0.28rem 0.62rem;
-  color: rgba(214, 225, 236, 0.68);
+  color: var(--color-text-secondary);
   background: var(--color-bg-hover);
   border: 1px solid var(--color-border-medium);
   font-size: 0.74rem;
@@ -276,7 +276,7 @@ function openArticle(article: TimelineAggregationArticle) {
 
 .timeline-item__expand:hover,
 .timeline-item__expand:focus-visible {
-  color: rgba(248, 252, 255, 0.92);
+  color: var(--color-text-primary);
   border-color: var(--color-accent);
 }
 

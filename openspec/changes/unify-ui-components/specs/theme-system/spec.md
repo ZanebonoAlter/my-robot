@@ -104,6 +104,20 @@ onUnmounted(() => {
 | `--shadow-medium` | `0 2px 8px rgba(26,26,26,0.08)` | `0 2px 8px rgba(0,0,0,0.4)` | 中阴影 |
 | `--shadow-strong` | `0 4px 16px rgba(26,26,26,0.12)` | `0 4px 16px rgba(0,0,0,0.5)` | 强阴影 |
 | `--shadow-print` | 印刷阴影 | 暗色印刷阴影 | 特殊 |
+| `--color-tag-event` | `rgba(196,136,60,0.85)` | `rgba(245,158,11,0.72)` | 事件分类色 |
+| `--color-tag-event-bg` | `rgba(196,136,60,0.12)` | `rgba(245,158,11,0.18)` | 事件分类底色 |
+| `--color-tag-event-border` | `rgba(196,136,60,0.25)` | `rgba(245,158,11,0.32)` | 事件分类边框 |
+| `--color-tag-person` | `rgba(45,138,122,0.85)` | `rgba(16,185,129,0.72)` | 人物分类色 |
+| `--color-tag-person-bg` | `rgba(45,138,122,0.12)` | `rgba(16,185,129,0.18)` | 人物分类底色 |
+| `--color-tag-person-border` | `rgba(45,138,122,0.25)` | `rgba(16,185,129,0.32)` | 人物分类边框 |
+| `--color-tag-keyword` | `rgba(74,93,138,0.85)` | `rgba(99,102,241,0.72)` | 关键词分类色 |
+| `--color-tag-keyword-bg` | `rgba(74,93,138,0.12)` | `rgba(99,102,241,0.18)` | 关键词分类底色 |
+| `--color-tag-keyword-border` | `rgba(74,93,138,0.25)` | `rgba(99,102,241,0.32)` | 关键词分类边框 |
+| `--color-link` | `rgba(63,124,255,0.9)` | `rgba(99,179,237,0.9)` | 交互蓝色 |
+| `--color-link-hover` | `rgba(63,124,255,1)` | `rgba(99,179,237,1)` | 交互蓝悬停 |
+| `--color-link-subtle` | `rgba(63,124,255,0.08)` | `rgba(99,179,237,0.1)` | 交互蓝淡底 |
+| `--color-link-border` | `rgba(63,124,255,0.2)` | `rgba(99,179,237,0.25)` | 交互蓝边框 |
+| `--color-link-border-hover` | `rgba(63,124,255,0.4)` | `rgba(99,179,237,0.5)` | 交互蓝边框悬停 |
 
 ### Layer 3: Component (`--dialog-*`, `--button-*`, `--input-*`, `--toggle-*`)
 
@@ -170,3 +184,83 @@ onUnmounted(() => {
 - 主题切换不需要 CSS transition（直接切换）
 - `localStorage` key: `'syntopica-theme'`
 - Nuxt SSR 兼容：使用 `useHead({ htmlAttrs })` 设置 html 属性，避免 FOUC
+
+## Browser Regression Requirements
+
+### Requirement: Global theme ownership
+
+用户选择的主题 SHALL 同时作用于 Feed、Tags、TopicGraph 和 Global Settings。页面 SHALL NOT 在挂载时强制覆盖用户主题。
+
+#### Scenario: Navigate between pages
+
+- **GIVEN** 用户已选择 `editorial`
+- **WHEN** 用户依次进入 Tags 和 TopicGraph
+- **THEN** `<html data-theme>` 保持 `editorial`
+- **AND** 返回 Feed 后仍保持 `editorial`
+
+### Requirement: First-paint theme
+
+应用 SHALL 在首次可见绘制前为 `<html>` 设置 `editorial` 或 `dark`，不得出现 `data-theme` 缺失后再切换的可见闪烁。
+
+#### Scenario: Reload persisted dark theme
+
+- **GIVEN** `syntopica-theme` 保存为 `dark`
+- **WHEN** 用户刷新页面
+- **THEN** 首次绘制即使用 dark token
+- **AND** 页面不得先显示 editorial surface
+
+### Requirement: Semantic surfaces
+
+普通页面栏、卡片、面板、空状态、表单和统计卡 SHALL 使用主题响应的 semantic surface token。`--color-bg-overlay` SHALL 仅用于覆盖页面的模态遮罩。
+
+#### Scenario: Dark Feed reader
+
+- **WHEN** Feed 处于 dark
+- **THEN** Header、文章卡、未选文章空状态、正文占位和全屏容器均使用 dark surface
+- **AND** 不出现非媒体用途的大面积固定白色背景
+
+#### Scenario: Editorial Tags header
+
+- **WHEN** Tags 处于 editorial
+- **THEN** topbar 使用 editorial surface
+- **AND** 不呈现模态遮罩式灰层
+
+### Requirement: Theme-aware settings
+
+Global Settings 的六个 tab SHALL 在两种主题下保持可读层级。统计卡可以保留状态色相，但 SHALL 使用主题响应的低强调背景。
+
+#### Scenario: Dark settings
+
+- **WHEN** Global Settings 处于 dark
+- **THEN** General 和 Preferences 不出现亮白渐变或大面积白卡
+- **AND** Queues、Schedulers、Firecrawl 的标题、辅助文字、状态和操作控件均清晰可辨
+
+### Requirement: Accessible controls
+
+主题切换文案 SHALL 明确描述目标主题。按钮文字与背景 SHALL 使用不同语义 token，并在正常、hover、focus、disabled 状态下保持可辨识。
+
+#### Scenario: Theme toggle label
+
+- **GIVEN** 当前主题为 dark
+- **THEN** 切换按钮的可访问名称为“切换为浅色模式”
+
+#### Scenario: Tags add button
+
+- **WHEN** Tags 板块详情显示“添加”按钮
+- **THEN** 按钮文字不得与背景使用相同 computed color
+
+### Requirement: Theme-aware visualizations
+
+TopicGraph、Tags 中的 SVG、Canvas、公式和 CSS gradient SHALL 从当前主题 token 派生颜色，并在主题变化后更新。
+
+#### Scenario: Matching formula in editorial
+
+- **WHEN** MatchingConfigDialog 处于 editorial
+- **THEN** 公式与公式容器具有清晰对比度
+- **AND** 公式文字不得固定为白色
+
+#### Scenario: TopicGraph route availability
+
+- **WHEN** 用户访问 `/topics`
+- **THEN** 页面无 CSS/Vite 编译错误
+- **AND** 图谱可在当前用户主题下渲染

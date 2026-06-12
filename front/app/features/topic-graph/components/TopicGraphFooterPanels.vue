@@ -47,7 +47,7 @@ const panelTitle = computed(() => {
 .topic-footer-intro {
   display: grid;
   gap: 0.28rem;
-  border-left: 2px solid rgba(240, 138, 75, 0.42);
+  border-left: 2px solid var(--color-accent);
   padding-left: 0.9rem;
 }
 

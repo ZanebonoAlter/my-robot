@@ -8,6 +8,7 @@ const props = defineProps<{ boardId: number }>()
 
 const { getBoardSectionTimeline, getDailyReportDetail } = useDailyReportsApi()
 const { getArticle } = useArticlesApi()
+const { theme } = useTheme()
 
 const days = ref(14)
 const loading = ref(false)
@@ -49,6 +50,17 @@ const statusLabels: Record<string, string> = {
 
 function statusFill(status: string): string {
   return statusColorMap[status] || '#9ca3af'
+}
+
+// Theme-aware SVG colors
+const svgGridColor = computed(() => theme.value === 'dark' ? 'rgba(255,255,255,0.04)' : 'rgba(26,26,26,0.06)')
+const svgEdgeColor = computed(() => theme.value === 'dark' ? 'rgba(255,255,255,' : 'rgba(26,26,26,')
+const svgNodeStroke = computed(() => theme.value === 'dark' ? 'rgba(255,255,255,0.15)' : 'rgba(26,26,26,0.15)')
+const svgHighlightColor = computed(() => theme.value === 'dark' ? 'rgba(255,255,255,0.65)' : 'rgba(26,26,26,0.65)')
+
+function getEdgeColor(distance: number, highlighted: boolean): string {
+  if (highlighted) return svgHighlightColor.value
+  return `${svgEdgeColor.value}${edgeOpacity(distance)})`
 }
 
 // --- Date helpers ---
@@ -339,7 +351,7 @@ watch(
             :y1="0"
             :x2="col.x"
             :y2="svgHeight"
-            stroke="rgba(255,255,255,0.04)"
+            :stroke="svgGridColor"
             stroke-width="1"
           />
 
@@ -349,7 +361,7 @@ watch(
             :key="edge.key"
             :d="edge.d"
             fill="none"
-            :stroke="isEdgeHighlighted(edge) ? 'rgba(255,255,255,0.65)' : `rgba(255,255,255,${edgeOpacity(edge.distance)})`"
+            :stroke="getEdgeColor(edge.distance, isEdgeHighlighted(edge))"
             :stroke-width="isEdgeHighlighted(edge) ? 2.5 : edgeWeight(edge.distance)"
           >
             <title>距离: {{ edge.distance.toFixed(3) }}</title>
@@ -376,7 +388,7 @@ watch(
               :r="selectedNode?.id === pn.data.id ? NODE_R + 2 : NODE_R"
               :fill="statusFill(pn.data.status)"
               :stroke-dasharray="pn.data.status === 'ending' ? '3 2' : undefined"
-              stroke="rgba(255,255,255,0.15)"
+              :stroke="svgNodeStroke"
               :stroke-width="selectedNode?.id === pn.data.id ? 2 : 1"
             />
             <text

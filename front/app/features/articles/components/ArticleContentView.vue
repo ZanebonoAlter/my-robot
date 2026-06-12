@@ -103,13 +103,13 @@ const previewProps = computed(() => ({
 </script>
 
 <template>
-  <div v-if="!article" class="h-full flex items-center justify-center bg-white">
+  <div v-if="!article" class="h-full flex items-center justify-center" style="background: var(--color-bg-base)">
     <div class="text-center">
       <div>
         <img src="/favicon.png" alt="Syntopica" width="360" height="360" class="mx-auto mb-4" />
       </div>
-      <h3 class="mb-2 text-xl font-semibold text-gray-700">选择一篇文章开始阅读</h3>
-      <p class="text-gray-500">点击左侧文章列表查看内容</p>
+      <h3 class="mb-2 text-xl font-semibold" style="color: var(--color-text-primary)">选择一篇文章开始阅读</h3>
+      <p style="color: var(--color-text-secondary)">点击左侧文章列表查看内容</p>
     </div>
   </div>
 
@@ -147,7 +147,7 @@ const previewProps = computed(() => ({
 
   <!-- Fullscreen mode -->
   <Teleport v-else to="body">
-    <div class="fullscreen-article fixed inset-0 z-[100] bg-white flex flex-col">
+    <div class="fullscreen-article fixed inset-0 z-[100] flex flex-col" style="background: var(--color-bg-base)">
       <ArticleContentToolbar
         :feed="feed"
         :article-title="article.title ?? ''" :article-favorite="article.favorite ?? false"

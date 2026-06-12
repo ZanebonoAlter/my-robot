@@ -91,7 +91,7 @@ const emit = defineEmits<{
   <!-- Processing Panel -->
   <div
     v-if="showProcessingPanel && mergedArticle"
-    class="mb-6 rounded-2xl border border-ink-200 bg-white/80 p-4 shadow-subtle"
+    class="mb-6 rounded-2xl border border-[var(--color-border-subtle)] p-4 shadow-subtle" style="background: var(--color-bg-elevated)"
   >
     <div class="flex flex-wrap items-start justify-between gap-3">
       <div class="flex flex-wrap items-center gap-2">
@@ -116,7 +116,8 @@ const emit = defineEmits<{
       <div class="flex flex-wrap items-center gap-2">
         <button
           v-if="showManualFirecrawlAction"
-          class="inline-flex items-center gap-1.5 rounded-full border border-ink-200 bg-white px-3 py-1.5 text-xs font-semibold text-ink-700 transition hover:border-ink-300 hover:text-ink-900 disabled:cursor-not-allowed disabled:opacity-50"
+          class="inline-flex items-center gap-1.5 rounded-full border border-[var(--color-border-subtle)] px-3 py-1.5 text-xs font-semibold text-[var(--color-text-primary)] transition hover:border-[var(--color-border-medium)] hover:text-[var(--color-text-primary)] disabled:cursor-not-allowed disabled:opacity-50"
+          style="background: var(--color-bg-elevated)"
           :disabled="actionBusy"
           @click="handleManualFirecrawl"
         >
@@ -125,7 +126,8 @@ const emit = defineEmits<{
         </button>
         <button
           v-if="showManualSummaryAction"
-          class="inline-flex items-center gap-1.5 rounded-full border border-ink-200 bg-white px-3 py-1.5 text-xs font-semibold text-ink-700 transition hover:border-ink-300 hover:text-ink-900 disabled:cursor-not-allowed disabled:opacity-50"
+          class="inline-flex items-center gap-1.5 rounded-full border border-[var(--color-border-subtle)] px-3 py-1.5 text-xs font-semibold text-[var(--color-text-primary)] transition hover:border-[var(--color-border-medium)] hover:text-[var(--color-text-primary)] disabled:cursor-not-allowed disabled:opacity-50"
+          style="background: var(--color-bg-elevated)"
           :disabled="actionBusy"
           @click="handleManualSummary"
         >
@@ -135,7 +137,7 @@ const emit = defineEmits<{
       </div>
     </div>
 
-    <div v-if="detailLines.length" class="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-xs text-ink-medium">
+    <div v-if="detailLines.length" class="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-xs text-[var(--color-text-secondary)]">
       <span v-for="line in detailLines" :key="line">{{ line }}</span>
     </div>
 
@@ -150,18 +152,18 @@ const emit = defineEmits<{
   <!-- Content Source Toggle -->
   <div
     v-if="showContentSourceToggle"
-    class="mb-6 flex items-center gap-2 rounded-2xl border border-ink-200 bg-white/80 p-2 shadow-subtle"
+    class="mb-6 flex items-center gap-2 rounded-2xl border border-[var(--color-border-subtle)] p-2 shadow-subtle" style="background: var(--color-bg-elevated)"
   >
     <button
       class="rounded-xl px-3 py-2 text-xs font-semibold transition"
-      :class="activeContentSource === 'original' ? 'bg-ink-900 text-white' : 'text-ink-600 hover:bg-ink-100'"
+      :class="activeContentSource === 'original' ? 'bg-[var(--color-bg-sunken)] text-white' : 'text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-elevated)]'"
       @click="emit('update:activeContentSource', 'original')"
     >
       原始内容
     </button>
     <button
       class="rounded-xl px-3 py-2 text-xs font-semibold transition"
-      :class="activeContentSource === 'firecrawl' ? 'bg-ink-900 text-white' : 'text-ink-600 hover:bg-ink-100'"
+      :class="activeContentSource === 'firecrawl' ? 'bg-[var(--color-bg-sunken)] text-white' : 'text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-elevated)]'"
       @click="emit('update:activeContentSource', 'firecrawl')"
     >
       Firecrawl 全文
@@ -169,8 +171,8 @@ const emit = defineEmits<{
   </div>
 
   <!-- AI Summary -->
-  <div v-if="mergedArticle?.aiContentSummary" class="mb-6 rounded-2xl border border-ink-200 bg-white/80 p-5 shadow-subtle">
-    <div class="mb-3 flex items-center gap-2 text-ink-700">
+  <div v-if="mergedArticle?.aiContentSummary" class="mb-6 rounded-2xl border border-[var(--color-border-subtle)] p-5 shadow-subtle" style="background: var(--color-bg-elevated)">
+    <div class="mb-3 flex items-center gap-2 text-[var(--color-text-primary)]">
       <Icon icon="mdi:brain" width="18" height="18" />
       <span class="text-sm font-semibold">AI 整理稿</span>
     </div>
@@ -212,13 +214,14 @@ const emit = defineEmits<{
       show-watch
       @watch-toggle="handleTagWatchToggle"
     />
-    <span v-if="manualTaggingLoading" class="inline-flex items-center gap-1 text-xs text-ink-medium">
+    <span v-if="manualTaggingLoading" class="inline-flex items-center gap-1 text-xs text-[var(--color-text-secondary)]">
       <Icon icon="mdi:loading" width="14" height="14" class="animate-spin" />
       正在生成标签...
     </span>
     <button
       v-else-if="aiEnabled"
-      class="inline-flex items-center gap-1 rounded-full border border-dashed border-ink-200 bg-white/80 px-2.5 py-1 text-xs font-medium text-ink-medium transition hover:border-ink-300 hover:text-ink-900 disabled:cursor-not-allowed disabled:opacity-50"
+      class="inline-flex items-center gap-1 rounded-full border border-dashed border-[var(--color-border-subtle)] px-2.5 py-1 text-xs font-medium text-[var(--color-text-secondary)] transition hover:border-[var(--color-border-medium)] hover:text-[var(--color-text-primary)] disabled:cursor-not-allowed disabled:opacity-50"
+      style="background: var(--color-bg-elevated)"
       :disabled="actionBusy"
       @click="handleManualTagging"
     >

@@ -36,7 +36,7 @@ const emit = defineEmits<{
     <div class="header-left">
       <button
         v-if="showBackButton"
-        class="flex items-center gap-1 rounded-lg p-2 text-ink-medium transition-all duration-200 hover:bg-ink-50 hover:text-ink-dark"
+        class="flex items-center gap-1 rounded-lg p-2 text-[var(--color-text-secondary)] transition-all duration-200 hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-text-primary)]"
         @click="emit('toggle-fullscreen')"
       >
         <Icon icon="mdi:arrow-left" width="20" height="20" />
@@ -57,7 +57,7 @@ const emit = defineEmits<{
         <button class="action-btn" :class="{ 'opacity-30 cursor-not-allowed': !hasNext }" :disabled="!hasNext" title="下一篇文章" @click="emit('navigate-next')">
           <Icon icon="mdi:chevron-down" width="20" height="20" />
         </button>
-        <div class="mx-1 h-5 w-px bg-ink-200" />
+        <div class="mx-1 h-5 w-px bg-[var(--color-border-subtle)]" />
       </template>
 
       <button class="action-btn" :title="viewMode === 'preview' ? '切换到内嵌网页' : '切换到内容预览'" @click="emit('toggle-view-mode')">

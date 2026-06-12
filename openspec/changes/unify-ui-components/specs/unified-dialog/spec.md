@@ -227,6 +227,8 @@ interface AppDialogSlots {
 
 涉及: GlobalSettingsDialog
 
+> 后续决策（2026-06-12）：浏览器回归证明 Global Settings 已超出 Dialog 的合理职责。该 Pattern C 迁移仅作为统一组件过程中的过渡实现，最终由 `settings-workspace` 独立路由替代。`AppDialog` 不再承载多 section 配置中心。
+
 ### Pattern D → AppDialog (全屏预览)
 
 ```
@@ -246,3 +248,4 @@ interface AppDialogSlots {
 - 不支持嵌套 dialog（如果业务需要，后续再加 z-index 管理）
 - GlobalSettings 的"去掉底部完成按钮"在此 spec 内完成
 - ArticlePreviewModal 只有一份 (features/tags/)，不存在合并问题
+- AppDialog 不用于完整设置中心、超长管理列表或需要 URL 导航状态的工作区

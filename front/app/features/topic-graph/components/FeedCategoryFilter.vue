@@ -103,7 +103,7 @@ function selectFeed(feedId: string) {
         <span class="text-white/80 flex-1">{{ category.name }}</span>
         <span
           class="text-xs px-1.5 py-0.5 rounded-full text-white/50"
-          :style="{ backgroundColor: category.color ? `${category.color}22` : 'rgba(255,255,255,0.06)' }"
+          :style="{ backgroundColor: category.color ? `${category.color}22` : 'var(--color-bg-hover)' }"
         >
           {{ feedsByCategory.grouped.get(category.id)?.length || 0 }}
         </span>

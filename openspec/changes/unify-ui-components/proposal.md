@@ -29,12 +29,35 @@
 - **删除废弃文件**：`Dialog.css`
 - **删除旧 token 定义**：`--color-ink-*`、`--color-paper-*`、`--color-print-red-*`、孤儿 `--color-bg-*`、孤儿 `--text-*`
 
+### 浏览器回归补充（2026-06-12）
+
+顶部全局主题切换加入后，TagsPage 和 TopicGraphPage 不再是固定暗色页面，原设计中的“页面级主题锁定”前提失效。本 change 追加以下收尾范围：
+
+- 三个入口页面和 Global Settings 的全部可见区域必须同时支持 `editorial` / `dark`
+- 页面栏、卡片、空状态、表单、统计卡、图表、SVG 和运行时 Canvas 色值均纳入主题适配
+- 独立页面保留可访问的主题切换入口，不要求用户返回首页切换
+- 修复 TopicGraph 样式编译错误，恢复 `/topics` 页面可用性后再进行双主题验收
+- 消除主题首屏闪烁，首次绘制前 `<html>` 必须已有有效 `data-theme`
+- 主题切换按钮文案使用“浅色模式 / 深色模式”，不再使用容易误解的“编辑模式”
+
+### 第二轮回归补充：设置工作区
+
+主题适配完成后，Global Settings 仍存在结构性问题：约 `550px` 高的 Dialog 承载了最高 `8652px` 的内容、数十张卡片和上百个交互控件。继续在 Dialog 内微调颜色和间距无法解决导航、性能和编辑效率问题。
+
+- **将 Global Settings 从 Dialog 升级为独立设置工作区**
+- **按领域拆分导航**：订阅源、AI 模型、能力路由、Embedding、队列、阅读偏好、Firecrawl、定时任务
+- **保留 Header 设置入口**：点击后进入设置路由，而不是打开超长 Dialog
+- **订阅源采用主从布局**：可搜索列表 + 单项编辑器，不一次展开所有订阅源表单
+- **长列表采用折叠、分页或虚拟化**：队列、阅读偏好和订阅源不得一次渲染全部数据
+- **AppDialog 回归轻量职责**：继续承载新增、编辑、确认等短流程，不承载完整管理后台
+
 ## Capabilities
 
 ### New Capabilities
 - `theme-system`: 三层 CSS 变量 token 架构（Primitive → Semantic → Component），`data-theme` 双主题切换，`useTheme()` composable
 - `unified-dialog`: 统一对话框外壳组件 AppDialog，含 Teleport、Transition、overlay、关闭行为
 - `unified-form-controls`: 统一表单原子组件（AppToggle、AppButton、AppInput、AppSectionHeader），响应主题 token
+- `settings-workspace`: 独立设置工作区，提供领域导航、主从编辑、长列表治理和响应式布局
 
 ### Modified Capabilities
 

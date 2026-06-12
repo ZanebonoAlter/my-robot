@@ -651,3 +651,55 @@ Category/search list -> selected feed id -> FeedSettingsEditor
 - 边宽应按权重设上下限，避免单条连线覆盖主要画布。
 - 初始 camera fit 应包含合理 padding，避免节点过小或焦点被推到画布边缘。
 - 两种主题均需验证焦点节点、普通节点、边和标签的对比度。
+
+## Third Browser Regression Follow-up (2026-06-12)
+
+### Confirmed Improvements
+
+- `/settings` 已替代超长 Dialog，桌面端工作区高度稳定。
+- `section` 查询参数可在刷新后恢复当前模块。
+- 600px 窄屏下侧栏隐藏并通过 240px 抽屉导航，无横向溢出。
+- 订阅源已采用列表 + 单项编辑器，不再同时挂载全部完整表单。
+- Feed reader、Tags 和设置工作区未发现大面积固定亮色 surface。
+
+### Remaining Findings and Solutions
+
+#### AI Section Duplication
+
+`SettingsSectionAiProviders` 仍直接挂载完整的 `AIRouterSettingsPanel`，因此 `AI 模型` 页面同时出现主模型、备用模型池、能力路由和板块匹配阈值。独立的 `能力路由` 与 `Embedding` section 又重复渲染相同内容。
+
+解决方案：
+
+- 将提供商管理提取为独立组件，只在 `AI 模型` section 挂载。
+- `AIRouterCapabilityRoutes` 只由 `能力路由` section 挂载。
+- Embedding 模型配置和板块匹配阈值只由 `Embedding` section 挂载。
+- 共享数据通过 composable/store 复用，不通过复用聚合 UI 组件实现。
+
+#### Long-list Governance
+
+浏览器实测队列 section 内容高度约 `2276px`，阅读偏好约 `2044px`，说明分页、折叠或默认条数限制尚未真正作用于渲染结果。
+
+解决方案：
+
+- 队列默认只挂载摘要与最近一页记录，Embedding / 标签队列切换时卸载非活动列表。
+- 阅读偏好按服务端或客户端分页展示，并让搜索、排序作用于完整数据集。
+- 验收不仅检查控件是否存在，还检查首屏 DOM 行数和 scroll height。
+
+#### Scheduler Presentation
+
+`preference_update`、`tag_quality_score`、`log_cleanup`、`daily_report` 仍直接作为标题，状态仍显示 `idle` / `running`。
+
+解决方案：
+
+- 使用任务标识到中文标题的集中映射，未知任务回退到技术标识。
+- 状态使用统一映射，例如“空闲”“执行中”“失败”“已停用”。
+- 技术标识保留为次要文本，状态文字在 dark 下不得只使用最低强调色。
+
+#### TopicGraph Canvas Verification
+
+外围文本和 surface 的双主题色值已正确更新，但 WebGL Canvas 在自动截图时超时，因此不能仅凭 DOM token 判定图谱节点可读。
+
+解决方案：
+
+- 增加 Canvas 颜色映射的单元测试或可导出的测试渲染模式。
+- 人工或 E2E 截图分别覆盖 editorial/dark 的焦点节点、普通节点、标签和高权重边。

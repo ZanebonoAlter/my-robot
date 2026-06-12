@@ -14,8 +14,8 @@ export function useBoardTimeline() {
 
   const activeFilterLabelId = ref<number | null>(null)
   const filterFeedId = ref<number | null>(null)
-  const startDate = ref<string>('')
-  const endDate = ref<string>('')
+  const startDate = ref<string>(getDateStr(new Date()))
+  const endDate = ref<string>(getDateStr(new Date()))
   const showDirectionMismatch = ref(false)
   const timelineSort = ref<'quality' | 'time'>('quality')
   const quickRange = ref<'today' | '3d' | '7d' | '30d' | null>('today')

@@ -74,6 +74,13 @@ AI 提供商、能力路由和 Embedding SHALL 是独立 section，不得继续�
 - **THEN** 工作区展示该提供商详情和局部保存/测试操作
 - **AND** 能力路由与 Embedding 配置不同时渲染
 
+### Scenario: Open AI providers section
+
+- **WHEN** 用户进入 `AI 模型` section
+- **THEN** 页面只渲染主模型和备用提供商管理
+- **AND** 不渲染能力路由编辑器
+- **AND** 不渲染板块匹配阈值
+
 ## Long Lists
 
 队列、阅读偏好和其他长列表 SHALL 使用分页、窗口化或受限默认条数。
@@ -90,6 +97,13 @@ AI 提供商、能力路由和 Embedding SHALL 是独立 section，不得继续�
 - **THEN** 用户可搜索、排序和分页
 - **AND** 统计摘要保持在列表顶部
 
+### Scenario: Bounded initial rendering
+
+- **WHEN** 用户首次进入队列或阅读偏好 section
+- **THEN** 页面只挂载当前活动视图和当前页数据
+- **AND** 非活动队列列表不得同时保留在 DOM
+- **AND** 不能以存在分页控件但仍渲染完整数据集的方式满足本要求
+
 ## Theme and Accessibility
 
 工作区及所有 section SHALL 响应 `editorial` / `dark`，并使用语义 token。辅助文字不得通过重复 opacity 降低到难以辨认。
@@ -99,6 +113,13 @@ AI 提供商、能力路由和 Embedding SHALL 是独立 section，不得继续�
 - **WHEN** 用户在设置工作区切换主题
 - **THEN** 导航、表单、列表、状态和图表同时更新
 - **AND** 当前 section 与未保存输入不丢失
+
+### Scenario: Scheduler labels
+
+- **WHEN** 用户进入定时任务 section
+- **THEN** 已知任务和状态使用可读中文文案
+- **AND** 技术标识作为次要信息保留
+- **AND** 状态文字在 dark 下保持清晰可辨
 
 ## Migration
 

@@ -416,15 +416,15 @@ const {
   position: relative;
   z-index: 2;
   border: 1px solid var(--color-border-subtle);
-  background: var(--color-bg-overlay);
-  box-shadow: 0 40px 120px rgba(0, 0, 0, 0.4);
+  background: color-mix(in srgb, var(--color-bg-elevated) 82%, transparent);
+  box-shadow: var(--shadow-strong);
   backdrop-filter: blur(20px);
 }
 
 .topic-note {
   border: 1px solid var(--color-border-medium);
-  background: var(--color-bg-overlay);
-  box-shadow: 0 24px 80px rgba(6, 10, 16, 0.24);
+  background: color-mix(in srgb, var(--color-bg-elevated) 85%, transparent);
+  box-shadow: var(--shadow-medium);
   backdrop-filter: blur(12px);
 }
 

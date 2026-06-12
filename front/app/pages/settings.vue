@@ -1,0 +1,32 @@
+<script setup lang="ts">
+import SettingsWorkspace from '~/features/settings/components/SettingsWorkspace.vue'
+import SettingsSectionFeeds from '~/features/settings/components/SettingsSectionFeeds.vue'
+import SettingsSectionAiProviders from '~/features/settings/components/SettingsSectionAiProviders.vue'
+import SettingsSectionCapabilityRoutes from '~/features/settings/components/SettingsSectionCapabilityRoutes.vue'
+import SettingsSectionEmbedding from '~/features/settings/components/SettingsSectionEmbedding.vue'
+import SettingsSectionQueues from '~/features/settings/components/SettingsSectionQueues.vue'
+import SettingsSectionPreferences from '~/features/settings/components/SettingsSectionPreferences.vue'
+import SettingsSectionFirecrawl from '~/features/settings/components/SettingsSectionFirecrawl.vue'
+import SettingsSectionSchedulers from '~/features/settings/components/SettingsSectionSchedulers.vue'
+
+import type { SectionKey } from '~/features/settings/components/SettingsWorkspace.vue'
+
+const sectionComponents: Record<SectionKey, any> = {
+  'feeds': SettingsSectionFeeds,
+  'ai-providers': SettingsSectionAiProviders,
+  'capability-routes': SettingsSectionCapabilityRoutes,
+  'embedding': SettingsSectionEmbedding,
+  'queues': SettingsSectionQueues,
+  'preferences': SettingsSectionPreferences,
+  'firecrawl': SettingsSectionFirecrawl,
+  'schedulers': SettingsSectionSchedulers,
+}
+</script>
+
+<template>
+  <SettingsWorkspace>
+    <template #default="{ section }">
+      <component :is="sectionComponents[section]" :key="section" />
+    </template>
+  </SettingsWorkspace>
+</template>

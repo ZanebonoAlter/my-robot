@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { Icon } from '@iconify/vue'
+import { useRouter } from 'vue-router'
 import LayoutAppHeader from '~/features/shell/components/AppHeaderShell.vue'
 import LayoutAppSidebar from '~/features/shell/components/AppSidebarShell.vue'
 import LayoutArticleListPanel from '~/features/shell/components/ArticleListPanelShell.vue'
@@ -44,7 +45,8 @@ const selectedArticle = ref<Article | null>(null)
 const showAddFeedDialog = ref(false)
 const showAddCategoryDialog = ref(false)
 const showImportDialog = ref(false)
-const showGlobalSettings = ref(false)
+
+const router = useRouter()
 
 const editCategoryId = ref<string | null>(null)
 const editFeedId = ref<string | null>(null)
@@ -453,7 +455,7 @@ import '~/components/FeedLayout.css'
       @add-category="showAddCategoryDialog = true"
       @import-opml="showImportDialog = true"
       @export-opml="handleExportOpml"
-      @settings="showGlobalSettings = true"
+      @settings="router.push('/settings')"
       @close-refresh-message="showRefreshMessage = false"
     />
 
@@ -548,9 +550,6 @@ import '~/components/FeedLayout.css'
       @close="showImportDialog = false"
       @imported="() => {}"
     />
-
-    <!-- 全局设置对话框 -->
-    <GlobalSettingsDialog :show="showGlobalSettings" @update:show="showGlobalSettings = $event" />
   </div>
 </template>
 

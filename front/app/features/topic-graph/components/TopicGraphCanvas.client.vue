@@ -19,6 +19,10 @@ interface TokenColors {
   textMuted: string
   borderSubtle: string
   borderMedium: string
+  tagEvent: string
+  tagPerson: string
+  tagKeyword: string
+  feedColor: string
 }
 
 // Lazy-resolved color palette from design tokens (resolved once per render cycle)
@@ -36,6 +40,10 @@ function tokenColors(): TokenColors {
     textMuted: getCSSVar('--color-text-muted') || 'rgba(255,255,255,0.35)',
     borderSubtle: getCSSVar('--color-border-subtle') || 'rgba(255,255,255,0.05)',
     borderMedium: getCSSVar('--color-border-medium') || 'rgba(255,255,255,0.1)',
+    tagEvent: getCSSVar('--color-tag-event') || 'rgba(196,136,60,0.85)',
+    tagPerson: getCSSVar('--color-tag-person') || 'rgba(45,138,122,0.85)',
+    tagKeyword: getCSSVar('--color-tag-keyword') || 'rgba(74,93,138,0.85)',
+    feedColor: getCSSVar('--color-text-secondary') || '#7b8a96',
   }
   return _tokenCache
 }
@@ -159,7 +167,7 @@ async function setupGraph() {
 
   graph.d3Force('charge').strength((node: TopicGraphSceneNode) => node.kind === 'feed' ? -260 : -420)
   graph.d3Force('link').distance((link: TopicGraphSceneEdge) => link.kind === 'topic_topic' ? 132 : 184)
-  graph.cameraPosition({ z: 260 })
+  graph.cameraPosition({ z: 200 })
   graphInstance.value = graph
   graphReady.value = true
   applyHighlightStyles()
@@ -304,10 +312,23 @@ function buildNodeObject(node: TopicGraphSceneNode) {
 // Opacity: quality-aware for topic nodes
   const opacity = node.opacity ?? 0.98
 
+// Resolve theme-aware accent color for this node
+  let nodeAccent = node.accent
+  if (node.kind === 'topic' && node.category) {
+    const categoryColors: Record<string, string> = {
+      event: tokenColors().tagEvent,
+      person: tokenColors().tagPerson,
+      keyword: tokenColors().tagKeyword,
+    }
+    nodeAccent = categoryColors[node.category] || nodeAccent
+  } else if (node.kind === 'feed') {
+    nodeAccent = tokenColors().feedColor
+  }
+
   const sphere = new THREE.Mesh(
     new THREE.SphereGeometry(radius, 24, 24),
     new THREE.MeshBasicMaterial({
-      color: node.accent,
+      color: nodeAccent,
       transparent: true,
       opacity,
     }),
@@ -316,7 +337,7 @@ function buildNodeObject(node: TopicGraphSceneNode) {
 
   // Abstract tag glow: emissive halo using lighter version of accent color
   if (node.isAbstract) {
-    const glowColor = lightenColor(node.accent, 0.35)
+    const glowColor = lightenColor(nodeAccent, 0.35)
     const abstractHalo = new THREE.Mesh(
       new THREE.SphereGeometry(radius * 1.6, 24, 24),
       new THREE.MeshBasicMaterial({
@@ -343,7 +364,7 @@ function buildNodeObject(node: TopicGraphSceneNode) {
     const halo = new THREE.Mesh(
       new THREE.SphereGeometry(radius * (isTrunk ? 1.9 : 1.45), 24, 24),
       new THREE.MeshBasicMaterial({
-        color: isTrunk ? tokenColors().accent : node.accent,
+        color: isTrunk ? tokenColors().accent : nodeAccent,
         transparent: true,
         opacity: isTrunk ? 0.13 : 0.08,
       }),
@@ -376,7 +397,7 @@ function buildNodeObject(node: TopicGraphSceneNode) {
 // Labels: Always show for all nodes, style varies by emphasis
   const label = new SpriteText(compactLabel(node.label, isTrunk ? 40 : 20))
   label.color = tokenColors().textPrimary
-  label.textHeight = isTrunk ? 9 : (isBranch ? 5.1 : 4.6)
+  label.textHeight = isTrunk ? 10 : (isBranch ? 6 : 5.5)
   label.backgroundColor = isTrunk ? `${tokenColors().bgSunken}c7` : `${tokenColors().bgSunken}57`
   label.padding = isTrunk ? 4 : 2
   label.borderRadius = 10
@@ -398,7 +419,7 @@ function buildLinkWidth(link: TopicGraphSceneEdge) {
   }
 
   return isFocusedEdge(link)
-    ? Math.max(1.8, link.weight * 0.8) // Stronger focused edges
+    ? Math.min(4, Math.max(1.8, link.weight * 0.8)) // Cap at 4 to prevent overwhelming lines
     : 0.1 // Thinner unfocused edges
 }
 

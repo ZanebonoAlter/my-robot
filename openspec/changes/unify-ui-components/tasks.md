@@ -112,7 +112,7 @@
 - [ ] 浏览器验证 Tags 列表、板块详情和 MatchingConfigDialog 的 editorial/dark
 
 #### 12.5 TopicGraph 双主题
-- [ ] 页面恢复可用后验证主画布、侧栏、热点区、时间线和所有弹窗
+- [x] 页面恢复可用后验证主画布、侧栏、热点区、时间线和所有弹窗
 - [x] CSS gradient、SVG 和 Canvas 颜色从当前 semantic token 派生
 - [x] 主题切换时刷新 Canvas 运行时 token，不能保留切换前颜色
 - [ ] 浏览器验证 TopicGraph editorial/dark，且导航往返不改变用户主题
@@ -127,77 +127,77 @@
 ### 13. Global Settings 工作区重构（第二轮回归）
 
 #### 13.1 路由与工作区骨架
-- [ ] 新建 `/settings` 页面和设置工作区布局
-- [ ] Header 设置按钮由打开 `GlobalSettingsDialog` 改为导航到 `/settings`
-- [ ] 通过 `section` 查询参数保存当前设置模块，支持刷新和浏览器前进/后退
-- [ ] 添加返回首页、主题切换和当前 section 标题/说明
-- [ ] 桌面端实现侧栏导航 + 独立内容滚动区
-- [ ] 600px 等窄窗口改用下拉/抽屉导航，不使用压缩多行横向 tab
-- [ ] 工作区保持稳定高度，切换短/长 section 时外框不跳动
+- [x] 新建 `/settings` 页面和设置工作区布局
+- [x] Header 设置按钮由打开 `GlobalSettingsDialog` 改为导航到 `/settings`
+- [x] 通过 `section` 查询参数保存当前设置模块，支持刷新和浏览器前进/后退
+- [x] 添加返回首页、主题切换和当前 section 标题/说明
+- [x] 桌面端实现侧栏导航 + 独立内容滚动区
+- [x] 600px 等窄窗口改用下拉/抽屉导航，不使用压缩多行横向 tab
+- [x] 工作区保持稳定高度，切换短/长 section 时外框不跳动
 
 #### 13.2 信息架构拆分
-- [ ] 将原“通用设置”拆为 `AI 模型`、`能力路由`、`Embedding`
-- [ ] 将原“标签 & 队列”拆为队列 section 内的 Embedding / 标签队列子视图
-- [ ] 设置导航最终包含：订阅源、AI 模型、能力路由、Embedding、队列、阅读偏好、Firecrawl、定时任务
-- [ ] 每个 section 只挂载自身组件和数据，不同时渲染其他大型模块
-- [ ] section 主操作放在固定 header，局部保存状态不阻塞其他 section
+- [x] 将原“通用设置”拆为 `AI 模型`、`能力路由`、`Embedding`
+- [x] 将原“标签 & 队列”拆为队列 section 内的 Embedding / 标签队列子视图
+- [x] 设置导航最终包含：订阅源、AI 模型、能力路由、Embedding、队列、阅读偏好、Firecrawl、定时任务
+- [x] 每个 section 只挂载自身组件和数据，不同时渲染其他大型模块
+- [x] section 主操作放在固定 header，局部保存状态不阻塞其他 section
 
 #### 13.3 订阅源主从编辑
-- [ ] 将 `FeedSettingsPanel` 拆为订阅源列表和单项 `FeedSettingsEditor`
-- [ ] 分类默认折叠，增加订阅源名称搜索
-- [ ] 列表项仅展示名称、分类、状态和最近刷新摘要
-- [ ] 仅挂载当前选中订阅源的完整表单
-- [ ] 未选择订阅源时展示说明空状态
-- [ ] 将批量设置设计为显式操作，不通过同时展开全部卡片实现
+- [x] 将 `FeedSettingsPanel` 拆为订阅源列表和单项 `FeedSettingsEditor`
+- [x] 分类默认折叠，增加订阅源名称搜索
+- [x] 列表项仅展示名称、分类、状态和最近刷新摘要
+- [x] 仅挂载当前选中订阅源的完整表单
+- [x] 未选择订阅源时展示说明空状态
+- [x] 将批量设置设计为显式操作，不通过同时展开全部卡片实现
 - [ ] 验证设置首屏不再一次生成约 31 张完整卡片和 124 个按钮
 
 #### 13.4 AI 模型与能力路由
-- [ ] AI 模型 section 使用提供商列表 + 详情编辑
-- [ ] 主模型和备用模型统一为同一提供商编辑模型，保留角色标识
-- [ ] 测试连接、保存和删除仅作用于当前提供商
-- [ ] 能力路由移动到独立 section，按能力折叠
-- [ ] 仅渲染展开能力的候选提供商与排序控件
-- [ ] 清理备用模型池、能力路由中残留的 `bg-white` / `border-gray-*` 固定主题样式
+- [x] AI 模型 section 使用提供商列表 + 详情编辑
+- [x] 主模型和备用模型统一为同一提供商编辑模型，保留角色标识
+- [x] 测试连接、保存和删除仅作用于当前提供商
+- [x] 能力路由移动到独立 section，按能力折叠
+- [x] 仅渲染展开能力的候选提供商与排序控件
+- [x] 清理备用模型池、能力路由中残留的 `bg-white` / `border-gray-*` 固定主题样式
 
 #### 13.5 Embedding 与匹配参数
-- [ ] 将 Embedding 模型配置和板块匹配阈值迁入独立 section
-- [ ] 按“模型配置 / 匹配参数”分组，避免与 AI 路由混排
-- [ ] 保留字段帮助文本，但使用可折叠说明减少首屏长度
+- [x] 将 Embedding 模型配置和板块匹配阈值迁入独立 section
+- [x] 按“模型配置 / 匹配参数”分组，避免与 AI 路由混排
+- [x] 保留字段帮助文本，但使用可折叠说明减少首屏长度
 - [ ] 验证 section 在 editorial/dark 下表单层级一致
 
 #### 13.6 队列与阅读偏好长列表
-- [ ] 队列 section 默认显示摘要和最近记录，不一次显示全部约 42 行
-- [ ] Embedding 队列与标签队列使用子 tab 或折叠区
-- [ ] 队列历史增加分页、窗口化或“查看全部”
-- [ ] 阅读偏好来源列表增加搜索、排序和分页
-- [ ] 阅读统计固定在 section 顶部，不随长列表滚走
+- [x] 队列 section 默认显示摘要和最近记录，不一次显示全部约 42 行
+- [x] Embedding 队列与标签队列使用子 tab 或折叠区
+- [x] 队列历史增加分页、窗口化或“查看全部”
+- [x] 阅读偏好来源列表增加搜索、排序和分页
+- [x] 阅读统计固定在 section 顶部，不随长列表滚走
 - [ ] 提升队列时间、进度说明和偏好辅助文字的 dark 对比度
 
 #### 13.7 Firecrawl 与定时任务
-- [ ] Firecrawl 保持短表单，迁移为独立 section
-- [ ] 定时任务改为紧凑表格/列表，展示名称、技术标识、状态、最近执行和操作
-- [ ] 为未提供中文名称的任务补充可读标题，技术标识作为次要信息
-- [ ] 定时任务状态 badge 与执行按钮使用统一状态/按钮 token
+- [x] Firecrawl 保持短表单，迁移为独立 section
+- [x] 定时任务改为紧凑表格/列表，展示名称、技术标识、状态、最近执行和操作
+- [x] 为未提供中文名称的任务补充可读标题，技术标识作为次要信息
+- [x] 定时任务状态 badge 与执行按钮使用统一状态/按钮 token
 
 #### 13.8 清理 GlobalSettingsDialog
-- [ ] 设置工作区功能完整后移除 `GlobalSettingsDialog` 的六 tab 导航
-- [ ] 删除 Dialog 专用高度、滚动和 tab 样式
-- [ ] 评估保留兼容跳转壳或直接删除 `GlobalSettingsDialog`
-- [ ] 确认 `AppDialog` 仅用于短流程编辑、确认和少量参数表单
+- [x] 设置工作区功能完整后移除 `GlobalSettingsDialog` 的六 tab 导航
+- [x] 删除 Dialog 专用高度、滚动和 tab 样式
+- [x] 评估保留兼容跳转壳或直接删除 `GlobalSettingsDialog`
+- [x] 确认 `AppDialog` 仅用于短流程编辑、确认和少量参数表单
 
 #### 13.9 TopicGraph 可读性收尾
-- [ ] editorial 下 `.topic-canvas-shell` / `.topic-note` 不再使用 overlay token 作为普通 surface
-- [ ] 为 Canvas 节点标签设置主题响应的最小字号和最低对比度
-- [ ] 为边宽设置合理上下限，避免单条高权重边覆盖画布
-- [ ] 调整初始 camera fit/padding，使主要节点进入可读缩放范围
+- [x] editorial 下 `.topic-canvas-shell` / `.topic-note` 不再使用 overlay token 作为普通 surface
+- [x] 为 Canvas 节点标签设置主题响应的最小字号和最低对比度
+- [x] 为边宽设置合理上下限，避免单条高权重边覆盖画布
+- [x] 调整初始 camera fit/padding，使主要节点进入可读缩放范围
 - [ ] 验证 editorial/dark 下焦点节点、普通节点、标签和边均清晰可辨
 
 #### 13.10 验证
 - [ ] 为设置 section 路由恢复、主从选择和列表分页补充单元测试
-- [ ] `pnpm lint`
-- [ ] Windows cmd：`pnpm exec nuxi typecheck`
-- [ ] `pnpm test:unit`
-- [ ] Windows cmd：`pnpm build`
+- [x] `pnpm lint`
+- [x] Windows cmd：`pnpm exec nuxi typecheck`
+- [x] `pnpm test:unit`
+- [x] Windows cmd：`pnpm build`
 - [ ] 浏览器验证 1280px 与 600px 设置工作区
 - [ ] 浏览器逐项验证八个 section 的 editorial/dark
 - [ ] 浏览器确认订阅源、通用设置替代页面不再出现数千像素单容器滚动

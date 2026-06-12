@@ -112,39 +112,85 @@ onMounted(() => {
   <div class="space-y-4">
     <div class="flex items-center justify-between gap-4">
       <AppSectionHeader title="Embedding 配置" description="向量搜索阈值与维度，模型在 AI 路由中配置" icon-name="mdi:vector-square" />
-      <button
-        class="px-4 py-2 text-sm font-medium text-white bg-teal-600 rounded-lg hover:bg-teal-700 transition-colors disabled:opacity-50"
+      <AppButton
+        variant="primary"
+        size="sm"
         :disabled="saving || dirtyKeys.size === 0"
         @click="saveConfig"
       >
         {{ saving ? '保存中...' : dirtyKeys.size > 0 ? `保存 (${dirtyKeys.size})` : '已保存' }}
-      </button>
+      </AppButton>
     </div>
 
     <div v-if="loading" class="py-8 flex justify-center">
-      <Icon icon="mdi:loading" width="28" height="28" class="animate-spin text-teal-600" />
+      <Icon icon="mdi:loading" width="28" height="28" class="animate-spin" style="color: var(--color-accent)" />
     </div>
 
     <div v-else class="space-y-3">
-      <div v-for="config in configs" :key="config.key" class="rounded-lg border border-gray-200 p-4 bg-gray-50/50">
+      <div v-for="config in configs" :key="config.key" class="embedding-config-card">
         <div class="flex items-center justify-between gap-4 mb-1.5">
-          <label class="block text-sm font-medium text-gray-700">{{ getLabel(config.key) }}</label>
-          <span v-if="getUnit(config.key)" class="text-xs text-gray-400">{{ getUnit(config.key) }}</span>
+          <label class="embedding-config-label">{{ getLabel(config.key) }}</label>
+          <span v-if="getUnit(config.key)" class="embedding-config-unit">{{ getUnit(config.key) }}</span>
         </div>
         <AppInput
           v-model="editValues[config.key]"
           type="text"
           @input="markDirty(config.key)"
         />
-        <p class="mt-1 text-xs text-gray-500">{{ getHint(config.key) }}</p>
+        <p class="embedding-config-hint">{{ getHint(config.key) }}</p>
       </div>
     </div>
 
-    <div v-if="success" class="rounded-lg bg-emerald-50 border border-emerald-200 px-4 py-3 text-sm text-emerald-700">
+    <div v-if="success" class="ai-msg ai-msg--success">
       {{ success }}
     </div>
-    <div v-if="error" class="rounded-lg bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700">
+    <div v-if="error" class="ai-msg ai-msg--error">
       {{ error }}
     </div>
   </div>
 </template>
+
+<style scoped>
+.embedding-config-card {
+  border-radius: 8px;
+  border: 1px solid var(--color-border-subtle);
+  padding: 16px;
+  background: var(--color-bg-sunken);
+}
+
+.embedding-config-label {
+  display: block;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--color-text-secondary);
+}
+
+.embedding-config-unit {
+  font-size: 11px;
+  color: var(--color-text-muted);
+}
+
+.embedding-config-hint {
+  margin-top: 4px;
+  font-size: 11px;
+  color: var(--color-text-muted);
+}
+
+.ai-msg {
+  border-radius: 8px;
+  padding: 12px 16px;
+  font-size: 13px;
+}
+
+.ai-msg--success {
+  background: rgba(61, 138, 74, 0.1);
+  border: 1px solid rgba(61, 138, 74, 0.25);
+  color: var(--color-success);
+}
+
+.ai-msg--error {
+  background: rgba(196, 47, 60, 0.1);
+  border: 1px solid rgba(196, 47, 60, 0.25);
+  color: var(--color-error);
+}
+</style>

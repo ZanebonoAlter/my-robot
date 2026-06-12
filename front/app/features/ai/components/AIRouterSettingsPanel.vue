@@ -51,8 +51,8 @@ const {
               <AppInput v-model="primaryProviderForm.name" type="text" placeholder="default-primary" />
             </div>
             <div>
-              <label class="block text-[11px] font-medium text-gray-500 uppercase tracking-wider mb-1">类型</label>
-              <select v-model="primaryProviderForm.provider_type" class="input w-full text-sm">
+              <label class="block text-[11px] font-medium uppercase tracking-wider mb-1" style="color: var(--color-text-muted)">类型</label>
+              <select v-model="primaryProviderForm.provider_type" class="ai-select">
                 <option value="openai_compatible">OpenAI Compatible</option>
                 <option value="ollama">Ollama (本地)</option>
               </select>
@@ -116,7 +116,7 @@ const {
           <div class="flex items-center gap-4">
             <input v-model.number="embeddingThreshold" type="range" min="0.1" max="0.95" step="0.05"
               class="flex-1 h-2 rounded-lg appearance-none cursor-pointer"
-              :style="{ background: `linear-gradient(to right, #8b5cf6 0%, #8b5cf6 ${(embeddingThreshold - 0.1) / 0.85 * 100}%, #e5e7eb ${(embeddingThreshold - 0.1) / 0.85 * 100}%, #e5e7eb 100%)` }">
+              :style="{ background: `linear-gradient(to right, var(--color-accent) 0%, var(--color-accent) ${(embeddingThreshold - 0.1) / 0.85 * 100}%, var(--color-bg-sunken) ${(embeddingThreshold - 0.1) / 0.85 * 100}%, var(--color-bg-sunken) 100%)` }">
             <span class="text-base font-bold w-12 text-right tabular-nums" style="color: var(--color-accent)">{{ embeddingThreshold.toFixed(2) }}</span>
           </div>
           <div class="flex justify-between mt-1">
@@ -135,3 +135,38 @@ const {
     </div>
   </div>
 </template>
+
+<style scoped>
+/* Override hardcoded Tailwind gray classes with theme tokens */
+:deep(.text-gray-500) {
+  color: var(--color-text-muted) !important;
+}
+
+:deep(.text-gray-400) {
+  color: var(--color-text-muted) !important;
+}
+
+:deep(.text-gray-700) {
+  color: var(--color-text-secondary) !important;
+}
+
+:deep(.hover\:text-gray-600:hover) {
+  color: var(--color-text-secondary) !important;
+}
+
+.ai-select {
+  width: 100%;
+  padding: 7px 10px;
+  font-size: 13px;
+  border: 1px solid var(--color-input-border);
+  border-radius: 8px;
+  background: var(--color-input-bg);
+  color: var(--color-text-primary);
+  outline: none;
+  transition: border-color 0.15s;
+}
+
+.ai-select:focus {
+  border-color: var(--color-input-focus);
+}
+</style>

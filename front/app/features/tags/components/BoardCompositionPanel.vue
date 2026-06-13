@@ -180,7 +180,7 @@ async function handleConfirmAdd() {
   border-radius: 8px;
   border: 1px solid var(--color-secondary);
   background: var(--color-secondary);
-  color: var(--color-secondary);
+  color: var(--color-text-inverted);
   font-size: 0.68rem;
   line-height: 1.5;
 }
@@ -263,7 +263,7 @@ async function handleConfirmAdd() {
 
 .bcp-empty-add:hover {
   background: var(--color-secondary);
-  color: var(--color-secondary);
+  color: var(--color-text-inverted);
 }
 
 .bcp-chips {

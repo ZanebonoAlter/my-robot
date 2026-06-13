@@ -1,8 +1,8 @@
 # PRD: semantic_labels 慢查询优化
 
-> **状态**: 实施中
+> **状态**: 部分完成（打标签流程已修复；聚类自连接已修复）
 > **优先级**: 高（打标签流程性能瓶颈）
-> **关联**: `auxiliary_label_service.go`, `models/semantic_label.go`
+> **关联**: `auxiliary_label_service.go`, `models/semantic_label.go`, `tagmanagement/handler/board_crud_handler.go`
 
 ## 背景
 
@@ -55,3 +55,19 @@ CREATE INDEX idx_semantic_labels_type_status ON semantic_labels(label_type, stat
 ```
 
 将 slug 查询和 embedding 查询拆分为独立步骤，slug 精确匹配走索引。
+
+---
+
+## 关联问题：辅助标签聚类自连接（GET /api/auxiliary-labels/clusters）
+
+与打标签流程的 N+1 问题不同，这是另一个独立的慢查询，但受**同一约束**（pgvector 无法为 vector(2560) 建 ANN 索引）影响。
+
+- **问题 SQL**：`clusterAuxiliaryLabels` 内的两两自连接
+  ```sql
+  SELECT a.id, b.id, a.embedding <=> b.embedding AS distance
+  FROM semantic_labels a JOIN semantic_labels b ON a.id < b.id
+  WHERE ... AND a.embedding <=> b.embedding < 0.2
+  ```
+- **实测**：10015 个 active auxiliary × vector(2560)，单次 **95 分钟**（单线程 O(N²) 暴力计算，5000 万次余弦距离）。
+- **修复**：复用既定的「Go 侧 cosine 计算」方案（与 `sqlMergeMatcher` 同思路）——一次拉数据、float32 预归一化、并发点积建图、BFS 聚类，加 10 分钟内存缓存。首次计算实测 **10.8s**，缓存命中毫秒级。
+- **详情见**：[`issues/02-cluster-auxiliary-labels-inmemory.md`](issues/02-cluster-auxiliary-labels-inmemory.md)（已完成）

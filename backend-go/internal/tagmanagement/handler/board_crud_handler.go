@@ -4,10 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"net/http"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -543,18 +546,65 @@ type labelClusterDTO struct {
 	Label  string                     `json:"label"`
 }
 
+// auxClusterEmbeddingRow is a slim projection of semantic_labels used by the
+// in-memory auxiliary-label clustering.
+type auxClusterEmbeddingRow struct {
+	ID        uint    `gorm:"column:id"`
+	Label     string  `gorm:"column:label"`
+	Slug      string  `gorm:"column:slug"`
+	RefCount  int     `gorm:"column:ref_count"`
+	Embedding *string `gorm:"column:embedding"`
+}
+
+var (
+	// auxClusterCache holds the last computed clustering. Clustering is a
+	// read-only aggregate over rarely-changing embeddings, so the result is
+	// reused until the TTL expires.
+	auxClusterCacheMu   sync.RWMutex
+	auxClusterCache     *auxClusterCacheData
+	auxClusterComputeMu sync.Mutex
+	auxClusterCacheTTL  = 10 * time.Minute
+)
+
+type auxClusterCacheData struct {
+	clusters         []labelClusterDTO
+	unclusteredCount int
+	createdAt        time.Time
+}
+
+// auxClusterDistance is the cosine distance below which two auxiliary labels
+// are treated as neighbors (cosine similarity > 1 - distance).
+const auxClusterDistance = 0.2
+
 func (h *semanticBoardHandler) clusterAuxiliaryLabels(c *gin.Context) {
 	ctx := c.Request.Context()
 
-	type embeddingRow struct {
-		ID        uint    `gorm:"column:id"`
-		Label     string  `gorm:"column:label"`
-		Slug      string  `gorm:"column:slug"`
-		RefCount  int     `gorm:"column:ref_count"`
-		Embedding *string `gorm:"column:embedding"`
+	force := strings.EqualFold(c.Query("refresh"), "true") || c.Query("refresh") == "1"
+	if !force {
+		auxClusterCacheMu.RLock()
+		entry := auxClusterCache
+		auxClusterCacheMu.RUnlock()
+		if entry != nil && time.Since(entry.createdAt) < auxClusterCacheTTL {
+			respondOK(c, gin.H{"clusters": entry.clusters, "unclustered_count": entry.unclusteredCount})
+			return
+		}
 	}
 
-	var rows []embeddingRow
+	// Serialize computation so concurrent requests reuse one pass instead of
+	// duplicating the O(N^2) work.
+	auxClusterComputeMu.Lock()
+	defer auxClusterComputeMu.Unlock()
+	if !force {
+		auxClusterCacheMu.RLock()
+		entry := auxClusterCache
+		auxClusterCacheMu.RUnlock()
+		if entry != nil && time.Since(entry.createdAt) < auxClusterCacheTTL {
+			respondOK(c, gin.H{"clusters": entry.clusters, "unclustered_count": entry.unclusteredCount})
+			return
+		}
+	}
+
+	var rows []auxClusterEmbeddingRow
 	if err := h.db.WithContext(ctx).
 		Model(&models.SemanticLabel{}).
 		Where("label_type = ? AND status = ? AND embedding IS NOT NULL", "auxiliary", "active").
@@ -570,45 +620,149 @@ func (h *semanticBoardHandler) clusterAuxiliaryLabels(c *gin.Context) {
 		return
 	}
 
-	type pairRow struct {
-		ID1      uint    `gorm:"column:id1"`
-		ID2      uint    `gorm:"column:id2"`
-		Distance float64 `gorm:"column:distance"`
-	}
-	var pairs []pairRow
-	pairSQL := `
-		SELECT a.id AS id1, b.id AS id2, a.embedding <=> b.embedding AS distance
-		FROM semantic_labels a
-		JOIN semantic_labels b ON a.id < b.id
-		WHERE a.label_type = 'auxiliary' AND a.status = 'active' AND a.embedding IS NOT NULL
-		  AND b.label_type = 'auxiliary' AND b.status = 'active' AND b.embedding IS NOT NULL
-		  AND a.embedding <=> b.embedding < 0.2
-	`
-	if err := h.db.WithContext(ctx).Raw(pairSQL).Scan(&pairs).Error; err != nil {
-		respondError(c, http.StatusInternalServerError, err)
-		return
-	}
+	// Embedding comparison is done in Go, not SQL: pgvector cannot build an ANN
+	// index on vector(2560) (2000-dim limit for vector, 4000 for halfvec), so the
+	// old self-join was a single-threaded O(N^2) brute force (~95 min for ~10k
+	// labels). Here we L2-normalize into a flat float32 buffer and run concurrent
+	// dot products; cosine distance = 1 - dot after normalization.
+	dim, flat, valid := normalizeAuxEmbeddings(rows)
+	clusters, unclusteredCount := clusterAuxLabels(rows, dim, flat, valid)
 
-	adj := make(map[uint][]uint)
-	for _, p := range pairs {
-		adj[p.ID1] = append(adj[p.ID1], p.ID2)
-		adj[p.ID2] = append(adj[p.ID2], p.ID1)
+	auxClusterCacheMu.Lock()
+	auxClusterCache = &auxClusterCacheData{
+		clusters:         clusters,
+		unclusteredCount: unclusteredCount,
+		createdAt:        time.Now(),
 	}
+	auxClusterCacheMu.Unlock()
 
-	visited := make(map[uint]bool)
-	labelMap := make(map[uint]embeddingRow, len(rows))
+	respondOK(c, gin.H{"clusters": clusters, "unclustered_count": unclusteredCount})
+}
+
+// normalizeAuxEmbeddings parses each row's pgvector embedding, L2-normalizes
+// it, and packs the result into a contiguous float32 buffer at row index i.
+// The common dimension is inferred from the first parseable embedding; rows
+// with a missing/malformed/mismatched-dimension embedding are marked invalid.
+func normalizeAuxEmbeddings(rows []auxClusterEmbeddingRow) (dim int, flat []float32, valid []bool) {
+	valid = make([]bool, len(rows))
 	for _, r := range rows {
-		labelMap[r.ID] = r
-	}
-
-	var clusters []labelClusterDTO
-	for _, r := range rows {
-		if visited[r.ID] {
+		if r.Embedding == nil || *r.Embedding == "" {
 			continue
 		}
-		comp := []uint{}
-		queue := []uint{r.ID}
-		visited[r.ID] = true
+		v, err := service.ParsePgVector(*r.Embedding)
+		if err != nil || len(v) == 0 {
+			continue
+		}
+		dim = len(v)
+		break
+	}
+	if dim == 0 {
+		return 0, nil, valid
+	}
+	flat = make([]float32, len(rows)*dim)
+	for i, r := range rows {
+		if r.Embedding == nil || *r.Embedding == "" {
+			continue
+		}
+		v, err := service.ParsePgVector(*r.Embedding)
+		if err != nil || len(v) != dim {
+			continue
+		}
+		var sum float64
+		for _, x := range v {
+			sum += float64(x) * float64(x)
+		}
+		norm := math.Sqrt(sum)
+		if norm == 0 {
+			continue
+		}
+		off := i * dim
+		inv := float32(1.0 / norm)
+		for k, x := range v {
+			flat[off+k] = float32(x) * inv
+		}
+		valid[i] = true
+	}
+	return dim, flat, valid
+}
+
+// clusterAuxLabels builds a neighbor graph (edges with cosine distance <
+// auxClusterDistance) via concurrent dot products and returns connected
+// components of size >= 2, preserving the original ordering/sorting behavior.
+func clusterAuxLabels(rows []auxClusterEmbeddingRow, dim int, flat []float32, valid []bool) ([]labelClusterDTO, int) {
+	n := len(rows)
+	adj := make([][]int, n)
+
+	if dim > 0 {
+		simThreshold := float32(1.0 - auxClusterDistance)
+
+		type edge struct{ a, b int }
+		workers := runtime.NumCPU()
+		if workers < 1 {
+			workers = 1
+		}
+		if workers > n {
+			workers = n
+		}
+		results := make([][]edge, workers)
+		var wg sync.WaitGroup
+		step := (n + workers - 1) / workers
+		for w := 0; w < workers; w++ {
+			start := w * step
+			end := start + step
+			if end > n {
+				end = n
+			}
+			if start >= end {
+				continue
+			}
+			wg.Add(1)
+			go func(start, end, wid int) {
+				defer wg.Done()
+				var local []edge
+				for i := start; i < end; i++ {
+					if !valid[i] {
+						continue
+					}
+					ai := i * dim
+					vi := flat[ai : ai+dim]
+					for j := i + 1; j < n; j++ {
+						if !valid[j] {
+							continue
+						}
+						aj := j * dim
+						vj := flat[aj : aj+dim]
+						var dot float32
+						for k := 0; k < dim; k++ {
+							dot += vi[k] * vj[k]
+						}
+						if dot > simThreshold {
+							local = append(local, edge{i, j})
+						}
+					}
+				}
+				results[wid] = local
+			}(start, end, w)
+		}
+		wg.Wait()
+
+		for _, local := range results {
+			for _, e := range local {
+				adj[e.a] = append(adj[e.a], e.b)
+				adj[e.b] = append(adj[e.b], e.a)
+			}
+		}
+	}
+
+	visited := make([]bool, n)
+	var clusters []labelClusterDTO
+	for i := range rows {
+		if visited[i] {
+			continue
+		}
+		comp := []int{}
+		queue := []int{i}
+		visited[i] = true
 		for len(queue) > 0 {
 			cur := queue[0]
 			queue = queue[1:]
@@ -627,18 +781,17 @@ func (h *semanticBoardHandler) clusterAuxiliaryLabels(c *gin.Context) {
 		members := make([]auxiliaryLabelClusterDTO, 0, len(comp))
 		representative := ""
 		maxRef := -1
-		for _, id := range comp {
-			if r, ok := labelMap[id]; ok {
-				members = append(members, auxiliaryLabelClusterDTO{
-					ID:       r.ID,
-					Label:    r.Label,
-					Slug:     r.Slug,
-					RefCount: r.RefCount,
-				})
-				if r.RefCount > maxRef {
-					maxRef = r.RefCount
-					representative = r.Label
-				}
+		for _, idx := range comp {
+			r := rows[idx]
+			members = append(members, auxiliaryLabelClusterDTO{
+				ID:       r.ID,
+				Label:    r.Label,
+				Slug:     r.Slug,
+				RefCount: r.RefCount,
+			})
+			if r.RefCount > maxRef {
+				maxRef = r.RefCount
+				representative = r.Label
 			}
 		}
 		clusters = append(clusters, labelClusterDTO{
@@ -651,19 +804,18 @@ func (h *semanticBoardHandler) clusterAuxiliaryLabels(c *gin.Context) {
 	sort.Slice(clusters, func(i, j int) bool {
 		return clusters[i].Size > clusters[j].Size
 	})
-
 	if len(clusters) > 50 {
 		clusters = clusters[:50]
 	}
 
 	unclusteredCount := 0
-	for _, r := range rows {
-		if !visited[r.ID] {
+	for i := range rows {
+		if !visited[i] {
 			unclusteredCount++
 		}
 	}
 
-	respondOK(c, gin.H{"clusters": clusters, "unclustered_count": unclusteredCount})
+	return clusters, unclusteredCount
 }
 
 func (h *semanticBoardHandler) disableAuxiliaryLabel(c *gin.Context) {

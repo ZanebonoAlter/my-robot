@@ -175,7 +175,7 @@ function sourceTitle(source: string): string {
 .sb-item-badge { font-size: 0.6rem; color: var(--color-text-muted); padding: 0.1rem 0.4rem; border-radius: 999px; background: var(--color-bg-hover); flex-shrink: 0; }
 .sb-icon-btn { display: flex; align-items: center; justify-content: center; width: 20px; height: 20px; border: none; border-radius: 6px; background: none; color: var(--color-text-muted); cursor: pointer; opacity: 0; transition: all 0.12s ease; flex-shrink: 0; }
 .sb-item:hover .sb-icon-btn { opacity: 1; }
-.sb-edit-btn:hover { color: var(--color-secondary); background: var(--color-secondary); }
+.sb-edit-btn:hover { color: var(--color-text-inverted); background: var(--color-secondary); }
 .sb-delete-btn:hover { color: rgba(252, 165, 165, 0.9); background: rgba(239, 68, 68, 0.12); }
 
 .sb-loading { display: flex; flex-direction: column; gap: 0.5rem; }
@@ -190,7 +190,7 @@ function sourceTitle(source: string): string {
 .sb-action-btn--primary { color: var(--color-accent); border-color: var(--color-accent); }
 .sb-action-btn--primary:hover { background: var(--color-accent-subtle); border-color: var(--color-accent); color: var(--color-accent-hover); }
 .sb-action-btn--secondary { color: var(--color-secondary); border-color: var(--color-secondary); }
-.sb-action-btn--secondary:hover { background: var(--color-secondary); border-color: var(--color-secondary); color: var(--color-secondary); }
+.sb-action-btn--secondary:hover { background: var(--color-secondary); border-color: var(--color-secondary); color: var(--color-text-inverted); }
 .sb-action-btn--ghost { color: var(--color-text-muted); border-color: var(--color-border-subtle); }
 .sb-action-btn--ghost:hover { background: var(--color-bg-hover); color: var(--color-text-secondary); }
 </style>

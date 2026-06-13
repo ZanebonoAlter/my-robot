@@ -235,7 +235,7 @@ watch([label, search], () => { page.value = 1 })
   border-radius: 8px;
   border: 1px solid var(--color-secondary);
   background: var(--color-secondary);
-  color: var(--color-secondary);
+  color: var(--color-text-inverted);
   font-size: 0.72rem;
   cursor: pointer;
   transition: all 0.12s ease;
@@ -245,6 +245,7 @@ watch([label, search], () => { page.value = 1 })
 .alp-fetch-btn:hover:not(:disabled) {
   background: var(--color-secondary);
   border-color: var(--color-secondary);
+  opacity: 0.9;
 }
 
 .alp-fetch-btn:disabled {

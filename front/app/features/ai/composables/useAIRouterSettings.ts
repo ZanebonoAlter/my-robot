@@ -63,6 +63,7 @@ export function useAIRouterSettings() {
     enabled: true,
     timeout_seconds: 120,
     enable_thinking: false,
+    clear_api_key: false,
   })
   const showEditProviderApiKey = ref(false)
 
@@ -218,10 +219,6 @@ export function useAIRouterSettings() {
     if (!primaryProviderForm.base_url || !primaryProviderForm.model) {
       pushMessage('error', '主模型至少要有 Base URL 和 Model'); return
     }
-    const isOllama = primaryProviderForm.provider_type === 'ollama'
-    if (!isOllama && !primaryProviderId.value && !primaryProviderForm.api_key) {
-      pushMessage('error', '首次创建主模型需要填写 API Key'); return
-    }
     saving.value = true; error.value = null
     try {
       const aiAdminApi = useAIAdminApi()
@@ -274,10 +271,6 @@ export function useAIRouterSettings() {
     if (!newProviderForm.name || !newProviderForm.base_url || !newProviderForm.model) {
       pushMessage('error', '备用模型表单还没填完整'); return
     }
-    const isOllama = newProviderForm.provider_type === 'ollama'
-    if (!isOllama && !newProviderForm.api_key) {
-      pushMessage('error', '非 Ollama 类型的备用模型需要填写 API Key'); return
-    }
     saving.value = true
     try {
       const aiAdminApi = useAIAdminApi()
@@ -310,6 +303,7 @@ export function useAIRouterSettings() {
     editProviderForm.enabled = provider.enabled
     editProviderForm.timeout_seconds = provider.timeout_seconds
     editProviderForm.enable_thinking = provider.enable_thinking ?? false
+    editProviderForm.clear_api_key = false
   }
 
   function cancelEditingProvider() {
@@ -322,6 +316,7 @@ export function useAIRouterSettings() {
     editProviderForm.enabled = true
     editProviderForm.timeout_seconds = 120
     editProviderForm.enable_thinking = false
+    editProviderForm.clear_api_key = false
   }
 
   async function saveEditedProvider() {
@@ -393,10 +388,6 @@ export function useAIRouterSettings() {
   async function testPrimaryProvider() {
     if (!primaryProviderForm.base_url || !primaryProviderForm.model) {
       pushMessage('error', '测试连接前请填入 Base URL 和 Model'); return
-    }
-    const isOllama = primaryProviderForm.provider_type === 'ollama'
-    if (!isOllama && !primaryProviderForm.api_key) {
-      pushMessage('error', '非 Ollama 类型测试连接前请填入 API Key'); return
     }
     testing.value = true
     try {

@@ -62,11 +62,32 @@ type AuxiliaryLabelEmbedder func(ctx context.Context, input string, mode Auxilia
 
 type mergeMatcherFunc func(ctx context.Context, db *gorm.DB, labels []models.SemanticLabel, mergePgVector string, mergeVector []float64) (*models.SemanticLabel, error)
 
+const (
+	auxActiveLabelsTTL    = 5 * time.Minute
+	auxMergeEmbeddingsTTL = 10 * time.Minute
+)
+
+type auxLabelCache struct {
+	mu sync.RWMutex
+
+	// Active auxiliary labels cache
+	activeLabels   []models.SemanticLabel
+	activeLabelsAt time.Time
+
+	// Merge embedding vectors cache
+	mergeEmbeddings   map[uint][]float64
+	mergeEmbeddingsAt time.Time
+}
+
 type AuxiliaryLabelService struct {
 	db           *gorm.DB
 	embedder     AuxiliaryLabelEmbedder
 	mergeMatcher mergeMatcherFunc
+	cache        *auxLabelCache
 }
+
+// package-level cache for AuxiliaryLabelService — shared across instances
+var packageAuxLabelCache = &auxLabelCache{}
 
 func NewAuxiliaryLabelService(db *gorm.DB, embedder AuxiliaryLabelEmbedder) *AuxiliaryLabelService {
 	if db == nil {
@@ -75,7 +96,7 @@ func NewAuxiliaryLabelService(db *gorm.DB, embedder AuxiliaryLabelEmbedder) *Aux
 	if embedder == nil {
 		embedder = DefaultAuxiliaryLabelEmbedder
 	}
-	return &AuxiliaryLabelService{db: db, embedder: embedder, mergeMatcher: sqlMergeMatcher}
+	return &AuxiliaryLabelService{db: db, embedder: embedder, mergeMatcher: sqlMergeMatcher, cache: packageAuxLabelCache}
 }
 
 // vectorDimEnsurers holds callbacks registered by other packages to ensure their
@@ -165,7 +186,7 @@ func (s *AuxiliaryLabelService) ResolveAuxiliaryLabel(ctx context.Context, rawLa
 		}
 	}
 
-	// L2: merge embedding comparison (SQL for pgvector, Go fallback for SQLite tests)
+	// L2: merge embedding comparison (Go-side cosine for 2560-dim vectors — pgvector HNSW cannot index >2000 dim)
 	mergePgVector, mergeVector, err := s.embedder(ctx, label, AuxiliaryLabelEmbeddingModeMerge)
 	if err != nil {
 		return nil, err
@@ -204,6 +225,7 @@ func (s *AuxiliaryLabelService) ResolveAuxiliaryLabel(ctx context.Context, rawLa
 	if err := s.db.WithContext(ctx).Create(&created).Error; err != nil {
 		return nil, err
 	}
+	s.invalidateOnCreate()
 	return &created, nil
 }
 
@@ -216,7 +238,11 @@ func (s *AuxiliaryLabelService) DisableAuxiliaryLabel(ctx context.Context, label
 	if err := s.db.WithContext(ctx).Where("id = ? AND label_type = ?", labelID, "auxiliary").First(&label).Error; err != nil {
 		return err
 	}
-	return s.db.WithContext(ctx).Model(&label).Update("status", "disabled").Error
+	if err := s.db.WithContext(ctx).Model(&label).Update("status", "disabled").Error; err != nil {
+		return err
+	}
+	s.invalidateOnDisable()
+	return nil
 }
 
 func (s *AuxiliaryLabelService) MergeAuxiliaryLabelAlias(ctx context.Context, sourceID uint, targetID uint) error {
@@ -459,61 +485,77 @@ func (s *AuxiliaryLabelService) gcCleanup(ctx context.Context, req AuxLabelGCReq
 }
 
 func (s *AuxiliaryLabelService) loadActiveAuxiliaryLabels(ctx context.Context) ([]models.SemanticLabel, error) {
+	s.cache.mu.RLock()
+	if s.cache.activeLabels != nil && time.Since(s.cache.activeLabelsAt) < auxActiveLabelsTTL {
+		labels := s.cache.activeLabels
+		s.cache.mu.RUnlock()
+		return labels, nil
+	}
+	s.cache.mu.RUnlock()
+
+	s.cache.mu.Lock()
+	defer s.cache.mu.Unlock()
+	// Double-check after acquiring write lock
+	if s.cache.activeLabels != nil && time.Since(s.cache.activeLabelsAt) < auxActiveLabelsTTL {
+		return s.cache.activeLabels, nil
+	}
+
 	var labels []models.SemanticLabel
 	err := s.db.WithContext(ctx).
 		Select("id, label, slug, label_type, aliases, ref_count, description, status, protected, source, display_order, created_at, updated_at").
 		Where("label_type = ? AND status = ?", "auxiliary", "active").
 		Find(&labels).Error
-	return labels, err
+	if err != nil {
+		return nil, err
+	}
+	s.cache.activeLabels = labels
+	s.cache.activeLabelsAt = time.Now()
+	return labels, nil
 }
 
-// sqlMergeMatcher loads only id + merge_embedding columns and computes cosine
-// similarity in Go. pgvector HNSW cannot index vector(2560) (>2000 dim limit),
-// and halfvec expression indexes are not recognized by the query planner, so
-// SQL-side ORDER BY <=> is equally slow (~3-5s full scan). Go-side computation
-// on the slim result set avoids the 345 MB payload of SELECT *.
-func sqlMergeMatcher(ctx context.Context, db *gorm.DB, labels []models.SemanticLabel, _ string, mergeVector []float64) (*models.SemanticLabel, error) {
-	// Collect IDs of active auxiliary labels
-	ids := make([]uint, 0, len(labels))
-	for _, l := range labels {
-		ids = append(ids, l.ID)
-	}
+func (s *AuxiliaryLabelService) invalidateOnCreate() {
+	s.cache.mu.Lock()
+	defer s.cache.mu.Unlock()
+	s.cache.activeLabels = nil
+	s.cache.activeLabelsAt = time.Time{}
+	s.cache.mergeEmbeddings = nil
+	s.cache.mergeEmbeddingsAt = time.Time{}
+}
 
-	// Load only id + merge_embedding for candidates
-	type row struct {
-		ID             uint
-		MergeEmbedding *string
-	}
-	var rows []row
-	if err := db.WithContext(ctx).Model(&models.SemanticLabel{}).
-		Select("id, merge_embedding").
-		Where("id IN ?", ids).
-		Find(&rows).Error; err != nil {
+func (s *AuxiliaryLabelService) invalidateOnDisable() {
+	s.cache.mu.Lock()
+	defer s.cache.mu.Unlock()
+	s.cache.activeLabels = nil
+	s.cache.activeLabelsAt = time.Time{}
+	s.cache.mergeEmbeddings = nil
+	s.cache.mergeEmbeddingsAt = time.Time{}
+}
+
+func (s *AuxiliaryLabelService) invalidateOnAliasChange() {
+	s.cache.mu.Lock()
+	defer s.cache.mu.Unlock()
+	s.cache.activeLabels = nil
+	s.cache.activeLabelsAt = time.Time{}
+	// mergeEmbeddings preserved — vectors unchanged by alias changes
+}
+
+// sqlMergeMatcher loads merge embeddings from cache and computes cosine
+// similarity in Go. Eliminates the 216 MB DB transfer on every call.
+func sqlMergeMatcher(ctx context.Context, db *gorm.DB, labels []models.SemanticLabel, _ string, mergeVector []float64) (*models.SemanticLabel, error) {
+	// Use package-level cache
+	embeddings, err := packageAuxLabelCacheGetOrLoad(ctx, db)
+	if err != nil {
 		return nil, err
 	}
 
-	// Compute cosine similarity and find best match
 	var best *models.SemanticLabel
-	idSimMap := make(map[uint]float64, len(rows))
-	for _, r := range rows {
-		if r.MergeEmbedding == nil || *r.MergeEmbedding == "" {
-			continue
-		}
-		existingVec, err := ParsePgVector(*r.MergeEmbedding)
-		if err != nil {
+	for i := range labels {
+		existingVec, ok := embeddings[labels[i].ID]
+		if !ok {
 			continue
 		}
 		sim, err := airouter.CosineSimilarity(mergeVector, existingVec)
 		if err != nil || sim < auxiliaryLabelMergeThreshold {
-			continue
-		}
-		idSimMap[r.ID] = sim
-	}
-
-	// Pick best by RefCount DESC, ID ASC among threshold-passing matches
-	for i := range labels {
-		_, ok := idSimMap[labels[i].ID]
-		if !ok {
 			continue
 		}
 		candidate := labels[i]
@@ -521,8 +563,52 @@ func sqlMergeMatcher(ctx context.Context, db *gorm.DB, labels []models.SemanticL
 			best = &candidate
 		}
 	}
-
 	return best, nil
+}
+
+// packageAuxLabelCacheGetOrLoad loads merge embeddings using the package-level cache.
+// This is a standalone helper since sqlMergeMatcher is a package-level function (not a method).
+func packageAuxLabelCacheGetOrLoad(ctx context.Context, db *gorm.DB) (map[uint][]float64, error) {
+	packageAuxLabelCache.mu.RLock()
+	if packageAuxLabelCache.mergeEmbeddings != nil && time.Since(packageAuxLabelCache.mergeEmbeddingsAt) < auxMergeEmbeddingsTTL {
+		emb := packageAuxLabelCache.mergeEmbeddings
+		packageAuxLabelCache.mu.RUnlock()
+		return emb, nil
+	}
+	packageAuxLabelCache.mu.RUnlock()
+
+	packageAuxLabelCache.mu.Lock()
+	defer packageAuxLabelCache.mu.Unlock()
+	if packageAuxLabelCache.mergeEmbeddings != nil && time.Since(packageAuxLabelCache.mergeEmbeddingsAt) < auxMergeEmbeddingsTTL {
+		return packageAuxLabelCache.mergeEmbeddings, nil
+	}
+
+	type row struct {
+		ID             uint
+		MergeEmbedding *string
+	}
+	var rows []row
+	if err := db.WithContext(ctx).Model(&models.SemanticLabel{}).
+		Select("id, merge_embedding").
+		Where("label_type = ? AND status = ? AND merge_embedding IS NOT NULL", "auxiliary", "active").
+		Find(&rows).Error; err != nil {
+		return nil, err
+	}
+
+	result := make(map[uint][]float64, len(rows))
+	for _, r := range rows {
+		if r.MergeEmbedding == nil || *r.MergeEmbedding == "" {
+			continue
+		}
+		vec, err := ParsePgVector(*r.MergeEmbedding)
+		if err != nil {
+			continue
+		}
+		result[r.ID] = vec
+	}
+	packageAuxLabelCache.mergeEmbeddings = result
+	packageAuxLabelCache.mergeEmbeddingsAt = time.Now()
+	return result, nil
 }
 
 func (s *AuxiliaryLabelService) addAlias(ctx context.Context, label *models.SemanticLabel, alias string) (*models.SemanticLabel, error) {
@@ -531,6 +617,7 @@ func (s *AuxiliaryLabelService) addAlias(ctx context.Context, label *models.Sema
 		if err := s.db.WithContext(ctx).Save(label).Error; err != nil {
 			return nil, err
 		}
+		s.invalidateOnAliasChange()
 	}
 	return label, nil
 }

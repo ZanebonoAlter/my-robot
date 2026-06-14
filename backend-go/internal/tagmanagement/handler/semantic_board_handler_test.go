@@ -12,11 +12,11 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 
 	"syntopica-backend/internal/models"
+	"syntopica-backend/internal/platform/testutil"
 	"syntopica-backend/internal/tagmanagement/repository"
 	"syntopica-backend/internal/tagmanagement/service"
 )
@@ -30,16 +30,13 @@ func (f fakeSemanticBoardHandlerLLM) SuggestSemanticBoardUpgrades(ctx context.Co
 }
 
 func setupSemanticBoardHandlerRouter(t *testing.T) (*gorm.DB, *gin.Engine) {
-	t.Helper()
 	g := gin.New()
-	db, err := gorm.Open(sqlite.Open(fmt.Sprintf("file:%s?mode=memory&cache=shared", strings.ReplaceAll(t.Name(), "/", "_"))), &gorm.Config{})
-	require.NoError(t, err)
-	require.NoError(t, db.Exec("PRAGMA foreign_keys = ON").Error)
+	db := testutil.SetupTestDB(t)
 	repository.InitRepository(db)
-	require.NoError(t, db.AutoMigrate(&models.Feed{}, &models.Article{}, &models.TopicTag{}, &models.TopicTagEmbedding{}, &models.ArticleTopicTag{}, &models.SemanticLabel{}, &models.TopicTagSemanticLabel{}, &models.TopicTagBoardLabel{}, &models.BoardComposition{}, &models.AISettings{}))
 
 	semanticBoardLabelEmbedder = func(ctx context.Context, input string, mode service.AuxiliaryLabelEmbeddingMode) (string, []float64, error) {
-		return service.FloatsToPgVector([]float64{1, 0, 0}), []float64{1, 0, 0}, nil
+		vec := testutil.PadVector([]float64{1, 0, 0}, testutil.TestEmbeddingDim)
+		return service.FloatsToPgVector(vec), vec, nil
 	}
 	semanticBoardUpgradeLLMFactory = func() service.SemanticBoardUpgradeLLM {
 		return fakeSemanticBoardHandlerLLM{suggestions: []service.SemanticBoardUpgradeSuggestion{{Decision: service.SemanticBoardUpgradeDecisionCreateNew, BoardLabel: "AI Board", Description: "AI stories", AuxiliaryLabelIDs: []uint{1}}}}
@@ -349,7 +346,7 @@ func createHandlerSemanticLabel(t *testing.T, db *gorm.DB, label string, slug st
 	t.Helper()
 	semanticLabel := models.SemanticLabel{Label: label, Slug: slug, LabelType: labelType, Status: status, RefCount: refCount}
 	if vector != nil {
-		pgVector := service.FloatsToPgVector(vector)
+		pgVector := service.FloatsToPgVector(testutil.PadVector(vector, testutil.TestEmbeddingDim))
 		semanticLabel.Embedding = &pgVector
 	}
 	require.NoError(t, db.Create(&semanticLabel).Error)

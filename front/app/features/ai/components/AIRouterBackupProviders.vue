@@ -52,7 +52,7 @@ const ctx = inject<AIRouterCtx>('ai-router-ctx')!
           </div>
           <div v-else class="ai-notice ai-notice--warning md:col-span-2">Ollama 模式无需 API Key</div>
           <div class="ai-toggle-row">
-            <AppToggle v-model="ctx.newProviderForm.enable_thinking" /> Thinking
+            <AppToggle v-model="ctx.newProviderForm.enable_thinking" /> 清理推理输出
           </div>
         </div>
         <div class="flex justify-end">
@@ -109,13 +109,25 @@ const ctx = inject<AIRouterCtx>('ai-router-ctx')!
                   <Icon :icon="ctx.showEditProviderApiKey ? 'mdi:eye-off' : 'mdi:eye'" width="15" height="15" />
                 </button>
               </div>
+              <div v-if="ctx.editProviderForm.provider_type !== 'ollama' && provider.api_key_configured" class="md:col-span-2">
+                <button v-if="!ctx.editProviderForm.clear_api_key"
+                  class="text-xs px-3 py-1.5 rounded-lg transition-colors"
+                  style="color: var(--color-error); background: var(--color-error-bg, rgba(196, 47, 60, 0.1)); border: 1px solid var(--color-error-border, rgba(196, 47, 60, 0.25))"
+                  @click="ctx.editProviderForm.clear_api_key = true">
+                  清除已保存密钥
+                </button>
+                <span v-else class="text-xs px-3 py-1.5 rounded-lg"
+                  style="color: var(--color-warning); background: var(--color-warning-bg, rgba(196, 136, 60, 0.1)); border: 1px solid var(--color-warning-border, rgba(196, 136, 60, 0.25))">
+                  保存后将清除已保存密钥
+                </span>
+              </div>
               <div v-else class="ai-notice ai-notice--warning md:col-span-2">Ollama 模式无需 API Key</div>
               <AppInput v-model="ctx.editProviderForm.timeout_seconds" type="number" min="30" placeholder="Timeout (秒)" />
               <div class="ai-toggle-row">
                 <AppToggle v-model="ctx.editProviderForm.enabled" /> 启用
               </div>
               <div class="ai-toggle-row">
-                <AppToggle v-model="ctx.editProviderForm.enable_thinking" /> Thinking
+                <AppToggle v-model="ctx.editProviderForm.enable_thinking" /> 清理推理输出
               </div>
             </div>
             <div class="flex justify-end gap-2">

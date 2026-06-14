@@ -36,6 +36,7 @@ type SemanticBoardUpgradeConfig struct {
 	CoTagDedupeSimThreshold  float64
 	CoTagHardLimit           int
 	ClusterMethod            string
+	Mode                     string
 }
 
 type SemanticBoardUpgradeCandidate struct {
@@ -113,11 +114,17 @@ func NewSemanticBoardUpgradeService(db *gorm.DB, llm SemanticBoardUpgradeLLM, em
 	return &SemanticBoardUpgradeService{db: db, llm: llm, embedder: embedder}
 }
 
-func (s *SemanticBoardUpgradeService) GenerateSuggestions(ctx context.Context) ([]SemanticBoardUpgradeSuggestion, []SemanticBoardUpgradeCluster, error) {
+func (s *SemanticBoardUpgradeService) GenerateSuggestions(ctx context.Context, mode string) ([]SemanticBoardUpgradeSuggestion, []SemanticBoardUpgradeCluster, error) {
 	if s.llm == nil {
 		return nil, nil, fmt.Errorf("semantic board upgrade llm is required")
 	}
 	config := s.LoadUpgradeConfig(ctx)
+	if mode != "" {
+		config.Mode = mode
+	}
+	if config.Mode == "" {
+		config.Mode = "discover_new"
+	}
 	candidates, err := s.CollectCandidates(ctx, config)
 	if err != nil {
 		return nil, nil, err
@@ -136,7 +143,7 @@ func (s *SemanticBoardUpgradeService) GenerateSuggestions(ctx context.Context) (
 		}
 	}
 
-	suggestions, err := s.llm.SuggestSemanticBoardUpgrades(ctx, buildSemanticBoardUpgradePrompt(clusters))
+	suggestions, err := s.llm.SuggestSemanticBoardUpgrades(ctx, buildSemanticBoardUpgradePrompt(clusters, config.Mode))
 	if err != nil {
 		return nil, nil, err
 	}
@@ -144,7 +151,7 @@ func (s *SemanticBoardUpgradeService) GenerateSuggestions(ctx context.Context) (
 	for _, candidate := range candidates {
 		validAuxiliaryIDs[candidate.ID] = struct{}{}
 	}
-	return filterSemanticBoardUpgradeSuggestions(suggestions, validAuxiliaryIDs), clusters, nil
+	return filterSemanticBoardUpgradeSuggestions(suggestions, validAuxiliaryIDs, config.Mode), clusters, nil
 }
 
 func (s *SemanticBoardUpgradeService) ConfirmSuggestion(ctx context.Context, req ConfirmSemanticBoardUpgradeRequest) (*ConfirmSemanticBoardUpgradeResult, error) {
@@ -218,18 +225,31 @@ func (s *SemanticBoardUpgradeService) ConfirmSuggestion(ctx context.Context, req
 	if err != nil {
 		return nil, err
 	}
+	packageBoardCache.InvalidateBoardData()
 	return &result, nil
 }
 
 func (s *SemanticBoardUpgradeService) CollectCandidates(ctx context.Context, config SemanticBoardUpgradeConfig) ([]SemanticBoardUpgradeCandidate, error) {
 	var labels []models.SemanticLabel
-	err := s.db.WithContext(ctx).
-		Where("label_type = ? AND status = ? AND ref_count >= ? AND embedding IS NOT NULL", "auxiliary", "active", config.RefCountThreshold).
-		Where("NOT EXISTS (SELECT 1 FROM board_composition WHERE board_composition.auxiliary_label_id = semantic_labels.id)").
-		Order("id ASC").
-		Find(&labels).Error
-	if err != nil {
-		return nil, err
+
+	if config.Mode == "expand_existing" {
+		err := s.db.WithContext(ctx).
+			Where("label_type = ? AND status = ? AND ref_count >= ? AND embedding IS NOT NULL", "auxiliary", "active", config.RefCountThreshold).
+			Where("EXISTS (SELECT 1 FROM board_composition WHERE board_composition.auxiliary_label_id = semantic_labels.id)").
+			Order("id ASC").
+			Find(&labels).Error
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		err := s.db.WithContext(ctx).
+			Where("label_type = ? AND status = ? AND ref_count >= ? AND embedding IS NOT NULL", "auxiliary", "active", config.RefCountThreshold).
+			Where("NOT EXISTS (SELECT 1 FROM board_composition WHERE board_composition.auxiliary_label_id = semantic_labels.id)").
+			Order("id ASC").
+			Find(&labels).Error
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	candidates := make([]SemanticBoardUpgradeCandidate, 0, len(labels))
@@ -622,13 +642,24 @@ func isNearKeptVector(vector []float64, keptVectors [][]float64, threshold float
 	return false
 }
 
-func buildSemanticBoardUpgradePrompt(clusters []SemanticBoardUpgradeCluster) string {
+func buildSemanticBoardUpgradePrompt(clusters []SemanticBoardUpgradeCluster, mode string) string {
 	var builder strings.Builder
-	builder.WriteString("你是一个语义板块分析助手。根据以下辅助标签聚类信息，判断每个簇应该：create_new（创建新板块）或 skip（跳过不处理）。\n\n")
-	builder.WriteString("判断原则：\n")
-	builder.WriteString("- 如果簇内标签语义集中、有明确主题且不存在对应板块 → create_new\n")
-	builder.WriteString("- 如果簇内标签过于分散或过于泛化，不足以形成独立板块 → skip\n\n")
-	builder.WriteString("返回 JSON 格式：{\"suggestions\": [{\"decision\": \"create_new|skip\", \"board_label\": \"板块名称\", \"description\": \"板块描述\", \"auxiliary_label_ids\": [id1, id2], \"reason\": \"判断理由\"}]}\n\n")
+	builder.WriteString("你是一个语义板块分析助手。根据以下辅助标签聚类信息，判断每个簇应该：")
+
+	if mode == "expand_existing" {
+		builder.WriteString("create_new（创建新板块）、merge_into_existing（合并到已有板块）或 skip（跳过不处理）。\n\n")
+		builder.WriteString("判断原则：\n")
+		builder.WriteString("- 如果簇内标签明确属于某个已有板块，且该板块的标签和描述与簇内容吻合 → merge_into_existing\n")
+		builder.WriteString("- 如果簇内标签语义集中、有明确主题且不存在对应板块 → create_new\n")
+		builder.WriteString("- 如果簇内标签过于分散或过于泛化，不足以形成独立板块 → skip\n\n")
+		builder.WriteString("返回 JSON 格式：{\"suggestions\": [{\"decision\": \"create_new|merge_into_existing|skip\", \"board_label\": \"板块名称\", \"description\": \"板块描述\", \"auxiliary_label_ids\": [id1, id2], \"target_board_id\": 123, \"reason\": \"判断理由\"}]}\n\n")
+	} else {
+		builder.WriteString("create_new（创建新板块）或 skip（跳过不处理）。\n\n")
+		builder.WriteString("判断原则：\n")
+		builder.WriteString("- 如果簇内标签语义集中、有明确主题且不存在对应板块 → create_new\n")
+		builder.WriteString("- 如果簇内标签过于分散或过于泛化，不足以形成独立板块 → skip\n\n")
+		builder.WriteString("返回 JSON 格式：{\"suggestions\": [{\"decision\": \"create_new|skip\", \"board_label\": \"板块名称\", \"description\": \"板块描述\", \"auxiliary_label_ids\": [id1, id2], \"reason\": \"判断理由\"}]}\n\n")
+	}
 	for i, cluster := range clusters {
 		fmt.Fprintf(&builder, "【簇 %d】\n", i+1)
 		builder.WriteString("候选辅助标签：\n")
@@ -652,11 +683,17 @@ func buildSemanticBoardUpgradePrompt(clusters []SemanticBoardUpgradeCluster) str
 	return builder.String()
 }
 
-func filterSemanticBoardUpgradeSuggestions(suggestions []SemanticBoardUpgradeSuggestion, validAuxiliaryIDs map[uint]struct{}) []SemanticBoardUpgradeSuggestion {
+func filterSemanticBoardUpgradeSuggestions(suggestions []SemanticBoardUpgradeSuggestion, validAuxiliaryIDs map[uint]struct{}, mode string) []SemanticBoardUpgradeSuggestion {
 	filtered := make([]SemanticBoardUpgradeSuggestion, 0, len(suggestions))
 	for _, suggestion := range suggestions {
-		// Only accept create_new and skip; defensively reject merge_into_existing
-		if suggestion.Decision != SemanticBoardUpgradeDecisionCreateNew && suggestion.Decision != SemanticBoardUpgradeDecisionSkip {
+		switch suggestion.Decision {
+		case SemanticBoardUpgradeDecisionCreateNew, SemanticBoardUpgradeDecisionSkip:
+			// Always accepted
+		case SemanticBoardUpgradeDecisionMergeIntoExisting:
+			if mode != "expand_existing" {
+				continue
+			}
+		default:
 			continue
 		}
 		suggestion.AuxiliaryLabelIDs = filterKnownAuxiliaryIDs(UniqueUintSlice(suggestion.AuxiliaryLabelIDs), validAuxiliaryIDs)

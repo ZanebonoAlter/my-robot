@@ -56,8 +56,15 @@ type semanticBoardUpgradeClusterDTO struct {
 type airouterSemanticBoardUpgradeLLM struct{}
 
 func (h *semanticBoardHandler) getUpgradeCandidates(c *gin.Context) {
+	mode := strings.TrimSpace(c.Query("mode"))
 	svc := service.NewSemanticBoardUpgradeService(h.db, nil, nil)
 	config := svc.LoadUpgradeConfig(c.Request.Context())
+	if mode != "" {
+		config.Mode = mode
+	}
+	if config.Mode == "" {
+		config.Mode = "discover_new"
+	}
 	candidates, err := svc.CollectCandidates(c.Request.Context(), config)
 	if err != nil {
 		respondError(c, http.StatusInternalServerError, err)
@@ -71,8 +78,9 @@ func (h *semanticBoardHandler) getUpgradeCandidates(c *gin.Context) {
 	respondOK(c, gin.H{"candidates": upgradeCandidatesToDTO(candidates), "clusters": upgradeClustersToDTO(clusters), "config": semanticBoardUpgradeConfigToMap(config)})
 }
 func (h *semanticBoardHandler) suggestUpgrades(c *gin.Context) {
+	mode := strings.TrimSpace(c.Query("mode"))
 	svc := service.NewSemanticBoardUpgradeService(h.db, semanticBoardUpgradeLLMFactory(), nil)
-	suggestions, clusters, err := svc.GenerateSuggestions(c.Request.Context())
+	suggestions, clusters, err := svc.GenerateSuggestions(c.Request.Context(), mode)
 	if err != nil {
 		respondError(c, http.StatusBadRequest, err)
 		return

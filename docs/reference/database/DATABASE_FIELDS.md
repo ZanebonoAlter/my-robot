@@ -209,7 +209,7 @@
 | `name` | VARCHAR(100) UNIQUE NOT NULL | 供应商名称 |
 | `provider_type` | VARCHAR(50) DEFAULT 'openai_compatible' | 供应商类型 |
 | `base_url` | VARCHAR(500) NOT NULL | API 地址 |
-| `api_key` | TEXT NOT NULL | API 密钥 |
+| `api_key` | TEXT | API 密钥（可空，本地无认证服务留空） |
 | `model` | VARCHAR(100) NOT NULL | 模型名称 |
 | `enabled` | BOOLEAN DEFAULT true | 是否启用 |
 | `timeout_seconds` | INTEGER DEFAULT 120 | 超时时间 |
@@ -859,6 +859,6 @@ HNSW 索引：`idx_topic_tag_embeddings_embedding USING hnsw (embedding vector_c
 - [全局实体关系图](ER_DIAGRAM.md) — 35 张表的 FK 关系图（ASCII + Mermaid）和约束矩阵
 - [数据生命周期](DATA_LIFECYCLE.md) — 6 条数据链路的状态字段流转说明
 - [数据流](../reference/architecture/data-flow.md) — 代码执行流、API 调用链、前端 store 交互
-- [数据库运维说明](../operations/database.md) — 数据库运维说明
+- [数据库运维说明](../../operations/database-operations.md) — 数据库运维说明
 - [PostgreSQL 迁移手册](../operations/postgres-migration.md) — PostgreSQL 迁移手册
 - [AGENTS.md](../../AGENTS.md) — 项目开发指南

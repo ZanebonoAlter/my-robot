@@ -243,8 +243,9 @@ export function useSemanticBoardsApi() {
     return apiClient.get('/semantic-boards/upgrade-candidates')
   }
 
-  async function suggestUpgrade(): Promise<ApiResponse<UpgradeSuggestResponse>> {
-    return apiClient.post('/semantic-boards/upgrade-suggest')
+  async function suggestUpgrade(mode?: string): Promise<ApiResponse<UpgradeSuggestResponse>> {
+    const query = mode ? `?mode=${mode}` : ''
+    return apiClient.post(`/semantic-boards/upgrade-suggest${query}`)
   }
 
   async function executeUpgrade(data: {

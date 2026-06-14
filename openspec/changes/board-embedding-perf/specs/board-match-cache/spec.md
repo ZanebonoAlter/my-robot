@@ -53,7 +53,7 @@ Board matching 的内存缓存层，缓存版块辅助标签、embedding 和 AI 
 
 ### Requirement: Active Auxiliary Labels Cache (TTL)
 
-`AuxiliaryLabelService` SHALL 缓存 `loadActiveAuxiliaryLabels` 的结果，TTL 为 5 分钟。过期后下次调用重新从 DB 加载。
+`AuxiliaryLabelService` SHALL 缓存 `loadActiveAuxiliaryLabels` 的结果，TTL 为 5 分钟。过期后下次调用重新从 DB 加载。缓存 SHALL 在新增或禁用辅助标签时立即失效。
 
 #### Scenario: Labels returned from cache within TTL
 
@@ -64,6 +64,50 @@ Board matching 的内存缓存层，缓存版块辅助标签、embedding 和 AI 
 
 - **WHEN** 距上次加载超过 5 分钟，且 `ResolveAuxiliaryLabel` 被调用
 - **THEN** 系统 SHALL 重新执行 `loadActiveAuxiliaryLabels` 全表扫描，更新缓存
+
+#### Scenario: Cache invalidated on label creation
+
+- **WHEN** `ResolveAuxiliaryLabel` 的 L3 阶段创建了新标签
+- **THEN** 系统 SHALL 清除 active labels 缓存，下次调用重新从 DB 加载
+
+#### Scenario: Cache invalidated on label disable
+
+- **WHEN** `DisableAuxiliaryLabel` 被调用
+- **THEN** 系统 SHALL 清除 active labels 缓存
+
+### Requirement: Merge Embedding 向量缓存
+
+`AuxiliaryLabelService` SHALL 缓存所有活跃辅助标签的 `merge_embedding` 向量（已解析为 `map[uint][]float64`），TTL 为 10 分钟。`sqlMergeMatcher` SHALL 优先使用缓存数据，避免每次调用都从 DB 加载 ~216 MB 向量数据。
+
+#### Scenario: sqlMergeMatcher 使用缓存向量
+
+- **WHEN** `ResolveAuxiliaryLabel` 的 L2 阶段调用 `sqlMergeMatcher`，且 merge embedding 缓存有效
+- **THEN** 系统 SHALL 使用缓存的 `map[uint][]float64` 计算余弦相似度，不执行 `SELECT id, merge_embedding` DB 查询
+
+#### Scenario: 首次调用或缓存过期时从 DB 加载
+
+- **WHEN** merge embedding 缓存为空或已过期（超过 10 分钟）
+- **THEN** 系统 SHALL 执行 `SELECT id, merge_embedding FROM semantic_labels WHERE label_type='auxiliary' AND status='active' AND merge_embedding IS NOT NULL`，调用 `ParsePgVector` 解析每行，存入缓存
+
+#### Scenario: 缓存在标签新增时失效
+
+- **WHEN** `ResolveAuxiliaryLabel` 的 L3 阶段创建了新标签
+- **THEN** 系统 SHALL 同时清除 merge embedding 缓存和 active labels 缓存
+
+#### Scenario: 缓存在标签禁用时失效
+
+- **WHEN** `DisableAuxiliaryLabel` 被调用
+- **THEN** 系统 SHALL 同时清除 merge embedding 缓存和 active labels 缓存
+
+#### Scenario: 添加别名不影响 merge embedding 缓存
+
+- **WHEN** `addAlias` 被调用（标签的 aliases 字段变化）
+- **THEN** 系统 SHALL 清除 active labels 缓存，但保留 merge embedding 缓存（向量数据未变化）
+
+#### Scenario: parsePgVector 仅在缓存加载时调用
+
+- **WHEN** merge embedding 缓存有效，10 次 `ResolveAuxiliaryLabel` 调用发生
+- **THEN** 系统 SHALL NOT 为 merge embeddings 调用 `ParsePgVector`，直接使用缓存的 `[]float64`
 
 ### Requirement: Thread Safety
 

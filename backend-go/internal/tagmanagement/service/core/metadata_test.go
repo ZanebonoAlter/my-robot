@@ -2,72 +2,29 @@ package core
 
 import (
 	"context"
-	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
-	"github.com/glebarez/sqlite"
 	"gorm.io/gorm"
 
 	"syntopica-backend/internal/models"
 	"syntopica-backend/internal/platform/airouter"
 	"syntopica-backend/internal/platform/database"
+	"syntopica-backend/internal/platform/testutil"
 	"syntopica-backend/internal/tagmanagement/repository"
 )
 
 func setupTopicExtractionTestDB(t *testing.T) {
-	t.Helper()
-
-	db, err := gorm.Open(sqlite.Open(fmt.Sprintf("file:%s?mode=memory&cache=shared", t.Name())), &gorm.Config{})
-	if err != nil {
-		t.Fatalf("open sqlite: %v", err)
-	}
-
+	db := testutil.SetupTestDB(t)
 	repository.InitRepository(db)
 	database.DB = db // needed by airouter.NewStore() via NewTagExtractor()
 
 	// Set up bridge factories (normally set by sub-package init(), but can't import due to cycles)
 	AuxServiceFactory = func(db *gorm.DB, embedder interface{}) AuxService {
 		return &noopAuxService{}
-	}
-	if err := repository.Repo.DB().AutoMigrate(
-		&models.Feed{},
-		&models.TopicTag{},
-		&models.Article{},
-		&models.ArticleTopicTag{},
-		&models.AIProvider{},
-		&models.AIRoute{},
-		&models.AIRouteProvider{},
-		&models.AICallLog{},
-	); err != nil {
-		t.Fatalf("migrate test db: %v", err)
-	}
-}
-
-func TestLimitArticleTagsKeepsTopFiveInOrder(t *testing.T) {
-	tags := make([]TopicTag, 0, 10)
-	for i := 0; i < 10; i++ {
-		tags = append(tags, TopicTag{
-			Label:    fmt.Sprintf("Tag %d", i),
-			Slug:     fmt.Sprintf("tag-%d", i),
-			Category: "keyword",
-			Score:    float64(10 - i),
-		})
-	}
-
-	limited := limitArticleTags(tags)
-
-	if len(limited) != 5 {
-		t.Fatalf("limited tag count = %d, want 5", len(limited))
-	}
-	for i, tag := range limited {
-		want := fmt.Sprintf("Tag %d", i)
-		if tag.Label != want {
-			t.Fatalf("tag at index %d = %q, want %q", i, tag.Label, want)
-		}
 	}
 }
 

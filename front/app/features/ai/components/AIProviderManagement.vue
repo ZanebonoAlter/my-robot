@@ -88,7 +88,7 @@ const {
           </div>
           <div class="flex items-center gap-2.5">
             <AppToggle v-model="primaryProviderForm.enable_thinking" />
-            <span class="text-sm text-gray-700">启用 Thinking（推理模型的思考过程，会消耗额外 token）</span>
+            <span class="text-sm text-gray-700">清理推理输出（剥离 &lt;think&gt; 标签，适用于 llama.cpp/Qwen3 等内嵌推理的模型）</span>
           </div>
         </div>
       </div>

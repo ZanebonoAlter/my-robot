@@ -3,8 +3,10 @@ package handler
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/gin-gonic/gin"
@@ -62,4 +64,46 @@ func TestDeleteProviderRemovesUnusedProvider(t *testing.T) {
 	var count int64
 	require.NoError(t, db.Model(&models.AIProvider{}).Where("id = ?", provider.ID).Count(&count).Error)
 	require.EqualValues(t, 0, count)
+}
+
+func TestUpdateProviderClearAPIKey(t *testing.T) {
+	db := setupAIAdminTestDB(t)
+	provider := models.AIProvider{Name: "cloud", ProviderType: "openai_compatible", BaseURL: "https://api.example.com/v1", APIKey: "secret-key", Model: "gpt-4o", Enabled: true, TimeoutSeconds: 120}
+	require.NoError(t, db.Create(&provider).Error)
+
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Params = gin.Params{{Key: "provider_id", Value: fmt.Sprintf("%d", provider.ID)}}
+	ctx.Request = httptest.NewRequest(http.MethodPut, "/", nil)
+	body := fmt.Sprintf(`{"name":"cloud","base_url":"https://api.example.com/v1","model":"gpt-4o","clear_api_key":true}`)
+	ctx.Request.Body = io.NopCloser(strings.NewReader(body))
+
+	UpdateProvider(ctx)
+	require.Equal(t, http.StatusOK, recorder.Code)
+
+	var loaded models.AIProvider
+	require.NoError(t, db.First(&loaded, provider.ID).Error)
+	require.Equal(t, "", loaded.APIKey)
+}
+
+func TestUpdateProviderKeepExistingKeyWhenNoClear(t *testing.T) {
+	db := setupAIAdminTestDB(t)
+	provider := models.AIProvider{Name: "cloud", ProviderType: "openai_compatible", BaseURL: "https://api.example.com/v1", APIKey: "secret-key", Model: "gpt-4o", Enabled: true, TimeoutSeconds: 120}
+	require.NoError(t, db.Create(&provider).Error)
+
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Params = gin.Params{{Key: "provider_id", Value: fmt.Sprintf("%d", provider.ID)}}
+	ctx.Request = httptest.NewRequest(http.MethodPut, "/", nil)
+	body := fmt.Sprintf(`{"name":"cloud","base_url":"https://api.example.com/v1","model":"gpt-4o","clear_api_key":false}`)
+	ctx.Request.Body = io.NopCloser(strings.NewReader(body))
+
+	UpdateProvider(ctx)
+	require.Equal(t, http.StatusOK, recorder.Code)
+
+	var loaded models.AIProvider
+	require.NoError(t, db.First(&loaded, provider.ID).Error)
+	require.Equal(t, "secret-key", loaded.APIKey)
 }

@@ -26,6 +26,7 @@ type UpsertProviderRequest struct {
 	Temperature    *float64 `json:"temperature"`
 	EnableThinking *bool    `json:"enable_thinking"`
 	Metadata       string   `json:"metadata"`
+	ClearAPIKey    bool     `json:"clear_api_key"`
 }
 
 type UpdateRouteRequest struct {
@@ -116,7 +117,9 @@ func UpdateProvider(c *gin.Context) {
 	provider.Name = strings.TrimSpace(req.Name)
 	provider.ProviderType = strings.TrimSpace(req.ProviderType)
 	provider.BaseURL = strings.TrimSpace(req.BaseURL)
-	if strings.TrimSpace(req.APIKey) != "" {
+	if req.ClearAPIKey {
+		provider.APIKey = ""
+	} else if strings.TrimSpace(req.APIKey) != "" {
 		provider.APIKey = strings.TrimSpace(req.APIKey)
 	}
 	provider.Model = strings.TrimSpace(req.Model)

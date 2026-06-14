@@ -2,7 +2,11 @@
 
 ## Context
 
-Tag-to-board matching is the most frequently triggered heavy operation in the system. Every event tag that gets embedded automatically triggers `MatchTopicTag`, which:
+Two independent performance bottlenecks exist in the tag processing pipeline:
+
+### Bottleneck A: MatchTopicTag (版块匹配)
+
+Every event tag that gets embedded automatically triggers `MatchTopicTag`, which:
 
 1. **Loads all board auxiliaries** from `board_composition` + `semantic_labels` (full table scan)
 2. **Loads all board embeddings** and calls `parsePgVector` on each (expensive string→float64 conversion)
@@ -12,14 +16,26 @@ Tag-to-board matching is the most frequently triggered heavy operation in the sy
 
 With ~200+ boards, ~3000+ auxiliary labels, and 2560-dim embeddings, each `MatchTopicTag` call incurs 4 DB queries and ~10ms of vector parsing overhead. During backfill, this is called hundreds of times sequentially.
 
+### Bottleneck B: sqlMergeMatcher (辅助标签 L2 匹配) — 最严重
+
+`ResolveAuxiliaryLabel` 的 L2 阶段调用 `sqlMergeMatcher`，每次从 DB 加载全部活跃辅助标签的 `merge_embedding` 向量：
+
+```sql
+SELECT id, merge_embedding FROM semantic_labels WHERE id IN (...10823 IDs...)
+-- 5243ms, rows=10823, ~216 MB 传输
+```
+
+调用链：`tagArticle → AttachAuxiliaryLabels → per label → ResolveAuxiliaryLabel → sqlMergeMatcher`。一篇文章 2~5 个 tag × 1~3 个 label = 4~15 次调用 × 5.2s = **20~78 秒仅此一个查询**。
+
 Additionally, board upgrade only supports discovering new boards. The `collectCandidates` query hard-filters out labels already in `board_composition`, and `filterSemanticBoardUpgradeSuggestions` rejects `merge_into_existing` decisions from LLM. Users who want to expand existing boards have no automated path.
 
 ## Goals
 
 1. Eliminate redundant DB loads in `MatchTopicTag` via in-process caching
-2. Add "expand existing board" mode to board upgrade
-3. Parallelize backfill processing with configurable concurrency
-4. Reduce `parsePgVector` redundant calls
+2. **Eliminate redundant `sqlMergeMatcher` DB loads** via merge embedding cache (~216 MB → ~0ms on hit)
+3. Add "expand existing board" mode to board upgrade
+4. Parallelize backfill processing with configurable concurrency
+5. Reduce `parsePgVector` redundant calls
 
 ## Non-Goals
 
@@ -35,14 +51,22 @@ Additionally, board upgrade only supports discovering new boards. The `collectCa
 
 **Decision:** Use a simple Go struct with `sync.RWMutex`, `map`, and `time.Time` per cache entry. No external dependencies.
 
-**Four cache entries:**
+**Six cache entries across two services:**
+
+*BoardMatchCache* (owned by `SemanticBoardMatchingService`):
 
 | Cache | Key Type | Value | Invalidation |
 |-------|----------|-------|-------------|
 | Board auxiliaries | `"all"` | `[]boardAuxiliaryLabel` | On board upgrade confirm / board composition change |
 | Board embeddings | `"all"` | `map[uint][]float64` | On board upgrade confirm / board composition change |
 | AI config | `"config"` | `SemanticBoardMatchConfig` | TTL 5 min |
-| Active auxiliary labels | `"auxiliary_labels"` | `[]models.SemanticLabel` | TTL 5 min |
+
+*AuxLabelCache* (owned by `AuxiliaryLabelService`, see D6):
+
+| Cache | Key Type | Value | Invalidation |
+|-------|----------|-------|-------------|
+| Active auxiliary labels | `"all"` | `[]models.SemanticLabel` | TTL 5 min + event-based (create/disable) |
+| Merge embeddings | `"all"` | `map[uint][]float64` | TTL 10 min + event-based (create/disable) |
 
 **Why not `sync.Map`**: We need read-heavy concurrency with occasional writes. `RWMutex` + typed map gives zero-allocation reads and type safety.
 
@@ -50,9 +74,15 @@ Additionally, board upgrade only supports discovering new boards. The `collectCa
 
 **Why event-based for board data**: Board auxiliaries/embeddings only change on upgrade confirm, which is a known code path. Event-based gives instant consistency.
 
-**Location:** New file `semantic_board_cache.go` in the tagging domain. Cache instance owned by `SemanticBoardMatchingService` (injected).
+**Why event-based for board data + merge embeddings**: Board auxiliaries/embeddings only change on upgrade confirm. Merge embeddings only change on label create/disable. Both are known code paths — event-based gives instant consistency.
 
-**Invalidation trigger:** `ConfirmSuggestion` calls `cache.InvalidateBoardData()` after DB transaction commits.
+**Locations:**
+- BoardMatchCache: New file `semantic_board_cache.go` in the tagging domain. Cache instance owned by `SemanticBoardMatchingService`.
+- AuxLabelCache: Inline in `auxiliary_label_service.go`. Cache instance owned by `AuxiliaryLabelService`.
+
+**Invalidation triggers:**
+- BoardMatchCache: `ConfirmSuggestion` calls `cache.InvalidateBoardData()` after DB transaction commits.
+- AuxLabelCache: `ResolveAuxiliaryLabel` (L3 create) / `DisableAuxiliaryLabel` / `addAlias` call respective invalidation methods.
 
 ### D2: Board Upgrade Dual Mode — Mode Parameter on `suggestUpgrades` API
 
@@ -115,6 +145,86 @@ Cached flow: First call loads + parses; subsequent calls return cached `map[uint
 
 No changes to `parsePgVector` itself — just ensure it's called only on cache miss.
 
+Same principle applies to merge embedding cache (D6) — `ParsePgVector` called once on cache miss, cached result reused.
+
+### D6: Merge Embedding Cache — `AuxiliaryLabelService` 内部缓存
+
+**Decision:** 在 `AuxiliaryLabelService` 中新增 `auxLabelCache` 结构，同时缓存 `activeLabels`（Task 3）和 `mergeEmbeddings`。两个缓存共享同一把 `sync.RWMutex`，在标签新增/禁用时统一失效。
+
+```go
+type auxLabelCache struct {
+    mu sync.RWMutex
+
+    // 标签元数据缓存 (Task 3 复用)
+    activeLabels     []models.SemanticLabel
+    activeLabelsAt   time.Time
+    activeLabelsTTL  = 5 * time.Minute
+
+    // merge embedding 向量缓存 (新增)
+    mergeEmbeddings     map[uint][]float64  // labelID → parsed vector
+    mergeEmbeddingsAt   time.Time
+    mergeEmbeddingsTTL  = 10 * time.Minute
+}
+```
+
+**Why in `AuxiliaryLabelService` not `boardCache`:** 职责内聚 — `sqlMergeMatcher` 和 `loadActiveAuxiliaryLabels` 都在 `AuxiliaryLabelService` 中，缓存应由同一 service 管理。避免跨服务依赖。
+
+**Why TTL 10 min (比 activeLabels 长):** merge embedding 向量变化频率更低（仅新增/禁用标签时变化），更长的 TTL 减少 216 MB 传输的频率。
+
+**Why 200 MB 常驻内存可接受:** 单用户系统，内存充裕。200 MB 换取 5.2s → ~0ms 的提速，ROI 极高。
+
+**Invalidation matrix:**
+
+| Event | activeLabels | mergeEmbeddings | 原因 |
+|-------|-------------|-----------------|------|
+| L3 新增标签 | 失效 | 失效 | 新 ID + 新 vector |
+| DisableAuxiliaryLabel | 失效 | 失效 | ID 集合变化 |
+| addAlias | 失效 | **保留** | vector 不变 |
+| TTL 过期 | 重新加载 | 重新加载 | 兜底 |
+
+**Cache loading flow:**
+
+```
+getOrLoadMergeEmbeddings(ctx)
+  ├─ cache hit (TTL 内): return cached map[uint][]float64  ~0ms
+  └─ cache miss:
+       ├─ SELECT id, merge_embedding FROM semantic_labels
+       │   WHERE label_type='auxiliary' AND status='active'
+       │   AND merge_embedding IS NOT NULL
+       ├─ ParsePgVector × N
+       ├─ store map[uint][]float64 in cache
+       └─ return  ~5.2s (首次)
+```
+
+**Simplified `sqlMergeMatcher`:**
+
+```go
+func (s *AuxiliaryLabelService) sqlMergeMatcher(ctx context.Context, labels []models.SemanticLabel, _ string, mergeVector []float64) (*models.SemanticLabel, error) {
+    embeddings, err := s.getOrLoadMergeEmbeddings(ctx)
+    if err != nil {
+        return nil, err
+    }
+
+    var best *models.SemanticLabel
+    for _, label := range labels {
+        existingVec, ok := embeddings[label.ID]
+        if !ok {
+            continue
+        }
+        sim, err := airouter.CosineSimilarity(mergeVector, existingVec)
+        if err != nil || sim < auxiliaryLabelMergeThreshold {
+            continue
+        }
+        if best == nil || label.RefCount > best.RefCount || (label.RefCount == best.RefCount && label.ID < best.ID) {
+            best = &label
+        }
+    }
+    return best, nil
+}
+```
+
+No DB query on cache hit. Cosine similarity computed entirely in memory against cached vectors.
+
 ### D5: API Changes Summary
 
 | Endpoint | Change |
@@ -133,7 +243,8 @@ No new endpoints. No schema changes.
 
 ### Memory Pressure
 - **Risk:** Board auxiliaries + embeddings cached in-process. With ~200 boards × 2560 dims × 8 bytes = ~4 MB. Negligible.
-- **Mitigation:** None needed. Single-user system, memory footprint is trivial.
+- **Additional:** Merge embedding cache adds ~200 MB (10K labels × 2560 dims × 8 bytes).
+- **Mitigation:** Single-user system with ample memory. 200 MB is acceptable for 5.2s → ~0ms improvement. If memory becomes a concern, could add LRU eviction or reduce TTL.
 
 ### Concurrency During Backfill
 - **Risk:** 4 concurrent `MatchTopicTag` calls each hit DB for tag-specific data (tag auxiliaries, tag embedding). These are per-tag queries and cannot be cached globally.

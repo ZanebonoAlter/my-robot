@@ -2,27 +2,20 @@ package auxlabel
 
 import (
 	"context"
-	"fmt"
-	"strings"
 	"testing"
 
-	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 
 	"syntopica-backend/internal/models"
+	"syntopica-backend/internal/platform/testutil"
 	"syntopica-backend/internal/tagmanagement/repository"
 	"syntopica-backend/internal/tagmanagement/service/core"
 )
 
 func setupAuxiliaryLabelTestDB(t *testing.T) *gorm.DB {
-	t.Helper()
-
-	db, err := gorm.Open(sqlite.Open(fmt.Sprintf("file:%s?mode=memory&cache=shared", strings.ReplaceAll(t.Name(), "/", "_"))), &gorm.Config{})
-	require.NoError(t, err)
-	require.NoError(t, db.Exec("PRAGMA foreign_keys = ON").Error)
+	db := testutil.SetupTestDB(t)
 	repository.InitRepository(db)
-	require.NoError(t, db.AutoMigrate(&models.TopicTag{}, &models.SemanticLabel{}, &models.TopicTagSemanticLabel{}, &models.TopicTagBoardLabel{}, &models.BoardComposition{}))
 	return db
 }
 
@@ -35,11 +28,12 @@ func (e *recordingAuxiliaryEmbedder) embed(ctx context.Context, input string, mo
 	e.calls = append(e.calls, input)
 	if e.vectors != nil {
 		if vec, ok := e.vectors[input]; ok {
-			return core.FloatsToPgVector(vec), vec, nil
+			padded := testutil.PadVector(vec, testutil.TestEmbeddingDim)
+			return core.FloatsToPgVector(padded), padded, nil
 		}
 	}
-	vec := []float64{1, 0, 0}
-	return core.FloatsToPgVector(vec), vec, nil
+	padded := testutil.PadVector([]float64{1, 0, 0}, testutil.TestEmbeddingDim)
+	return core.FloatsToPgVector(padded), padded, nil
 }
 
 func TestAuxiliaryLabelServiceL1SlugAndAliasExactMatch(t *testing.T) {
@@ -60,7 +54,7 @@ func TestAuxiliaryLabelServiceExcludesDisabledLabels(t *testing.T) {
 	db := setupAuxiliaryLabelTestDB(t)
 	disabled := models.SemanticLabel{Label: "OpenAI", Slug: "openai", LabelType: "auxiliary", Status: "disabled", Aliases: []string{"Open AI"}}
 	require.NoError(t, db.Create(&disabled).Error)
-	disabledVec := core.FloatsToPgVector([]float64{1, 0, 0})
+	disabledVec := core.FloatsToPgVector(testutil.PadVector([]float64{1, 0, 0}, testutil.TestEmbeddingDim))
 	disabledCandidate := models.SemanticLabel{Label: "OpenAI Candidate", Slug: "openai-candidate", LabelType: "auxiliary", Status: "disabled", Embedding: &disabledVec}
 	require.NoError(t, db.Create(&disabledCandidate).Error)
 	embedder := &recordingAuxiliaryEmbedder{vectors: map[string][]float64{"OpenAI": {0, 1, 0}}}
@@ -171,7 +165,7 @@ func TestAuxiliaryLabelServiceRemoveBoardCompositionDeletesOnlyRequestedRow(t *t
 
 func TestAuxiliaryLabelServiceL2MergeKeepsHigherRefCountAndAppendsAlias(t *testing.T) {
 	db := setupAuxiliaryLabelTestDB(t)
-	existingVec := core.FloatsToPgVector([]float64{1, 0, 0})
+	existingVec := core.FloatsToPgVector(testutil.PadVector([]float64{1, 0, 0}, testutil.TestEmbeddingDim))
 	lowRef := models.SemanticLabel{Label: "GPT-5", Slug: "gpt-5", LabelType: "auxiliary", Status: "active", RefCount: 1, MergeEmbedding: &existingVec}
 	require.NoError(t, db.Create(&lowRef).Error)
 	highRef := models.SemanticLabel{Label: "GPT-5 High Ref", Slug: "gpt-5-high-ref", LabelType: "auxiliary", Status: "active", RefCount: 9, MergeEmbedding: &existingVec}

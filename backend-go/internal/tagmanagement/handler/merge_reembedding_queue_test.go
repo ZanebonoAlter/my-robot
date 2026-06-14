@@ -2,47 +2,23 @@ package handler
 
 import (
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"sync"
 	"testing"
 
 	"github.com/gin-gonic/gin"
-	"github.com/glebarez/sqlite"
 	"gorm.io/gorm"
 
 	"syntopica-backend/internal/models"
+	"syntopica-backend/internal/platform/testutil"
 	"syntopica-backend/internal/tagmanagement/repository"
 	"syntopica-backend/internal/tagmanagement/service"
 )
 
 func setupMergeReembeddingTestDB(t *testing.T) *gorm.DB {
-	t.Helper()
-
-	db, err := gorm.Open(sqlite.Open(fmt.Sprintf("file:%s?mode=memory&cache=shared", strings.ReplaceAll(t.Name(), "/", "_"))), &gorm.Config{})
-	if err != nil {
-		t.Fatalf("open sqlite: %v", err)
-	}
-
+	db := testutil.SetupTestDB(t)
 	repository.InitRepository(db)
-
-	if err := db.AutoMigrate(
-		&models.TopicTag{},
-		&models.TopicTagEmbedding{},
-		&models.TopicTagRelation{},
-		&models.EmbeddingConfig{},
-		&models.MergeReembeddingQueue{},
-		&models.Article{},
-		&models.ArticleTopicTag{},
-	); err != nil {
-		t.Fatalf("migrate test tables: %v", err)
-	}
-
-	if err := db.Exec(`CREATE TABLE article_feeds (article_id INTEGER NOT NULL, feed_id INTEGER NOT NULL)`).Error; err != nil {
-		t.Fatalf("create article_feeds: %v", err)
-	}
 
 	mergeQueueService = nil
 	mergeQueueServiceOnce = sync.Once{}

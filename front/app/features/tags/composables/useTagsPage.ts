@@ -105,10 +105,10 @@ export function useTagsPage() {
     upgradeLoading.value = false
   }
 
-  async function handleSuggestUpgrade() {
+  async function handleSuggestUpgrade(mode: string) {
     upgradeSuggesting.value = true
     upgradeBackfillNotice.value = false
-    const res = await sbApi.suggestUpgrade()
+    const res = await sbApi.suggestUpgrade(mode)
     if (res.success && res.data) {
       upgradeSuggestions.value = res.data.suggestions
     }

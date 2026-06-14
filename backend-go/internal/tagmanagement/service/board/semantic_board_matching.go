@@ -18,14 +18,15 @@ import (
 )
 
 type SemanticBoardMatchingService struct {
-	db *gorm.DB
+	db    *gorm.DB
+	cache *boardCache
 }
 
 func NewSemanticBoardMatchingService(db *gorm.DB) *SemanticBoardMatchingService {
 	if db == nil {
 		db = repository.Repo.DB()
 	}
-	return &SemanticBoardMatchingService{db: db}
+	return &SemanticBoardMatchingService{db: db, cache: packageBoardCache}
 }
 
 var (
@@ -93,10 +94,15 @@ func (s *SemanticBoardMatchingService) MatchTopicTag(ctx context.Context, topicT
 		return []SemanticBoardMatchResult{}, s.replaceTopicTagBoardLabels(ctx, topicTagID, nil)
 	}
 
+	boardAuxiliariesFiltered := filterBoardAuxiliaries(boardAuxiliaries, config.DirectHitMinOverlap)
+	if len(boardAuxiliariesFiltered) == 0 {
+		return []SemanticBoardMatchResult{}, s.replaceTopicTagBoardLabels(ctx, topicTagID, nil)
+	}
+
 	tagEmbedding, _ := s.LoadTagIdentityEmbedding(ctx, topicTagID)
 	boardEmbeddings, _ := s.loadBoardEmbeddings(ctx)
 
-	matches := evaluateSemanticBoardMatches(tagAuxiliaries, boardAuxiliaries, config, tagEmbedding, boardEmbeddings)
+	matches := evaluateSemanticBoardMatches(tagAuxiliaries, boardAuxiliariesFiltered, config, tagEmbedding, boardEmbeddings)
 	if len(matches) > config.MaxBoards {
 		matches = matches[:config.MaxBoards]
 	}
@@ -117,6 +123,9 @@ func (s *SemanticBoardMatchingService) LoadTagAuxiliaries(ctx context.Context, t
 }
 
 func (s *SemanticBoardMatchingService) loadBoardAuxiliaries(ctx context.Context) ([]BoardAuxiliaryLabel, error) {
+	if cached, ok := s.cache.GetBoardAuxiliaries(); ok {
+		return cached, nil
+	}
 	var labels []BoardAuxiliaryLabel
 	err := s.db.WithContext(ctx).
 		Table("board_composition").
@@ -124,7 +133,11 @@ func (s *SemanticBoardMatchingService) loadBoardAuxiliaries(ctx context.Context)
 		Joins("JOIN semantic_labels AS board ON board.id = board_composition.board_id AND board.label_type = ? AND board.status = ?", "board", "active").
 		Joins("JOIN semantic_labels AS auxiliary ON auxiliary.id = board_composition.auxiliary_label_id AND auxiliary.label_type = ? AND auxiliary.status = ?", "auxiliary", "active").
 		Scan(&labels).Error
-	return labels, err
+	if err != nil {
+		return nil, err
+	}
+	s.cache.SetBoardAuxiliaries(labels)
+	return labels, nil
 }
 
 func (s *SemanticBoardMatchingService) LoadTagIdentityEmbedding(ctx context.Context, topicTagID uint) ([]float64, error) {
@@ -145,6 +158,9 @@ func (s *SemanticBoardMatchingService) LoadTagIdentityEmbedding(ctx context.Cont
 }
 
 func (s *SemanticBoardMatchingService) loadBoardEmbeddings(ctx context.Context) (map[uint][]float64, error) {
+	if cached, ok := s.cache.GetBoardEmbeddings(); ok {
+		return cached, nil
+	}
 	type boardEmbeddingRow struct {
 		ID        uint    `gorm:"column:id"`
 		Embedding *string `gorm:"column:embedding"`
@@ -169,6 +185,7 @@ func (s *SemanticBoardMatchingService) loadBoardEmbeddings(ctx context.Context) 
 		}
 		result[row.ID] = vec
 	}
+	s.cache.SetBoardEmbeddings(result)
 	return result, nil
 }
 
@@ -361,6 +378,32 @@ func ComputeMatchDetail(tagAuxiliaries []models.SemanticLabel, boardAuxiliaries 
 	return detail
 }
 
+func filterBoardAuxiliaries(auxiliaries []BoardAuxiliaryLabel, minAuxiliaries int) []BoardAuxiliaryLabel {
+	if minAuxiliaries <= 1 {
+		return auxiliaries
+	}
+	counts := make(map[uint]int)
+	for _, a := range auxiliaries {
+		counts[a.BoardID]++
+	}
+	valid := make(map[uint]struct{})
+	for boardID, count := range counts {
+		if count >= minAuxiliaries {
+			valid[boardID] = struct{}{}
+		}
+	}
+	if len(valid) == len(counts) {
+		return auxiliaries
+	}
+	filtered := make([]BoardAuxiliaryLabel, 0, len(auxiliaries))
+	for _, a := range auxiliaries {
+		if _, ok := valid[a.BoardID]; ok {
+			filtered = append(filtered, a)
+		}
+	}
+	return filtered
+}
+
 func countDirectSemanticBoardHits(tagAuxiliaryIDs map[uint]struct{}, boardAuxiliaries []BoardAuxiliaryLabel) int {
 	count := 0
 	for _, auxiliary := range boardAuxiliaries {
@@ -426,6 +469,9 @@ func (s *SemanticBoardMatchingService) replaceTopicTagBoardLabels(ctx context.Co
 }
 
 func (s *SemanticBoardMatchingService) LoadConfig(ctx context.Context) SemanticBoardMatchConfig {
+	if cached, ok := s.cache.GetConfig(); ok {
+		return *cached
+	}
 	config := SemanticBoardMatchConfig{
 		SimThreshold:           0.72,
 		DirectHitRate:          0.5,
@@ -490,6 +536,7 @@ func (s *SemanticBoardMatchingService) LoadConfig(ctx context.Context) SemanticB
 			config.DirectionSimThreshold = parseSemanticBoardMatchFloat(setting.Value, config.DirectionSimThreshold)
 		}
 	}
+	s.cache.SetConfig(config)
 	return config
 }
 

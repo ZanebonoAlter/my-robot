@@ -4,11 +4,13 @@ import (
 	"context"
 	"fmt"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
+	"golang.org/x/sync/errgroup"
 	"gorm.io/gorm"
 
 	"syntopica-backend/internal/models"
@@ -258,20 +260,33 @@ func (s *SemanticBoardBackfillService) processJob(ctx context.Context, jobID str
 		return
 	}
 
+	// Load concurrency config
+	concurrency := 4
+	var setting models.AISettings
+	if err := s.db.WithContext(ctx).Where("key = ?", "semantic_board_backfill_concurrency").First(&setting).Error; err == nil {
+		if n, err := strconv.Atoi(setting.Value); err == nil && n > 0 {
+			concurrency = n
+		}
+	}
+
 	s.mu.RLock()
 	topicTagIDs := append([]uint(nil), s.jobs[jobID].topicTagIDs...)
 	s.mu.RUnlock()
 
+	g, gctx := errgroup.WithContext(ctx)
+	g.SetLimit(concurrency)
+
 	for _, topicTagID := range topicTagIDs {
-		if err := ctx.Err(); err != nil {
-			s.recordFailure(jobID, topicTagID, err)
-			break
-		}
-		if _, err := s.matcher.MatchTopicTag(ctx, topicTagID); err != nil {
-			s.recordFailure(jobID, topicTagID, err)
-		}
-		s.markProcessed(jobID)
+		topicTagID := topicTagID
+		g.Go(func() error {
+			if _, err := s.matcher.MatchTopicTag(gctx, topicTagID); err != nil {
+				s.recordFailure(jobID, topicTagID, err)
+			}
+			s.markProcessed(jobID)
+			return nil // never cancel group for individual failures
+		})
 	}
+	_ = g.Wait()
 
 	s.markCompleted(jobID)
 }

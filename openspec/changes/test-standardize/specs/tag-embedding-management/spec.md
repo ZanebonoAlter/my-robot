@@ -6,9 +6,9 @@ Delta spec for `tag-embedding-management`: migrate all tagmanagement embedding-r
 
 ## Requirements
 
-### Requirement: 所有 tagmanagement SQLite 测试迁移到 Postgres
+### Requirement: 所有 tagmanagement 测试迁移到 Postgres
 
-`internal/tagmanagement/` 下全部 12 个 SQLite 测试文件 SHALL 使用 `testutil.SetupTestDB(t)` 替代 SQLite 内存数据库。迁移文件列表：
+`internal/tagmanagement/` 下全部 14 个测试文件 SHALL 使用 `testutil.SetupTestDB(t)` 替代各自的 SQLite setup 函数。其中 13 个直接 import `glebarez/sqlite`，另 1 个（`semantic_board_backfill_test.go`）间接复用即将删除的 `setupSemanticBoardMatchingTestDB`。迁移文件列表：
 
 - `repository/tagger_embedding_test.go`
 - `repository/tag_job_queue_test.go`

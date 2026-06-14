@@ -40,7 +40,7 @@
 
 | 字段 | 类型 | 必填 | 说明 |
 |------|------|------|------|
-| `api_key` | string | 是 | API Key |
+| `api_key` | string | 否 | API Key（本地无认证服务可留空） |
 | `base_url` | string | 否 | 默认 `https://api.openai.com/v1` |
 | `model` | string | 否 | 默认 `gpt-4o-mini` |
 
@@ -87,13 +87,14 @@
 | `timeout_seconds` | int | 否 | 超时 |
 | `max_tokens` | int* | 否 | 最大 tokens |
 | `temperature` | float64* | 否 | 温度 |
+| `enable_thinking` | bool | 否 | 清理推理输出（剥离 `<think>` 标签），默认 `false` |
 | `metadata` | string | 否 | 附加元数据 |
 
 返回 `{"success": true, "data": {"id": ...}}`。
 
 ### PUT /api/ai/providers/:provider_id
 
-同上。`api_key` 仅非空时更新。
+同上。`api_key` 仅非空时更新；传 `clear_api_key: true` 可显式清空已保存的密钥。
 
 ### DELETE /api/ai/providers/:provider_id
 

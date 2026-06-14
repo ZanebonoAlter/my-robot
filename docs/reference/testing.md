@@ -14,9 +14,14 @@
 
 ### 后端（Go）
 
-测试使用标准 `testing` 包和 `github.com/stretchr/testify` 断言。每个测试文件以 `*_test.go` 形式与源码放在一起。多数测试通过 `gorm.Open(sqlite.Open("file:...?mode=memory&cache=shared"))` 创建内存 SQLite 数据库，并自动迁移所需模型，因此不需要外部数据库。
+测试使用标准 `testing` 包和 `github.com/stretchr/testify` 断言。每个测试文件以 `*_test.go` 形式与源码放在一起。
 
-> **说明**：单元测试使用内存 SQLite（通过 `glebarez/sqlite` 驱动）纯粹是为了测试隔离——无需启动外部数据库即可快速运行。生产环境**仅使用 PostgreSQL**，代码中不包含 SQLite 生产的任何路径。
+- **单元测试**（`*_unit_test.go`）：纯逻辑，无数据库依赖，`go test -short` 下运行。
+- **集成测试**（`*_test.go`）：通过 `testutil.SetupTestDB(t)` 连接到一个**由 testcontainers-go 启动的隔离 pgvector Postgres 容器**（镜像 `pgvector/pgvector:pg18-trixie`，与生产同构）。容器按测试进程启动一次、进程退出时由 Ryuk sidecar 自动销毁。
+
+> ⚠️ **安全约定（事故教训）**：`testutil` 包**没有**默认 DSN，也**不读取**任何环境变量（包括历史上的 `TEST_DB_DSN`）。它只能启动隔离容器，无法连接到 `docker-compose.pg.yml` 跑的开发库（那正是生产数据所在）。早期版本曾通过默认 DSN 连到开发库并执行 `TRUNCATE`/`DROP TABLE`，导致业务数据被清空——该路径已彻底移除。**禁止**重新引入任何「默认数据库连接」或「env 覆盖」机制。
+>
+> 部分 package（reader/admin/topicgraph）仍使用内存 SQLite（`glebarez/sqlite`），仅用于无 pgvector 依赖的 CRUD 测试。
 
 ### 前端单元（Vitest）
 
@@ -179,9 +184,58 @@ python test_firecrawl_integration.py
 - **后端**：Go 测试命令中没有 `cover` 配置文件或阈值标志。
 - **集成**：`pytest-cov` 在 `tests/workflow/requirements.txt` 中列为依赖。使用 `pytest --cov=. --cov-report=html` 生成报告。
 
+## 后端测试分层约定
+
+### 测试层级
+
+| 层级 | 运行方式 | 需要 Docker | 说明 |
+|------|----------|-------------|------|
+| **单元测试** | `go test -short ./...` | 否 | 快速运行，跳过集成测试 |
+| **集成测试** | `go test ./...` | 是（Docker） | testcontainers-go 自动启动隔离 pgvector 容器，无需手动配置 |
+
+### 文件命名约定
+
+| 文件后缀 | 类型 | 说明 |
+|----------|------|------|
+| `xxx_test.go` | 集成测试 | 默认需要数据库，使用 `testutil.SetupTestDB(t)` |
+| `xxx_unit_test.go` | 单元测试 | 纯逻辑测试，无需外部依赖 |
+
+### `testutil.SetupTestDB` 使用模式
+
+集成测试的标准入口函数，负责：
+
+1. **跳过单元模式**：运行 `-short` 时自动跳过
+2. **启动隔离容器**：通过 testcontainers-go 启动一次性 pgvector 容器（进程级单例，首次调用启动，后续复用）
+3. **自动迁移**：容器启动后执行一次全量领域模型迁移（`RunAutoMigrate`）
+4. **清理数据**：每次测试前 `TRUNCATE` 所有表（容器本身是空库，无 DROP 操作）
+5. **设置全局 DB**：兼容生产代码的 `database.DB`
+
+**使用示例：**
+
+```go
+func TestSomethingIntegration(t *testing.T) {
+    db := testutil.SetupTestDB(t)
+    // db 已连接、已迁移、已清空
+    // ... 测试逻辑
+}
+```
+
+**单元测试示例：**
+
+```go
+// xxx_unit_test.go
+func TestSomethingUnit(t *testing.T) {
+    // 纯逻辑测试，不调用 SetupTestDB
+    // ... 测试逻辑
+}
+```
+
 ## CI 集成
 
-当前没有配置 CI/CD 流水线。仓库中没有 `.github/workflows/` 文件。
+CI 工作流位于 `.github/workflows/test-ci.yml`，包含两个独立任务：
+
+- **Unit**：`go test -short ./...`（无需 Docker）
+- **Integration**：`go test ./...`（testcontainers-go 在 runner 上自动启动隔离 pgvector 容器，runner 自带 Docker，无需 service container）
 
 所有测试本地运行：
 

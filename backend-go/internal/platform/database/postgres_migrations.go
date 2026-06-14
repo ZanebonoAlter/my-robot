@@ -349,11 +349,20 @@ func postgresMigrations() []Migration {
 				indexes := []string{
 					"CREATE INDEX IF NOT EXISTS idx_daily_report_threads_report_id ON daily_report_threads(report_id)",
 					"CREATE INDEX IF NOT EXISTS idx_daily_report_threads_section_id ON daily_report_threads(section_id)",
-					"CREATE INDEX IF NOT EXISTS idx_daily_report_threads_prev_thread_id ON daily_report_threads(prev_thread_id) WHERE prev_thread_id IS NOT NULL",
 				}
 				for _, s := range indexes {
 					if err := db.Exec(s).Error; err != nil {
 						return fmt.Errorf("daily_report_threads index: %w", err)
+					}
+				}
+				// prev_thread_id index — only if column exists (dropped in later migration)
+				var colExists bool
+				if err := db.Raw(`SELECT EXISTS (
+					SELECT 1 FROM information_schema.columns
+					WHERE table_name = 'daily_report_threads' AND column_name = 'prev_thread_id'
+				)`).Scan(&colExists).Error; err == nil && colExists {
+					if err := db.Exec("CREATE INDEX IF NOT EXISTS idx_daily_report_threads_prev_thread_id ON daily_report_threads(prev_thread_id) WHERE prev_thread_id IS NOT NULL").Error; err != nil {
+						return fmt.Errorf("daily_report_threads prev_thread_id index: %w", err)
 					}
 				}
 				return nil
@@ -519,16 +528,22 @@ func postgresMigrations() []Migration {
 					return fmt.Errorf("add unique constraint: %w", err)
 				}
 
-				// 2. Migrate existing prev_section_id data into relations
-				if err := db.Exec(`
-					INSERT INTO daily_report_section_relations (from_section_id, to_section_id, distance, created_at)
-					SELECT ps.id, s.id, 0.0, NOW()
-					FROM daily_report_sections s
-					JOIN daily_report_sections ps ON ps.id = s.prev_section_id
-					WHERE s.prev_section_id IS NOT NULL
-					ON CONFLICT (from_section_id, to_section_id) DO NOTHING
-				`).Error; err != nil {
-					logging.Warnf("migration: migrate prev_section_id data: %v", err)
+				// 2. Migrate existing prev_section_id data into relations (if column exists)
+				var prevColExists bool
+				if err := db.Raw(`SELECT EXISTS (
+					SELECT 1 FROM information_schema.columns
+					WHERE table_name = 'daily_report_sections' AND column_name = 'prev_section_id'
+				)`).Scan(&prevColExists).Error; err == nil && prevColExists {
+					if err := db.Exec(`
+						INSERT INTO daily_report_section_relations (from_section_id, to_section_id, distance, created_at)
+						SELECT ps.id, s.id, 0.0, NOW()
+						FROM daily_report_sections s
+						JOIN daily_report_sections ps ON ps.id = s.prev_section_id
+						WHERE s.prev_section_id IS NOT NULL
+						ON CONFLICT (from_section_id, to_section_id) DO NOTHING
+					`).Error; err != nil {
+						logging.Warnf("migration: migrate prev_section_id data: %v", err)
+					}
 				}
 
 				// 3. Drop prev_section_id column

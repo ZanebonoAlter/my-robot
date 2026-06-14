@@ -13,10 +13,12 @@ const props = defineProps<{
 }>()
 
 const emit = defineEmits<{
-  suggest: []
+  suggest: [mode: string]
   execute: [suggestion: UpgradeSuggestion, index: number]
   cancel: []
 }>()
+
+const upgradeMode = ref<'discover_new' | 'expand_existing'>('discover_new')
 
 const openMergeIndex = ref<number | null>(null)
 
@@ -78,12 +80,22 @@ function decisionStyle(d: string): { border: string; bg: string; color: string }
             <Icon icon="mdi:information-outline" width="14" />
             <span>已执行升级建议。历史标签归属不会自动回填，可手动触发匹配回填让新构成生效。</span>
           </div>
+          <div v-if="candidates.length > 0" class="usp-mode-selector">
+            <label class="usp-mode-option">
+              <input v-model="upgradeMode" type="radio" value="discover_new" />
+              <span>发现新版块</span>
+            </label>
+            <label class="usp-mode-option">
+              <input v-model="upgradeMode" type="radio" value="expand_existing" />
+              <span>扩充已有版块</span>
+            </label>
+          </div>
           <button
             v-if="candidates.length > 0"
             type="button"
             class="usp-suggest-btn"
             :disabled="suggesting"
-            @click="emit('suggest')"
+            @click="emit('suggest', upgradeMode)"
           >
             <Icon v-if="suggesting" icon="mdi:loading" width="14" class="animate-spin" />
             <Icon v-else icon="mdi:brain" width="14" />
@@ -98,7 +110,7 @@ function decisionStyle(d: string): { border: string; bg: string; color: string }
               type="button"
               class="usp-suggest-btn usp-suggest-btn--small"
               :disabled="suggesting"
-              @click="emit('suggest')"
+              @click="emit('suggest', upgradeMode)"
             >
               <Icon v-if="suggesting" icon="mdi:loading" width="13" class="animate-spin" />
               <Icon v-else icon="mdi:refresh" width="13" />
@@ -313,6 +325,27 @@ function decisionStyle(d: string): { border: string; bg: string; color: string }
   padding: 2rem 0;
   color: var(--color-text-muted);
   font-size: 0.8rem;
+}
+
+.usp-mode-selector {
+  display: flex;
+  gap: 1rem;
+  justify-content: center;
+}
+
+.usp-mode-option {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.75rem;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+}
+
+.usp-mode-option input[type="radio"] {
+  accent-color: var(--color-accent);
+  width: 14px;
+  height: 14px;
 }
 
 .usp-suggest-btn {

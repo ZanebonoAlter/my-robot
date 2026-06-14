@@ -63,5 +63,6 @@ export interface AIProviderUpsertRequest {
   temperature?: number | null
   enable_thinking?: boolean
   metadata?: string
+  clear_api_key?: boolean
 }
 

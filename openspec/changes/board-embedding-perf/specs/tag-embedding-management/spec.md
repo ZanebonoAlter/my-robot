@@ -1,6 +1,6 @@
 ## Purpose (Delta from `tag-embedding-management`)
 
-优化 `parsePgVector` 调用，通过 board embeddings 缓存消除重复解析。
+优化 `parsePgVector` 调用，通过 board embeddings 缓存和 merge embeddings 缓存消除重复解析。
 
 ## Requirements
 
@@ -17,6 +17,20 @@ Board embeddings 缓存 SHALL 存储 `map[uint][]float64`（已解析的 float64
 
 - **WHEN** 10 次 `MatchTopicTag` 调用发生在缓存有效期内
 - **THEN** 系统 SHALL NOT 为 board embeddings 调用 `parsePgVector`，直接使用缓存的 `[]float64`
+
+### Requirement: Merge Embeddings 缓存存储已解析数据
+
+Merge embedding 缓存（`AuxiliaryLabelService` 内）SHALL 存储 `map[uint][]float64`（已解析的 float64 切片），而非原始 pgvector 字符串。缓存加载时执行 `ParsePgVector`，后续读取直接使用解析结果。
+
+#### Scenario: ParsePgVector called once per merge embedding cache load
+
+- **WHEN** merge embedding 缓存首次加载（或失效后重新加载），DB 中有 10K 个活跃辅助标签
+- **THEN** 系统 SHALL 调用 `ParsePgVector` 恰好 10K 次（每个 merge_embedding 一次），结果存入缓存
+
+#### Scenario: Subsequent sqlMergeMatcher calls skip ParsePgVector
+
+- **WHEN** 10 次 `ResolveAuxiliaryLabel` L2 调用发生在缓存有效期内
+- **THEN** 系统 SHALL NOT 为 merge embeddings 调用 `ParsePgVector`，直接使用缓存的 `[]float64`
 
 ### Requirement: Tag Embedding 不缓存
 

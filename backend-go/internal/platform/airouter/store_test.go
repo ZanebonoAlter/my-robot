@@ -51,3 +51,24 @@ func TestStoreLoadRouteWithProvidersReturnsErrorWhenMissing(t *testing.T) {
 	require.Nil(t, loadedRoute)
 	require.Nil(t, providers)
 }
+
+func TestUpsertProviderOpenAICompatibleEmptyKeyAllowed(t *testing.T) {
+	db := setupAIRouterTestDB(t)
+	store := NewStore(db)
+
+	provider := &models.AIProvider{
+		Name:         "local-llama",
+		ProviderType: ProviderTypeOpenAICompatible,
+		BaseURL:      "http://localhost:8080/v1",
+		APIKey:       "",
+		Model:        "qwen3-8b",
+		Enabled:      true,
+	}
+	err := store.UpsertProvider(provider)
+	require.NoError(t, err)
+	require.NotZero(t, provider.ID)
+
+	var loaded models.AIProvider
+	require.NoError(t, db.First(&loaded, provider.ID).Error)
+	require.Equal(t, "", loaded.APIKey)
+}

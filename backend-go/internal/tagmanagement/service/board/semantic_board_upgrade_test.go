@@ -3,16 +3,15 @@ package board
 import (
 	"context"
 	"fmt"
-	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
 
-	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 
 	"syntopica-backend/internal/models"
+	"syntopica-backend/internal/platform/testutil"
 	"syntopica-backend/internal/tagmanagement/repository"
 	"syntopica-backend/internal/tagmanagement/service/core"
 )
@@ -32,13 +31,8 @@ func (f *fakeSemanticBoardUpgradeLLM) SuggestSemanticBoardUpgrades(ctx context.C
 }
 
 func setupSemanticBoardUpgradeTestDB(t *testing.T) *gorm.DB {
-	t.Helper()
-
-	db, err := gorm.Open(sqlite.Open(fmt.Sprintf("file:%s?mode=memory&cache=shared", strings.ReplaceAll(t.Name(), "/", "_"))), &gorm.Config{})
-	require.NoError(t, err)
-	require.NoError(t, db.Exec("PRAGMA foreign_keys = ON").Error)
+	db := testutil.SetupTestDB(t)
 	repository.InitRepository(db)
-	require.NoError(t, db.AutoMigrate(&models.Feed{}, &models.Article{}, &models.TopicTag{}, &models.TopicTagEmbedding{}, &models.ArticleTopicTag{}, &models.SemanticLabel{}, &models.TopicTagSemanticLabel{}, &models.TopicTagBoardLabel{}, &models.BoardComposition{}, &models.AISettings{}))
 	return db
 }
 
@@ -58,7 +52,7 @@ func TestSemanticBoardUpgradeCollectsCandidates(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, candidates, 1)
 	require.Equal(t, include.ID, candidates[0].ID)
-	require.Equal(t, []float64{1, 0, 0}, candidates[0].Embedding)
+	require.Equal(t, testutil.PadVector([]float64{1, 0, 0}, testutil.TestEmbeddingDim), candidates[0].Embedding)
 }
 
 func TestSemanticBoardUpgradeClustersCandidatesWithExistingBoards(t *testing.T) {
@@ -482,7 +476,7 @@ func TestSemanticBoardUpgradeGenerateSuggestionsUsesLLMMock(t *testing.T) {
 	}}
 	service := NewSemanticBoardUpgradeService(db, fakeLLM, nil)
 
-	suggestions, _, err := service.GenerateSuggestions(context.Background())
+	suggestions, _, err := service.GenerateSuggestions(context.Background(), "")
 
 	require.NoError(t, err)
 	require.Len(t, suggestions, 2)
@@ -505,7 +499,7 @@ func TestSemanticBoardUpgradeGenerateSuggestionsSkipsWhenCandidateCountBelowThre
 	fakeLLM := &fakeSemanticBoardUpgradeLLM{suggestions: []SemanticBoardUpgradeSuggestion{{Decision: SemanticBoardUpgradeDecisionCreateNew}}}
 	service := NewSemanticBoardUpgradeService(db, fakeLLM, nil)
 
-	suggestions, _, err := service.GenerateSuggestions(context.Background())
+	suggestions, _, err := service.GenerateSuggestions(context.Background(), "")
 
 	require.NoError(t, err)
 	require.Empty(t, suggestions)
@@ -526,7 +520,7 @@ func TestSemanticBoardUpgradePromptIncludesBoardAffinities(t *testing.T) {
 	fakeLLM := &fakeSemanticBoardUpgradeLLM{suggestions: []SemanticBoardUpgradeSuggestion{{Decision: SemanticBoardUpgradeDecisionSkip}}}
 	service := NewSemanticBoardUpgradeService(db, fakeLLM, nil)
 
-	_, _, err := service.GenerateSuggestions(context.Background())
+	_, _, err := service.GenerateSuggestions(context.Background(), "")
 
 	require.NoError(t, err)
 	// Prompt should NOT contain merge_into_existing
@@ -594,7 +588,7 @@ func createUpgradeLabel(t *testing.T, db *gorm.DB, label string, slug string, la
 	t.Helper()
 	semanticLabel := models.SemanticLabel{Label: label, Slug: slug, LabelType: labelType, Status: status, RefCount: refCount}
 	if vector != nil {
-		pgVector := core.FloatsToPgVector(vector)
+		pgVector := core.FloatsToPgVector(testutil.PadVector(vector, testutil.TestEmbeddingDim))
 		semanticLabel.Embedding = &pgVector
 	}
 	require.NoError(t, db.Create(&semanticLabel).Error)
@@ -610,8 +604,9 @@ func createUpgradeTopicTag(t *testing.T, db *gorm.DB, label string, category str
 
 func createUpgradeTopicEmbedding(t *testing.T, db *gorm.DB, topicTagID uint, vector []float64) {
 	t.Helper()
-	pgVector := core.FloatsToPgVector(vector)
-	require.NoError(t, db.Create(&models.TopicTagEmbedding{TopicTagID: topicTagID, EmbeddingType: "semantic", EmbeddingVec: pgVector, Dimension: len(vector), Model: "test", TextHash: fmt.Sprintf("hash-%d", topicTagID)}).Error)
+	padded := testutil.PadVector(vector, testutil.TestEmbeddingDim)
+	pgVector := core.FloatsToPgVector(padded)
+	require.NoError(t, db.Create(&models.TopicTagEmbedding{TopicTagID: topicTagID, EmbeddingType: "semantic", EmbeddingVec: pgVector, Dimension: testutil.TestEmbeddingDim, Model: "test", TextHash: fmt.Sprintf("hash-%d", topicTagID)}).Error)
 }
 
 func createUpgradeArticleWithTags(t *testing.T, db *gorm.DB, topicTagIDs ...uint) {

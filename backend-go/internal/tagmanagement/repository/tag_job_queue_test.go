@@ -1,30 +1,15 @@
 package repository
 
 import (
-	"fmt"
 	"testing"
 
-	"github.com/glebarez/sqlite"
-	"gorm.io/gorm"
 	"syntopica-backend/internal/models"
+	"syntopica-backend/internal/platform/testutil"
 )
 
-func setupTagJobQueueTestDB(t *testing.T) {
-	t.Helper()
-
-	db, err := gorm.Open(sqlite.Open(fmt.Sprintf("file:%s?mode=memory&cache=shared", t.Name())), &gorm.Config{})
-	if err != nil {
-		t.Fatalf("open sqlite: %v", err)
-	}
-
-	InitRepository(db)
-	if err := Repo.DB().AutoMigrate(&models.TagJob{}); err != nil {
-		t.Fatalf("migrate test db: %v", err)
-	}
-}
-
 func TestEnqueueTagJobUpgradesForceRetag(t *testing.T) {
-	setupTagJobQueueTestDB(t)
+	db := testutil.SetupTestDB(t)
+	InitRepository(db)
 
 	queue := NewTagJobQueue(Repo.DB())
 	request := TagJobRequest{ArticleID: 42, FeedName: "Feed", ForceRetag: false}

@@ -1,41 +1,20 @@
 package core
 
 import (
-	"fmt"
-	"strings"
 	"testing"
 
-	"syntopica-backend/internal/models"
-
-	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
+
+	"syntopica-backend/internal/models"
+	"syntopica-backend/internal/platform/testutil"
 	"syntopica-backend/internal/tagmanagement/repository"
 )
 
 func setupHardMergeTestDB(t *testing.T) *gorm.DB {
-	t.Helper()
-
-	db, err := gorm.Open(sqlite.Open(fmt.Sprintf("file:%s?mode=memory&cache=shared", strings.ReplaceAll(t.Name(), "/", "_"))), &gorm.Config{})
-	require.NoError(t, err, "open sqlite")
-
+	db := testutil.SetupTestDB(t)
 	repository.InitRepository(db)
-	t.Cleanup(func() {})
-
-	require.NoError(t, db.AutoMigrate(
-		&models.TopicTag{},
-		&models.TopicTagRelation{},
-		&models.ArticleTopicTag{},
-		&models.TopicTagEmbedding{},
-		&models.TopicTagSemanticLabel{},
-		&models.SemanticLabel{},
-		&models.Feed{},
-		&models.Article{},
-		&models.EmbeddingQueue{},
-		&models.MergeReembeddingQueue{},
-	), "migrate test tables")
-
 	return db
 }
 

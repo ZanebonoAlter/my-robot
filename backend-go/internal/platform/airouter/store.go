@@ -107,9 +107,6 @@ func (s *Store) UpsertProvider(provider *models.AIProvider) error {
 	if provider.ProviderType == "" {
 		provider.ProviderType = ProviderTypeOpenAICompatible
 	}
-	if provider.ProviderType != ProviderTypeOllama && provider.APIKey == "" {
-		return fmt.Errorf("api_key is required for provider type %s", provider.ProviderType)
-	}
 	if provider.TimeoutSeconds <= 0 {
 		provider.TimeoutSeconds = 120
 	}

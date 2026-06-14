@@ -14,7 +14,7 @@ Agent guide for coding assistants working in `Syntopica` (`D:\project\my-robot`)
 | 项目 | 说明 |
 |------|------|
 | OS | **Windows**（WSL2 `bash` 可用，但路径使用 Windows 格式如 `D:/project/...`）|
-| 数据库 | **Docker**：`docker compose -f docker-compose.pg.yml up -d` 启动 PostgreSQL（pgvector），默认端口 `5432`，用户/密码/库名均为 `postgres`。数据持久化在 `./data/` 下。`docker compose -f docker-compose.pg.yml down` 停止。|
+| 数据库 | **Docker**：`docker compose -f docker-compose.pg.yml up -d` 启动 PostgreSQL（pgvector），默认端口 `5432`，用户/密码为 `postgres`，库名为 `syntopica`（对应 `docker-compose.pg.yml` 的 `POSTGRES_DB` 默认值）。数据持久化在 `./data/` 下。`docker compose -f docker-compose.pg.yml down` 停止。|
 | Python | **uv**：需要 Python 脚本/工具时使用 `uv`（如 `uv run script.py`、`uv add package`）。Python 集成测试位于 `tests/workflow/`、`tests/firecrawl/`。|
 | Node.js | `pnpm`（要求 corepack 启用）。详见 `front/AGENTS.md`。|
 | Go | 直接使用系统 Go 工具链。详见 `backend-go/AGENTS.md`。|

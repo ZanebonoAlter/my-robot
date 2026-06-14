@@ -6,24 +6,24 @@ Provide a shared Go test utility package that gives integration tests access to 
 
 ## Requirements
 
-### Requirement: testutil package with OpenTestDB
+### Requirement: testutil package with OpenTestDB — isolated testcontainer
 
-系统 SHALL 在 `backend-go/internal/platform/testutil/` 提供 `OpenTestDB(t *testing.T) *gorm.DB` 函数，连接到 Postgres 数据库实例（默认 `localhost:5432/syntopica`，可通过 `TEST_DB_DSN` 环境变量覆盖）。
+系统 SHALL 在 `backend-go/internal/platform/testutil/` 提供 `OpenTestDB(t *testing.T) *gorm.DB` 函数，通过 testcontainers-go 启动一个隔离的 pgvector Postgres 容器（镜像 `pgvector/pgvector:pg18-trixie`）并返回连接到该容器的 `*gorm.DB`。该函数**不得**读取任何环境变量、**不得**存在默认 DSN、**不得**连接到 `docker-compose.pg.yml` 运行的数据库（那是生产数据所在）。容器由 Testcontainers Ryuk sidecar 在测试进程退出时自动销毁。
 
-#### Scenario: 连接成功时返回有效 *gorm.DB
+#### Scenario: 启动隔离容器并返回有效连接
 
-- **WHEN** Postgres 实例运行在 `localhost:5432` 且 `OpenTestDB` 被调用
-- **THEN** 返回一个连接到 `syntopica` 数据库的 `*gorm.DB` 实例，`db.Name()` 返回 `"postgres"`
+- **WHEN** Docker daemon 可用且 `OpenTestDB` 被调用
+- **THEN** 启动一个隔离的 pgvector 容器，返回连接到该容器的 `*gorm.DB`，该容器与开发库（`localhost:5432/syntopica`）完全隔离
 
-#### Scenario: Postgres 不可用时测试立即失败并给出提示
+#### Scenario: Docker 不可用时测试立即失败
 
-- **WHEN** `localhost:5432` 无 Postgres 实例监听且未设置 `TEST_DB_DSN`
-- **THEN** `t.Fatalf` 被调用，错误消息包含启动命令提示 `docker compose -f docker-compose.pg.yml up -d`
+- **WHEN** Docker daemon 未运行且 `OpenTestDB` 被调用
+- **THEN** `t.Fatalf` 被调用，错误消息提示需要 Docker
 
-#### Scenario: TEST_DB_DSN 环境变量覆盖默认连接
+#### Scenario: 无任何环境变量可重定向到生产库
 
-- **WHEN** 环境变量 `TEST_DB_DSN` 设置为 `host=localhost port=5433 user=test password=test dbname=testdb sslmode=disable`
-- **THEN** `OpenTestDB` 使用该 DSN 连接而非默认值
+- **WHEN** 设置任何环境变量（包括 `TEST_DB_DSN`）
+- **THEN** `OpenTestDB` 忽略它，仍然启动隔离容器——这是防止测试连到生产库的安全保证
 
 ### Requirement: testutil package with SetupTestDB — single entry point
 
@@ -44,6 +44,25 @@ Provide a shared Go test utility package that gives integration tests access to 
 - **WHEN** `SetupTestDB` 在同一 Postgres 实例上被连续调用两次
 - **THEN** 两次均成功返回，AutoMigrate 幂等，TruncateAllTables 清空数据
 
+### Requirement: 进程内单例连接与单次迁移
+
+系统 SHALL 在 testutil 包内通过 `sync.Once` 实现：(1) pgvector 容器与 `*gorm.DB` 连接的进程内单例——首次 `OpenTestDB` 启动容器并执行 `gorm.Open` 建立连接，缓存于包级 `sync.Once`（`startOnce`），后续调用复用同一实例，不重复启动容器或建池；(2) `AutoMigrate` 的进程内单次执行——无论 `SetupTestDB` 被调用多少次，全量 model 迁移只发生一次（`migrateOnce`）。
+
+#### Scenario: 重复调用 SetupTestDB 只启动一次容器
+
+- **WHEN** 同一测试进程内 `SetupTestDB` 被多次调用
+- **THEN** 底层 testcontainer 容器与 `gorm.Open` 均仅执行一次，所有调用复用同一容器与连接池
+
+#### Scenario: 重复调用 SetupTestDB 只迁移一次
+
+- **WHEN** 同一测试进程内 `SetupTestDB` 被多次调用
+- **THEN** `AutoMigrate` 仅在首次执行；后续调用仅执行 `TruncateAllTables`
+
+#### Scenario: 首次连接或迁移失败不被吞掉
+
+- **WHEN** 首次 `gorm.Open` 或 `AutoMigrate` 失败
+- **THEN** 错误被记录到包级变量，后续每次 `SetupTestDB` 调用通过 `t.Fatal` 报出该错误，不静默返回无效 `*gorm.DB`
+
 ### Requirement: testutil package with TruncateAllTables
 
 系统 SHALL 提供 `TruncateAllTables(t *testing.T, db *gorm.DB)` 函数，使用 `TRUNCATE TABLE ... CASCADE` 清空所有 domain 表数据，保证测试间隔离。
@@ -60,7 +79,9 @@ Provide a shared Go test utility package that gives integration tests access to 
 
 ### Requirement: 测试分层 — short 模式跳过集成测试
 
-系统 SHALL 定义测试分层规范：带有数据库依赖的集成测试 MUST 检查 `testing.Short()` 并在 `-short` 模式下 `t.Skip("requires Postgres")`。
+系统 SHALL 将 `testing.Short()` 跳过逻辑内置在 `SetupTestDB` 中：函数首行执行 `if testing.Short() { t.Skip("requires Postgres") }`。集成测试函数本身无需（也不应）重复编写该守卫——调用 `SetupTestDB` 即自动获得分层保护。
+
+依赖真实 LLM 等其他外部资源但不走 `SetupTestDB` 的测试（如 `tag_context_dump_test.go`）SHALL 自行维护 `testing.Short()` 守卫。单元测试（`*_unit_test.go`）不调用 `SetupTestDB`，在 `-short` 下自然运行。
 
 #### Scenario: go test -short 跳过 DB 测试
 

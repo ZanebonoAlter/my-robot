@@ -1,62 +1,17 @@
 package core
 
 import (
-	"fmt"
 	"math"
 	"testing"
 	"time"
 
-	"github.com/glebarez/sqlite"
-	"gorm.io/gorm"
-
 	"syntopica-backend/internal/models"
 	"syntopica-backend/internal/platform/database"
+	"syntopica-backend/internal/platform/testutil"
 )
 
-func setupQualityScoreTestDB(t *testing.T) {
-	t.Helper()
-
-	db, err := gorm.Open(sqlite.Open(fmt.Sprintf("file:%s?mode=memory&cache=shared", t.Name())), &gorm.Config{})
-	if err != nil {
-		t.Fatalf("open sqlite: %v", err)
-	}
-
-	database.DB = db
-	if err := database.DB.AutoMigrate(
-		&models.Feed{},
-		&models.Article{},
-		&models.TopicTag{},
-		&models.TopicTagEmbedding{},
-		&models.ArticleTopicTag{},
-		&models.TopicTagRelation{},
-	); err != nil {
-		t.Fatalf("migrate test db: %v", err)
-	}
-}
-
-func TestPercentileRankStableRange(t *testing.T) {
-	values := map[uint]float64{1: 10, 2: 20, 3: 20, 4: 50}
-
-	lowest := percentileRank(values, 1)
-	middle := percentileRank(values, 2)
-	highest := percentileRank(values, 4)
-
-	if lowest < 0 || lowest > 1 {
-		t.Fatalf("lowest percentile out of range: %f", lowest)
-	}
-	if middle < 0 || middle > 1 {
-		t.Fatalf("middle percentile out of range: %f", middle)
-	}
-	if highest < 0 || highest > 1 {
-		t.Fatalf("highest percentile out of range: %f", highest)
-	}
-	if !(lowest < middle && middle < highest) {
-		t.Fatalf("expected ordered percentiles, got lowest=%f middle=%f highest=%f", lowest, middle, highest)
-	}
-}
-
 func TestComputeAllQualityScoresDefaultsAndEmptyAssociations(t *testing.T) {
-	setupQualityScoreTestDB(t)
+	testutil.SetupTestDB(t)
 
 	feed := models.Feed{Title: "Feed", URL: "https://example.com/feed"}
 	if err := database.DB.Create(&feed).Error; err != nil {

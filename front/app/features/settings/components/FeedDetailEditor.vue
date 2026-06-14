@@ -148,7 +148,7 @@ function formatStatus(feed: RssFeed): string {
             </div>
           </div>
           <AppToggle
-            :model-value="feed.taggingEnabled !== false"
+            :model-value="!!feed.taggingEnabled"
             @update:model-value="emit('update-feed', feed.id, 'tagging_enabled', $event)"
           />
         </div>
@@ -162,7 +162,7 @@ function formatStatus(feed: RssFeed): string {
             </div>
           </div>
           <AppToggle
-            :model-value="feed.completionOnRefresh !== false"
+            :model-value="!!feed.completionOnRefresh"
             @update:model-value="emit('update-feed', feed.id, 'completion_on_refresh', $event)"
           />
         </div>

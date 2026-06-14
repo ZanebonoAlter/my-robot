@@ -167,10 +167,10 @@ function getIntervalColor(minutes: number): string {
                   </div>
                   <button
                     class="relative inline-flex h-5 w-9 items-center rounded-full transition-colors"
-                    :class="feed.taggingEnabled !== false ? 'bg-amber-500' : 'bg-gray-300'"
-                    @click="emit('update-feed', feed.id, 'tagging_enabled', !(feed.taggingEnabled !== false))"
+                    :class="!!feed.taggingEnabled ? 'bg-amber-500' : 'bg-gray-300'"
+                    @click="emit('update-feed', feed.id, 'tagging_enabled', !feed.taggingEnabled)"
                   >
-                    <span class="inline-block h-3 w-3 transform rounded-full bg-white transition-transform" :class="feed.taggingEnabled !== false ? 'translate-x-5' : 'translate-x-1'" />
+                    <span class="inline-block h-3 w-3 transform rounded-full bg-white transition-transform" :class="!!feed.taggingEnabled ? 'translate-x-5' : 'translate-x-1'" />
                   </button>
                 </div>
                 <div class="flex items-center justify-between">
@@ -180,10 +180,10 @@ function getIntervalColor(minutes: number): string {
                   </div>
                   <button
                     class="relative inline-flex h-5 w-9 items-center rounded-full transition-colors"
-                    :class="feed.completionOnRefresh !== false ? 'bg-green-500' : 'bg-gray-300'"
-                    @click="emit('update-feed', feed.id, 'completion_on_refresh', !(feed.completionOnRefresh !== false))"
+                    :class="!!feed.completionOnRefresh ? 'bg-green-500' : 'bg-gray-300'"
+                    @click="emit('update-feed', feed.id, 'completion_on_refresh', !feed.completionOnRefresh)"
                   >
-                    <span class="inline-block h-3 w-3 transform rounded-full bg-white transition-transform" :class="feed.completionOnRefresh !== false ? 'translate-x-5' : 'translate-x-1'" />
+                    <span class="inline-block h-3 w-3 transform rounded-full bg-white transition-transform" :class="!!feed.completionOnRefresh ? 'translate-x-5' : 'translate-x-1'" />
                   </button>
                 </div>
               </div>

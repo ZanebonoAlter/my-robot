@@ -2,6 +2,7 @@ package handler
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -10,6 +11,7 @@ import (
 	"github.com/glebarez/sqlite"
 	"gorm.io/gorm"
 	"syntopica-backend/internal/models"
+	"syntopica-backend/internal/platform/airouter"
 	"syntopica-backend/internal/platform/database"
 	"syntopica-backend/internal/reader/repository"
 	"syntopica-backend/internal/reader/service"
@@ -96,5 +98,72 @@ func TestCompleteFeedArticlesRetriesFailedArticlesWhenTriggeredManually(t *testi
 	}
 	if refreshed.CompletionAttempts != 2 {
 		t.Fatalf("completion attempts = %d, want 2", refreshed.CompletionAttempts)
+	}
+}
+
+func TestCompleteArticleContentReloadsProviderWithoutSummaryRouteOrAPIKey(t *testing.T) {
+	setupHandlersTestDB(t)
+	gin.SetMode(gin.TestMode)
+
+	completionService = service.NewContentCompletionService()
+
+	aiServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"# Test\n\n## 导读\n- reloaded"}}]}`))
+	}))
+	defer aiServer.Close()
+
+	provider := models.AIProvider{
+		Name:         "late-local-provider",
+		ProviderType: airouter.ProviderTypeOpenAICompatible,
+		BaseURL:      aiServer.URL,
+		APIKey:       "",
+		Model:        "test-model",
+		Enabled:      true,
+	}
+	if err := database.DB.Create(&provider).Error; err != nil {
+		t.Fatalf("create provider: %v", err)
+	}
+
+	feed := models.Feed{
+		Title:                 "Feed",
+		URL:                   "https://example.com/late-provider.xml",
+		ArticleSummaryEnabled: true,
+		FirecrawlEnabled:      true,
+		MaxCompletionRetries:  1,
+	}
+	if err := database.DB.Create(&feed).Error; err != nil {
+		t.Fatalf("create feed: %v", err)
+	}
+
+	article := models.Article{
+		FeedID:           feed.ID,
+		Title:            "Configured after startup",
+		Link:             "https://example.com/late-provider",
+		FirecrawlStatus:  "completed",
+		FirecrawlContent: "body",
+		SummaryStatus:    "incomplete",
+	}
+	if err := database.DB.Create(&article).Error; err != nil {
+		t.Fatalf("create article: %v", err)
+	}
+
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodPost, fmt.Sprintf("/api/articles/%d/complete", article.ID), nil)
+	ctx.Params = gin.Params{{Key: "article_id", Value: fmt.Sprint(article.ID)}}
+
+	CompleteArticleContent(ctx)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200, body=%s", recorder.Code, recorder.Body.String())
+	}
+
+	var refreshed models.Article
+	if err := database.DB.First(&refreshed, article.ID).Error; err != nil {
+		t.Fatalf("reload article: %v", err)
+	}
+	if refreshed.SummaryStatus != "complete" {
+		t.Fatalf("summary status = %q, want complete; error=%q", refreshed.SummaryStatus, refreshed.CompletionError)
 	}
 }

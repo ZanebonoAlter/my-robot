@@ -176,3 +176,5 @@ AI 相关配置不存储在文件或环境变量中 — 通过 Web UI 管理并�
 | `open_notebook_config` | Open Notebook digest 导出设置（启用、base URL、API key、model、目标笔记本、prompt 模式、自动发送日报/周报） |
 
 这些设置通过 `aisettings.LoadSummaryConfig()`、`aisettings.LoadFirecrawlConfig()` 等函数加载，在前端设置页面中配置。
+
+文章手动总结会在每次请求时重新读取 AI Provider 配置：优先使用 `summary` capability 的启用路由；未配置该路由时，回退到任一启用且具有 Base URL 和 Model 的 Provider。因此服务启动后新增 Provider 无需重启。API Key 对本地 Ollama、llama.cpp 或无需鉴权的 OpenAI-compatible 服务是可选项。

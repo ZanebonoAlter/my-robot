@@ -121,10 +121,12 @@ func EnsureVectorDimensionOnce(ctx context.Context) {
 		}
 		dim := len(vector)
 		if err := EnsureSemanticLabelVectorDimension(dim); err != nil {
-			logging.Warnf("Failed to ensure embedding vector dimension: %v", err)
+			logging.Errorf("Failed to ensure semantic_labels.embedding vector dimension: %v; "+
+				"INSERT into semantic_labels will fail until this is resolved", err)
 		}
 		if err := EnsureSemanticLabelMergeVectorDimension(dim); err != nil {
-			logging.Warnf("Failed to ensure merge_embedding vector dimension: %v", err)
+			logging.Errorf("Failed to ensure semantic_labels.merge_embedding vector dimension: %v; "+
+				"INSERT into semantic_labels will fail until this is resolved", err)
 		}
 		for _, fn := range vectorDimEnsurers {
 			fn(dim)
@@ -683,22 +685,30 @@ func UniqueSemanticLabelSlug(db *gorm.DB, base string) string {
 	}
 }
 
-// EnsureSemanticLabelVectorDimension checks if the semantic_labels.embedding column
-// matches the required dimension and alters it if not.
+// ensureSemanticLabelVectorColumnDim checks if a vector column on semantic_labels
+// matches the required dimension and alters it if not. column is a hardcoded column
+// name ("embedding" / "merge_embedding"), never user input, so it is safe to splice
+// into SQL.
+//
 // Should only be called at startup; DDL operations use a 5s lock timeout to avoid
 // blocking if other connections hold table locks.
-func EnsureSemanticLabelVectorDimension(dim int) error {
-	if err := repository.Repo.DB().Exec("SET LOCAL lock_timeout = '5s'").Error; err != nil {
+//
+// On ALTER failure it diagnoses whether stale data is blocking the resize and returns
+// an actionable error: pgvector cannot truncate existing vectors, so the caller must
+// clear the rows before the dimension can change.
+func ensureSemanticLabelVectorColumnDim(column string, dim int) error {
+	db := repository.Repo.DB()
+	if err := db.Exec("SET LOCAL lock_timeout = '5s'").Error; err != nil {
 		logging.Warnf("Failed to set lock_timeout: %v", err)
 	}
 
 	var typeStr string
-	if err := repository.Repo.DB().Raw(`
+	if err := db.Raw(`
 		SELECT format_type(a.atttypid, a.atttypmod)
 		FROM pg_attribute a
 		JOIN pg_class c ON c.oid = a.attrelid
-		WHERE c.relname = 'semantic_labels' AND a.attname = 'embedding'
-	`).Row().Scan(&typeStr); err != nil {
+		WHERE c.relname = 'semantic_labels' AND a.attname = ?`, column,
+	).Row().Scan(&typeStr); err != nil {
 		return nil // column may not exist yet, let migration handle it
 	}
 
@@ -707,50 +717,38 @@ func EnsureSemanticLabelVectorDimension(dim int) error {
 		return nil
 	}
 
-	logging.Infof("Altering semantic_labels.embedding column from %s to %s", typeStr, expected)
+	logging.Infof("Altering semantic_labels.%s column from %s to %s", column, typeStr, expected)
 
-	_ = repository.Repo.DB().Exec("DROP INDEX IF EXISTS idx_semantic_labels_embedding").Error
+	_ = db.Exec(fmt.Sprintf("DROP INDEX IF EXISTS idx_semantic_labels_%s", column)).Error
 
-	if err := repository.Repo.DB().Exec(fmt.Sprintf(
-		"ALTER TABLE semantic_labels ALTER COLUMN embedding TYPE %s", expected,
+	if err := db.Exec(fmt.Sprintf(
+		"ALTER TABLE semantic_labels ALTER COLUMN %s TYPE %s", column, expected,
 	)).Error; err != nil {
-		return fmt.Errorf("alter semantic_labels.embedding column to %s: %w", expected, err)
+		var staleRows int64
+		_ = db.Raw(fmt.Sprintf(
+			"SELECT count(*) FROM semantic_labels WHERE %s IS NOT NULL", column,
+		)).Scan(&staleRows).Error
+		if staleRows > 0 {
+			return fmt.Errorf(
+				"alter semantic_labels.%s from %s to %s failed: %d row(s) contain stale vectors of the old dimension; "+
+					"clear them (e.g. UPDATE semantic_labels SET %s = NULL) then restart: %w",
+				column, typeStr, expected, staleRows, column, err,
+			)
+		}
+		return fmt.Errorf("alter semantic_labels.%s column to %s: %w", column, expected, err)
 	}
 
 	return nil
 }
 
+// EnsureSemanticLabelVectorDimension checks if the semantic_labels.embedding column
+// matches the required dimension and alters it if not.
+func EnsureSemanticLabelVectorDimension(dim int) error {
+	return ensureSemanticLabelVectorColumnDim("embedding", dim)
+}
+
 // EnsureSemanticLabelMergeVectorDimension checks if the semantic_labels.merge_embedding
 // column matches the required dimension and alters it if not.
 func EnsureSemanticLabelMergeVectorDimension(dim int) error {
-	if err := repository.Repo.DB().Exec("SET LOCAL lock_timeout = '5s'").Error; err != nil {
-		logging.Warnf("Failed to set lock_timeout: %v", err)
-	}
-
-	var typeStr string
-	if err := repository.Repo.DB().Raw(`
-		SELECT format_type(a.atttypid, a.atttypmod)
-		FROM pg_attribute a
-		JOIN pg_class c ON c.oid = a.attrelid
-		WHERE c.relname = 'semantic_labels' AND a.attname = 'merge_embedding'
-	`).Row().Scan(&typeStr); err != nil {
-		return nil // column may not exist yet, let migration handle it
-	}
-
-	expected := fmt.Sprintf("vector(%d)", dim)
-	if typeStr == expected {
-		return nil
-	}
-
-	logging.Infof("Altering semantic_labels.merge_embedding column from %s to %s", typeStr, expected)
-
-	_ = repository.Repo.DB().Exec("DROP INDEX IF EXISTS idx_semantic_labels_merge_embedding").Error
-
-	if err := repository.Repo.DB().Exec(fmt.Sprintf(
-		"ALTER TABLE semantic_labels ALTER COLUMN merge_embedding TYPE %s", expected,
-	)).Error; err != nil {
-		return fmt.Errorf("alter semantic_labels.merge_embedding column to %s: %w", expected, err)
-	}
-
-	return nil
+	return ensureSemanticLabelVectorColumnDim("merge_embedding", dim)
 }

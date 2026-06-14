@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"encoding/xml"
 	"net/http"
 	"time"
@@ -9,6 +10,7 @@ import (
 	"gorm.io/gorm"
 	"syntopica-backend/internal/models"
 	"syntopica-backend/internal/reader/repository"
+	"syntopica-backend/internal/reader/service"
 )
 
 type OPML struct {
@@ -145,6 +147,23 @@ func ImportOPML(c *gin.Context) {
 
 			feedsAdded = append(feedsAdded, feed.ID)
 		}
+	}
+
+	// Trigger background refresh for newly imported feeds to fetch icons
+	if len(feedsAdded) > 0 {
+		go func() {
+			feedService := service.NewFeedService()
+			for _, feedID := range feedsAdded {
+				// Update status to refreshing
+				now := time.Now()
+				repository.Repo.DB().Model(&models.Feed{}).Where("id = ?", feedID).Updates(map[string]interface{}{
+					"refresh_status": "refreshing",
+					"last_refresh_at": &now,
+				})
+				// Refresh feed to fetch icon and articles
+				feedService.RefreshFeed(context.Background(), feedID)
+			}
+		}()
 	}
 
 	c.JSON(http.StatusOK, gin.H{

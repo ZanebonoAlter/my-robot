@@ -83,3 +83,17 @@ func (c *boardCache) InvalidateBoardData() {
 	c.boardEmbeddings = nil
 	c.boardEmbeddingsSet = false
 }
+
+// InvalidateConfig forces the next LoadConfig call to read from the database.
+func (c *boardCache) InvalidateConfig() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.config = nil
+	c.configTime = time.Time{}
+}
+
+// InvalidateMatchingConfigCache clears the cached matching config so the next
+// LoadConfig call reads fresh values from the database.
+func InvalidateMatchingConfigCache() {
+	packageBoardCache.InvalidateConfig()
+}

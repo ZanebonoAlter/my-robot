@@ -8,6 +8,19 @@ import (
 	"syntopica-backend/internal/platform/logging"
 )
 
+// tableExists reports whether a table exists in the public schema. Migrations
+// that target optional/domain-registered tables (e.g. the daily_report_* tables
+// registered by internal/topicgraph) use it to no-op when the table is absent,
+// rather than failing on CREATE INDEX / ALTER TABLE. This keeps migrations
+// safe on deployments that don't register those domain models.
+func tableExists(db *gorm.DB, table string) bool {
+	var exists bool
+	if err := db.Raw(`SELECT to_regclass(?) IS NOT NULL`, "public."+table).Row().Scan(&exists); err != nil {
+		return false
+	}
+	return exists
+}
+
 // postgresMigrations returns versioned migrations for operations that GORM AutoMigrate
 // cannot handle: extensions, custom indexes, triggers, data migrations, column/table drops.
 //
@@ -328,6 +341,13 @@ func postgresMigrations() []Migration {
 			Version:     "20260526_0001",
 			Description: "Add indexes for board_daily_reports.",
 			Up: func(db *gorm.DB) error {
+				// The daily_report_* tables are registered by internal/topicgraph;
+				// deployments that don't import it (incl. the test harness) won't
+				// have them. Skip rather than fail on CREATE INDEX over a missing
+				// table.
+				if !tableExists(db, "board_daily_reports") || !tableExists(db, "daily_report_sections") {
+					return nil
+				}
 				indexes := []string{
 					"CREATE INDEX IF NOT EXISTS idx_board_daily_reports_semantic_board_id ON board_daily_reports(semantic_board_id)",
 					"CREATE INDEX IF NOT EXISTS idx_daily_report_sections_report_id ON daily_report_sections(report_id)",
@@ -346,6 +366,9 @@ func postgresMigrations() []Migration {
 			Version:     "20260529_0001",
 			Description: "Add indexes for daily_report_threads.",
 			Up: func(db *gorm.DB) error {
+				if !tableExists(db, "daily_report_threads") {
+					return nil
+				}
 				indexes := []string{
 					"CREATE INDEX IF NOT EXISTS idx_daily_report_threads_report_id ON daily_report_threads(report_id)",
 					"CREATE INDEX IF NOT EXISTS idx_daily_report_threads_section_id ON daily_report_threads(section_id)",
@@ -513,6 +536,11 @@ func postgresMigrations() []Migration {
 			Version:     "20260603_0001",
 			Description: "Add unique constraint to section_relations, migrate prev_section_id, drop status/prev_thread_id columns.",
 			Up: func(db *gorm.DB) error {
+				// daily_report_* tables are optional (registered by internal/topicgraph);
+				// skip the whole block if the core table is absent.
+				if !tableExists(db, "daily_report_section_relations") {
+					return nil
+				}
 
 				// 1. Add unique constraint (table created by AutoMigrate)
 				if err := db.Exec(`
@@ -600,6 +628,9 @@ func postgresMigrations() []Migration {
 			Version:     "20260601_0002",
 			Description: "Add embedding vector column to daily_report_sections (dimension set at runtime).",
 			Up: func(db *gorm.DB) error {
+				if !tableExists(db, "daily_report_sections") {
+					return nil
+				}
 				if err := db.Exec(`ALTER TABLE daily_report_sections ADD COLUMN IF NOT EXISTS embedding vector`).Error; err != nil {
 					return fmt.Errorf("add daily_report_sections.embedding column: %w", err)
 				}

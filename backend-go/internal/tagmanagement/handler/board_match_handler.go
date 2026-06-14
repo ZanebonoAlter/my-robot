@@ -493,6 +493,8 @@ func (h *semanticBoardHandler) updateMatchingConfig(c *gin.Context) {
 			return
 		}
 	}
+	// Invalidate config cache so LoadConfig reads fresh values from DB
+	service.InvalidateMatchingConfigCache()
 	respondOK(c, h.getAllConfigs(c))
 }
 func semanticBoardMatchConfigToMap(config service.SemanticBoardMatchConfig) gin.H {

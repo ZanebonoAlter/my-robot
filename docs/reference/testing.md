@@ -206,16 +206,18 @@ python test_firecrawl_integration.py
 
 1. **跳过单元模式**：运行 `-short` 时自动跳过
 2. **启动隔离容器**：通过 testcontainers-go 启动一次性 pgvector 容器（进程级单例，首次调用启动，后续复用）
-3. **自动迁移**：容器启动后执行一次全量领域模型迁移（`RunAutoMigrate`）
-4. **清理数据**：每次测试前 `TRUNCATE` 所有表（容器本身是空库，无 DROP 操作）
+3. **重建测试 schema**：每次测试删除并重建隔离容器中的 `public` schema，清除上一次测试的结构和数据
+4. **导入生产状态**：执行生产的 `RunAutoMigrate` 与 `RunMigrations`，重新导入生产版本迁移中的默认数据
 5. **设置全局 DB**：兼容生产代码的 `database.DB`
+
+需要在同一测试中恢复首次启动状态时，调用 `testutil.ReimportTestDB(t, db)`。该函数只操作 testcontainers-go 创建的临时数据库，不读取开发或生产 DSN。
 
 **使用示例：**
 
 ```go
 func TestSomethingIntegration(t *testing.T) {
     db := testutil.SetupTestDB(t)
-    // db 已连接、已迁移、已清空
+    // db 已连接，并恢复为生产首次启动后的 schema 与默认数据
     // ... 测试逻辑
 }
 ```

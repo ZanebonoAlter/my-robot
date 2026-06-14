@@ -35,11 +35,10 @@ const (
 )
 
 var (
-	startOnce   sync.Once // starts the container + opens the connection, once per process
-	migrateOnce sync.Once // runs migrations, once per process
-	cachedDB    *gorm.DB
-	startErr    error
-	migrateErr  error
+	startOnce sync.Once // starts the container + opens the connection, once per process
+	resetMu   sync.Mutex
+	cachedDB  *gorm.DB
+	startErr  error
 )
 
 // OpenTestDB returns a *gorm.DB connected to a throwaway pgvector Postgres
@@ -92,7 +91,17 @@ func startContainerAndConnect() error {
 		return fmt.Errorf("get container connection string: %w", err)
 	}
 
-	db, err := gorm.Open(postgres.Open(connStr), &gorm.Config{})
+	// Verbatim copy of production (database.InitDB): AutoMigrate must NOT create
+	// FK constraints, because the versioned migrations are the source of truth
+	// for which FKs exist. Production drops several FKs on purpose (e.g.
+	// fk_topic_tag_relations_*, fk_merge_reembedding_queues_*) so that
+	// MergeTags/HardMergeTags can hard-delete a tag still referenced from those
+	// tables. With the default gorm.Config{} AutoMigrate would CREATE those FKs
+	// and never drop them, leaving the test DB stricter than production and
+	// breaking those code paths for no real reason.
+	db, err := gorm.Open(postgres.Open(connStr), &gorm.Config{
+		DisableForeignKeyConstraintWhenMigrating: true,
+	})
 	if err != nil {
 		return fmt.Errorf("gorm open: %w", err)
 	}
@@ -101,13 +110,12 @@ func startContainerAndConnect() error {
 	return nil
 }
 
-// SetupTestDB is the single entry point for integration tests (D2, D11).
+// SetupTestDB is the single entry point for integration tests.
 // It:
-//  1. Skips when running with -short flag (D11).
-//  2. Starts (or reuses) the isolated pgvector container and connection (D10).
-//  3. Runs AutoMigrate on ALL domain models exactly once per process (D10).
-//  4. Truncates all tables for test isolation (D4).
-//  5. Sets database.DB for production code compatibility (D6).
+//  1. Skips when running with -short flag.
+//  2. Starts (or reuses) the isolated pgvector container and connection.
+//  3. Rebuilds the test schema and imports production migrations and seed data.
+//  4. Sets database.DB for production code compatibility.
 //
 // Every integration test should start with: db := testutil.SetupTestDB(t)
 func SetupTestDB(t *testing.T) *gorm.DB {
@@ -118,23 +126,33 @@ func SetupTestDB(t *testing.T) *gorm.DB {
 	}
 
 	db := OpenTestDB(t)
-
-	// Migrate all domain models exactly once per process.
-	migrateOnce.Do(func() {
-		migrateErr = runTestMigrations(db)
-	})
-
-	if migrateErr != nil {
-		t.Fatalf("test db migration: %v", migrateErr)
-	}
-
-	TruncateAllTables(t, db)
-
 	database.DB = db
+	ReimportTestDB(t, db)
 	return db
 }
 
-// TruncateAllTables truncates all user tables using CASCADE (D4).
+// ReimportTestDB rebuilds the isolated test schema and reruns the production
+// migration path. Regression tests can call it explicitly to restore the same
+// schema and seed data that a fresh production database receives.
+func ReimportTestDB(t *testing.T, db *gorm.DB) {
+	t.Helper()
+
+	resetMu.Lock()
+	defer resetMu.Unlock()
+
+	if err := db.Exec("DROP SCHEMA IF EXISTS public CASCADE").Error; err != nil {
+		t.Fatalf("drop test schema: %v", err)
+	}
+	if err := db.Exec("CREATE SCHEMA public").Error; err != nil {
+		t.Fatalf("create test schema: %v", err)
+	}
+	if err := runTestMigrations(db); err != nil {
+		t.Fatalf("import production database state: %v", err)
+	}
+}
+
+// TruncateAllTables truncates all user tables using CASCADE. This is the reset
+// helper for tests that deliberately need an empty database without seed data.
 func TruncateAllTables(t *testing.T, db *gorm.DB) {
 	t.Helper()
 
@@ -173,101 +191,35 @@ func PadVector(vec []float64, dim int) []float64 {
 	return out
 }
 
-// runTestMigrations applies all migrations needed for tests on the freshly
-// started container: pgvector extension, AutoMigrate (all domain models),
-// vector column type, unique indexes, and seed data tests depend on.
+// runTestMigrations mirrors the production database initialization path
+// (database.InitDB): the same two phases production runs on every startup —
+//   - Phase 1: database.RunAutoMigrate (sync all model tables/columns)
+//   - Phase 2: database.RunMigrations (versioned migrations — the source of
+//     truth for FKs/indexes/triggers and for the ai_settings/embedding_config
+//     seed rows tests rely on).
 //
-// The container is always a brand-new empty database, so there is no DROP step
-// (an earlier revision dropped tables here — that was both unnecessary and
-// dangerous; it is intentionally absent).
+// This is intentionally a verbatim copy of production: the testcontainer schema
+// and seed data are exactly what production serves. Earlier revisions duplicated
+// parts of this by hand (manual embedding column DDL, manual ai_settings /
+// embedding_config seeds) — those duplicated production and drifted, so they
+// were removed in favor of running the real migration path.
 func runTestMigrations(db *gorm.DB) error {
-	// Enable pgvector extension.
+	// Enable pgvector extension (mirrors the first production migration).
 	if err := db.Exec("CREATE EXTENSION IF NOT EXISTS vector").Error; err != nil {
 		return fmt.Errorf("enable pgvector: %w", err)
 	}
 
-	// AutoMigrate all domain models (reuses the same list as production).
+	// Phase 1: AutoMigrate — same as database.InitDB phase 1.
 	if err := database.RunAutoMigrate(db); err != nil {
 		return fmt.Errorf("auto migrate: %w", err)
 	}
 
-	// Ensure the embedding column is vector(4096) — GORM AutoMigrate cannot
-	// change column types, so we do it explicitly (same as production migration).
-	if err := db.Exec("ALTER TABLE topic_tag_embeddings ADD COLUMN IF NOT EXISTS embedding vector(4096)").Error; err != nil {
-		return fmt.Errorf("add embedding column: %w", err)
-	}
-	if err := db.Exec("ALTER TABLE topic_tag_embeddings ALTER COLUMN embedding TYPE vector(4096)").Error; err != nil {
-		return fmt.Errorf("set embedding type: %w", err)
+	// Phase 2: versioned migrations — same as database.InitDB phase 2. This is
+	// the source of truth for FKs/indexes/triggers and the seed data (semantic
+	// board / event cluster config) that production and tests both depend on.
+	if err := database.RunMigrations(db); err != nil {
+		return fmt.Errorf("run versioned migrations: %w", err)
 	}
 
-	// Unique index on (topic_tag_id, embedding_type, text_hash) — required for
-	// SaveEmbedding upsert logic.
-	if err := db.Exec(
-		"CREATE UNIQUE INDEX IF NOT EXISTS idx_topic_tag_embeddings_tag_type_hash ON topic_tag_embeddings(topic_tag_id, embedding_type, text_hash)",
-	).Error; err != nil {
-		return fmt.Errorf("create embedding unique index: %w", err)
-	}
-
-	// Seed semantic board settings that tests depend on.
-	if err := seedSemanticBoardSettings(db); err != nil {
-		return fmt.Errorf("seed semantic board settings: %w", err)
-	}
-
-	// Seed event clustering config keys.
-	if err := seedEventClusterConfig(db); err != nil {
-		return fmt.Errorf("seed event cluster config: %w", err)
-	}
-
-	return nil
-}
-
-// seedSemanticBoardSettings inserts the AISettings defaults required by
-// semantic board matching/upgrade tests. Uses ON CONFLICT to be idempotent.
-func seedSemanticBoardSettings(db *gorm.DB) error {
-	settings := []struct{ Key, Value, Description string }{
-		{"semantic_board_match_sim_threshold", "0.6", "Minimum auxiliary label similarity counted as a SemanticBoard match"},
-		{"semantic_board_match_direct_hit_rate", "0.5", "Minimum direct auxiliary label hit rate for a SemanticBoard match"},
-		{"semantic_board_match_direct_max_sim", "0.8", "Maximum similarity threshold for direct SemanticBoard matching"},
-		{"semantic_board_match_direct_max_sim_min_hits", "2", "Minimum number of auxiliary label hits required for max_sim matching rule"},
-		{"semantic_board_match_direct_max_sim_min_hit_rate", "0.3", "Minimum auxiliary label hit rate required for max_sim matching rule"},
-		{"semantic_board_match_min_effective_sample", "3", "Minimum denominator for hit rate calculation"},
-		{"semantic_board_match_hit_rate_sim_blend", "0.7", "Weight of maxSimilarity in hit_rate rule score"},
-		{"semantic_board_match_weight_sim", "0.6", "Similarity weight used in weighted SemanticBoard matching"},
-		{"semantic_board_match_weight_density", "0.4", "Density weight used in weighted SemanticBoard matching"},
-		{"semantic_board_match_weighted_threshold", "0.6", "Minimum weighted score for assigning a topic tag to a SemanticBoard"},
-		{"semantic_board_match_direct_hit_min_overlap", "2", "Minimum auxiliary label overlap count for direct_hit matching rule"},
-		{"semantic_board_match_max_boards", "3", "Maximum SemanticBoard matches retained for each topic tag"},
-		{"semantic_board_upgrade_ref_count_threshold", "5", "Minimum reference count before suggesting a new SemanticBoard"},
-		{"semantic_board_upgrade_cluster_distance_threshold", "0.35", "Cluster distance threshold for SemanticBoard upgrade suggestions"},
-		{"semantic_board_upgrade_cotag_window_days", "30", "Co-tag analysis window in days"},
-		{"semantic_board_upgrade_cotag_top_n", "20", "Maximum co-tag candidates considered"},
-		{"semantic_board_upgrade_cotag_dedupe_sim_threshold", "0.85", "Similarity threshold for deduplicating co-tag upgrade candidates"},
-		{"semantic_board_upgrade_cotag_hard_limit", "15", "Hard limit for co-tag upgrade candidates"},
-	}
-	for _, s := range settings {
-		if err := db.Exec(
-			"INSERT INTO ai_settings (key, value, description, created_at, updated_at) VALUES (?, ?, ?, NOW(), NOW()) ON CONFLICT (key) DO NOTHING",
-			s.Key, s.Value, s.Description,
-		).Error; err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-// seedEventClusterConfig inserts the embedding_config defaults for event clustering.
-func seedEventClusterConfig(db *gorm.DB) error {
-	defaults := []struct{ Key, Value, Description string }{
-		{"event_cluster_kw_min_overlap", "2", "Minimum shared keyword count for Stage 1 event tag keyword-overlap clustering"},
-		{"event_cluster_sem_threshold", "0.80", "Minimum semantic cosine similarity for Stage 2 event tag clustering filter"},
-	}
-	for _, d := range defaults {
-		if err := db.Exec(
-			"INSERT INTO embedding_config (key, value, description) VALUES (?, ?, ?) ON CONFLICT (key) DO NOTHING",
-			d.Key, d.Value, d.Description,
-		).Error; err != nil {
-			return err
-		}
-	}
 	return nil
 }

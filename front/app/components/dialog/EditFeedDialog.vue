@@ -24,7 +24,7 @@ const error = ref<string | null>(null)
 const showDeleteConfirm = ref(false)
 
 const articleSummaryEnabled = ref(props.feed.articleSummaryEnabled ?? false)
-const completionOnRefresh = ref(props.feed.completionOnRefresh ?? true)
+const completionOnRefresh = ref(props.feed.completionOnRefresh ?? false)
 const maxCompletionRetries = ref(props.feed.maxCompletionRetries ?? 3)
 const firecrawlEnabled = ref(props.feed.firecrawlEnabled ?? false)
 

@@ -32,8 +32,24 @@ func loadCompletionAISettings() {
 	}
 
 	provider, _, err := airouter.NewRouter().ResolvePrimaryProvider(airouter.CapabilitySummary)
-	if err == nil && provider != nil && provider.BaseURL != "" && provider.APIKey != "" && provider.Model != "" {
+	if err == nil && provider != nil && provider.BaseURL != "" && provider.Model != "" {
 		completionService.SetAICredentials(provider.BaseURL, provider.APIKey, provider.Model)
+		return
+	}
+
+	// Fallback: use any enabled provider when no summary-specific route exists.
+	// This handles the common case where the user configured an AI provider
+	// but did not create a dedicated route for the summary capability.
+	store := airouter.NewStore(nil)
+	providers, err := store.ListProviders()
+	if err != nil {
+		return
+	}
+	for _, p := range providers {
+		if p.Enabled && p.BaseURL != "" && p.Model != "" {
+			completionService.SetAICredentials(p.BaseURL, p.APIKey, p.Model)
+			return
+		}
 	}
 }
 
@@ -54,6 +70,9 @@ func CompleteArticleContent(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "Content completion service not initialized"})
 		return
 	}
+
+	// Reload AI settings to pick up configuration changes made after startup.
+	loadCompletionAISettings()
 
 	var req struct {
 		Force bool `json:"force"`
@@ -85,6 +104,9 @@ func CompleteFeedArticles(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "Content completion service not initialized"})
 		return
 	}
+
+	// Reload AI settings to pick up configuration changes made after startup.
+	loadCompletionAISettings()
 
 	var articles []models.Article
 	if err := repository.Repo.DB().Omit("tag_count", "relevance_score").Where("feed_id = ? AND summary_status IN ?", feedID, []string{"incomplete", "failed"}).Find(&articles).Error; err != nil {

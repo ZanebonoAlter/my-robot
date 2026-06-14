@@ -40,6 +40,7 @@ var (
 	UpdateRoute    = handler.UpdateRoute
 	GetSettings    = handler.GetSettings
 	SaveSettings   = handler.SaveSettings
+	TestConnection = handler.TestConnection
 )
 
 // Scheduler handlers

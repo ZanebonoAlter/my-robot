@@ -6,8 +6,11 @@ type SemanticLabel struct {
 	ID             uint      `gorm:"primaryKey" json:"id"`
 	Label          string    `gorm:"size:160;not null" json:"label"`
 	Slug           string    `gorm:"size:160;not null;uniqueIndex:idx_semantic_labels_slug" json:"slug"`
-	Embedding      *string   `gorm:"type:vector(4096);column:embedding" json:"-"`
-	MergeEmbedding *string   `gorm:"type:vector(4096);column:merge_embedding" json:"-"`
+	// Vector columns are declared without a fixed dimension. The actual dimension is
+	// determined at runtime by the configured embedder (see auxlabel.EnsureVectorDimensionOnce)
+	// and may differ across deployments, so hardcoding it here would race AutoMigrate.
+	Embedding      *string   `gorm:"type:vector;column:embedding" json:"-"`
+	MergeEmbedding *string   `gorm:"type:vector;column:merge_embedding" json:"-"`
 	LabelType      string    `gorm:"size:20;not null;index:idx_semantic_labels_label_type" json:"label_type"`
 	Aliases        []string  `gorm:"type:jsonb;serializer:json;default:'[]'" json:"aliases"`
 	RefCount       int       `gorm:"not null;default:0" json:"ref_count"`

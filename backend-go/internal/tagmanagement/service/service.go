@@ -112,6 +112,12 @@ var (
 	ParsePgVector                   = auxlabel.ParsePgVector
 )
 
+// InvalidateMatchingConfigCache clears the cached matching config so the next
+// LoadConfig call reads fresh values from the database.
+func InvalidateMatchingConfigCache() {
+	board.InvalidateMatchingConfigCache()
+}
+
 // ============================================================================
 // Type / function re-exports from merge/
 // ============================================================================

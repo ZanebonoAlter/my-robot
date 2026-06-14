@@ -153,7 +153,7 @@ func (s *ContentCompletionService) CompleteArticleWithMetadata(ctx context.Conte
 		return fmt.Errorf("failed to reload claimed article: %w", err)
 	}
 
-	if s.aiService == nil || s.aiService.BaseURL == "" || s.aiService.APIKey == "" {
+	if !s.hasFallbackConfig() {
 		if !s.hasRouteConfig() {
 			if err := s.persistCompletionFailure(&article, &feed, "AI service not configured"); err != nil {
 				return fmt.Errorf("persist completion failure: %w", err)
@@ -229,7 +229,7 @@ func (s *ContentCompletionService) ListReadyArticles(limit int) ([]models.Articl
 
 func (s *ContentCompletionService) GetOverview() (*ContentCompletionOverview, error) {
 	overview := &ContentCompletionOverview{}
-	overview.AIConfigured = (s.aiService != nil && s.aiService.BaseURL != "" && s.aiService.APIKey != "") || s.hasRouteConfig()
+	overview.AIConfigured = s.hasFallbackConfig() || s.hasRouteConfig()
 
 	countQuery := []struct {
 		assign func(int64)
@@ -358,7 +358,15 @@ func (s *ContentCompletionService) hasRouteConfig() bool {
 		return false
 	}
 	provider, _, err := s.router.ResolvePrimaryProvider(airouter.CapabilitySummary)
-	return err == nil && provider != nil && strings.TrimSpace(provider.APIKey) != ""
+	return err == nil && provider != nil &&
+		strings.TrimSpace(provider.BaseURL) != "" &&
+		strings.TrimSpace(provider.Model) != ""
+}
+
+func (s *ContentCompletionService) hasFallbackConfig() bool {
+	return s.aiService != nil &&
+		strings.TrimSpace(s.aiService.BaseURL) != "" &&
+		strings.TrimSpace(s.aiService.Model) != ""
 }
 
 func (s *ContentCompletionService) summarizeContent(articleID uint, feedID uint, title, content string, metadata map[string]any) (string, error) {
@@ -385,7 +393,7 @@ func (s *ContentCompletionService) summarizeContent(articleID uint, feedID uint,
 		if err == nil {
 			return strings.TrimSpace(result.Content), nil
 		}
-		if s.aiService == nil || s.aiService.BaseURL == "" || s.aiService.APIKey == "" {
+		if !s.hasFallbackConfig() {
 			return "", err
 		}
 	}
@@ -453,5 +461,3 @@ func ToArticleRef(article models.Article) *ContentCompletionArticleRef {
 		Title:  article.Title,
 	}
 }
-
-

@@ -2,6 +2,7 @@ package handler
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -310,6 +311,46 @@ func SaveSettings(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"success": true})
+}
+
+type TestConnectionRequest struct {
+	BaseURL      string `json:"base_url" binding:"required"`
+	APIKey       string `json:"api_key"`
+	Model        string `json:"model"`
+	ProviderType string `json:"provider_type"`
+}
+
+func TestConnection(c *gin.Context) {
+	var req TestConnectionRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": err.Error()})
+		return
+	}
+
+	provider := models.AIProvider{
+		BaseURL:      strings.TrimSpace(req.BaseURL),
+		APIKey:       strings.TrimSpace(req.APIKey),
+		Model:        strings.TrimSpace(req.Model),
+		ProviderType: strings.TrimSpace(req.ProviderType),
+	}
+
+	result, err := airouter.TestConnection(c.Request.Context(), provider)
+	if err != nil {
+		logging.Warnf("ai-test: connection test failed for %s: %v", provider.BaseURL, err)
+		c.JSON(http.StatusOK, gin.H{"success": false, "error": err.Error()})
+		return
+	}
+
+	msg := "连接成功"
+	if len(result.Models) > 0 {
+		msg = fmt.Sprintf("连接成功，共 %d 个可用模型", len(result.Models))
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": msg,
+		"data":    result,
+	})
 }
 
 func upsertAISetting(key, value, description string) error {

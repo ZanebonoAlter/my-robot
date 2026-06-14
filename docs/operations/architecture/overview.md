@@ -211,8 +211,8 @@ my-robot/
 | `/api/reading-behavior` | 阅读行为上报 |
 | `/api/user-preferences` | 偏好查询与更新 |
 | `/api/topic-graph` | 主题图谱、分析、相关文章 |
-| `/api/topic-graph/analysis` | 主题分析、embedding 配置、标签管理 |
-| `/api/embedding` | Embedding 配置与队列管理 |
+| `/api/topic-graph/analysis` | 主题分析、标签管理 |
+| `/api/embedding` | Embedding 队列管理 |
 | `/api/topic-tags` | 关注标签、标签合并预览 |
 | `/api/narratives` | 叙事摘要查询与历史 |
 | `/api/traces` | 链路追踪查询与统计 |

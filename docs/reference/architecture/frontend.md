@@ -96,8 +96,8 @@ features/
 │  ├─ composables/     # useTopicGraph、useTopicTimeline、useArticlePreview、useFloatingPanelDrag 等
 │  ├─ utils/           # buildDisplayedTopicGraph、buildTopicGraphViewModel、normalizeTopicCategory
 │  └─ public.ts        # 跨 feature 共享 facade（TagMergePreview）
-├─ ai/                 # AI Router 设置面板、Embedding 配置/队列
-│  ├─ components/      # AIRouterSettingsPanel、EmbeddingConfigPanel 等
+├─ ai/                 # AI Router 设置面板、Embedding 队列
+│  ├─ components/      # AIRouterSettingsPanel、EmbeddingQueuePanel 等
 │  └─ composables/     # useAIRouterSettings
 └─ hierarchy-config/   # 层级配置管理
 ```

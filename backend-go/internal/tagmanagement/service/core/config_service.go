@@ -30,29 +30,6 @@ func (s *EmbeddingConfigService) LoadConfig() (map[string]string, error) {
 	return m, nil
 }
 
-// LoadMatchThreshold loads the match threshold from config.
-// Returns the default (0.92) if not configured.
-func (s *EmbeddingConfigService) LoadMatchThreshold() (float64, error) {
-	config, err := s.LoadConfig()
-	if err != nil {
-		return MatchThreshold, err
-	}
-
-	// Prefer new key; fall back to old keys for backward compat
-	if v, ok := config["match_threshold"]; ok {
-		if f, err := strconv.ParseFloat(v, 64); err == nil && f > 0 && f <= 1.0 {
-			return f, nil
-		}
-	}
-	if v, ok := config["low_similarity_threshold"]; ok {
-		if f, err := strconv.ParseFloat(v, 64); err == nil && f > 0 && f <= 1.0 {
-			return f, nil
-		}
-	}
-
-	return MatchThreshold, nil
-}
-
 // ClusterConfig holds tuning parameters for tag clustering.
 type ClusterConfig struct {
 	MaxTags             int

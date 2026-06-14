@@ -558,6 +558,28 @@ func postgresMigrations() []Migration {
 			},
 		},
 
+		// ── Clean up dead embedding config keys ──────────────────────────
+		{
+			Version:     "20260614_0001",
+			Description: "Remove dead embedding_config and ai_settings rows that are no longer consumed by any runtime code.",
+			Up: func(db *gorm.DB) error {
+				deadEmbeddingKeys := []string{
+					"high_similarity_threshold",
+					"low_similarity_threshold",
+					"embedding_dimension",
+					"embedding_model",
+				}
+				if err := db.Exec("DELETE FROM embedding_config WHERE key IN (?, ?, ?, ?)",
+					deadEmbeddingKeys[0], deadEmbeddingKeys[1], deadEmbeddingKeys[2], deadEmbeddingKeys[3]).Error; err != nil {
+					return fmt.Errorf("delete dead embedding_config keys: %w", err)
+				}
+				if err := db.Exec("DELETE FROM ai_settings WHERE key = ?", "narrative_board_embedding_threshold").Error; err != nil {
+					return fmt.Errorf("delete dead ai_settings key: %w", err)
+				}
+				return nil
+			},
+		},
+
 		// ── Section embedding column ────────────────────────────────────
 		{
 			Version:     "20260601_0002",

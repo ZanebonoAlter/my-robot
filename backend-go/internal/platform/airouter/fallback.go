@@ -18,11 +18,7 @@ type AIService struct {
 }
 
 type AISummaryResponse struct {
-	OneSentence string   `json:"one_sentence"`
-	KeyPoints   []string `json:"key_points"`
-	Takeaways   []string `json:"takeaways"`
-	Tags        []string `json:"tags"`
-	Markdown    string   `json:"markdown"`
+	Markdown string `json:"markdown"`
 }
 
 type openAIRequest struct {
@@ -58,7 +54,7 @@ func NewAIService(baseURL, apiKey, model string) *AIService {
 	}
 }
 
-func (s *AIService) SummarizeArticle(title, content, language string) (*AISummaryResponse, error) {
+func (s *AIService) SummarizeArticle(title, content, language string) (string, error) {
 	systemPrompt := s.GetSystemPrompt(language)
 	userContent := s.PrepareArticleContent(title, content)
 
@@ -74,19 +70,16 @@ func (s *AIService) SummarizeArticle(title, content, language string) (*AISummar
 
 	resp, err := s.callOpenAI(req)
 	if err != nil {
-		return nil, err
+		return "", err
 	}
 	if resp.Error != nil {
-		return nil, fmt.Errorf("AI API error: %s", resp.Error.Message)
+		return "", fmt.Errorf("AI API error: %s", resp.Error.Message)
 	}
 	if len(resp.Choices) == 0 {
-		return nil, fmt.Errorf("no response from AI")
+		return "", fmt.Errorf("no response from AI")
 	}
 
-	summaryText := cleanSummaryMarkdown(resp.Choices[0].Message.Content)
-	summary := ParseSummaryMarkdown(summaryText)
-	summary.Markdown = summaryText
-	return summary, nil
+	return cleanSummaryMarkdown(resp.Choices[0].Message.Content), nil
 }
 
 func (s *AIService) GetSystemPrompt(language string) string {
@@ -139,44 +132,12 @@ func (s *AIService) PrepareArticleContent(title, content string) string {
 	return fmt.Sprintf("Title: %s\n\nSource content in Markdown:\n%s", title, content)
 }
 
-func ParseSummaryMarkdown(responseText string) *AISummaryResponse {
-	summary := &AISummaryResponse{
-		KeyPoints: make([]string, 0),
-		Takeaways: make([]string, 0),
-		Tags:      make([]string, 0),
-		Markdown:  responseText,
-	}
-
-	plain := markdownToPlainText(responseText)
-	if plain != "" {
-		if len(plain) > 180 {
-			summary.OneSentence = plain[:180]
-		} else {
-			summary.OneSentence = plain
-		}
-	}
-
-	return summary
-}
-
 func cleanSummaryMarkdown(input string) string {
 	text := strings.TrimSpace(input)
 	text = strings.TrimPrefix(text, "```markdown")
 	text = strings.TrimPrefix(text, "```")
 	text = strings.TrimSuffix(text, "```")
 	return strings.TrimSpace(text)
-}
-
-func markdownToPlainText(input string) string {
-	replacer := strings.NewReplacer(
-		"#", " ",
-		"*", " ",
-		"`", " ",
-		">", " ",
-		"|", " ",
-	)
-	plain := replacer.Replace(input)
-	return strings.Join(strings.Fields(plain), " ")
 }
 
 func (s *AIService) callOpenAI(req openAIRequest) (*openAIResponse, error) {

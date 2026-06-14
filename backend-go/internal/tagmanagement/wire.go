@@ -105,7 +105,6 @@ var (
 	RegisterTagMergePreviewRoutes       = handler.RegisterTagMergePreviewRoutes
 	RegisterTagQueueRoutes              = handler.RegisterTagQueueRoutes
 	RegisterSemanticBoardRoutes         = handler.RegisterSemanticBoardRoutes
-	RegisterEmbeddingConfigRoutes       = handler.RegisterEmbeddingConfigRoutes
 	RegisterEmbeddingQueueRoutes        = handler.RegisterEmbeddingQueueRoutes
 	RegisterMergeReembeddingQueueRoutes = handler.RegisterMergeReembeddingQueueRoutes
 )

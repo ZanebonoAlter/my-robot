@@ -31,7 +31,7 @@ func loadCompletionAISettings() {
 		return
 	}
 
-	provider, _, err := airouter.NewRouter().ResolvePrimaryProvider(airouter.CapabilityArticleCompletion)
+	provider, _, err := airouter.NewRouter().ResolvePrimaryProvider(airouter.CapabilitySummary)
 	if err == nil && provider != nil && provider.BaseURL != "" && provider.APIKey != "" && provider.Model != "" {
 		completionService.SetAICredentials(provider.BaseURL, provider.APIKey, provider.Model)
 	}

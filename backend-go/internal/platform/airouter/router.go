@@ -19,10 +19,10 @@ import (
 const maxResponseSnippet = 10000
 
 var defaultConcurrency = map[Capability]int{
-	CapabilityArticleCompletion: 2,
-	CapabilityTopicTagging:      3,
-	CapabilityOpenNotebook:      2,
-	CapabilityEmbedding:         5,
+	CapabilityTopicTagging: 3,
+	CapabilityDigestPolish:  2,
+	CapabilityOpenNotebook:  2,
+	CapabilityEmbedding:    5,
 }
 
 func truncateSnippet(s string) string {

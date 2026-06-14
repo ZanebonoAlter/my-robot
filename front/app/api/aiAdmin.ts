@@ -10,7 +10,6 @@ export function useAIAdminApi() {
     base_url?: string
     api_key: string
     model?: string
-    narrative_board_embedding_threshold?: number
   }): Promise<ApiResponse<void>> {
     return apiClient.post('/ai/settings', data)
   }

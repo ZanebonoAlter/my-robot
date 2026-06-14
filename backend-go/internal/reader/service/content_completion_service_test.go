@@ -49,7 +49,7 @@ func TestCompleteArticleWithForceUsesAIRouterRoute(t *testing.T) {
 	if err := database.DB.Create(&provider).Error; err != nil {
 		t.Fatalf("create provider: %v", err)
 	}
-	route := models.AIRoute{Name: airouter.DefaultRouteName, Capability: string(airouter.CapabilityArticleCompletion), Enabled: true, Strategy: "ordered_failover"}
+	route := models.AIRoute{Name: airouter.DefaultRouteName, Capability: string(airouter.CapabilitySummary), Enabled: true, Strategy: "ordered_failover"}
 	if err := database.DB.Create(&route).Error; err != nil {
 		t.Fatalf("create route: %v", err)
 	}
@@ -196,7 +196,7 @@ func TestCompleteArticleWithForceRetriesUntilMaxAndLogsMetadata(t *testing.T) {
 	if err := database.DB.Create(&provider).Error; err != nil {
 		t.Fatalf("create provider: %v", err)
 	}
-	route := models.AIRoute{Name: airouter.DefaultRouteName, Capability: string(airouter.CapabilityArticleCompletion), Enabled: true, Strategy: "ordered_failover"}
+	route := models.AIRoute{Name: airouter.DefaultRouteName, Capability: string(airouter.CapabilitySummary), Enabled: true, Strategy: "ordered_failover"}
 	if err := database.DB.Create(&route).Error; err != nil {
 		t.Fatalf("create route: %v", err)
 	}
@@ -271,7 +271,7 @@ func TestCompleteArticleWithForceSkipsFreshPendingAndReclaimsStalePending(t *tes
 	if err := database.DB.Create(&provider).Error; err != nil {
 		t.Fatalf("create provider: %v", err)
 	}
-	route := models.AIRoute{Name: airouter.DefaultRouteName, Capability: string(airouter.CapabilityArticleCompletion), Enabled: true, Strategy: "ordered_failover"}
+	route := models.AIRoute{Name: airouter.DefaultRouteName, Capability: string(airouter.CapabilitySummary), Enabled: true, Strategy: "ordered_failover"}
 	if err := database.DB.Create(&route).Error; err != nil {
 		t.Fatalf("create route: %v", err)
 	}
@@ -352,7 +352,7 @@ func TestCompleteArticleWithMetadataAddsSchedulerRunIDToCallLogs(t *testing.T) {
 	if err := database.DB.Create(&provider).Error; err != nil {
 		t.Fatalf("create provider: %v", err)
 	}
-	route := models.AIRoute{Name: airouter.DefaultRouteName, Capability: string(airouter.CapabilityArticleCompletion), Enabled: true, Strategy: "ordered_failover"}
+	route := models.AIRoute{Name: airouter.DefaultRouteName, Capability: string(airouter.CapabilitySummary), Enabled: true, Strategy: "ordered_failover"}
 	if err := database.DB.Create(&route).Error; err != nil {
 		t.Fatalf("create route: %v", err)
 	}
@@ -408,7 +408,7 @@ func TestCompleteArticleEnqueuesRetagJobAfterSuccessfulCompletion(t *testing.T) 
 	if err := database.DB.Create(&provider).Error; err != nil {
 		t.Fatalf("create provider: %v", err)
 	}
-	route := models.AIRoute{Name: airouter.DefaultRouteName, Capability: string(airouter.CapabilityArticleCompletion), Enabled: true, Strategy: "ordered_failover"}
+	route := models.AIRoute{Name: airouter.DefaultRouteName, Capability: string(airouter.CapabilitySummary), Enabled: true, Strategy: "ordered_failover"}
 	if err := database.DB.Create(&route).Error; err != nil {
 		t.Fatalf("create route: %v", err)
 	}

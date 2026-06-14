@@ -257,7 +257,7 @@ func UpdateRoute(c *gin.Context) {
 }
 
 func GetSettings(c *gin.Context) {
-	primary, _, err := airouter.NewRouter().ResolvePrimaryProvider(airouter.CapabilityArticleCompletion)
+	primary, _, err := airouter.NewRouter().ResolvePrimaryProvider(airouter.CapabilitySummary)
 	if err != nil {
 		logging.Warnf("ai-settings: resolve primary provider failed: %v", err)
 	}
@@ -297,7 +297,6 @@ func GetSettings(c *gin.Context) {
 }
 
 type SaveSettingsRequest struct {
-	NarrativeBoardEmbeddingThreshold *float64 `json:"narrative_board_embedding_threshold"`
 }
 
 func SaveSettings(c *gin.Context) {
@@ -305,18 +304,6 @@ func SaveSettings(c *gin.Context) {
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": err.Error()})
 		return
-	}
-
-	if req.NarrativeBoardEmbeddingThreshold != nil {
-		val := *req.NarrativeBoardEmbeddingThreshold
-		if val < 0.1 || val > 1.0 {
-			c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "narrative_board_embedding_threshold must be between 0.1 and 1.0"})
-			return
-		}
-		if err := upsertAISetting("narrative_board_embedding_threshold", strconv.FormatFloat(val, 'f', -1, 64), "板块概念匹配的 embedding 相似度阈值"); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": err.Error()})
-			return
-		}
 	}
 
 	c.JSON(http.StatusOK, gin.H{"success": true})

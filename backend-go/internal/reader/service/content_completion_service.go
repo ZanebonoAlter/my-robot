@@ -179,7 +179,7 @@ func (s *ContentCompletionService) CompleteArticleWithMetadata(ctx context.Conte
 	}
 
 	now = currentCompletionTime()
-	article.AIContentSummary = formatAISummary(summary)
+	article.AIContentSummary = strings.TrimSpace(summary)
 	article.SummaryStatus = "complete"
 	article.CompletionError = ""
 	article.SummaryGeneratedAt = &now
@@ -357,11 +357,11 @@ func (s *ContentCompletionService) hasRouteConfig() bool {
 	if s.router == nil {
 		return false
 	}
-	provider, _, err := s.router.ResolvePrimaryProvider(airouter.CapabilityArticleCompletion)
+	provider, _, err := s.router.ResolvePrimaryProvider(airouter.CapabilitySummary)
 	return err == nil && provider != nil && strings.TrimSpace(provider.APIKey) != ""
 }
 
-func (s *ContentCompletionService) summarizeContent(articleID uint, feedID uint, title, content string, metadata map[string]any) (*airouter.AISummaryResponse, error) {
+func (s *ContentCompletionService) summarizeContent(articleID uint, feedID uint, title, content string, metadata map[string]any) (string, error) {
 	requestMeta := map[string]any{
 		"article_id": articleID,
 		"feed_id":    feedID,
@@ -374,7 +374,7 @@ func (s *ContentCompletionService) summarizeContent(articleID uint, feedID uint,
 	if s.router != nil {
 		maxTokens := 16000
 		result, err := s.router.Chat(context.Background(), airouter.ChatRequest{
-			Capability: airouter.CapabilityArticleCompletion,
+			Capability: airouter.CapabilitySummary,
 			Messages: []airouter.Message{
 				{Role: "system", Content: s.aiService.GetSystemPrompt("zh")},
 				{Role: "user", Content: s.aiService.PrepareArticleContent(title, content)},
@@ -383,10 +383,10 @@ func (s *ContentCompletionService) summarizeContent(articleID uint, feedID uint,
 			Metadata:  requestMeta,
 		})
 		if err == nil {
-			return airouter.ParseSummaryMarkdown(result.Content), nil
+			return strings.TrimSpace(result.Content), nil
 		}
 		if s.aiService == nil || s.aiService.BaseURL == "" || s.aiService.APIKey == "" {
-			return nil, err
+			return "", err
 		}
 	}
 
@@ -454,44 +454,4 @@ func ToArticleRef(article models.Article) *ContentCompletionArticleRef {
 	}
 }
 
-func formatAISummary(summary *airouter.AISummaryResponse) string {
-	if summary == nil {
-		return ""
-	}
 
-	if strings.TrimSpace(summary.Markdown) != "" {
-		return strings.TrimSpace(summary.Markdown)
-	}
-
-	var result strings.Builder
-	result.WriteString("# 内容整理\n\n")
-
-	if summary.OneSentence != "" {
-		fmt.Fprintf(&result, "> %s\n\n", summary.OneSentence)
-	}
-
-	if len(summary.KeyPoints) > 0 {
-		result.WriteString("## 关键点\n\n")
-		for _, point := range summary.KeyPoints {
-			fmt.Fprintf(&result, "- %s\n", point)
-		}
-		result.WriteString("\n")
-	}
-
-	if len(summary.Takeaways) > 0 {
-		result.WriteString("## 补充说明\n\n")
-		for i, takeaway := range summary.Takeaways {
-			fmt.Fprintf(&result, "%d. %s\n", i+1, takeaway)
-		}
-		result.WriteString("\n")
-	}
-
-	if len(summary.Tags) > 0 {
-		result.WriteString("## 标签\n\n")
-		for _, tag := range summary.Tags {
-			fmt.Fprintf(&result, "- %s\n", tag)
-		}
-	}
-
-	return result.String()
-}

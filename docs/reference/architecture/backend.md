@@ -163,6 +163,8 @@ internal/<domain>/
 - `ws/`：WebSocket hub，给前端推送异步任务状态
 - `ai/`：AI 调用封装
 - `airouter/`：AI provider、capability route、failover 路由
+  - capability 绑定：`summary` → 文章自动总结、`digest_polish` → 日报生成、`topic_tagging` → 标签提取、`embedding` → 向量嵌入
+  - `article_completion` 已废弃，前端面板不再显示；数据库残留行不影响运行
 - `aisettings/`：兼容旧配置表的 AI / Firecrawl / Open Notebook 配置读写
 - `opennotebook/`：Open Notebook 客户端能力
 

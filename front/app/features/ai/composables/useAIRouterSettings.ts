@@ -5,13 +5,12 @@ import { useAI } from '~/composables/useAI'
 
 const routeLabels: Record<string, string> = {
   summary: '文章总结',
-  article_completion: '正文补全',
   topic_tagging: '主题提取',
   digest_polish: '日报润色',
   embedding: '向量嵌入',
 }
 
-const capabilityOrder = ['summary', 'article_completion', 'topic_tagging', 'digest_polish', 'embedding']
+const capabilityOrder = ['summary', 'topic_tagging', 'digest_polish', 'embedding']
 
 export function useAIRouterSettings() {
   const loading = ref(false)
@@ -51,8 +50,6 @@ export function useAIRouterSettings() {
   const showNewProviderForm = ref(false)
   const showPrimaryApiKey = ref(false)
   const showNewProviderApiKey = ref(false)
-  const embeddingThreshold = ref(0.7)
-  const savingThreshold = ref(false)
   const { loadSettings: reloadAISettings } = useAI()
   const editingProviderId = ref<number | null>(null)
   const draggingProviderId = ref<number | null>(null)
@@ -136,8 +133,6 @@ export function useAIRouterSettings() {
         ? Number(settingsRes.data.provider_id) : null
       primaryProviderForm.time_range = settingsRes.success && typeof settingsRes.data?.time_range === 'number'
         ? settingsRes.data.time_range : 180
-      embeddingThreshold.value = settingsRes.success && settingsRes.data?.narrative_board_embedding_threshold
-        ? parseFloat(String(settingsRes.data.narrative_board_embedding_threshold)) : 0.7
       hydratePrimaryProvider()
       hydrateRouteSelections()
     } catch (err) {
@@ -394,23 +389,6 @@ export function useAIRouterSettings() {
     }
   }
 
-  // ---- Threshold ----
-  async function saveThreshold() {
-    savingThreshold.value = true
-    try {
-      const aiAdminApi = useAIAdminApi()
-      const res = await aiAdminApi.saveSettings({
-        narrative_board_embedding_threshold: embeddingThreshold.value,
-      } as any)
-      if (!res.success) throw new Error(res.error || '保存阈值失败')
-      pushMessage('success', '匹配阈值已保存')
-    } catch (err) {
-      pushMessage('error', err instanceof Error ? err.message : '保存阈值失败')
-    } finally {
-      savingThreshold.value = false
-    }
-  }
-
   // ---- Test connection ----
   async function testPrimaryProvider() {
     if (!primaryProviderForm.base_url || !primaryProviderForm.model) {
@@ -447,7 +425,6 @@ export function useAIRouterSettings() {
     primaryProviderId, primaryProviderForm,
     newProviderForm, showNewProviderForm,
     showPrimaryApiKey, showNewProviderApiKey,
-    embeddingThreshold, savingThreshold,
     editingProviderId, editProviderForm, showEditProviderApiKey,
     draggingProviderId, draggingCapability,
     backupProviders,
@@ -465,7 +442,7 @@ export function useAIRouterSettings() {
     loadData, savePrimaryProvider,
     saveNewProvider, startEditingProvider, cancelEditingProvider,
     saveEditedProvider, deleteBackupProvider,
-    saveRoutes, saveThreshold,
+    saveRoutes,
     testPrimaryProvider,
   }
 }

@@ -6,7 +6,6 @@ import (
 
 // RegisterRoutes registers all tagmanagement module routes under the given router group.
 func RegisterRoutes(rg *gin.RouterGroup) {
-	RegisterEmbeddingConfigRoutes(rg)
 	RegisterEmbeddingQueueRoutes(rg)
 	RegisterMergeReembeddingQueueRoutes(rg)
 	RegisterTagQueueRoutes(rg)

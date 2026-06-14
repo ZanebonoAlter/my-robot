@@ -112,4 +112,4 @@
 | `enabled` | bool | 否 | 默认 `true` |
 | `description` | string | 否 | 描述 |
 
-`capability` 如 `summary`, `article_completion`。
+`capability` 取值及业务绑定：`summary`（文章自动总结）、`digest_polish`（日报生成）、`topic_tagging`（事件标签提取）、`embedding`（向量嵌入）。`article_completion` 已废弃，前端面板不再显示。

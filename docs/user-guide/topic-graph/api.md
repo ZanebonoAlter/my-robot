@@ -298,25 +298,6 @@ POST 请求还支持 JSON body 传入 `windowType` 和 `anchorDate`。
 
 ---
 
-## Embedding 配置
-
-| 方法 | 路径 | 说明 |
-|------|------|------|
-| GET | `/api/embedding/config` | 获取所有 embedding 配置 |
-| PUT | `/api/embedding/config/:key` | 更新单个配置项 |
-
-### GET /api/embedding/config
-
-返回所有 embedding 配置项列表。
-
-### PUT /api/embedding/config/:key
-
-```json
-{ "value": "新值" }
-```
-
----
-
 ## Embedding 队列
 
 | 方法 | 路径 | 说明 |

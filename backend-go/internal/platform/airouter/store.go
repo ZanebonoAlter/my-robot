@@ -17,8 +17,9 @@ import (
 type Capability string
 
 const (
-	CapabilityArticleCompletion  Capability = "article_completion"
+	CapabilitySummary            Capability = "summary"
 	CapabilityTopicTagging       Capability = "topic_tagging"
+	CapabilityDigestPolish       Capability = "digest_polish"
 	CapabilityOpenNotebook       Capability = "open_notebook"
 	CapabilityEmbedding          Capability = "embedding"
 	DefaultRouteName             string     = "default"

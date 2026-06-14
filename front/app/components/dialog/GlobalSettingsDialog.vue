@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import AIRouterSettingsPanel from '~/features/ai/components/AIRouterSettingsPanel.vue'
-import EmbeddingConfigPanel from '~/features/ai/components/EmbeddingConfigPanel.vue'
 import EmbeddingQueuePanel from '~/features/ai/components/EmbeddingQueuePanel.vue'
 import TagQueuePanel from '~/features/topic-graph/components/TagQueuePanel.vue'
 import FeedSettingsPanel from '~/components/dialog/FeedSettingsPanel.vue'
@@ -75,7 +74,6 @@ const {
 
       <div v-if="activeTab === 'general'" class="space-y-6">
         <AIRouterSettingsPanel />
-        <EmbeddingConfigPanel />
       </div>
 
       <div v-if="activeTab === 'queues'" class="space-y-6">

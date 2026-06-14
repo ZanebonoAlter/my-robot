@@ -9,7 +9,6 @@ export type SectionKey =
   | 'feeds'
   | 'ai-providers'
   | 'capability-routes'
-  | 'embedding'
   | 'queues'
   | 'preferences'
   | 'firecrawl'
@@ -26,7 +25,6 @@ const sections: SectionMeta[] = [
   { key: 'feeds', label: '订阅源', description: '管理 RSS 订阅源的刷新、抓取和标签配置', icon: 'mdi:rss' },
   { key: 'ai-providers', label: 'AI 模型', description: '配置主模型与备用模型提供商', icon: 'mdi:brain' },
   { key: 'capability-routes', label: '能力路由', description: '按能力分配模型优先级与降级顺序', icon: 'mdi:routes' },
-  { key: 'embedding', label: 'Embedding', description: 'Embedding 模型配置与板块匹配阈值', icon: 'mdi:vector-link' },
   { key: 'queues', label: '队列', description: 'Embedding 与标签打标队列的监控', icon: 'mdi:format-list-bulleted' },
   { key: 'preferences', label: '阅读偏好', description: '阅读统计、来源评分与推荐偏好', icon: 'mdi:chart-bar' },
   { key: 'firecrawl', label: 'Firecrawl', description: 'Firecrawl 服务配置与抓取参数', icon: 'mdi:spider' },

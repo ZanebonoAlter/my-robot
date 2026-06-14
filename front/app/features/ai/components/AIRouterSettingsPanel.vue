@@ -12,12 +12,10 @@ const {
   loading, saving, testing, error, success,
   primaryProviderForm, showPrimaryApiKey,
   newProviderForm, showNewProviderApiKey,
-  embeddingThreshold, savingThreshold,
   editingProviderId, editProviderForm, showEditProviderApiKey,
   backupProviders, showNewProviderForm,
   savePrimaryProvider, testPrimaryProvider,
   deleteBackupProvider, isProviderLinked,
-  saveThreshold,
 } = ctx
 </script>
 
@@ -101,30 +99,6 @@ const {
 
       <!-- Section 3: Capability Routes (extracted) -->
       <AIRouterCapabilityRoutes />
-
-      <!-- Section 4: Embedding Threshold -->
-      <div class="rounded-xl border border-[var(--color-border-subtle)] overflow-hidden" style="background: var(--color-bg-elevated)">
-        <div class="px-5 py-3.5 border-b border-[var(--color-border-subtle)] flex items-center justify-between">
-          <AppSectionHeader title="板块匹配阈值" description="Embedding 相似度阈值，越低标签越容易匹配到板块" icon-name="mdi:tune-variant" />
-          <button class="px-3 py-1.5 text-xs font-medium text-white rounded-lg transition-colors disabled:opacity-50"
-            style="background: var(--color-accent)"
-            :disabled="savingThreshold" @click="saveThreshold">
-            <Icon v-if="savingThreshold" icon="mdi:loading" width="12" height="12" class="animate-spin inline-block mr-1" /> 保存
-          </button>
-        </div>
-        <div class="p-5">
-          <div class="flex items-center gap-4">
-            <input v-model.number="embeddingThreshold" type="range" min="0.1" max="0.95" step="0.05"
-              class="flex-1 h-2 rounded-lg appearance-none cursor-pointer"
-              :style="{ background: `linear-gradient(to right, var(--color-accent) 0%, var(--color-accent) ${(embeddingThreshold - 0.1) / 0.85 * 100}%, var(--color-bg-sunken) ${(embeddingThreshold - 0.1) / 0.85 * 100}%, var(--color-bg-sunken) 100%)` }">
-            <span class="text-base font-bold w-12 text-right tabular-nums" style="color: var(--color-accent)">{{ embeddingThreshold.toFixed(2) }}</span>
-          </div>
-          <div class="flex justify-between mt-1">
-            <span class="text-[10px]" style="color: var(--color-text-muted)">0.10 宽松</span>
-            <span class="text-[10px]" style="color: var(--color-text-muted)">0.95 严格</span>
-          </div>
-        </div>
-      </div>
     </template>
 
     <div v-if="success" class="rounded-lg px-4 py-2.5 text-xs flex items-center gap-2" style="background: var(--color-success-bg, rgba(61, 138, 74, 0.1)); border: 1px solid var(--color-success-border, rgba(61, 138, 74, 0.25)); color: var(--color-success)">

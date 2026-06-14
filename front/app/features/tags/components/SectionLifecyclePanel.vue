@@ -3,6 +3,7 @@ import { ref, computed, watch } from 'vue'
 import { Icon } from '@iconify/vue'
 import { useDailyReportsApi, type SectionLifecycleNode, type SectionRelation, type DailyReportThread } from '~/api/dailyReports'
 import { useArticlesApi } from '~/api/articles'
+import { bfsHighlight, type GraphHighlightEdge } from '~/features/topic-graph/utils/graphBfsHighlight'
 
 const props = defineProps<{
   sectionId: number
@@ -186,32 +187,28 @@ const currentSection = computed(() =>
   sections.value.find(s => s.id === props.sectionId),
 )
 
-// --- Hover highlight ---
+// --- Hover highlight (BFS-based) ---
 const hoveredId = ref<number | null>(null)
 
-const neighborsOf = computed(() => {
-  const map = new Map<number, Set<number>>()
-  for (const r of relations.value) {
-    let s = map.get(r.from_id)
-    if (!s) { s = new Set(); map.set(r.from_id, s) }
-    s.add(r.to_id)
-    s = map.get(r.to_id)
-    if (!s) { s = new Set(); map.set(r.to_id, s) }
-    s.add(r.from_id)
-  }
-  return map
+// Map relations to numeric edges for bfsHighlight
+const graphEdges = computed<GraphHighlightEdge<number>[]>(() =>
+  relations.value.map(r => ({ source: r.from_id, target: r.to_id }))
+)
+
+// Cached BFS highlight result for hovered node
+const highlightedSet = computed<Set<number>>(() => {
+  if (hoveredId.value === null) return new Set()
+  return bfsHighlight(hoveredId.value, graphEdges.value, sections.value.length)
 })
 
 function isEdgeHighlighted(r: { fromId: number; toId: number }): boolean {
   if (hoveredId.value === null) return false
-  return r.fromId === hoveredId.value || r.toId === hoveredId.value
+  return highlightedSet.value.has(r.fromId) && highlightedSet.value.has(r.toId)
 }
 
 function isNodeHighlighted(nodeId: number): boolean {
   if (hoveredId.value === null) return false
-  if (nodeId === hoveredId.value) return true
-  const nb = neighborsOf.value.get(hoveredId.value)
-  return nb ? nb.has(nodeId) : false
+  return highlightedSet.value.has(nodeId)
 }
 
 // --- Thread/article loading ---
@@ -351,6 +348,7 @@ function navigateToNode(node: SectionLifecycleNode) {
           <path
             v-for="edge in edgePaths"
             :key="edge.key"
+            :data-testid="`slp-edge-${edge.fromId}-${edge.toId}`"
             :d="edge.d"
             fill="none"
             :stroke="getEdgeColor(edge.distance, isEdgeHighlighted(edge))"
@@ -363,6 +361,7 @@ function navigateToNode(node: SectionLifecycleNode) {
           <g
             v-for="pn in positionedNodes"
             :key="'n-' + pn.data.id"
+            :data-testid="`slp-node-${pn.data.id}`"
             class="slp-node"
             :class="{
               'slp-node--current': pn.data.id === sectionId,

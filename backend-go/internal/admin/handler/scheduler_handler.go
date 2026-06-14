@@ -128,6 +128,15 @@ func schedulerDescriptors() []schedulerDescriptor {
 				return s
 			},
 		},
+		{
+			Name:        "blocked_article_recovery",
+			DisplayName: "Blocked Article Recovery",
+			Description: "Recover articles stuck in blocked state",
+			Get: func() interface{} {
+				s, _ := Reg.Get("blocked_article_recovery")
+				return s
+			},
+		},
 	}
 }
 

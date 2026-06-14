@@ -39,6 +39,7 @@ var (
 	resetMu   sync.Mutex
 	cachedDB  *gorm.DB
 	startErr  error
+	cachedDSN string // container connection string; used to reopen the pool after a schema rebuild
 )
 
 // OpenTestDB returns a *gorm.DB connected to a throwaway pgvector Postgres
@@ -99,15 +100,28 @@ func startContainerAndConnect() error {
 	// tables. With the default gorm.Config{} AutoMigrate would CREATE those FKs
 	// and never drop them, leaving the test DB stricter than production and
 	// breaking those code paths for no real reason.
-	db, err := gorm.Open(postgres.Open(connStr), &gorm.Config{
-		DisableForeignKeyConstraintWhenMigrating: true,
-	})
+	db, err := openGorm(connStr)
 	if err != nil {
 		return fmt.Errorf("gorm open: %w", err)
 	}
 
+	cachedDSN = connStr
 	cachedDB = db
 	return nil
+}
+
+// openGorm opens a *gorm.DB against dsn using the same config production's
+// InitDB uses (SlowLogger, no FK constraints during migrate). ReimportTestDB
+// calls it to open a fresh pool after rebuilding the schema.
+//
+// The SlowLogger mirrors production: it swallows gorm.ErrRecordNotFound (e.g.
+// the check-then-create existence probes inside the embedding_config seed
+// migrations) instead of surfacing them as warnings like GORM's default logger.
+func openGorm(dsn string) (*gorm.DB, error) {
+	return gorm.Open(postgres.Open(dsn), &gorm.Config{
+		DisableForeignKeyConstraintWhenMigrating: true,
+		Logger:                                   database.NewSlowLogger(200 * time.Millisecond),
+	})
 }
 
 // SetupTestDB is the single entry point for integration tests.
@@ -126,15 +140,13 @@ func SetupTestDB(t *testing.T) *gorm.DB {
 	}
 
 	db := OpenTestDB(t)
-	database.DB = db
-	ReimportTestDB(t, db)
-	return db
+	return ReimportTestDB(t, db)
 }
 
 // ReimportTestDB rebuilds the isolated test schema and reruns the production
 // migration path. Regression tests can call it explicitly to restore the same
 // schema and seed data that a fresh production database receives.
-func ReimportTestDB(t *testing.T, db *gorm.DB) {
+func ReimportTestDB(t *testing.T, db *gorm.DB) *gorm.DB {
 	t.Helper()
 
 	resetMu.Lock()
@@ -149,6 +161,26 @@ func ReimportTestDB(t *testing.T, db *gorm.DB) {
 	if err := runTestMigrations(db); err != nil {
 		t.Fatalf("import production database state: %v", err)
 	}
+
+	// Reopen the connection pool. Rebuilding the schema (DROP SCHEMA public
+	// CASCADE) recreates the pgvector `vector` type with a NEW oid each cycle
+	// (measured: 16387 -> 17280 -> 18173 across three rebuilds). The pool we
+	// just used still holds server-side prepared statements that reference the
+	// OLD oid, so any subsequent vector-column query fails with either
+	// `cache lookup failed for type <old-oid>` or `cached plan must not change
+	// result type`. Closing this pool and opening a fresh one gives connections
+	// whose prepared-statement cache matches the rebuilt catalog — exactly what
+	// a production restart does (new connection -> fresh catalog view).
+	freshDB, err := openGorm(cachedDSN)
+	if err != nil {
+		t.Fatalf("reopen test database after schema rebuild: %v", err)
+	}
+	if sqlDB, err := db.DB(); err == nil {
+		_ = sqlDB.Close()
+	}
+	cachedDB = freshDB
+	database.DB = freshDB
+	return freshDB
 }
 
 // TruncateAllTables truncates all user tables using CASCADE. This is the reset

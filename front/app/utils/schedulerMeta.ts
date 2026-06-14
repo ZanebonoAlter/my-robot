@@ -1,4 +1,4 @@
-import type { SchedulerArticleRef, SchedulerStatus } from '~/types/scheduler'
+import type { SchedulerArticleRef, SchedulerLastRunSummary, SchedulerStatus } from '~/types/scheduler'
 
 const contentCompletionAliases = new Set(['content_completion', 'ai_summary'])
 
@@ -111,4 +111,69 @@ export function getCurrentContentCompletionArticle(scheduler: ContentCompletionA
   }
 
   return null
+}
+
+export function formatLastRunSummary(name: string, summary: SchedulerLastRunSummary | null | undefined): string {
+  if (!summary) {
+    return ''
+  }
+
+  // Try to build a human-readable summary based on scheduler name
+  switch (name) {
+    case 'log_cleanup': {
+      const logs = (summary as Record<string, unknown>).last_ai_call_logs_deleted as number | undefined
+      const spans = (summary as Record<string, unknown>).last_otel_spans_deleted as number | undefined
+      const parts: string[] = []
+      if (logs !== undefined) parts.push(`${logs} 条 AI 日志`)
+      if (spans !== undefined) parts.push(`${spans} 条追踪`)
+      return parts.length > 0 ? `清理了 ${parts.join('、')}` : (summary.reason || '')
+    }
+    case 'aux_label_cleanup': {
+      const count = (summary as Record<string, unknown>).affected_count as number | undefined
+      if (count !== undefined) return `清理了 ${count} 个辅助标签`
+      return summary.reason || ''
+    }
+    case 'blocked_article_recovery': {
+      const count = (summary as Record<string, unknown>).recovered_count as number | undefined
+      if (count !== undefined) return `恢复了 ${count} 篇文章`
+      return summary.reason || ''
+    }
+    case 'preference_update': {
+      const count = (summary as Record<string, unknown>).updated_count as number | undefined
+      if (count !== undefined) return `更新了 ${count} 项偏好`
+      return summary.reason || ''
+    }
+    case 'daily_report': {
+      const count = summary.report_count ?? (summary as Record<string, unknown>).report_count as number | undefined
+      if (count !== undefined) return `生成了 ${count} 份日报`
+      return summary.reason || ''
+    }
+    case 'auto_refresh': {
+      const triggered = summary.triggered_feeds
+      const scanned = summary.scanned_feeds
+      if (triggered !== undefined && scanned !== undefined) {
+        return `刷新 ${triggered} 个订阅源（扫描 ${scanned} / 到期 ${triggered}）`
+      }
+      return summary.reason || ''
+    }
+    case 'firecrawl': {
+      const completed = summary.completed_count
+      const failed = summary.failed_count
+      const total = (summary as Record<string, unknown>).total as number | undefined
+      if (completed !== undefined && failed !== undefined) {
+        return `处理了 ${total ?? (completed + failed)} 个任务（成功 ${completed} / 失败 ${failed}）`
+      }
+      return summary.reason || ''
+    }
+    case 'content_completion': {
+      const completed = summary.completed_count
+      const failed = summary.failed_count
+      if (completed !== undefined && failed !== undefined) {
+        return `完成 ${completed} 篇、失败 ${failed} 篇`
+      }
+      return summary.reason || ''
+    }
+    default:
+      return summary.reason || ''
+  }
 }

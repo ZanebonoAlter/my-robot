@@ -13,10 +13,10 @@ import (
 func NewTaskPersistence(name, description string) *TaskPersistence {
 	return &TaskPersistence{
 		InitTask: func(n string, interval time.Duration) {
-			initSchedulerTask(name, description, interval)
+			initSchedulerTask(name, description, interval, nil)
 		},
 		UpdateTask: func(n string, status string, startTime *time.Time, err error, result *JobResult) {
-			updateSchedulerTask(name, description, n, status, startTime, err, result)
+			updateSchedulerTask(name, description, n, status, startTime, err, result, nil)
 		},
 		ResetTask: func(n string) error {
 			return resetSchedulerTask(name, n)
@@ -24,10 +24,32 @@ func NewTaskPersistence(name, description string) *TaskPersistence {
 	}
 }
 
-func initSchedulerTask(name, description string, interval time.Duration) {
+// NewTaskPersistenceWithNextRun creates a TaskPersistence that uses a NextRunFn
+// to compute the next execution time instead of interval-based calculation.
+func NewTaskPersistenceWithNextRun(name, description string, nextRunFn func(time.Time) time.Time) *TaskPersistence {
+	return &TaskPersistence{
+		InitTask: func(n string, interval time.Duration) {
+			initSchedulerTask(name, description, interval, nextRunFn)
+		},
+		UpdateTask: func(n string, status string, startTime *time.Time, err error, result *JobResult) {
+			updateSchedulerTask(name, description, n, status, startTime, err, result, nextRunFn)
+		},
+		ResetTask: func(n string) error {
+			return resetSchedulerTask(name, n)
+		},
+		NextRunFn: nextRunFn,
+	}
+}
+
+func initSchedulerTask(name, description string, interval time.Duration, nextRunFn func(time.Time) time.Time) {
 	var task models.SchedulerTask
 	now := time.Now()
-	nextRun := now.Add(interval)
+	var nextRun time.Time
+	if nextRunFn != nil {
+		nextRun = nextRunFn(now)
+	} else {
+		nextRun = now.Add(interval)
+	}
 
 	if err := repository.Repo.DB().Where("name = ?", name).First(&task).Error; err == nil {
 		updates := map[string]interface{}{
@@ -55,18 +77,26 @@ func initSchedulerTask(name, description string, interval time.Duration) {
 	repository.Repo.DB().Create(&task)
 }
 
-func updateSchedulerTask(name, description string, _ string, status string, startTime *time.Time, err error, result *JobResult) {
+func updateSchedulerTask(name, description string, _ string, status string, startTime *time.Time, err error, result *JobResult, nextRunFn func(time.Time) time.Time) {
 	now := time.Now()
 
-	// Calculate interval from the existing task or use default
-	interval := 60 * time.Second
-	var existing models.SchedulerTask
-	if err2 := repository.Repo.DB().Where("name = ?", name).First(&existing).Error; err2 == nil {
-		if existing.CheckInterval > 0 {
-			interval = time.Duration(existing.CheckInterval) * time.Second
+	// Calculate next execution time and check interval
+	var nextExecution time.Time
+	checkInterval := 60 // default seconds
+	if nextRunFn != nil {
+		nextExecution = nextRunFn(now)
+	} else {
+		// Calculate interval from the existing task or use default
+		interval := 60 * time.Second
+		var existing models.SchedulerTask
+		if err2 := repository.Repo.DB().Where("name = ?", name).First(&existing).Error; err2 == nil {
+			if existing.CheckInterval > 0 {
+				interval = time.Duration(existing.CheckInterval) * time.Second
+			}
 		}
+		nextExecution = now.Add(interval)
+		checkInterval = int(interval.Seconds())
 	}
-	nextExecution := now.Add(interval)
 
 	resultJSON := ""
 	if result != nil {
@@ -144,7 +174,7 @@ func updateSchedulerTask(name, description string, _ string, status string, star
 	task = models.SchedulerTask{
 		Name:              name,
 		Description:       description,
-		CheckInterval:     int(interval.Seconds()),
+		CheckInterval:     checkInterval,
 		Status:            status,
 		LastError:         "",
 		NextExecutionTime: &nextExecution,

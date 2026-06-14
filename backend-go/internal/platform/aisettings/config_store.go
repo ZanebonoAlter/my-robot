@@ -3,14 +3,22 @@ package aisettings
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
+	"regexp"
+	"strings"
 
 	"gorm.io/gorm"
 	"syntopica-backend/internal/models"
 	"syntopica-backend/internal/platform/database"
+	"syntopica-backend/internal/platform/logging"
 )
 
 const openNotebookConfigKey = "open_notebook_config"
 const firecrawlConfigKey = "firecrawl_config"
+const dailyReportTimeKey = "daily_report_time"
+const defaultDailyReportTime = "21:00"
+
+var hhmmPattern = regexp.MustCompile(`^([01][0-9]|2[0-3]):([0-5][0-9])$`)
 
 func loadConfigByKey(key string) (map[string]interface{}, *models.AISettings, error) {
 	var settings models.AISettings
@@ -78,4 +86,49 @@ func LoadOpenNotebookConfig() (map[string]interface{}, *models.AISettings, error
 
 func SaveOpenNotebookConfig(config map[string]interface{}, description string) error {
 	return saveConfigByKey(openNotebookConfigKey, config, description)
+}
+
+// LoadDailyReportTimeConfig loads the daily_report_time setting from ai_settings.
+// Returns the HH:MM string. If the key is missing or invalid, returns default "21:00".
+func LoadDailyReportTimeConfig() (string, error) {
+	var settings models.AISettings
+	err := database.DB.Where("key = ?", dailyReportTimeKey).First(&settings).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return defaultDailyReportTime, nil
+		}
+		return "", err
+	}
+
+	value := strings.TrimSpace(settings.Value)
+	if !hhmmPattern.MatchString(value) {
+		logging.Warnf("Invalid daily_report_time value %q, falling back to default %s", value, defaultDailyReportTime)
+		return defaultDailyReportTime, nil
+	}
+	return value, nil
+}
+
+// SaveDailyReportTimeConfig saves the daily_report_time setting.
+// Validates HH:MM format (00:00–23:59). Returns error for invalid values.
+func SaveDailyReportTimeConfig(value string) error {
+	value = strings.TrimSpace(value)
+	if !hhmmPattern.MatchString(value) {
+		return fmt.Errorf("invalid daily_report_time format %q: expected HH:MM (00:00–23:59)", value)
+	}
+
+	var settings models.AISettings
+	dbErr := database.DB.Where("key = ?", dailyReportTimeKey).First(&settings).Error
+	if dbErr == nil {
+		settings.Value = value
+		return database.DB.Save(&settings).Error
+	}
+	if !errors.Is(dbErr, gorm.ErrRecordNotFound) {
+		return dbErr
+	}
+
+	return database.DB.Create(&models.AISettings{
+		Key:         dailyReportTimeKey,
+		Value:       value,
+		Description: "日报生成时刻（HH:MM）",
+	}).Error
 }

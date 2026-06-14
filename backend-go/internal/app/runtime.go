@@ -88,12 +88,13 @@ func StartRuntime() *Runtime {
 	// Each scheduler is configured with its JobFunc, interval, startup delay,
 	// and optional TaskPersistence for DB state tracking.
 
-	// Simple schedulers: no SchedulerTask DB persistence
 	registry.Register("log_cleanup", scheduler.New(scheduler.Config{
 		Name:         "Log Cleanup",
 		Interval:     86400 * time.Second,
 		StartupDelay: 5 * time.Minute,
 		Job:          admin.LogCleanupJob,
+		Persistence: admin.NewTaskPersistence("log_cleanup",
+			"清理过期的 AI 调用日志和追踪数据"),
 	}))
 
 	registry.Register("aux_label_cleanup", scheduler.New(scheduler.Config{
@@ -101,12 +102,16 @@ func StartRuntime() *Runtime {
 		Interval:     3600 * time.Second,
 		StartupDelay: 10 * time.Minute,
 		Job:          admin.AuxLabelCleanupJob,
+		Persistence: admin.NewTaskPersistence("aux_label_cleanup",
+			"清理无活跃标签引用的辅助标签"),
 	}))
 
 	registry.Register("blocked_article_recovery", scheduler.New(scheduler.Config{
 		Name:     "Blocked Article Recovery",
 		Interval: 3600 * time.Second,
 		Job:      admin.BlockedArticleRecoveryJob,
+		Persistence: admin.NewTaskPersistence("blocked_article_recovery",
+			"恢复被阻塞的文章"),
 	}))
 
 	// Medium schedulers: with SchedulerTask DB persistence
@@ -145,12 +150,14 @@ func StartRuntime() *Runtime {
 	}))
 
 	// DailyReport: wrapped with TriggerNowWithDate support
+	dailyReportNextRunFn := scheduler.NextDailyReportTime
 	dailyReportBase := scheduler.New(scheduler.Config{
-		Name:     "Daily Report",
-		Interval: 86400 * time.Second,
-		Job:      admin.DailyReportJob(), // uses current time at each execution
-		Persistence: admin.NewTaskPersistence("daily_report",
-			"Generate daily reports for all active semantic boards"),
+		Name:    "Daily Report",
+		NextRun: dailyReportNextRunFn,
+		Job:     admin.DailyReportJob(), // uses current time at each execution
+		Persistence: admin.NewTaskPersistenceWithNextRun("daily_report",
+			"Generate daily reports for all active semantic boards",
+			dailyReportNextRunFn),
 	})
 	dailyReportWrapper := admin.NewDailyReportSchedulerWrapper(dailyReportBase)
 	registry.Register("daily_report", dailyReportWrapper)
@@ -163,6 +170,8 @@ func StartRuntime() *Runtime {
 		StartupDelay: 0,
 		Job:          admin.FirecrawlJob(firecrawlQueue, "scheduled"),
 		StatusDetail: admin.FirecrawlStatusEnricher(),
+		Persistence: admin.NewTaskPersistence("firecrawl",
+			"自动爬取文章全文"),
 	}))
 
 	// Set global registry for handler access

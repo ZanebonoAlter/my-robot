@@ -637,5 +637,22 @@ func postgresMigrations() []Migration {
 				return nil
 			},
 		},
+
+		// ── Seed daily_report_time default ───────────────────────────────
+		{
+			Version:     "20260614_0002",
+			Description: "Seed daily_report_time default value into ai_settings.",
+			Up: func(db *gorm.DB) error {
+				var existing models.AISettings
+				if err := db.Where("key = ?", "daily_report_time").First(&existing).Error; err == nil {
+					return nil // already exists
+				}
+				return db.Create(&models.AISettings{
+					Key:         "daily_report_time",
+					Value:       "21:00",
+					Description: "日报生成时刻（HH:MM）",
+				}).Error
+			},
+		},
 	}
 }

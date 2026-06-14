@@ -18,7 +18,15 @@ func NewPreferenceService(db *gorm.DB) *PreferenceService {
 }
 
 func (s *PreferenceService) UpdateAllPreferences() error {
-	return s.db.Transaction(func(tx *gorm.DB) error {
+	_, err := s.UpdateAllPreferencesWithCount()
+	return err
+}
+
+// UpdateAllPreferencesWithCount rebuilds all preferences and returns the
+// total number of rebuilt preference rows (feed + category).
+func (s *PreferenceService) UpdateAllPreferencesWithCount() (int, error) {
+	var totalCount int
+	err := s.db.Transaction(func(tx *gorm.DB) error {
 		txService := NewPreferenceService(tx)
 
 		repairedBehaviors, err := txService.repairOrphanReadingBehaviors()
@@ -50,6 +58,8 @@ func (s *PreferenceService) UpdateAllPreferences() error {
 			return err
 		}
 
+		totalCount = feedCount + categoryCount
+
 		logging.Infof(
 			"Preference update completed: repaired_behaviors=%d deleted_behaviors=%d deleted_orphan_preferences=%d rebuilt_feed_preferences=%d rebuilt_category_preferences=%d",
 			repairedBehaviors,
@@ -61,6 +71,7 @@ func (s *PreferenceService) UpdateAllPreferences() error {
 
 		return nil
 	})
+	return totalCount, err
 }
 
 func (s *PreferenceService) repairOrphanReadingBehaviors() (int64, error) {

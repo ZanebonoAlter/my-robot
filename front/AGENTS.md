@@ -12,6 +12,8 @@
 - HTTP via `ApiClient` in `app/api/client.ts`. Return `{ success, data, error, message }`.
 - Files must be UTF-8. Preserve existing semicolon style per file.
 - UI: editorial/magazine feel, avoid generic SaaS look.
+- **主题系统**：使用三层 Token 架构（Primitive → Semantic → Component），通过 `data-theme="editorial|dark"` 切换主题，使用 `useTheme()` composable 管理主题状态
+- **统一组件**：所有对话框使用 `AppDialog`，按钮使用 `AppButton`，开关使用 `AppToggle`，输入框使用 `AppInput`，标题使用 `AppSectionHeader`
 
 ## Anti-Patterns
 

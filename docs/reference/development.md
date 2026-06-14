@@ -216,10 +216,12 @@ python test_firecrawl_integration.py
 
 ### 前端样式约定
 
-- 保持 editorial / magazine 主题风格
-- 不回退到蓝紫色 SaaS 视觉
+- 保持 editorial / magazine 主题风格，不回退到蓝紫色 SaaS 视觉
+- 使用三层 Token 架构：Primitive (`--raw-*`) → Semantic (`--color-*`) → Component (`--dialog-*` 等)
+- 通过 `data-theme="editorial|dark"` 切换主题，使用 `useTheme()` composable 管理状态
+- 组件只引用 Layer 2 语义 token，不直接使用原始色值
+- 统一组件：对话框使用 `AppDialog`，按钮使用 `AppButton`，开关使用 `AppToggle`，输入框使用 `AppInput`
 - 复用 `app/assets/css/main.css` 里的主题变量
-- 对话框、卡片、状态标签优先沿用现有语义类
 - 图标使用 Iconify
 
 ### 后端目录约定
@@ -230,7 +232,7 @@ python test_firecrawl_integration.py
 | `internal/app/` | HTTP 路由、中间件、运行时装配 |
 | `internal/domain/` | 业务域逻辑（feeds, articles, summaries, digest, contentprocessing, categories, topicanalysis, topicextraction, topicgraph, topictypes, aiadmin, preferences 等） |
 | `internal/domain/models/` | GORM 数据模型 |
-| `internal/jobs/` | 后台调度任务 |
+| `internal/admin/` | 后台管理（handler, service, scheduler, repository, wire） |
 | `internal/platform/` | 共享基础设施（config, database, ws, ai, airouter, aisettings, middleware, tracing, opennotebook） |
 | `configs/` | 配置文件 |
 

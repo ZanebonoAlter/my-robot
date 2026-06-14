@@ -34,6 +34,9 @@ type TaskPersistence struct {
 	UpdateTask func(name string, status string, startTime *time.Time, err error, result *JobResult)
 	// ResetTask resets the DB row when ResetStats() is called.
 	ResetTask func(name string) error
+	// NextRunFn optionally computes the next execution time for persistence.
+	// When set, InitTask and UpdateTask use this instead of interval-based calculation.
+	NextRunFn func(now time.Time) time.Time
 }
 
 // Config configures a BaseScheduler.
@@ -42,6 +45,13 @@ type Config struct {
 	Interval     time.Duration // Tick interval
 	StartupDelay time.Duration // Delay before first execution (0 = no extra delay)
 	Job          JobFunc       // Business logic
+
+	// NextRun is an optional callback that computes the next wall-clock
+	// trigger time. When set, the scheduler ignores Interval/StartupDelay
+	// and instead loops: compute next → sleep until next → run → recompute.
+	// Each call uses a fresh time.Now(), so config changes are picked up
+	// on the next cycle. Use for wall-clock-aligned schedules like DailyReport.
+	NextRun func(now time.Time) time.Time
 
 	// Optional enrichment. If nil, GetTaskStatusDetails falls back
 	// to embedding JobResult.Data directly.
@@ -106,16 +116,37 @@ func (s *BaseScheduler) Start() error {
 		s.cfg.Persistence.InitTask(s.cfg.Name, s.cfg.Interval)
 	}
 
-	nextRun := time.Now()
+	firstDelay := s.cfg.Interval
 	if s.cfg.StartupDelay > 0 {
-		nextRun = nextRun.Add(s.cfg.StartupDelay)
+		firstDelay = s.cfg.StartupDelay
 	}
+	nextRun := time.Now().Add(firstDelay)
 	s.nextRun = &nextRun
 
 	go func() {
 		defer s.wg.Done()
 
-		// Startup delay
+		if s.cfg.NextRun != nil {
+			// Wall-clock scheduling loop
+			for {
+				next := s.cfg.NextRun(time.Now())
+				s.updateNextRun(next)
+				delay := time.Until(next)
+				if delay > 0 {
+					timer := time.NewTimer(delay)
+					select {
+					case <-timer.C:
+					case <-s.stopChan:
+						timer.Stop()
+						logging.Infof("%s scheduler stopped", s.cfg.Name)
+						return
+					}
+				}
+				s.runJob()
+			}
+		}
+
+		// Interval-based scheduling loop (original path)
 		if s.cfg.StartupDelay > 0 {
 			timer := time.NewTimer(s.cfg.StartupDelay)
 			defer timer.Stop()
@@ -143,7 +174,11 @@ func (s *BaseScheduler) Start() error {
 		}
 	}()
 
-	logging.Infof("%s scheduler started (interval: %v, startupDelay: %v)", s.cfg.Name, s.cfg.Interval, s.cfg.StartupDelay)
+	if s.cfg.NextRun != nil {
+		logging.Infof("%s scheduler started (wall-clock mode)", s.cfg.Name)
+	} else {
+		logging.Infof("%s scheduler started (interval: %v, startupDelay: %v)", s.cfg.Name, s.cfg.Interval, s.cfg.StartupDelay)
+	}
 	return nil
 }
 

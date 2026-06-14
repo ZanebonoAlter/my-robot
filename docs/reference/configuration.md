@@ -174,6 +174,7 @@ AI 相关配置不存储在文件或环境变量中 — 通过 Web UI 管理并�
 | `auto_summary_config` | 自动摘要调度器设置（时间范围、模型参数） |
 | `firecrawl_config` | Firecrawl 集成设置（启用、API URL、API key、模式、超时、最大内容长度） |
 | `open_notebook_config` | Open Notebook digest 导出设置（启用、base URL、API key、model、目标笔记本、prompt 模式、自动发送日报/周报） |
+| `daily_report_time` | 日报生成时刻（HH:MM 格式，默认 `21:00`） |
 
 这些设置通过 `aisettings.LoadSummaryConfig()`、`aisettings.LoadFirecrawlConfig()` 等函数加载，在前端设置页面中配置。
 

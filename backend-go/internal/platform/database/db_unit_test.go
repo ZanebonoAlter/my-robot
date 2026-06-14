@@ -107,6 +107,25 @@ func TestSemanticLabelBoardSystemMigrationDocumentsSchemaCutover(t *testing.T) {
 	}
 }
 
+func TestDailyReportTimeMigrationSeedsDefaultValue(t *testing.T) {
+	migration := mustFindMigration(t, postgresMigrations(), "20260614_0002")
+	if !strings.Contains(strings.ToLower(migration.Description), "daily_report_time") {
+		t.Fatalf("expected daily_report_time migration description, got %q", migration.Description)
+	}
+
+	source, err := os.ReadFile("postgres_migrations.go")
+	if err != nil {
+		t.Fatalf("read postgres_migrations.go: %v", err)
+	}
+	joined := string(source)
+
+	mustContainAll(t, joined,
+		`"daily_report_time"`,
+		`"21:00"`,
+		`日报生成时刻`,
+	)
+}
+
 func mustFindMigration(t *testing.T, migrations []Migration, version string) Migration {
 	t.Helper()
 

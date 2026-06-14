@@ -9,9 +9,11 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
+
 	"syntopica-backend/internal/admin/repository"
 	"syntopica-backend/internal/models"
 	"syntopica-backend/internal/platform/airouter"
+	"syntopica-backend/internal/platform/aisettings"
 	"syntopica-backend/internal/platform/logging"
 )
 
@@ -301,13 +303,26 @@ func GetSettings(c *gin.Context) {
 }
 
 type SaveSettingsRequest struct {
+	DailyReportTime string `json:"daily_report_time"`
 }
 
 func SaveSettings(c *gin.Context) {
-	var req SaveSettingsRequest
+	var req map[string]interface{}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": err.Error()})
 		return
+	}
+
+	if val, ok := req["daily_report_time"]; ok {
+		strVal, ok := val.(string)
+		if !ok {
+			c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "daily_report_time must be a string"})
+			return
+		}
+		if err := aisettings.SaveDailyReportTimeConfig(strVal); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": err.Error()})
+			return
+		}
 	}
 
 	c.JSON(http.StatusOK, gin.H{"success": true})

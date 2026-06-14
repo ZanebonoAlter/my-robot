@@ -279,21 +279,53 @@ Topic Graph 页面的复杂度已按内聚行为拆分为多个深 Module：
 
 ## 设计系统
 
-当前前端已经切到 editorial / magazine 风格，而不是常见 SaaS 蓝紫模板。
+### 主题系统
 
-- 主色：Ink Blue
-- 强调色：Print Red
-- 背景：Paper Warmth
-- 阴影：偏纸张和印刷感
-- 全局主题变量定义在 `front/app/assets/css/main.css`
-- 分类和订阅源可选色定义在 `front/app/utils/constants.ts`
+前端采用三层 Token 架构和双主题系统，确保视觉一致性：
 
-明确约束：
+**三层 Token 架构：**
+1. **Layer 1: Primitive Tokens (`--raw-*`)** - 原始色值，项目色板的唯一来源，不直接在组件中使用
+2. **Layer 2: Semantic Tokens (`--color-*`)** - 跟主题走，组件直接引用这一层
+3. **Layer 3: Component Tokens (`--dialog-*`, `--button-*` 等)** - 可选，复杂组件的局部 token
+
+**双主题：**
+- **Editorial Theme (`data-theme="editorial"`)** - 暖白印刷厂风格，主色 Print Red，背景 Paper Warmth
+- **Dark Theme (`data-theme="dark"`)** - 深色调查风格，强调色 Amber，背景深蓝灰
+
+**主题切换：**
+- 通过 `<html data-theme="editorial|dark">` 属性切换
+- 使用 `useTheme()` composable 管理主题状态，支持 localStorage 记忆
+- 首次绘制前 `<html>` 必须已有有效 `data-theme`，避免主题闪烁
+
+**Token 使用规则：**
+- 组件只引用 Layer 2 语义 token（`--color-*`），不直接使用原始色值
+- `--color-bg-overlay` 仅用于模态遮罩，不得作为普通表面背景
+- 页面表面按层级使用 `base → elevated → sunken`
+- SVG、Canvas 和 CSS gradient 颜色必须由当前主题 token 派生
+
+### 统一组件库
+
+统一组件位于 `components/ui/`，提供一致的交互和视觉体验：
+
+- **AppDialog** - 统一对话框外壳，含 Teleport、Transition、overlay、关闭行为
+- **AppButton** - 统一按钮组件，支持 primary/secondary/ghost/danger 变体和 sm/md/lg 尺寸
+- **AppToggle** - 统一开关组件，响应主题 token
+- **AppInput** - 统一输入框组件，响应主题 token，支持 type="number"
+- **AppSectionHeader** - 统一 section 标题组件，可选 icon box + 标题 + 描述
+
+**使用约束：**
+- 所有对话框必须使用 AppDialog，禁止自建对话框模式
+- 所有按钮必须使用 AppButton，禁止使用原生 button 样式类
+- 所有开关必须使用 AppToggle，禁止使用原生 checkbox 或手写 toggle
+- 所有输入框必须使用 AppInput，禁止使用原生 input 样式类
+
+### 设计约束
 
 - 不用紫色 / 靛蓝色方案
 - 不用纯平背景
 - 不用默认 shadcn / Material 风格
 - 不做对称、平均分栏的模板布局
+- 保持 editorial / magazine 风格，避免通用 SaaS 外观
 
 ## 运行与环境
 

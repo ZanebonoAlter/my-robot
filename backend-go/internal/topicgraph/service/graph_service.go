@@ -72,7 +72,8 @@ func GetBoardSectionTimeline(boardID uint, days int) (repository.SectionTimeline
 	return repository.Repo.GetBoardSectionTimeline(boardID, days)
 }
 
-// GetSectionLifecycle fetches the clicked section and its directly connected neighbors (1 hop).
+// GetSectionLifecycle fetches the full connected component containing sectionID,
+// traversing daily_report_section_relations bidirectionally.
 func GetSectionLifecycle(sectionID uint) (repository.SectionTimelineResponse, error) {
 	return repository.Repo.GetSectionLifecycle(sectionID)
 }

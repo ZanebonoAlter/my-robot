@@ -126,8 +126,6 @@ func DeriveSectionStatuses(sectionIDs []uint, relations []SectionRelationResult,
 	return statuses
 }
 
-// GetSectionLifecycle fetches the clicked section and its directly connected neighbors (1 hop).
-
 // BackfillSectionEmbeddings generates embeddings for sections that don't have one,
 // then runs pgvector matching to set prev_section_id for all sections.
 // It overwrites all prev_section_id values (including those from the old tag Jaccard matching).
@@ -235,9 +233,6 @@ func (r *TopicGraphRepository) GetReportByID(id uint) (*BoardDailyReport, error)
 func (r *TopicGraphRepository) ListReports(boardID uint, days int) ([]ReportListItem, error) {
 	if days <= 0 {
 		days = 7
-	}
-	if days > 30 {
-		days = 30
 	}
 
 	now := NormalizeReportDate(time.Now())
@@ -404,27 +399,32 @@ func (r *TopicGraphRepository) GetBoardSectionTimeline(boardID uint, days int) (
 	return SectionTimelineResponse{Sections: nodes, Relations: relations}, nil
 }
 
-// GetSectionLifecycle fetches the clicked section and its directly connected neighbors (1 hop).
+// GetSectionLifecycle fetches the full connected component containing sectionID
+// by traversing daily_report_section_relations bidirectionally.
 func (r *TopicGraphRepository) GetSectionLifecycle(sectionID uint) (SectionTimelineResponse, error) {
-	// Collect only direct neighbors (1 hop)
-	visited := map[uint]bool{sectionID: true}
-
-	var connectedIDs []uint
+	// Recursive CTE to find the full connected component
+	var allIDs []uint
 	if err := r.db.Raw(`
-		SELECT from_section_id AS id FROM daily_report_section_relations WHERE to_section_id = ?
-		UNION
-		SELECT to_section_id AS id FROM daily_report_section_relations WHERE from_section_id = ?
-	`, sectionID, sectionID).Scan(&connectedIDs).Error; err != nil {
-		logging.Warnf("GetSectionLifecycle: query failed for section %d: %v", sectionID, err)
+		WITH RECURSIVE component AS (
+			SELECT ?::bigint AS id
+			UNION
+			SELECT CASE
+				WHEN rel.from_section_id = c.id THEN rel.to_section_id
+				ELSE rel.from_section_id
+			END AS id
+			FROM component c
+			JOIN daily_report_section_relations rel
+				ON rel.from_section_id = c.id OR rel.to_section_id = c.id
+		)
+		SELECT DISTINCT id FROM component
+	`, sectionID).Scan(&allIDs).Error; err != nil {
+		logging.Warnf("GetSectionLifecycle: recursive CTE failed for section %d: %v", sectionID, err)
+		// Fallback: return just the section itself
+		allIDs = []uint{sectionID}
 	}
 
-	for _, id := range connectedIDs {
-		visited[id] = true
-	}
-
-	allIDs := make([]uint, 0, len(visited))
-	for id := range visited {
-		allIDs = append(allIDs, id)
+	if len(allIDs) == 0 {
+		allIDs = []uint{sectionID}
 	}
 
 	if len(allIDs) == 0 {
@@ -448,12 +448,12 @@ func (r *TopicGraphRepository) GetSectionLifecycle(sectionID uint) (SectionTimel
 		return SectionTimelineResponse{}, fmt.Errorf("get section lifecycle: %w", err)
 	}
 
-	// Query relations involving these sections
+	// Query relations where BOTH endpoints are in the returned sections
 	var relations []SectionRelationResult
 	if err := r.db.Raw(`
 		SELECT from_section_id AS from_id, to_section_id AS to_id, distance
 		FROM daily_report_section_relations
-		WHERE from_section_id IN ? OR to_section_id IN ?
+		WHERE from_section_id IN ? AND to_section_id IN ?
 	`, allIDs, allIDs).Scan(&relations).Error; err != nil {
 		logging.Warnf("GetSectionLifecycle: query relations failed: %v", err)
 	}

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { shallowRef, onMounted, onBeforeUnmount, ref, watch, computed, nextTick } from 'vue'
+import { Icon } from '@iconify/vue'
 import type { TopicGraphSceneEdge, TopicGraphSceneNode } from '~/features/topic-graph/utils/buildTopicGraphViewModel'
 import { isHighlightedTopicGraphEdge, resolveTopicGraphLinkOpacity } from '~/features/topic-graph/utils/topicGraphCanvasLinks'
 
@@ -91,6 +92,50 @@ const spriteTextCtor = shallowRef<any>(null)
 const threeLib = shallowRef<any>(null)
 const graphReady = ref(false)
 
+// Observable counter for node-drag interaction (used by E2E to verify drag is wired)
+const nodeDragCount = ref(0)
+
+// Display settings (not persisted)
+const settingsOpen = ref(false)
+const cameraZoom = ref(1) // 1 = default distance
+const nodeSizeMultiplier = ref(1)
+const labelSizeMultiplier = ref(1)
+
+const DEFAULT_CAMERA_ZOOM = 1
+const DEFAULT_NODE_SIZE = 1
+const DEFAULT_LABEL_SIZE = 1
+
+function resetDisplaySettings() {
+  cameraZoom.value = DEFAULT_CAMERA_ZOOM
+  nodeSizeMultiplier.value = DEFAULT_NODE_SIZE
+  labelSizeMultiplier.value = DEFAULT_LABEL_SIZE
+  applyCameraZoom()
+  applyGraphData()
+}
+
+function applyCameraZoom() {
+  if (!graphInstance.value) return
+  const graph = graphInstance.value
+  const camera = graph.camera?.()
+  if (!camera?.position) return
+  const controls = graph.controls?.()
+  const target = controls?.target || { x: 0, y: 0, z: 0 }
+  const dir = { x: camera.position.x - target.x, y: camera.position.y - target.y, z: camera.position.z - target.z }
+  const dist = Math.hypot(dir.x, dir.y, dir.z)
+  if (dist < 1) return
+  const newDist = 200 / cameraZoom.value // base distance is 200
+  const scale = newDist / dist
+  camera.position.set(
+    target.x + dir.x * scale,
+    target.y + dir.y * scale,
+    target.z + dir.z * scale,
+  )
+  controls?.update?.()
+}
+
+watch(cameraZoom, applyCameraZoom)
+watch([nodeSizeMultiplier, labelSizeMultiplier], () => applyGraphData())
+
 // 连线显示模式
 const linkDisplayMode = ref<'hidden' | 'selected' | 'all'>('hidden')
 
@@ -151,7 +196,8 @@ async function setupGraph() {
   const graph = new (ForceGraph3D as any)(containerRef.value, { controlType: 'orbit' })
     .backgroundColor('rgba(0,0,0,0)')
     .nodeRelSize(4)
-    .enableNodeDrag(false)
+    .enableNodeDrag(true)
+    .onNodeDrag(() => { nodeDragCount.value++ })
     .linkOpacity(0) // 默认隐藏所有连线
     .linkWidth((link: TopicGraphSceneEdge) => buildLinkWidth(link))
     .linkColor((link: TopicGraphSceneEdge) => buildLinkColor(link))
@@ -297,8 +343,8 @@ function buildNodeObject(node: TopicGraphSceneNode) {
   
   // Base radius calculation
   let radius = node.kind === 'feed'
-    ? Math.max(2.4, node.size * 0.12)
-    : Math.max(3.2, node.size * 0.14)
+    ? Math.max(2.4, node.size * 0.12) * nodeSizeMultiplier.value
+    : Math.max(3.2, node.size * 0.14) * nodeSizeMultiplier.value
     
   // Apply emphasis scaling
   if (isTrunk) {
@@ -397,7 +443,7 @@ function buildNodeObject(node: TopicGraphSceneNode) {
 // Labels: Always show for all nodes, style varies by emphasis
   const label = new SpriteText(compactLabel(node.label, isTrunk ? 40 : 20))
   label.color = tokenColors().textPrimary
-  label.textHeight = isTrunk ? 10 : (isBranch ? 6 : 5.5)
+  label.textHeight = (isTrunk ? 10 : (isBranch ? 6 : 5.5)) * labelSizeMultiplier.value
   label.backgroundColor = isTrunk ? `${tokenColors().bgSunken}c7` : `${tokenColors().bgSunken}57`
   label.padding = isTrunk ? 4 : 2
   label.borderRadius = 10
@@ -671,7 +717,38 @@ onBeforeUnmount(() => {
     :data-state="graphReady ? 'ready' : 'initializing'"
     :data-selected-category="props.selectedCategory || 'none'"
     :data-highlight-count="String((props.highlightedNodeIds || []).length)"
-  />
+    :data-node-drag-count="String(nodeDragCount)"
+  >
+    <!-- Display settings panel -->
+    <div class="display-settings">
+      <button
+        type="button"
+        class="display-settings-toggle"
+        @click="settingsOpen = !settingsOpen"
+      >
+        <Icon icon="mdi:cog-outline" width="16" />
+      </button>
+      <Transition name="settings-slide">
+        <div v-if="settingsOpen" class="display-settings-panel">
+          <div class="display-setting">
+            <label class="display-setting-label">视图缩放</label>
+            <input v-model.number="cameraZoom" type="range" min="0.3" max="3" step="0.1" class="display-setting-slider">
+          </div>
+          <div class="display-setting">
+            <label class="display-setting-label">节点尺寸</label>
+            <input v-model.number="nodeSizeMultiplier" type="range" min="0.3" max="3" step="0.1" class="display-setting-slider">
+          </div>
+          <div class="display-setting">
+            <label class="display-setting-label">标签尺寸</label>
+            <input v-model.number="labelSizeMultiplier" type="range" min="0.3" max="3" step="0.1" class="display-setting-slider">
+          </div>
+          <button type="button" class="display-setting-reset" @click="resetDisplaySettings">
+            重置视图
+          </button>
+        </div>
+      </Transition>
+    </div>
+  </div>
 </template>
 
 <style scoped>
@@ -696,5 +773,102 @@ onBeforeUnmount(() => {
     height: clamp(28rem, 62vh, 44rem);
     min-height: 28rem;
   }
+}
+
+/* Display settings panel */
+.display-settings {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  z-index: 10;
+}
+
+.display-settings-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border: 1px solid var(--color-border-subtle);
+  border-radius: 8px;
+  background: var(--color-bg-elevated);
+  color: var(--color-text-muted);
+  cursor: pointer;
+  transition: all 0.15s ease;
+  margin-left: auto;
+}
+
+.display-settings-toggle:hover {
+  background: var(--color-bg-hover);
+  color: var(--color-text-secondary);
+}
+
+.display-settings-panel {
+  margin-top: 4px;
+  padding: 12px;
+  border: 1px solid var(--color-border-subtle);
+  border-radius: 10px;
+  background: var(--color-bg-elevated);
+  min-width: 180px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.display-setting {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.display-setting-label {
+  font-size: 0.68rem;
+  color: var(--color-text-muted);
+}
+
+.display-setting-slider {
+  width: 100%;
+  height: 4px;
+  -webkit-appearance: none;
+  appearance: none;
+  background: var(--color-border-subtle);
+  border-radius: 2px;
+  outline: none;
+}
+
+.display-setting-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--color-accent);
+  cursor: pointer;
+}
+
+.display-setting-reset {
+  padding: 4px 0;
+  border: none;
+  background: none;
+  color: var(--color-text-muted);
+  font-size: 0.68rem;
+  cursor: pointer;
+  transition: color 0.12s ease;
+  text-align: center;
+}
+
+.display-setting-reset:hover {
+  color: var(--color-text-secondary);
+}
+
+.settings-slide-enter-active {
+  transition: opacity 150ms ease-out, transform 150ms ease-out;
+}
+.settings-slide-leave-active {
+  transition: opacity 100ms ease-in, transform 100ms ease-in;
+}
+.settings-slide-enter-from,
+.settings-slide-leave-to {
+  opacity: 0;
+  transform: translateY(-4px);
 }
 </style>

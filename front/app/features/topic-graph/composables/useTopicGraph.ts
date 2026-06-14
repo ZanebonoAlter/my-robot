@@ -4,6 +4,7 @@ import { useNotify } from '~/composables/useNotify'
 import { buildDisplayedTopicGraph } from '~/features/topic-graph/utils/buildDisplayedTopicGraph'
 import { buildTopicGraphViewModel } from '~/features/topic-graph/utils/buildTopicGraphViewModel'
 import { normalizeTopicCategory } from '~/features/topic-graph/utils/normalizeTopicCategory'
+import { bfsHighlight, type GraphHighlightEdge } from '~/features/topic-graph/utils/graphBfsHighlight'
 import { useFloatingPanelDrag } from './useFloatingPanelDrag'
 import { useArticlePreview } from './useArticlePreview'
 import { useTopicTimeline } from './useTopicTimeline'
@@ -75,20 +76,20 @@ export function useTopicGraph(initialLoad = true) {
   })
 
   const highlightedNodeIds = computed(() => {
-    const highlighted = new Set<string>()
     const focusSlug = selectedKeywordSlug.value || selectedTopicSlug.value
     if (!focusSlug) return []
 
     const focusNode = displayedGraph.value.nodes.find(node => node.slug === focusSlug)
     if (!focusNode) return []
 
-    highlighted.add(focusNode.id)
-    for (const edge of displayedGraph.value.edges) {
-      const sourceId = resolveGraphLinkNodeId(edge.source)
-      const targetId = resolveGraphLinkNodeId(edge.target)
-      if (sourceId === focusNode.id) highlighted.add(targetId)
-      if (targetId === focusNode.id) highlighted.add(sourceId)
-    }
+    // Normalize edges to string source/target for bfsHighlight
+    const edges: GraphHighlightEdge<string>[] = displayedGraph.value.edges.map(edge => ({
+      source: resolveGraphLinkNodeId(edge.source),
+      target: resolveGraphLinkNodeId(edge.target),
+    }))
+
+    const totalNodes = displayedGraph.value.nodes.length
+    const highlighted = bfsHighlight(focusNode.id, edges, totalNodes)
     return Array.from(highlighted)
   })
 

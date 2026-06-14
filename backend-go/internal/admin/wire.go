@@ -80,8 +80,10 @@ var (
 // BaseScheduler types and constructors for the factory pattern.
 // Runtime uses scheduler.New(scheduler.Config{...}) directly.
 var (
-	NewBaseScheduler   = scheduler.New
-	NewTaskPersistence = scheduler.NewTaskPersistence
+	NewBaseScheduler              = scheduler.New
+	NewTaskPersistence            = scheduler.NewTaskPersistence
+	NewTaskPersistenceWithNextRun = scheduler.NewTaskPersistenceWithNextRun
+	NextDailyReportTime           = scheduler.NextDailyReportTime
 )
 
 // DailyReportSchedulerWrapper for TriggerNowWithDate support.

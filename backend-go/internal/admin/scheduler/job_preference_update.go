@@ -11,11 +11,12 @@ import (
 // PreferenceUpdateJob updates reading preferences from behavior data.
 func PreferenceUpdateJob(ctx context.Context) (*JobResult, error) {
 	preferenceService := adminservice.NewPreferenceService(repository.Repo.DB())
-	if err := preferenceService.UpdateAllPreferences(); err != nil {
+	n, err := preferenceService.UpdateAllPreferencesWithCount()
+	if err != nil {
 		return nil, fmt.Errorf("preference update failed: %w", err)
 	}
 	return &JobResult{
-		Data:    map[string]interface{}{},
-		Summary: "preferences updated successfully",
+		Data:    map[string]interface{}{"updated_count": n},
+		Summary: fmt.Sprintf("updated %d preferences", n),
 	}, nil
 }

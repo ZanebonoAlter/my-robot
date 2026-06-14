@@ -6,8 +6,8 @@ Agent guide for coding assistants working in `Syntopica` (`D:\project\my-robot`)
 - Syntopica: Nuxt 4 frontend + Go backend (Gin/GORM), single-user, no auth.
 - Frontend API: `http://localhost:5000/api`; WebSocket: `ws://localhost:5000/ws`.
 - PostgreSQL + pgvector for persistence; Redis optional for job queues.
-- Crawl service: `http://localhost:11235`. AI config managed via web UI, no config files.
 - 和用户沟通使用中文，开发环境 Windows。
+- 使用openspec编写任务时,需要在task中标注完成后更新文档,并且需要注意数据库更新规范（一类是迁移（索引）、一类是gorm自动建立的框架）
 
 ## 开发环境 (Development Environment)
 

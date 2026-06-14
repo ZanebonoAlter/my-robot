@@ -1,6 +1,6 @@
 # 测试指南
 
-本项目有三套独立的测试套件，分别覆盖 Go 后端、Nuxt 前端和跨系统集成流程。
+本项目有两套测试套件：Go 后端和 Nuxt 前端。
 
 ## 测试框架与配置
 
@@ -9,8 +9,6 @@
 | 后端单元测试 | Go `testing` + `testify` | `backend-go/**/*_test.go` | Go |
 | 前端单元测试 | Vitest + Vue Test Utils | `front/app/**/*.test.ts` | TypeScript |
 | 前端 E2E 测试 | Playwright | `front/tests/e2e/*.spec.ts` | TypeScript |
-| 集成测试 | pytest | `tests/workflow/` | Python |
-| Firecrawl 检查 | Python 脚本 | `tests/firecrawl/` | Python |
 
 ### 后端（Go）
 
@@ -21,7 +19,7 @@
 
 > ⚠️ **安全约定（事故教训）**：`testutil` 包**没有**默认 DSN，也**不读取**任何环境变量（包括历史上的 `TEST_DB_DSN`）。它只能启动隔离容器，无法连接到 `docker-compose.pg.yml` 跑的开发库（那正是生产数据所在）。早期版本曾通过默认 DSN 连到开发库并执行 `TRUNCATE`/`DROP TABLE`，导致业务数据被清空——该路径已彻底移除。**禁止**重新引入任何「默认数据库连接」或「env 覆盖」机制。
 >
-> 部分 package（reader/admin/topicgraph）仍使用内存 SQLite（`glebarez/sqlite`），仅用于无 pgvector 依赖的 CRUD 测试。
+> 部分 package（`admin/handler`、`platform/airouter`、`reader/*`、`topicgraph/handler`）仍使用内存 SQLite（`glebarez/sqlite`），仅用于无 pgvector 依赖的 CRUD 测试。
 
 ### 前端单元（Vitest）
 
@@ -30,10 +28,6 @@ Vitest 使用 `happy-dom` 作为 DOM 环境。配置在 `front/vitest.config.ts`
 ### 前端 E2E（Playwright）
 
 Playwright 配置在 `front/playwright.config.ts`。它在 `http://localhost:3000` 启动 Nuxt 开发服务器，然后运行浏览器测试。测试串行执行（`fullyParallel: false`、`workers: 1`）以保证启动稳定性。
-
-### 集成测试（pytest）
-
-`tests/workflow/` 中的集成测试验证端到端调度器行为和数据流。它们需要 Go 后端运行在 `http://localhost:5000`。配置在 `tests/workflow/config.py`。
 
 ## 运行测试
 
@@ -45,10 +39,13 @@ cd backend-go
 go test ./...
 
 # 单个包（详细输出）
-go test ./internal/domain/feeds -v
+go test ./internal/topicgraph/repository -v
 
 # 按名称运行单个测试
-go test ./internal/domain/feeds -run TestBuildArticleFromEntryTracksOnlyRunnableStates -v
+go test ./internal/topicgraph/repository -run TestListReports_DefaultDays -v
+
+# 仅单元测试（跳过需要 Docker 的集成测试）
+go test -short ./...
 ```
 
 ### 前端单元测试
@@ -84,54 +81,13 @@ pnpm test:e2e:list
 pnpm test:e2e:args -- --grep "topic-graph"
 ```
 
-### Python 集成测试
-
-```bash
-# 设置环境（首次）
-cd tests/workflow
-uv venv
-.venv\Scripts\activate    # Windows
-uv pip install -r requirements.txt
-
-# 运行所有集成测试
-pytest test_*.py -v
-
-# 单个文件
-pytest test_schedulers.py -v
-
-# 单个测试
-pytest test_schedulers.py::TestAutoRefreshScheduler::test_scheduler_exists -v
-
-# 带覆盖率
-pytest --cov=. --cov-report=html
-```
-
-集成测试需要 Go 后端运行在 `http://localhost:5000`。从单独的终端启动：
-
-```bash
-cd backend-go
-go run cmd/server/main.go
-```
-
-### Firecrawl 集成检查
-
-独立的脚本验证 Firecrawl 服务连通性、抓取功能、文章内容更新和 AI 配置：
-
-```bash
-cd backend-go
-go run cmd/server/main.go    # 在单独终端启动后端
-
-cd tests/firecrawl
-python test_firecrawl_integration.py
-```
-
 ## 编写新测试
 
 ### 后端
 
 - 测试文件放在源码旁，作为同包的 `*_test.go`。
 - 多个用例共享相同逻辑时使用表驱动测试。
-- 需要数据库的测试，创建内存 SQLite 实例并对所需模型调用 `AutoMigrate`。参考 `backend-go/internal/domain/feeds/service_test.go` 的 `setupFeedsTestDB` 模式。
+- 需要数据库的集成测试，调用 `testutil.SetupTestDB(t)` 连接隔离 pgvector 容器（见下文「`testutil.SetupTestDB` 使用模式」）。无 pgvector 依赖的轻量 CRUD 测试可继续用内存 SQLite + `AutoMigrate`。
 - 仅当文件已经使用 `testify` 时才导入 `github.com/stretchr/testify`；否则直接使用标准 `testing` 包。
 - 在 setup 函数中使用 `t.Helper()` 获得更清晰的错误追踪。
 
@@ -166,23 +122,12 @@ python test_firecrawl_integration.py
   ```
 - 测试按顺序在 Chromium 上运行。开发服务器通过 `playwright.config.ts` 的 `webServer` 配置自动启动。
 
-### 集成测试
-
-- 测试文件放在 `tests/workflow/test_*.py`。
-- 使用 `tests/workflow/utils/` 中的共享辅助工具：
-  - `DatabaseHelper` — 直接数据库访问，用于断言数据库状态
-  - `APIClient` — HTTP 客户端，用于调用后端 API 端点
-  - `MockFirecrawl` / `MockAIService` — 模拟外部服务响应
-- 每个测试类使用 `pytest.fixture(autouse=True)` 进行 setup/teardown，创建测试数据并在结束后清理。
-- 测试配置见 `tests/workflow/config.py` 中的 `TestConfig` 和 `DatabaseConfig`。
-
 ## 覆盖率
 
 没有配置最低覆盖率阈值。
 
 - **前端**：Vitest 在 `vitest.config.ts` 中没有覆盖率设置。运行 `pnpm test:unit` 只得到通过/失败结果。
-- **后端**：Go 测试命令中没有 `cover` 配置文件或阈值标志。
-- **集成**：`pytest-cov` 在 `tests/workflow/requirements.txt` 中列为依赖。使用 `pytest --cov=. --cov-report=html` 生成报告。
+- **后端**：Go 测试命令中没有 `cover` 配置文件或阈值标志。需要时可加 `-cover` 临时查看：`go test -cover ./...`。
 
 ## 后端测试分层约定
 
@@ -232,102 +177,124 @@ func TestSomethingUnit(t *testing.T) {
 }
 ```
 
-## CI 集成
+### 集成测试常见陷阱
 
-CI 工作流位于 `.github/workflows/test-ci.yml`，包含两个独立任务：
+#### ⚠️ vector 列 seed 必须填合法值，不能依赖零值
 
-- **Unit**：`go test -short ./...`（无需 Docker）
-- **Integration**：`go test ./...`（testcontainers-go 在 runner 上自动启动隔离 pgvector 容器，runner 自带 Docker，无需 service container）
+部分 vector 列的 Go 字段是**非指针 `string`**（零值 `""`），pgvector 会拒绝空串：
 
-所有测试本地运行：
+| 模型 | 字段 | 类型 | 零值行为 |
+|------|------|------|----------|
+| `models.SemanticLabel` | `Embedding` / `MergeEmbedding` | `*string` | nil → NULL ✅ |
+| `repository.DailyReportSection` | `Embedding` | `string` | `""` → **报错** ❌ |
 
-- **后端**：`backend-go/` 目录下运行 `go test ./...`
-- **前端单元**：`front/` 目录下运行 `pnpm test:unit`
-- **前端类型检查**：`front/` 目录下运行 `pnpm exec nuxi typecheck`
-- **前端 E2E**：`front/` 目录下运行 `pnpm test:e2e`
-- **集成**：`tests/workflow/` 目录下运行 `pytest test_*.py -v`（需要运行中的后端）
+**症状**：`invalid input syntax for type vector: "" (SQLSTATE 22P02)`
 
-推荐的推送前验证序列：
+**修复**：seed 时用 `repository.FloatsToPgVector([]float64{0})` 填合法值（镜像生产——生产在 insert 前也会用 `FloatsToPgVector` 填充）：
 
-```bash
-cd backend-go && golangci-lint run ./... && go vet ./... && go test ./... && go build ./...
-cd front && pnpm lint && pnpm exec nuxi typecheck && pnpm test:unit && pnpm build
+```go
+section := repository.DailyReportSection{
+    ReportID:     reportID,
+    ClusterLabel: label,
+    Embedding:    repository.FloatsToPgVector([]float64{0}),
+}
 ```
+
+#### ⚠️ `ReimportTestDB` 内置重连，不可移除
+
+`DROP SCHEMA public CASCADE` 会**连坐销毁** pgvector 的 `vector` 类型，`CREATE EXTENSION IF NOT EXISTS` 重建时拿到**新 OID**（实测每周期递增：16387→17280→18173）。连接池里残留的服务端 prepared statement 仍引用旧 OID，导致后续 vector 查询失败。
+
+**症状**（任一）：
+- `cache lookup failed for type <oid> (SQLSTATE XX000)`
+- `cached plan must not change result type (SQLSTATE 0A000)`
+
+**关键认知**：catalog 本身没坏（`pg_depend` 正常、扩展正确重注册），坏的是**连接的 prepared statement 缓存**。所以修复不是动 schema/扩展，而是 `ReimportTestDB` 在重建后**关闭旧池、开新池**（已实现）。新连接的 cache 与新 catalog 一致，等价于生产重启。
+
+> 🛑 **切勿**为「优化」删掉 `ReimportTestDB` 末尾的 `openGorm` + `Close`——那是修这个坑的核心，删掉会复现 `cache lookup failed`。回归测试 `TestReimportPreservesVectorInserts` 会守住这行。
 
 ## 测试文件结构
 
+> 清单随代码演进，以 `find backend-go/internal -name '*_test.go'` 和 `find front/app -name '*.test.ts'` 的实际结果为准。
+
 ```
 backend-go/
-├── internal/domain/feeds/service_test.go                 # Feed 解析、文章创建
-├── internal/domain/summaries/summary_queue_test.go
-├── internal/domain/summaries/ai_prompt_builder_test.go
-├── internal/domain/digest/generator_test.go              # Digest 生成
-├── internal/domain/digest/scheduler_test.go
-├── internal/domain/digest/handler_test.go
-├── internal/domain/digest/integration_test.go
-├── internal/domain/digest/obsidian_test.go
-├── internal/domain/digest/feishu_test.go
-├── internal/domain/contentprocessing/firecrawl_job_queue_test.go
-├── internal/domain/contentprocessing/content_completion_service_test.go
-├── internal/domain/contentprocessing/content_completion_handler_test.go
-├── internal/domain/topicextraction/tag_job_queue_test.go
-├── internal/domain/topicextraction/metadata_test.go
-├── internal/domain/topicextraction/extractor_test.go
-├── internal/domain/topicgraph/handler_test.go
-├── internal/domain/topicanalysis/analysis_queue_test.go
-├── internal/domain/topicanalysis/auxiliary_label_service_test.go
-├── internal/domain/topicanalysis/embedding_test.go
-├── internal/domain/topicanalysis/merge_tags_reembedding_test.go
-├── internal/domain/topicanalysis/merge_reembedding_queue_test.go
-├── internal/domain/preferences/handler_test.go
-├── internal/domain/aiadmin/handler_test.go
-├── internal/domain/narrative/collector_test.go
-├── internal/domain/narrative/generator_test.go
-├── internal/jobs/auto_refresh_test.go                    # 后台任务处理器
-├── internal/jobs/firecrawl_test.go
-├── internal/jobs/content_completion_test.go
-├── internal/jobs/preference_update_test.go
-├── internal/jobs/auto_summary_test.go
-├── internal/jobs/handler_test.go
-├── internal/jobs/scheduler_status_response_test.go
-├── internal/jobs/trigger_now_status_code_test.go
-├── internal/jobs/tag_quality_score_test.go
-├── internal/platform/database/db_test.go                 # 数据库和迁移
-├── internal/platform/database/datamigrate/writer_postgres_test.go
-├── internal/platform/database/datamigrate/verify_test.go
-├── internal/platform/config/config_test.go
-├── internal/platform/airouter/router_test.go             # AI 模型路由
-├── internal/platform/airouter/store_test.go
-├── internal/platform/airouter/migration_test.go
-├── internal/platform/opennotebook/client_test.go
-├── internal/platform/aisettings/config_store_test.go
-└── cmd/migrate-db/main_test.go
+├── internal/admin/
+│   ├── handler/ai_handler_test.go
+│   └── scheduler/base_test.go
+├── internal/models/
+│   ├── semantic_label_test.go
+│   └── topic_graph_test.go
+├── internal/platform/
+│   ├── airouter/openai_compatible_test.go
+│   ├── airouter/router_test.go
+│   ├── airouter/store_test.go
+│   ├── aisettings/config_store_test.go
+│   ├── config/config_test.go
+│   ├── database/db_test.go
+│   ├── database/db_unit_test.go
+│   ├── database/slow_logger_test.go
+│   ├── jsonutil/sanitize_test.go
+│   ├── logging/logging_test.go
+│   ├── testutil/diag_test.go
+│   └── ws/hub_test.go
+├── internal/reader/
+│   ├── handler/article_handler_test.go
+│   ├── handler/content_completion_handler_test.go
+│   ├── repository/firecrawl_job_queue_test.go
+│   ├── service/content_completion_service_test.go
+│   ├── service/feed_service_test.go
+│   └── service/feed_service_unit_test.go
+├── internal/tagmanagement/
+│   ├── handler/merge_reembedding_queue_test.go
+│   ├── handler/semantic_board_handler_test.go
+│   ├── handler/semantic_board_match_detail_test.go
+│   ├── repository/tag_job_queue_test.go
+│   ├── service/auxlabel/auxiliary_label_service_test.go
+│   ├── service/board/semantic_board_backfill_test.go
+│   ├── service/board/semantic_board_matching_test.go
+│   ├── service/board/semantic_board_matching_unit_test.go
+│   ├── service/board/semantic_board_upgrade_test.go
+│   ├── service/board/tag_clustering_test.go
+│   ├── service/board/tag_clustering_unit_test.go
+│   ├── service/core/article_tagger_test.go
+│   ├── service/core/embedding_test.go
+│   ├── service/core/embedding_unit_test.go
+│   ├── service/core/extractor_test.go
+│   ├── service/core/hard_merge_test.go
+│   ├── service/core/helpers_test.go
+│   ├── service/core/merge_tags_reembedding_test.go
+│   ├── service/core/metadata_test.go
+│   ├── service/core/metadata_unit_test.go
+│   ├── service/core/quality_score_test.go
+│   ├── service/core/quality_score_unit_test.go
+│   ├── service/core/tag_cache_test.go
+│   ├── service/core/tag_queue_test.go
+│   └── service/merge/tag_merge_suggest_test.go
+├── internal/topicgraph/
+│   ├── handler/daily_report_handler_test.go
+│   ├── handler/graph_handler_test.go
+│   ├── repository/daily_report_matching_test.go
+│   ├── repository/daily_report_repository_test.go
+│   ├── service/daily_report_cluster_test.go
+│   └── service/daily_report_dedup_test.go
 
 front/
-├── app/utils/api.test.ts                                 # API 客户端工具
-├── app/utils/articleContentSource.test.ts                # 内容源解析
-├── app/utils/articleContentGuards.test.ts
-├── app/utils/schedulerMeta.test.ts
+├── app/api/scheduler.test.ts
 ├── app/features/articles/components/ArticleTagList.test.ts
-├── app/features/digest/components/digestLayout.test.ts
-├── app/features/topic-graph/utils/buildDisplayedTopicGraph.test.ts
-├── app/features/topic-graph/utils/topicGraphCanvasLinks.test.ts
-├── app/features/topic-graph/utils/buildTopicGraphViewModel.test.ts
+├── app/features/tags/components/SectionLifecyclePanel.test.ts
+├── app/features/topic-graph/components/TagHierarchy.test.ts
 ├── app/features/topic-graph/components/TopicTimeline.test.ts
+├── app/features/topic-graph/composables/useTopicGraph.test.ts
+├── app/features/topic-graph/utils/buildDisplayedTopicGraph.test.ts
+├── app/features/topic-graph/utils/buildTopicGraphViewModel.test.ts
+├── app/features/topic-graph/utils/graphBfsHighlight.test.ts
+├── app/features/topic-graph/utils/topicGraphCanvasLinks.test.ts
+├── app/stores/api.test.ts
+├── app/utils/api.test.ts
+├── app/utils/articleContentGuards.test.ts
+├── app/utils/articleContentSource.test.ts
+├── app/utils/schedulerMeta.test.ts
 └── tests/e2e/
-    ├── baseline.spec.ts                                  # 冒烟测试
-    └── topic-graph.spec.ts                               # Topic graph E2E
-
-tests/
-├── workflow/
-│   ├── test_schedulers.py                                # 调度器单元测试
-│   ├── test_workflow_integration.py                      # 端到端工作流测试
-│   ├── test_error_handling.py                            # 错误处理测试
-│   ├── utils/                                            # 共享测试辅助
-│   │   ├── database.py                                   # DatabaseHelper
-│   │   ├── api_client.py                                 # APIClient
-│   │   └── mock_services.py                              # MockFirecrawl, MockAIService
-│   └── config.py                                         # 测试配置
-└── firecrawl/
-    └── test_firecrawl_integration.py                     # Firecrawl 集成检查
+    ├── baseline.spec.ts
+    └── topic-graph.spec.ts
 ```

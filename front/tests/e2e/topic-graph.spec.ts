@@ -77,6 +77,35 @@ test.describe('Topic Graph P3', () => {
   })
 })
 
+test.describe('Topic Graph - Display & Interaction', () => {
+  test('should update node-drag count after dragging on the canvas', async ({ page }) => {
+    await gotoAndReady(page)
+
+    const canvas = page.locator('[data-testid="topic-graph-canvas"]')
+    await expect(canvas).toHaveAttribute('data-state', 'ready')
+
+    // Drag is enabled; the counter starts at 0 and increments as the
+    // force-graph drag handler fires during a pointer drag.
+    const before = Number(await canvas.getAttribute('data-node-drag-count'))
+    expect(before).toBeGreaterThanOrEqual(0)
+
+    const box = await canvas.boundingBox()
+    expect(box).not.toBeNull()
+    const cx = box!.x + box!.width / 2
+       const cy = box!.y + box!.height / 2
+
+    // Perform a pointer drag across the canvas center. The WebGL drag handler
+    // picks up the node under the pointer and increments nodeDragCount.
+    await page.mouse.move(cx, cy - 20)
+    await page.mouse.down()
+    await page.mouse.move(cx + 40, cy + 20, { steps: 6 })
+    await page.mouse.up()
+
+    // Counter must have advanced, proving node drag is wired (not disabled).
+    await expect(canvas).toHaveAttribute('data-node-drag-count', (before + 1).toString())
+  })
+})
+
 test.describe('Topic Graph - Timeline Tests', () => {
   test('should show timeline after selecting topic', async ({ page }) => {
     await gotoAndReady(page)

@@ -7,10 +7,35 @@ import (
 	"net/http"
 	"time"
 
+	"syntopica-backend/internal/platform/aisettings"
 	"syntopica-backend/internal/platform/logging"
 	"syntopica-backend/internal/platform/ws"
 	daily_report "syntopica-backend/internal/topicgraph"
 )
+
+// NextDailyReportTime computes the next wall-clock time for the daily report.
+// It reads the configured HH:MM from AISettings (default "21:00") and returns
+// today at that time if it hasn't passed yet, otherwise tomorrow at that time.
+func NextDailyReportTime(now time.Time) time.Time {
+	hhmm, err := aisettings.LoadDailyReportTimeConfig()
+	if err != nil {
+		logging.Warnf("daily_report: failed to load time config, using default: %v", err)
+		hhmm = "21:00"
+	}
+
+	h, m := 21, 0
+	_, scanErr := fmt.Sscanf(hhmm, "%d:%d", &h, &m)
+	if scanErr != nil {
+		logging.Warnf("daily_report: failed to parse time %q, using default 21:00: %v", hhmm, scanErr)
+		h, m = 21, 0
+	}
+
+	today := time.Date(now.Year(), now.Month(), now.Day(), h, m, 0, 0, now.Location())
+	if now.Before(today) {
+		return today
+	}
+	return today.Add(24 * time.Hour)
+}
 
 // DailyReportJob generates daily reports for all active semantic boards.
 // When no targetDate is provided (nil), it reports on the current local time.

@@ -3,6 +3,7 @@ import { Icon } from '@iconify/vue'
 import { onMounted } from 'vue'
 import { useSchedulerStatus } from '~/composables/useSchedulerStatus'
 import {
+  formatLastRunSummary,
   getSchedulerColor,
   getSchedulerDisplayName,
   getSchedulerIcon,
@@ -117,6 +118,47 @@ function getStatusDotStyle(status: string) {
               : 'background: var(--color-error-bg, rgba(196, 47, 60, 0.1)); color: var(--color-error)'"
           >
             {{ getSchedulerFeedback(schedulerTriggerFeedback, scheduler.name)?.message || (getSchedulerFeedback(schedulerTriggerFeedback, scheduler.name)?.accepted ? '已接受请求' : '请求被拒绝') }}
+          </div>
+        </div>
+
+        <!-- Last execution details -->
+        <div
+          v-if="scheduler.is_executing
+            || scheduler.database_state?.last_execution_time
+            || (scheduler.last_run_summary && formatLastRunSummary(scheduler.name, scheduler.last_run_summary))
+            || (scheduler.database_state?.failed_executions && scheduler.database_state.failed_executions > 0)"
+          class="mt-3 space-y-1"
+        >
+          <!-- Executing state -->
+          <div v-if="scheduler.is_executing" class="text-xs font-medium" style="color: var(--color-warning)">
+            执行中…
+          </div>
+
+          <!-- Last execution time + duration -->
+          <div v-if="scheduler.database_state?.last_execution_time && !scheduler.is_executing" class="text-xs" style="color: var(--color-text-muted)">
+            <span>上次执行：{{ scheduler.database_state.last_execution_time }}</span>
+            <span v-if="scheduler.database_state.last_execution_duration != null">
+              &nbsp;耗时 {{ typeof scheduler.database_state.last_execution_duration === 'number' ? scheduler.database_state.last_execution_duration.toFixed(1) : scheduler.database_state.last_execution_duration }}s
+            </span>
+          </div>
+
+          <!-- Result summary -->
+          <div
+            v-if="!scheduler.is_executing && scheduler.last_run_summary && formatLastRunSummary(scheduler.name, scheduler.last_run_summary)"
+            class="text-xs"
+            style="color: var(--color-text-secondary)"
+          >
+            结果：{{ formatLastRunSummary(scheduler.name, scheduler.last_run_summary) }}
+          </div>
+
+          <!-- Failure info (only when > 0) -->
+          <div
+            v-if="!scheduler.is_executing && (scheduler.database_state?.consecutive_failures ?? 0) > 0"
+            class="text-xs"
+            style="color: var(--color-error)"
+          >
+            失败：{{ scheduler.database_state?.failed_executions ?? 0 }} 次
+            <span v-if="scheduler.database_state?.last_error"> — {{ scheduler.database_state.last_error }}</span>
           </div>
         </div>
       </div>

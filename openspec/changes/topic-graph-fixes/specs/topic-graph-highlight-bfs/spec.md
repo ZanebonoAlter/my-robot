@@ -1,64 +1,77 @@
-## Purpose
+## ADDED Requirements
 
-BFS 连通分支高亮能力：从选中/悬停节点出发沿边执行广度优先搜索，高亮整个连通分支。当连通分支过大（>= 40% 总节点数）时退回固定跳数限制，防止全图亮起。供 TopicGraphPage 和 SectionLifecyclePanel 共用。
+### Requirement: 共享的有界 BFS 高亮算法
 
-## Requirements
+系统 SHALL 提供泛型共享工具函数 `bfsHighlight(focusId, edges, totalNodes)`。节点 ID SHALL 支持 `string` 或 `number`，边 SHALL 使用 `{ source, target }` 结构并按无向图处理。
 
-### Requirement: BFS 连通分支高亮算法
+算法 SHALL：
 
-系统 SHALL 提供共享工具函数 `bfsHighlight(focusId, edges, totalNodes)`，执行以下逻辑：
+1. 从 `focusId` 执行 BFS，收集完整连通分量。
+2. 当 `totalNodes <= 8` 时返回完整连通分量。
+3. 当连通分量节点数小于 `totalNodes * 0.4` 时返回完整连通分量。
+4. 其他情况下重新执行 BFS，同时限制最大深度为 4 跳、最大节点数为 `max(1, floor(totalNodes * 0.4))`。
+5. 即使 focus 节点没有任何边，也在结果中包含 focus 节点。
 
-1. 从 `focusId` 出发，将 `edges` 视为无向图构建邻接表
-2. 执行 BFS，收集可达节点集合 `component`
-3. 如果 `len(component) < totalNodes * 0.4` → 返回 `component`（全高亮）
-4. 如果 `len(component) >= totalNodes * 0.4` → 重新执行 BFS，限制最大跳数 4，返回截断后的集合
+系统 SHALL 导出 `COMPONENT_THRESHOLD = 0.4`、`MAX_HOPS = 4` 和 `SMALL_GRAPH_NODE_LIMIT = 8` 常量。
 
-常量 SHALL 导出：`COMPONENT_THRESHOLD = 0.4`，`MAX_HOPS = 4`。
+#### Scenario: 稀疏图高亮完整连通分量
 
-#### Scenario: 稀疏图高亮整个连通分支
+- **WHEN** 图有 100 个节点，focus 节点所在连通分量包含 25 个节点
+- **THEN** `bfsHighlight` SHALL 返回全部 25 个节点
 
-- **WHEN** 图有 100 个节点，focusNode 的连通分支包含 25 个节点（25% < 40%）
-- **THEN** `bfsHighlight` SHALL 返回全部 25 个节点的 ID
+#### Scenario: 密集低直径图不会全图高亮
 
-#### Scenario: 密集图退回 4 跳限制
+- **WHEN** 图有 100 个节点，focus 节点一跳即可到达其余 99 个节点
+- **THEN** `bfsHighlight` SHALL 返回不超过 40 个节点，并包含 focus 节点
 
-- **WHEN** 图有 100 个节点，focusNode 的连通分支包含 60 个节点（60% >= 40%）
-- **THEN** `bfsHighlight` SHALL 返回从 focusNode 出发最多 4 跳可达的节点集合
+#### Scenario: 有界 BFS 同时限制跳数
+
+- **WHEN** 图有 100 个节点，focus 节点所在连通分量包含 80 个节点，部分节点距离 focus 超过 4 跳
+- **THEN** 返回集合 SHALL 不包含距离 focus 超过 4 跳的节点，且总数 SHALL 不超过 40
+
+#### Scenario: 小图保持完整上下文
+
+- **WHEN** 图有 5 个节点且全部连通
+- **THEN** `bfsHighlight` SHALL 返回全部 5 个节点
 
 #### Scenario: 孤立节点
 
-- **WHEN** focusNode 无任何边连接
-- **THEN** `bfsHighlight` SHALL 返回仅包含 focusNode 的集合
+- **WHEN** focus 节点不出现在任何边中
+- **THEN** `bfsHighlight` SHALL 返回仅包含 focus 节点的集合
 
-#### Scenario: 小图阈值不触发
+#### Scenario: 支持数字节点 ID
 
-- **WHEN** 图有 5 个节点全部连通（连通分支 5 个 = 100% >= 40%）
-- **THEN** `bfsHighlight` SHALL 退回 4 跳限制，返回全部 5 个节点（4 跳足以覆盖全部）
+- **WHEN** focus ID 为数字 `50`，边为 `{source: 50, target: 60}` 和 `{source: 60, target: 70}`
+- **THEN** 返回集合 SHALL 使用数字 ID 并包含 `50`、`60`、`70`
 
-### Requirement: TopicGraphPage 使用 BFS 高亮
+### Requirement: 主题图使用共享 BFS 高亮
 
-`TopicGraphPage.vue` 的 `highlightedNodeIds` 计算属性 SHALL 调用 `bfsHighlight` 替代当前的 1-hop 逻辑。`relatedEdgeIds` SHALL 返回两端节点均在高亮集合中的边。
+`useTopicGraph` 的 `highlightedNodeIds` SHALL 基于当前 `displayedGraph` 调用共享 `bfsHighlight`，替代只收集直接邻居的一跳逻辑。调用前 SHALL 将可能被图组件解析为节点对象的 edge 端点转换为字符串节点 ID。
 
-#### Scenario: 选中话题高亮多跳连通分支
+`relatedEdgeIds` SHALL 仅包含两端节点均位于高亮集合中的边。
 
-- **WHEN** 用户选中话题节点 A，A 经边连接 B，B 经边连接 C（共 3 个节点，图总节点 50）
-- **THEN** `highlightedNodeIds` SHALL 包含 [A, B, C]，`relatedEdgeIds` SHALL 包含 A-B 和 B-C 两条边
+#### Scenario: 选中话题高亮多跳分支
+
+- **WHEN** 用户选中 A，显示图中存在 A-B、B-C，且该连通分量未达到密集图阈值
+- **THEN** `highlightedNodeIds` SHALL 包含 A、B、C，`relatedEdgeIds` SHALL 包含 A-B 和 B-C
 
 #### Scenario: 取消选中清除高亮
 
-- **WHEN** 用户取消选中（selectedTopicSlug 和 selectedKeywordSlug 均为空）
-- **THEN** `highlightedNodeIds` SHALL 返回空数组
+- **WHEN** `selectedTopicSlug` 和 `selectedKeywordSlug` 均为空
+- **THEN** `highlightedNodeIds` 和 `relatedEdgeIds` SHALL 返回空数组
 
-### Requirement: SectionLifecyclePanel 使用 BFS 高亮
+### Requirement: 生命周期面板使用共享 BFS 高亮
 
-`SectionLifecyclePanel.vue` 的 `isNodeHighlighted` 和 `isEdgeHighlighted` SHALL 使用 `bfsHighlight` 计算高亮集合。hover 变化时重新计算，结果缓存为 computed 属性。
+`SectionLifecyclePanel` SHALL 将 `SectionRelation.from_id/to_id` 映射为数字 `{ source, target }` 边，并使用共享 `bfsHighlight` 计算 hover 高亮集合。
 
-#### Scenario: 悬停 section 高亮上下游
+节点 SHALL 在其 ID 位于高亮集合时高亮；边 SHALL 仅在其两端节点都位于高亮集合时高亮。高亮结果 SHALL 由响应式计算属性缓存，并在 hover 节点或 relations 变化时重新计算。
 
-- **WHEN** 面板显示 section #50 → #60 → #70 的链式关系，用户悬停 #50
-- **THEN** #50、#60、#70 SHALL 全部高亮，边 #50-#60 和 #60-#70 SHALL 高亮
+#### Scenario: 悬停 section 高亮多跳上下游
 
-#### Scenario: 悬停无关联 section
+- **WHEN** 面板包含 #50 → #60 → #70，用户悬停 #50
+- **THEN** #50、#60、#70 及两条内部关系边 SHALL 高亮
 
-- **WHEN** 面板显示孤立 section #20（无 relation），用户悬停 #20
-- **THEN** 仅 #20 高亮，无边高亮
+#### Scenario: 悬停孤立 section
+
+- **WHEN** 面板仅包含无 relation 的 section #20，用户悬停 #20
+- **THEN** 仅 #20 SHALL 高亮，且没有边高亮

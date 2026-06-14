@@ -430,6 +430,8 @@ HNSW 索引：`idx_topic_tag_embeddings_embedding USING hnsw (embedding vector_c
 
 唯一约束：`(article_id, topic_tag_id)`
 
+标签任务写入关联前会在短事务内以 `FOR KEY SHARE` 锁定对应文章。若 Feed 清理已删除该文章，则跳过关联写入并正常完成任务，避免产生预期内的外键错误日志。
+
 ---
 
 ### 8. 语义标签相关表（已废弃：层级关系相关表）

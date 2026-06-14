@@ -6,6 +6,9 @@ import (
 	"strings"
 	"time"
 
+	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
+
 	"syntopica-backend/internal/models"
 	"syntopica-backend/internal/platform/logging"
 	"syntopica-backend/internal/tagmanagement/repository"
@@ -155,12 +158,13 @@ func tagArticle(ctx context.Context, article *models.Article, feedName, category
 			Score:      tag.Score,
 			Source:     source,
 		}
-		if err := repository.Repo.DB().Create(&link).Error; err != nil {
-			if isArticleDeletedRace(err, article.ID) {
-				logging.Infof("Article %d was deleted during tagging, skipping remaining tags", article.ID)
-				return nil
-			}
+		articleExists, err := createArticleTopicTagLink(&link)
+		if err != nil {
 			return err
+		}
+		if !articleExists {
+			logging.Infof("Article %d was deleted during tagging, skipping remaining tags", article.ID)
+			return nil
 		}
 
 		if dbTag.Category == "event" {
@@ -174,6 +178,28 @@ func tagArticle(ctx context.Context, article *models.Article, feedName, category
 	}
 
 	return nil
+}
+
+func createArticleTopicTagLink(link *models.ArticleTopicTag) (bool, error) {
+	articleExists := false
+	err := repository.Repo.DB().Transaction(func(tx *gorm.DB) error {
+		var article models.Article
+		result := tx.Clauses(clause.Locking{Strength: "KEY SHARE"}).
+			Select("id").
+			Where("id = ?", link.ArticleID).
+			Limit(1).
+			Find(&article)
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected == 0 {
+			return nil
+		}
+
+		articleExists = true
+		return tx.Create(link).Error
+	})
+	return articleExists, err
 }
 
 func limitArticleTags(tags []TopicTag) []TopicTag {
@@ -339,21 +365,6 @@ func CleanupOrphanedTags(tagIDs []uint) {
 			logging.Warnf("Failed to recount refs after orphan cleanup: %v", err)
 		}
 	}
-}
-
-// isArticleDeletedRace checks if a DB error is a foreign key violation caused by
-// the article being concurrently deleted (race with CleanupOldArticles during feed refresh).
-// When the article no longer exists, its tags are moot — skip gracefully.
-func isArticleDeletedRace(err error, articleID uint) bool {
-	if !strings.Contains(err.Error(), "fk_article_topic_tags_article") {
-		return false
-	}
-	// Double-check the article is actually gone (not some other FK issue)
-	var count int64
-	if dbErr := repository.Repo.DB().Model(&models.Article{}).Where("id = ?", articleID).Count(&count).Error; dbErr != nil {
-		return false
-	}
-	return count == 0
 }
 
 func parseAliasesFromJSON(aliases string) []string {

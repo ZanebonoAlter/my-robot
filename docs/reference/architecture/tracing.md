@@ -72,11 +72,11 @@ defer span.End()
 
 | 文件 | 方法 | 当前效果 |
 |------|------|----------|
-| `backend-go/internal/domain/feeds/service.go` | `FeedService.RefreshFeed` | 自动创建 span，自动记录 named error |
-| `backend-go/internal/domain/contentprocessing/firecrawl_service.go` | `FirecrawlService.ScrapePage` | 自动创建 span，自动记录 named error |
-| `backend-go/internal/domain/contentprocessing/content_completion_service.go` | `ContentCompletionService.CompleteArticle` | 自动创建 span，只有薄包装，无自动错误记录 |
-| `backend-go/internal/domain/contentprocessing/content_completion_service.go` | `ContentCompletionService.CompleteArticleWithForce` | 自动创建 span，只有薄包装，无自动错误记录 |
-| `backend-go/internal/domain/contentprocessing/content_completion_service.go` | `ContentCompletionService.CompleteArticleWithMetadata` | 自动创建 span，自动记录 named error |
+| `backend-go/internal/reader/service/feed_service.go` | `FeedService.RefreshFeed` | 自动创建 span，自动记录 named error |
+| `backend-go/internal/reader/service/firecrawl_service.go` | `FirecrawlService.ScrapePage` | 自动创建 span，自动记录 named error |
+| `backend-go/internal/reader/service/content_completion_service.go` | `ContentCompletionService.CompleteArticle` | 自动创建 span，只有薄包装，无自动错误记录 |
+| `backend-go/internal/reader/service/content_completion_service.go` | `ContentCompletionService.CompleteArticleWithForce` | 自动创建 span，只有薄包装，无自动错误记录 |
+| `backend-go/internal/reader/service/content_completion_service.go` | `ContentCompletionService.CompleteArticleWithMetadata` | 自动创建 span，自动记录 named error |
 | `backend-go/internal/platform/airouter/router.go` | `Router.Chat` | 自动创建 span，自动记录 named error |
 
 ### 3. 手动 root span：Scheduler
@@ -89,13 +89,17 @@ tracing.TraceSchedulerTick("auto_refresh", "cron", func(ctx context.Context) {
 })
 ```
 
-当前已接入的 scheduler 入口共 7 个：
+当前已接入的 scheduler 入口共 9 个：
 
 - `auto_refresh`
 - `firecrawl`
 - `content_completion`
 - `preference_update`
-- `narrative_summary`
+- `daily_report`
+- `blocked_article_recovery`
+- `tag_quality_score`
+- `log_cleanup`
+- `aux_label_cleanup`
 
 这类 span 的特点：
 

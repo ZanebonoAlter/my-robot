@@ -7,7 +7,7 @@ Agent guide for coding assistants working in `Syntopica` (`D:\project\my-robot`)
 - Frontend API: `http://localhost:5000/api`; WebSocket: `ws://localhost:5000/ws`.
 - PostgreSQL + pgvector for persistence; Redis optional for job queues.
 - 和用户沟通使用中文，开发环境 Windows。
-- 使用openspec编写任务时,需要在task中标注完成后更新文档,并且需要注意数据库更新规范（一类是迁移（索引）、一类是gorm自动建立的框架）
+- 使用 openspec 编写任务时，tasks.md 必须遵循 `docs/reference/开发执行规范.md` §11 归档门禁：以「测试 / 文档 / 验证」三节收尾，验证节每条附可执行命令；归档前重跑验证节确认零失败。数据库更新规范（迁移索引 vs gorm 自动建表）按 §10 处理。
 
 ## 开发环境 (Development Environment)
 
@@ -81,7 +81,7 @@ cd front && pnpm dev
 - Backend edits → `golangci-lint run ./...` / targeted `go test` first, then `go test ./...` / `go build ./...`。
 - Docs-only edits: consistency check unless behavior changed.
 - Keep code changes minimal and scoped. Match existing code style.
-- 完成任务后更新维护 `./docs` 知识库。
+- 完成任务后更新维护 `./docs/reference/` 知识库；openspec change 归档前满足 `开发执行规范.md` §11 归档门禁。
 
 ## Browser Automation
 Use `agent-browser`: `open <url>` → `snapshot -i` → `click @eX` / `fill @eX "text"` → re-snapshot.

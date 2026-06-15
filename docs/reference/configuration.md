@@ -15,18 +15,6 @@ Syntopica 使用分层配置系统：后端 YAML 配置文件、覆盖文件值�
 | `DATABASE_DRIVER` | 否 | `"postgres"` | 数据库驱动，主分支仅支持 `"postgres"` |
 | `DATABASE_DSN` | 否 | `"host=127.0.0.1 user=postgres password=postgres dbname=syntopica port=5432 sslmode=disable TimeZone=Asia/Shanghai"` | PostgreSQL 连接字符串 |
 | `CORS_ORIGINS` | 否 | `"http://localhost:3000,http://localhost:3000"` | 逗号分隔的允许 CORS 来源列表 |
-| `REDIS_URL` | 否 | *(空)* | Topic 分析任务队列的 Redis URL。设置后使用 Redis 作为持久后端；否则回退到内存队列 |
-
-### Topic Analysis 调优
-
-以下环境变量控制 AI 话题分析模块，在 `internal/domain/topicanalysis/ai_analysis.go` 中通过 `parseEnvInt` / `parseEnvFloat` 读取。
-
-| 变量 | 必填 | 默认值 | 说明 |
-|---|---|---|---|
-| `TOPIC_ANALYSIS_MAX_TOKENS` | 否 | `2000` | 话题分析 AI 调用最大 token 数 |
-| `TOPIC_ANALYSIS_TEMPERATURE` | 否 | `0.2` | 话题分析 AI 调用温度 |
-| `TOPIC_ANALYSIS_TIMEOUT_SECONDS` | 否 | `90` | 话题分析 AI 调用超时（秒） |
-| `TOPIC_ANALYSIS_RETRY_COUNT` | 否 | `3` | 话题分析 AI 调用最大重试次数 |
 
 ### 前端（Nuxt）
 
@@ -120,10 +108,6 @@ database:
 | CORS headers | `Content-Type, Authorization` | `viper.SetDefault` in `config.go` |
 | Tracing enabled | `true` | `tracing.DefaultConfig()` |
 | Tracing retention | `7` days | `tracing.DefaultConfig()` |
-| Topic analysis max tokens | `2000` | `ai_analysis.go` `parseEnvInt` |
-| Topic analysis temperature | `0.2` | `ai_analysis.go` `parseEnvFloat` |
-| Topic analysis timeout | `90` s | `ai_analysis.go` `parseEnvInt` |
-| Topic analysis retries | `3` | `ai_analysis.go` `parseEnvInt` |
 
 ### 前端默认值
 

@@ -26,7 +26,7 @@
 | `topic_tag_embeddings` | 主题标签向量 | `models.TopicTagEmbedding` |
 | `topic_tag_analyses` | 主题分析快照 | `models.TopicTagAnalysis` |
 | `topic_analysis_cursors` | 主题分析游标 | `models.TopicAnalysisCursor` |
-| `topic_analysis_jobs` | 主题分析任务队列 | `topicanalysis.topicAnalysisJobRecord` |
+| `topic_analysis_jobs` | 主题分析任务队列（已废弃，无 migrator 注册） | `topicanalysis.topicAnalysisJobRecord`（已废弃） |
 | `article_topic_tags` | 文章-主题关联 | `models.ArticleTopicTag` |
 | `embedding_config` | 向量配置 | `models.EmbeddingConfig` |
 | `embedding_queues` | 向量生成队列 | `models.EmbeddingQueue` |
@@ -709,7 +709,7 @@ HNSW 索引：`idx_topic_tag_embeddings_embedding USING hnsw (embedding vector_c
 
 这三张表对应旧版 Feed 级 AI 批量摘要功能。字段说明见 §6.5 "AI 摘要关联表"。
 
-**状态**：当前无 Go 代码引用（`ai_summaries` 等模型已不存在于 `internal/domain/models/`），数据库中可能存有旧数据。`articles.feed_summary_id` 仍然指向 `ai_summaries.id`。
+**状态**：当前无 Go 代码引用（`ai_summaries` 等模型已不存在于 `internal/models/`），数据库中可能存有旧数据。`articles.feed_summary_id` 仍然指向 `ai_summaries.id`。
 
 #### digest_configs（Digest 推送配置）
 

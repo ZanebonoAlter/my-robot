@@ -6,22 +6,22 @@
 
 当前后端可以直接按四层理解：
 
-- `cmd/`：启动入口和辅助命令
+- `cmd/server/`：启动入口
 - `internal/app/`：应用装配、路由注册、运行时启动与退出
 - `internal/platform/`：数据库、配置、AI 路由、WebSocket、共享基础设施
-- `internal/domain/` + `internal/jobs/`：业务域能力与后台调度执行壳
+- 业务域：`internal/reader/`、`internal/tagmanagement/`、`internal/topicgraph/`、`internal/admin/`、`internal/models/`
 
 如果你发现文档和代码不一致，优先相信源码入口：`backend-go/cmd/server/main.go`、`backend-go/internal/app/router.go`、`backend-go/internal/app/runtime.go`。
 
 ## 技术栈
 
-- Go 1.21
+- Go 1.25
 - Gin
 - GORM
 - PostgreSQL + pgvector
 - Viper
 - Gorilla WebSocket
-- robfig/cron
+- internal/admin/scheduler（自研调度器工厂 + Interval）
 
 ## 实时通信基础设施
 
@@ -70,7 +70,6 @@ es.onerror = () => es.close() // 扫描完成或出错时自动断开
 - 服务入口：`backend-go/cmd/server/main.go`
 - 路由装配：`backend-go/internal/app/router.go`
 - 运行时启动：`backend-go/internal/app/runtime.go`
-- 运行时共享引用：`backend-go/internal/app/runtimeinfo/schedulers.go`
 - 配置加载：`backend-go/internal/platform/config/config.go`
 - 数据库初始化与表补丁：`backend-go/internal/platform/database/db.go`
 - 配置文件：`backend-go/configs/config.yaml`
@@ -80,11 +79,7 @@ es.onerror = () => es.close() // 扫描完成或出错时自动断开
 ```text
 backend-go/
 ├── cmd/
-│   ├── migrate-db/
-│   ├── migrate-embedding-queue/
-│   ├── migrate-tags/
-│   ├── server/
-│   └── test-embedding/
+│   └── server/
 ├── configs/
 ├── internal/
 │   ├── app/
@@ -114,6 +109,7 @@ backend-go/
 │       ├── jsonutil/
 │       ├── logging/
 │       ├── middleware/
+│       ├── testutil/
 │       ├── tracing/
 │       └── ws/                    # WebSocket hub
 ```
@@ -138,10 +134,6 @@ internal/<domain>/
 ### `cmd/`
 
 - `server/`：HTTP 服务真实入口
-- `migrate-tags/`：主题标签相关迁移命令
-- `migrate-db/`：数据库迁移命令
-- `migrate-embedding-queue/`：embedding 队列迁移命令
-- `test-embedding/`：embedding 联调入口
 
 ### `internal/app/`
 
@@ -149,8 +141,6 @@ internal/<domain>/
 
 - `router.go`：注册 HTTP API 和 WebSocket 路由（调用各域的 `RegisterRoutes`）
 - `runtime.go`：启动 scheduler、初始化服务、注册优雅退出
-
-这里要注意：`runtimeinfo` 还是过渡方案，它不是完整的 runtime container。
 
 ### `internal/platform/`
 
@@ -161,12 +151,13 @@ internal/<domain>/
 - `logging/`：轻量日志门面，负责把 info/warn 与 error/fatal/panic 分流到 stdout / stderr
 - `middleware/`：Gin 中间件，例如 CORS
 - `ws/`：WebSocket hub，给前端推送异步任务状态
-- `ai/`：AI 调用封装
 - `airouter/`：AI provider、capability route、failover 路由
   - capability 绑定：`summary` → 文章自动总结、`digest_polish` → 日报生成、`topic_tagging` → 标签提取、`embedding` → 向量嵌入
   - `article_completion` 已废弃，前端面板不再显示；数据库残留行不影响运行
-- `aisettings/`：兼容旧配置表的 AI / Firecrawl / Open Notebook 配置读写
-- `opennotebook/`：Open Notebook 客户端能力
+- `aisettings/`：兼容旧配置表的 AI / Firecrawl 配置读写
+- `jsonutil/`：JSON 工具函数
+- `testutil/`：测试辅助工具
+- `tracing/`：OpenTelemetry tracing
 
 ### `internal/admin/`
 
@@ -287,7 +278,7 @@ Event 标签采用多行 embedding 策略：
 合并相似 Tag 时采用硬删除策略，不再使用 `status='merged'` 或 `status='inactive'`：
 
 - `HardMergeTags(sourceID, targetID)` 迁移 article_topic_tags → 迁移 topic_tag_relations (children) → DELETE topic_tag_embeddings → DELETE topic_tags 源行
-- AutoTagMerge 调度器基于 pgvector 余弦相似度 > 0.97 自动触发
+- `tag_quality_score` 调度器定期重算标签质量分
 
 #### SemanticBoard 匹配（`tagmanagement/service/board`）
 

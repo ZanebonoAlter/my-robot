@@ -238,15 +238,14 @@ auto_summary scheduler
 ### 每日叙事生成
 
 ```text
-NarrativeSummaryScheduler 触发
-  → GenerateAndSave(date)
-    → CollectSemanticBoardNarrativeInputs
+daily_report scheduler 触发
+  → job_daily_report.go 执行
+    → daily_report.CollectBoardIDsForDate(date)
       → 读取 active SemanticBoard (label_type='board', status='active')
       → 按 date + scope + semantic_board_id 收集 event tags (from topic_tag_board_labels)
     → 对每个有事件的 SemanticBoard:
-      → INSERT INTO narrative_boards (semantic_board_id, event_tag_ids, ...)
-      → prev_board_ids 按 semantic_board_id + scope + 前一日匹配
-    → GenerateAndSaveGlobal (全局 scope)
+      → daily_report.GenerateDailyReport(ctx, boardID, date)
+      → daily_report.SaveReport(report, sections, threadBatches)
     → runFallbackAssociations (关联前日叙事)
     → DeriveBoardConnections (派生 Board 连接)
     → runFeedbackFromTodayNarratives (反馈标签)

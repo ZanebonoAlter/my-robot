@@ -150,3 +150,72 @@ Strong success criteria let you loop independently. Weak criteria ("make it work
 ---
 
 **These guidelines are working if:** fewer unnecessary changes in diffs, fewer rewrites due to overcomplication, and clarifying questions come before implementation rather than after mistakes.
+
+---
+
+## context-mode — 上下文窗口路由规则（按需使用）
+
+> 本节由 context-mode plugin（`~/.config/opencode/opencode.json` → `plugin: ["context-mode"]`）提供。目的：把大块工具输出（日志/grep/JSON）沙箱化、索引进 FTS5，避免一次性灌爆上下文窗口。**与上面的核心开发规范并行生效；当本节规则与上面冲突时，上面的 Syntopica 项目规范优先**（例如前端编译必须走 Windows cmd、测试只跑影响包、和用户用中文沟通等不变）。
+
+context-mode 提供 11 个 `ctx_*` 工具。下列规则保护上下文窗口，一条未路由的命令可能直接灌入 56 KB。
+
+### Think in Code（强烈建议）
+
+分析/计数/过滤/比较/搜索/解析/变换数据时：用 `context-mode_ctx_execute(language, code)` 写代码，**只 `console.log()` 最终答案**，不要把原始数据读进上下文。PROGRAM 分析，而不是 COMPUTE。一次脚本顶十次工具调用。
+
+> 项目适配：本仓库后端是 Go，日常代码分析优先用 Go/项目自带工具；ctx_execute 主要用于跨工具批量取数、日志聚合、JSON 解析这类“会产出大块输出”的场景。
+
+### BLOCKED — 会被拦截（不要重试）
+
+- **curl / wget**：Shell 里的 `curl`/`wget` 会被拦截。改用 `context-mode_ctx_fetch_and_index(url, source)` 或 `context-mode_ctx_execute(language: "javascript", code: "const r = await fetch(...)")`。
+- **内联 HTTP**：`fetch('http`、`requests.get(`、`http.get(`、`http.request(` 会被拦截。改用 `context-mode_ctx_execute`，只有 stdout 进上下文。
+- **直接抓网页**：用 `context-mode_ctx_fetch_and_index(url, source)` 然后 `context-mode_ctx_search(queries)`。
+
+### REDIRECTED — 走沙箱
+
+- **Shell（输出 >20 行）**：Shell 只用于 `git`、`mkdir`、`rm`、`mv`、`cd`、`ls`、`npm install`、`pnpm install`、`go mod tidy` 等小输出命令。其余用 `context-mode_ctx_batch_execute(commands, queries)` 或 `context-mode_ctx_execute(language: "shell", code: "...")`。
+- **读文件（为了分析）**：读文件**为了编辑** → 正常读；读文件**为了分析/探索/总结** → `context-mode_ctx_execute_file(path, language, code)`。
+- **grep / 搜索（大结果）**：用 `context-mode_ctx_execute(language: "shell", code: "grep ...")` 在沙箱里跑。
+
+### 工具选择速查
+
+0. **MEMORY**：`context-mode_ctx_search(sort: "timeline")` — resume 后先查历史，别直接问用户。
+1. **GATHER**：`context-mode_ctx_batch_execute(commands, queries)` — 一次跑多条命令并自动索引、返回搜索结果，一次调用顶 30+。
+2. **FOLLOW-UP**：`context-mode_ctx_search(queries: ["q1", "q2", ...])` — 多个问题合并成数组一次调用。
+3. **PROCESSING**：`context-mode_ctx_execute(language, code)` | `context-mode_ctx_execute_file(path, language, code)` — 沙箱，只有 stdout 进上下文。
+4. **WEB**：`context-mode_ctx_fetch_and_index(url, source)` 然后 `context-mode_ctx_search(queries)`。
+5. **INDEX**：`context-mode_ctx_index(content, source)` — 存进 FTS5 供后续搜索。
+
+### 并发 I/O 批处理
+
+多 URL 抓取或多 API 调用时，带上 `concurrency: N`（1-8）：
+- 网络类（`gh`、`curl`、多区域云查询）用 `concurrency: 4-8`。
+- CPU 密集或共享状态（`npm test`、`build`、`lint`、同仓库写）保持 `concurrency: 1`。
+- GitHub API 限流：`gh` 调用上限 4。
+
+### 产物输出
+
+大产物写到**文件**，不要内联进上下文。返回：文件路径 + 一行描述。`search(source: "label")` 用有意义的 source 标签。
+
+### 会话连续性 & 记忆
+
+- 整个会话内 skills/roles/决策保持有效，不要随对话变长就丢弃。
+- 会话历史持久且可搜索。resume 时**先搜后问**：
+
+| 需求 | 命令 |
+|------|------|
+| 我们决定了什么？ | `context-mode_ctx_search(queries: ["decision"], source: "decision", sort: "timeline")` |
+| 有哪些约束？ | `context-mode_ctx_search(queries: ["constraint"], source: "constraint")` |
+
+不要问“我们刚才在做什么？”——**先搜**。搜出 0 条结果，就按全新会话处理。
+
+### ctx 命令
+
+| 命令 | 动作 |
+|------|------|
+| `ctx stats` | 调 `stats` MCP 工具，原样展示完整输出 |
+| `ctx doctor` | 调 `doctor` MCP 工具，跑返回的 shell 命令，按 checklist 展示 |
+| `ctx upgrade` | 调 `upgrade` MCP 工具，跑返回的 shell 命令，按 checklist 展示 |
+| `ctx purge` | 调 `purge` MCP 工具（confirm: true）。清知识库前会警告 |
+
+`/clear` 或 `/compact` 后：知识库和会话统计保留。想重开用 `ctx purge`。

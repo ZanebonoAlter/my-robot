@@ -1,0 +1,2 @@
+patchedDependencies:
+  three@0.183.2: patches/three@0.183.2.patch

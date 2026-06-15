@@ -90,6 +90,7 @@ features/
 │  └─ public.ts        # 跨 feature 共享 facade
 ├─ tags/               # 标签管理、合并、质量评分
 │  ├─ components/      # TagsPage、BoardCRUD、Timeline、Merge 等
+│  ├─ components/detective-wall/  # 3D 侦探照片墙（Three.js 子模块，见 §3D 侦探墙）
 │  └─ composables/     # useTagsPage、useBoardCRUD、useBoardTimeline、useAuxiliaryLabels
 ├─ topic-graph/        # 主题图谱、热点标签、话题详情、analysis、timeline、标签层级、合并预览
 │  ├─ components/      # TopicGraphPage、Canvas、Sidebar、Timeline、TagHierarchy、TagMergePreview 等
@@ -276,6 +277,39 @@ Topic Graph 页面的复杂度已按内聚行为拆分为多个深 Module：
 - 拆分目标不是文件行数下降，而是形成多个**深 Module**，每个以小 Interface 隐藏一组高内聚行为
 - 不能只把复杂度搬进单个巨型 composable（D17）
 - 组件通过 composable 获取状态和方法，子组件通过 props 接收数据
+
+## 3D 侦探墙（detective-wall）
+
+`features/tags/components/detective-wall/` 是项目内首个直接使用 Three.js 的特性，将话题总览（`BoardThreadBrowser` 2D SVG DAG）升级为沉浸式 3D 侦探照片墙。入口在 `BoardThreadBrowser` 的"侦探墙"按钮（仅 WebGL 可用且屏幕宽 ≥768px 显示），全屏视图 `TopicDetectiveWall.client.vue` 由 `BoardDailyReportTimeline` 渲染。
+
+### 子模块结构
+
+```text
+detective-wall/
+├─ types.ts              # 共享类型 + STYLE 常量 + SUPPORTED_DAYS
+├─ utils.ts              # 可测纯函数：bfsLifeline / layoutCards / densityForDays / edgeKey
+├─ TopicWallScene.ts     # 场景管理（renderer/camera/scene/CSS2D/render loop/dispose）
+├─ CardGroup.ts          # PinCardImpl（纸卡片+图钉+SpriteText）+ CardGroup（布局/动画）
+├─ RedString.ts          # Line2 粗红线 + RedStringCollection（距离衰减 opacity）
+├─ FogSystem.ts          # FogExp2（密度映射天数窗口，gsap 动画）
+├─ lighting.ts           # AmbientLight + SpotLight + 跟随相机 PointLight + 选中红色 PointLight
+├─ WallPostProcessing.ts # pmndrs EffectComposer + Bloom + Vignette + three/examples FilmPass
+├─ DirectorCamera.ts     # gsap 运镜（todayFocus/overview/topicFocus/lifecycleFull）
+├─ InteractionLayer.ts   # Raycaster hover/click + BFS 生命线编排 + 状态机
+└─ ChapterTransition.ts  # 板块切换 wipe + 档案封面打字机（gsap Timeline）
+```
+
+### 动画库分工
+
+3D 场景用 **gsap**（对 `THREE.Object3D`/材质属性的逐帧补间 + `timeline()` 多轨编排），2D overlay 用项目已装的 **motion-v**（Vue 组件声明式过渡）。详情面板是普通 Vue `position:fixed` overlay（非 CSS2DRenderer）；仅卡片悬停 tooltip 用 CSS2DRenderer（跟随 3D 坐标）。
+
+### BFS 生命线
+
+`utils.bfsLifeline` 与现有 `topic-graph/utils/graphBfsHighlight.bfsHighlight` **语义不同**：后者返回连通分量（带启发式截断、无日期约束），前者严格受日期窗口约束。两者不互相复用。
+
+### 数据层
+
+复用现有 API，无新增后端接口：`getBoardSectionTimeline(boardId, days)`、`getSectionLifecycle(sectionId)`、`getDailyReportDetail(id)`（均来自 `~/api/dailyReports`）。
 
 ## 设计系统
 

@@ -7,7 +7,8 @@
 │  ├── <canvas> (Three.js)                                    │
 │  ├── BoardSelectorOverlay (2D HTML)                         │
 │  ├── DaysRangeControl (2D HTML)                             │
-│  ├── TopicDetailPanel (CSS2DRenderer 叠加)                  │
+│  ├── TopicDetailPanel (2D HTML, position: fixed 叠加)        │
+│  ├── CardTooltip (CSS2DRenderer, 跟随 3D 卡片)              │
 │  └── ChapterTitleOverlay (2D HTML, 转场时显示)              │
 │                          │ props / events                    │
 │  Three.js 层 (TopicWallScene)  ◄────────┘                   │
@@ -265,8 +266,8 @@ function bfsLifeline(
   const queue = [startNode.id]
   visited.add(startNode.id)
 
-  // 预建邻接表
-  const adj = buildAdjacencyMap(relations)
+  // 预建无向邻接表（Map<number, Set<number>>，实现见 interaction spec §BFS Lifeline Algorithm）
+  const adj = buildUndirectedAdjacencyMap(relations)
 
   // 日期索引
   const nodeMap = new Map(allNodes.map(n => [n.id, n]))
@@ -389,27 +390,27 @@ function playChapterTransition(
 
 ## Post Processing
 
-```typescript
-import { EffectComposer, BloomEffect, VignetteEffect } from 'postprocessing'
+> ⚠️ 下例为**意图伪代码**，表达效果链组合与参数意图，不是可直接编译的 API。
+> 实现时按 `pmndrs/postprocessing` 当前版本 API 落地：`BloomEffect`/`VignetteEffect` 是 effect，
+> 需用 `composer.addPass(new EffectPass(camera, effect))` 包装，而非 `addPass(effect)`。
+> 具体写法以库版本为准。
 
-// FilmGrain 用自定义 ShaderPass
-// postprocessing 库没有内置，需要写一个简单的 noise pass
+效果链（意图）:
 
-const composer = new EffectComposer(renderer)
-
-composer.addPass(new RenderPass(scene, camera))
-composer.addPass(new BloomEffect({
-  intensity: 0.6,
-  luminanceThreshold: 0.8,  // 只让红线发光
-  luminanceSmoothing: 0.3,
-}))
-composer.addPass(new VignetteEffect({
-  darkness: 0.5,
-}))
-composer.addPass(new FilmGrainPass({
-  intensity: 0.04,  // 很轻微，别太重
-}))
 ```
+RenderPass(scene, camera)
+  → BloomEffect   { intensity: 0.6, luminanceThreshold: 0.8, luminanceSmoothing: 0.3 }  // 只让红线发光
+  → VignetteEffect{ darkness: 0.5 }                                                       // 暗角聚焦中央
+  → 颗粒感效果     { intensity: 0.04 }                                                     // 轻微胶片颗粒，增强氛围
+```
+
+### FilmGrain 选型（按优先级降序，任选其一即可）
+
+1. **优先**：`three/examples` 自带的 `FilmPass`（含颗粒 + 扫描线，参数可调），无新增依赖（three 已装）。
+2. 次选：`pmndrs/postprocessing` 的 `NoiseEffect`（配合 `EffectPass` 包装）。
+3. 兜底：自定义 GLSL simplex noise 的 `ShaderPass`（仅在上述方案效果不达标时采用，**不必一开始就从头写 shader**）。
+
+设计目标是"很轻微的颗粒感"，不必为它单独引入或手写复杂 shader——优先复用现成 pass。
 
 ## Color & Style Reference
 
@@ -446,28 +447,29 @@ composer.addPass(new FilmGrainPass({
   卡片标题 → 系统默认 sans-serif (通过 TextSprite 渲染)
 ```
 
-## GSAP Integration
+## Animation Library Split
 
-本 change 依赖 GSAP。与 `unify-ui-components` 的关系：
+本 change 同时使用两个动画库，分工严格不重叠：
+
+| 库 | 归属 | 职责 | 引入方式 |
+|----|------|------|----------|
+| `gsap` | 3D 场景 | 对 `THREE.Object3D` / 材质属性做逐帧补间：DirectorCamera 运镜、卡片 stagger 入场、红线 drawProgress、BFS 逐节点点亮、章节转场 Timeline 编排 | **本 change 自行新增安装**（项目内无前置 change 提供） |
+| `motion-v` | 2D overlay | Vue 组件 enter/leave/过渡：BoardSelector、DaysRange、DetailPanel 的进入/退出动画 | 已安装，直接复用 |
+
+GSAP 选型理由：对**非 DOM 对象**（`camera.position`、`material.opacity`、`group.rotation`）的属性补间和 `timeline()` 多轨编排是 motion-v 的短板，而这正是 3D 运镜的核心需求。motion-v 继续管它擅长的 Vue 组件声明式过渡，二者无需互相替代。
 
 ```
-unify-ui-components (先做)
-  └── 安装 gsap
-  └── 建立 composable: useGsapTransition()
-      └── 对话框 enter/leave
-      └── 基础 fade/slide helpers
-
-detective-topic-wall (后做)
-  └── 复用 gsap 安装
-  └── 扩展 3D 专用动画:
-      ├── DirectorCamera 运镜
-      ├── 卡片 stagger 入场
-      ├── 红线 drawProgress
-      ├── BFS 逐节点点亮
-      └── 章节转场 Timeline
+detective-topic-wall
+  ├── gsap (本 change 自行安装)
+  │   ├── DirectorCamera 运镜
+  │   ├── 卡片 stagger 入场
+  │   ├── 红线 drawProgress
+  │   ├── BFS 逐节点点亮
+  │   └── 章节转场 Timeline
+  └── motion-v (已安装，复用)
+      ├── BoardSelector / DaysRange 进入退出
+      └── DetailPanel slide-in / slide-out
 ```
-
-如果 unify-ui-components 尚未合并，本 change 自行安装 gsap。
 
 ## Fallback & Platform
 

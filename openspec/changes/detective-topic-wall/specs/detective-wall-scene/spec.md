@@ -148,7 +148,8 @@ VignetteEffect:
 FilmGrainPass:
   intensity: 0.04
   → 轻微胶片颗粒，增强氛围
-  → 自定义 ShaderPass (simplex noise)
+  → 选型优先级: three/examples 的 FilmPass（无新增依赖） > pmndrs NoiseEffect > 自定义 ShaderPass
+     （设计目标是轻微颗粒感，不必为它从头手写 shader；详见 design.md §Post Processing）
 ```
 
 ## Style Constants

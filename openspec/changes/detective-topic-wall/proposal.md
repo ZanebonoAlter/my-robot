@@ -14,9 +14,9 @@
 - **板块切换转场**：红色 wipe 扫过 → 档案封面浮现（打字机字体、CONFIDENTIAL 盖章）→ 相机飞入新板块
 - **话题聚焦模式（BFS 生命线）**：点击卡片后 BFS 沿 relations 扩展，严格受日期窗口约束，只点亮窗口内节点，非相关卡片退入背景
 - **完整生命周期视图**：点击"查看完整生命周期"调用 `getSectionLifecycle(id)`（不限天数），迷雾消失，只渲染该话题的完整演化线
-- **2D 详情面板叠加**：CSS2DRenderer 在 3D 场景上叠加案件档案风格的详情面板（案件编号、线索链、文章列表）
+- **2D 详情面板叠加**：详情面板用普通 Vue overlay（`position: fixed` 屏幕固定位置，motion-v 过渡）叠加在 3D 场景上，呈现案件档案风格（案件编号、线索链、文章列表）；卡片悬停 tooltip 才用 CSS2DRenderer（跟随 3D 卡片坐标）
 - **后处理管线**：FilmGrain + Vignette + Bloom（红线发光），使用 `pmndrs/postprocessing`
-- **GSAP 动画驱动**：所有 3D 动画（相机、卡片入场、红线绘制、转场）由 GSAP Timeline 编排，与 unify-ui-components 的 GSAP 统一层共享基础设施
+- **GSAP 动画驱动**：所有 3D 动画（相机、卡片入场、红线绘制、转场）由 GSAP Timeline 编排。GSAP 由本 change 自行引入（项目内无前置 change 提供该依赖）；2D overlay 的 Vue 组件过渡继续用已安装的 `motion-v`，二者分工不重叠。
 
 ## Capabilities
 
@@ -47,7 +47,8 @@
   - `features/tags/components/BoardThreadBrowser.vue`：添加"进入侦探墙"按钮
   - `features/tags/components/TagsPage.vue`：集成全屏 3D 视图的显示/隐藏逻辑
 - **依赖变更**：
-  - `gsap`：需新增安装（也是 unify-ui-components 的共享依赖）
+  - `gsap`：需新增安装，本 change 自行引入（无前置 change 提供该依赖）。专用于 3D 动画编排（相机运镜、卡片 stagger、红线 drawProgress、BFS 逐节点点亮、章节转场 Timeline）。
+  - `motion-v`：已安装，复用。专用于 2D overlay 的 Vue 组件过渡（BoardSelector、DaysRange、DetailPanel 的 enter/leave）。
   - `pmndrs/postprocessing`：需新增安装
   - `three`：已安装，直接使用
   - `Line2` / `LineMaterial`（Three.js examples）：用于粗红线

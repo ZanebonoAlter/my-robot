@@ -7,6 +7,7 @@ import { useDailyReportsApi, type DailyReportListItem, type DailyReport, type Da
 import { useArticlesApi } from '~/api/articles'
 import SectionLifecyclePanel from './SectionLifecyclePanel.vue'
 import BoardThreadBrowser from './BoardThreadBrowser.vue'
+import TopicDetectiveWall from './TopicDetectiveWall.client.vue'
 
 const props = defineProps<{ boardId: number }>()
 
@@ -98,6 +99,8 @@ const expandedSections = ref<Set<number>>(new Set())
 
 // Thread browser toggle
 const showThreadBrowser = ref(false)
+// Full-screen 3D detective wall
+const showDetectiveWall = ref(false)
 
 const { floatingStyles: threadPopupStyles } = useFloating(threadPopupTrigger, threadPopupFloating, {
   placement: 'right-start',
@@ -360,7 +363,12 @@ watch(() => props.boardId, () => {
       </div>
 
       <!-- Thread browser view -->
-      <BoardThreadBrowser v-if="showThreadBrowser" :board-id="boardId" @open-article="emit('openArticle', $event)" />
+      <BoardThreadBrowser
+        v-if="showThreadBrowser"
+        :board-id="boardId"
+        @open-article="emit('openArticle', $event)"
+        @open-detective-wall="showDetectiveWall = true"
+      />
 
       <!-- Report list view -->
       <template v-else>
@@ -527,6 +535,14 @@ watch(() => props.boardId, () => {
       </div>
     </div>
   </Teleport>
+
+  <!-- Full-screen 3D detective wall -->
+  <TopicDetectiveWall
+    v-if="showDetectiveWall"
+    :board-id="boardId"
+    @close="showDetectiveWall = false"
+    @open-article="emit('openArticle', $event)"
+  />
 </template>
 
 <style scoped>

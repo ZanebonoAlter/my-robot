@@ -55,6 +55,11 @@ interface InteractionState {
 
 ## BFS Lifeline Algorithm
 
+> 语义说明：本算法与现有 `graphBfsHighlight.ts` 的 `bfsHighlight` **不同**，不能直接复用。
+> `bfsHighlight` 的意图是"高亮连通分量"（带小图/稠密图启发式截断，无日期约束）；
+> 本算法的意图是"严格受日期窗口约束的 BFS 生命线"——日期窗口外的节点一律不进入结果。
+> 因此独立实现，邻接表构造写成无歧义版本（早期版本曾因 `list` 变量复用导致游离数组 bug）。
+
 ```typescript
 function bfsLifeline(
   startNodeId: number,
@@ -63,27 +68,34 @@ function bfsLifeline(
   dateRange: { start: string; end: string }
 ): {
   nodes: Set<number>
-  edges: Set<string>  // "from-to" key
+  edges: Set<string>  // 规范化 "minId-maxId" key（无向，与 relation 方向无关）
 } {
   const visited = new Set<number>()
   const edgeKeys = new Set<string>()
   const queue = [startNodeId]
   visited.add(startNodeId)
 
-  // 预建邻接表
-  const adj = new Map<number, number[]>()
-  for (const r of relations) {
-    let list = adj.get(r.from_id)
-    if (!list) { list = []; adj.set(r.from_id, list) }
-    list.push(r.to_id)
-    list = adj.get(r.to_id) || []
-    if (!adj.has(r.to_id)) adj.set(r.to_id, list)
-    adj.get(r.to_id)!.push(r.from_id)
+  // 预建无向邻接表（Map<number, Set<number>>，风格对齐现有 bfsHighlight）
+  const adj = new Map<number, Set<number>>()
+  const ensure = (id: number) => {
+    let set = adj.get(id)
+    if (!set) { set = new Set(); adj.set(id, set) }
+    return set
   }
+  for (const r of relations) {
+    ensure(r.from_id).add(r.to_id)
+    ensure(r.to_id).add(r.from_id)
+  }
+  ensure(startNodeId) // 保证孤立焦点也存在
+
+  // 规范化 edge key 工具：与 relation 的方向无关，避免 BFS 反向遍历时 key miss
+  const edgeKey = (a: number, b: number) =>
+    a < b ? `${a}-${b}` : `${b}-${a}`
 
   while (queue.length > 0) {
     const current = queue.shift()!
-    const neighbors = adj.get(current) || []
+    const neighbors = adj.get(current)
+    if (!neighbors) continue
 
     for (const neighborId of neighbors) {
       if (visited.has(neighborId)) continue
@@ -91,18 +103,28 @@ function bfsLifeline(
       const node = nodeMap.get(neighborId)
       if (!node) continue
 
-      // 关键约束: 日期窗口
+      // 关键约束: 日期窗口（窗口外节点不进入结果，但仍记录已访问避免重复）
       const date = node.period_date.slice(0, 10)
       if (date < dateRange.start || date > dateRange.end) continue
 
       visited.add(neighborId)
       queue.push(neighborId)
-      edgeKeys.add(`${current}-${neighborId}`)
+      edgeKeys.add(edgeKey(current, neighborId))
     }
   }
 
   return { nodes: visited, edges: edgeKeys }
 }
+```
+
+### 结果与 SectionRelation 的匹配
+
+BFS 返回的 `edges` 是规范化 key（`minId-maxId`）。下游渲染红线时，按同一规范化规则匹配 `relations`：
+
+```typescript
+const matchedRelations = relations.filter(r =>
+  result.edges.has(edgeKey(r.from_id, r.to_id))
+)
 ```
 
 ### BFS 动画序列
@@ -193,19 +215,34 @@ function bfsLifeline(
 ### 面板定位
 
 ```
-CSS2DRenderer 叠加在 Three.js canvas 上方
+详情面板 = 普通 Vue overlay（position: fixed），叠加在 Three.js canvas 上方
+（不是 CSS2DRenderer：面板不跟随 3D 对象，用 CSS2DRenderer 是过度设计）
 
 位置策略:
   - 默认: 屏幕右侧固定区域 (right: 2rem, top: 50%, transform: translateY(-50%))
   - 不跟随 3D 对象移动 (固定屏幕位置)
   - 面板宽度: 280px
-  - 动画: gsap.from(panel, { x: 50, opacity: 0, duration: 0.3 })
+  - 动画: motion-v 过渡（x: 50, opacity: 0 → enter），由 Vue 组件声明式驱动
+     → 不用 gsap，遵循 design.md §Animation Library Split 的 2D/3D 分工
 
 内容更新:
   - BFS 完成后填充数据
   - chainLabel: 从 BFS 节点中提取最短路径的 label 链
   - 状态分布: 统计 BFS 节点的 status
   - 总文章/线索: sum BFS 节点的 article_count / thread_count
+```
+
+### Card Tooltip（跟随 3D 卡片，才用 CSS2DRenderer）
+
+```
+卡片悬停 tooltip 才用 CSS2DRenderer：
+  - 内容: 话题名 + 状态
+  - 跟随被悬停卡片的 3D 坐标投射到屏幕
+  - 失焦（pointermove 离开）即隐藏
+
+→ 详情面板（固定屏幕位置）≠ tooltip（跟随 3D），两者实现不同：
+  详情面板 → 普通 Vue overlay + motion-v
+  tooltip  → CSS2DRenderer
 ```
 
 ### 面板操作
@@ -299,7 +336,7 @@ function switchBoard(newBoardId: number) {
 
 - Raycaster 检测在 requestAnimationFrame 中执行，不在 pointermove 回调中直接计算
 - BFS 计算是同步的，数据量 < 100 节点时耗时 < 1ms，不需要 Web Worker
-- CSS2D 面板不跟随 3D 对象，使用固定屏幕位置（避免旋转/缩放时面板乱跑）
+- 详情面板（固定屏幕位置）用普通 Vue overlay + motion-v，不用 CSS2DRenderer；只有卡片悬停 tooltip 用 CSS2DRenderer（跟随 3D 卡片坐标）。详见 §2D Detail Panel
 - 完整生命周期模式使用 `getSectionLifecycle`（不限天数），BFS 模式使用 `getBoardSectionTimeline`（受 days 限制），两个 API 不能混用
 - 转场期间 InteractionLayer.disable()，转场结束后 enable()
 - 移动端（< 768px）不提供 3D 入口，此 spec 不涉及移动端适配

@@ -52,6 +52,21 @@ function statusFill(status: string): string {
   return statusColorMap[status] || '#9ca3af'
 }
 
+// --- Detective wall entry: only on large screens with WebGL support ---
+const viewportWidth = ref(typeof window !== 'undefined' ? window.innerWidth : 1280)
+const showDetectiveEntry = computed(() => {
+  if (viewportWidth.value < 768) return false
+  try {
+    const c = document.createElement('canvas')
+    return !!(c.getContext('webgl2') || c.getContext('webgl'))
+  } catch {
+    return false
+  }
+})
+if (typeof window !== 'undefined') {
+  window.addEventListener('resize', () => { viewportWidth.value = window.innerWidth })
+}
+
 // Theme-aware SVG colors
 const svgGridColor = computed(() => theme.value === 'dark' ? 'rgba(255,255,255,0.04)' : 'rgba(26,26,26,0.06)')
 const svgEdgeColor = computed(() => theme.value === 'dark' ? 'rgba(255,255,255,' : 'rgba(26,26,26,')
@@ -262,6 +277,7 @@ async function toggleThreadArticles(thread: DailyReportThread) {
 
 const emit = defineEmits<{
   openArticle: [articleId: number]
+  openDetectiveWall: []
 }>()
 
 // --- Data loading ---
@@ -309,6 +325,15 @@ watch(
           {{ d }}天
         </button>
       </div>
+      <button
+        v-if="showDetectiveEntry"
+        class="btb-detective-btn"
+        title="进入 3D 侦探墙"
+        @click="emit('openDetectiveWall')"
+      >
+        <Icon icon="mdi:magnify-scan" width="16" />
+        <span>侦探墙</span>
+      </button>
     </div>
 
     <!-- Loading -->
@@ -540,6 +565,26 @@ watch(
   background: var(--color-bg-hover);
   color: var(--color-text-primary);
   border-color: var(--color-border-strong);
+}
+
+/* Detective wall entry button */
+.btb-detective-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.25rem 0.6rem;
+  font-size: 0.65rem;
+  border: 1px solid #DC2626;
+  border-radius: 4px;
+  background: rgba(220, 38, 38, 0.1);
+  color: #DC2626;
+  cursor: pointer;
+  transition: all 0.12s ease;
+}
+
+.btb-detective-btn:hover {
+  background: #DC2626;
+  color: #fff;
 }
 
 /* Loading */

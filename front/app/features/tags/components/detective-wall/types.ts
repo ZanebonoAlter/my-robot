@@ -169,6 +169,43 @@ export const STYLE = {
     ambient: 0.15,
     spotAngleDeg: 45,
     spotPenumbra: 0.5,
+    hemiSky: '#3a2a1a',
+    hemiGround: '#0a0f14',
+    hemiIntensity: 0.55,
+    followColor: '#fff0d0',
+  },
+  desk: {
+    y: -1.6,
+    zBack: -2,
+    zFront: 12,
+    color: '#3a2418',
+  },
+  wall: {
+    backZ: -0.6,
+    farZ: -4,
+    farColor: '#06090c',
+  },
+  lamp: {
+    offset: { x: 2.8, z: 5.2 },
+    brass: '#b08d3f',
+    glass: '#1f3d2e',
+    bulb: '#ffe9b0',
+    bulbEmissive: 1.5,
+    spotColor: '#ffd9a0',
+    spotIntensity: 2.0,
+  },
+  dossier: {
+    stackColor: '#e8d4a5',
+  },
+  directionalFog: {
+    density: 1.2,
+    range: 12,
+    color: '#0a0f14',
+  },
+  dust: {
+    count: 150,
+    color: '#ffe9c8',
+    size: 0.06,
   },
 } as const
 

@@ -7,7 +7,7 @@
  * @see specs/detective-wall-scene/spec.md
  */
 import {
-  Scene, PerspectiveCamera, WebGLRenderer, Color, PointLight, Mesh,
+  Scene, PerspectiveCamera, WebGLRenderer, Color, PointLight, SpotLight, Mesh,
   PlaneGeometry, MeshStandardMaterial, CanvasTexture, RepeatWrapping, Vector3,
 } from 'three'
 import { CSS2DRenderer } from 'three/examples/jsm/renderers/CSS2DRenderer.js'
@@ -20,6 +20,10 @@ import { RedStringCollection } from './RedString'
 import { FogSystem } from './FogSystem'
 import { setupLighting } from './lighting'
 import { WallPostProcessing } from './WallPostProcessing'
+import { AmbientEnv } from './AmbientEnv'
+import { SetDressing } from './SetDressing'
+import { DustParticles } from './DustParticles'
+import { injectDirectionalFog } from './shaders/directionalFog'
 
 export class TopicWallScene {
   readonly scene = new Scene()
@@ -31,9 +35,16 @@ export class TopicWallScene {
   readonly fog: FogSystem
   readonly composer: WallPostProcessing
   /** Camera-following explorer lamp (updated each frame). */
+  readonly spot: SpotLight
   readonly followLight: PointLight
   /** Red light above the selected card; intensity 0 unless focused. */
   readonly selectionLight: PointLight
+  /** Procedural warm env map for PBR reflections (pin brass etc.). */
+  readonly ambientEnv: AmbientEnv
+  /** Desk/lamp/dossier environment layer (rebuilt per data load). */
+  setDressing: SetDressing | null = null
+  /** Dust motes in the lamp cone (rebuilt per data load). */
+  dust: DustParticles | null = null
 
   private rafId = 0
   private disposed = false
@@ -67,8 +78,10 @@ export class TopicWallScene {
 
     this.fog = new FogSystem(this.scene, STYLE.fog)
     const lights = setupLighting(this.scene)
+    this.spot = lights.spot
     this.followLight = lights.followLight
     this.selectionLight = lights.selectionLight
+    this.ambientEnv = new AmbientEnv(this.scene, this.renderer)
 
     this.composer = new WallPostProcessing(this.renderer, this.scene, this.camera)
   }
@@ -102,16 +115,43 @@ export class TopicWallScene {
   ): void {
     this.clearScene()
     this.cardGroup.buildCards(sections, relations, dateRange, this.scene)
+
+    // Layout bounds drive desk/lamp/dust placement and the directional-fog origin.
+    const xs = this.cardGroup.cards.map(c => c.position.x)
+    const hasCards = xs.length > 0
+    const minX = hasCards ? Math.min(...xs) : 0
+    const latestDayX = hasCards ? Math.max(...xs) : 0
+    const tw = hasCards ? latestDayX - minX : 0
+
+    // Environment first: it owns the shared fog uniforms the cork wall injects below.
+    this.buildEnvironment(latestDayX, minX, tw)
+
     this.rebuildWall()
     this.redStrings.build(relations, this.cardGroup, this.scene)
     this.fog.setDensityForDays(days)
   }
 
-  /** Remove all cards and strings from the scene (keeps lights/fog). */
+  /** (Re)build the desk/lamp/dust layer and aim the main spotlight from the lamp. */
+  private buildEnvironment(latestDayX: number, minX: number, timelineWidth: number): void {
+    this.setDressing = new SetDressing({ latestDayX, minX, timelineWidth })
+    this.scene.add(this.setDressing.group)
+    this.dust = new DustParticles(this.setDressing.lampPosition)
+    this.scene.add(this.dust.points)
+    // Warm desk-lamp cone: from the shade toward today's column on the wall.
+    this.spot.position.copy(this.setDressing.lampPosition)
+    this.spot.target.position.set(latestDayX, 0, 0)
+    this.spot.target.updateMatrixWorld()
+  }
+
+  /** Remove cards, strings, and the environment layer (keeps lights/fog/env map). */
   clearScene(): void {
     this.disposeWall()
     this.cardGroup.clear(this.scene)
     this.redStrings.clear(this.scene)
+    this.setDressing?.dispose(this.scene)
+    this.setDressing = null
+    this.dust?.dispose(this.scene)
+    this.dust = null
   }
 
   private rebuildWall(): void {
@@ -140,8 +180,9 @@ export class TopicWallScene {
       roughness: 0.95,
       metalness: 0,
     })
+    if (this.setDressing) injectDirectionalFog(material, this.setDressing.fogUniforms)
     this.wallMesh = new Mesh(new PlaneGeometry(width, height), material)
-    this.wallMesh.position.set(centerX, centerY, -0.16)
+    this.wallMesh.position.set(centerX, centerY, STYLE.wall.backZ)
     this.scene.add(this.wallMesh)
   }
 
@@ -168,6 +209,7 @@ export class TopicWallScene {
       // Run registered frame callbacks (orbit pan/zoom, etc.) before rendering.
       for (const fn of this.frameCallbacks) fn()
       this.cardGroup.update(dt)
+      this.dust?.update(dt)
       this.composer.render(dt)
       this.css2d.render(this.scene, this.camera)
       this.rafId = requestAnimationFrame(tick)
@@ -194,6 +236,7 @@ export class TopicWallScene {
     this.disposed = true
     this.stopRenderLoop()
     this.clearScene()
+    this.ambientEnv.dispose()
     this.composer.dispose()
     this.renderer.dispose()
     this.css2d.domElement.remove()

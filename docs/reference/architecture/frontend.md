@@ -292,11 +292,15 @@ detective-wall/
 ├─ CardGroup.ts          # PinCardImpl（档案袋 CanvasTexture + 可选文章配图 + 图钉/胶带）+ CardGroup
 ├─ RedString.ts          # Line2 红线绳（边缘锚点折线 + 距离衰减 opacity）+ RedStringCollection
 ├─ FogSystem.ts          # FogExp2（密度映射天数窗口，gsap 动画）
-├─ lighting.ts           # AmbientLight + SpotLight + 跟随相机 PointLight + 选中红色 PointLight
+├─ lighting.ts           # HemisphereLight（暖天/冷地）+ 台灯定向暖 SpotLight + 跟随相机 PointLight + 选中红色 PointLight
 ├─ WallPostProcessing.ts # pmndrs EffectComposer + Bloom + Vignette + three/examples FilmPass
 ├─ DirectorCamera.ts     # gsap 运镜（todayFocus/overview/topicFocus/lifecycleFull）
 ├─ InteractionLayer.ts   # Raycaster hover/click + BFS 生命线编排 + 状态机
-└─ ChapterTransition.ts  # 板块切换 wipe + 档案封面打字机（gsap Timeline）
+├─ ChapterTransition.ts  # 板块切换 wipe + 档案封面打字机（gsap Timeline）
+├─ SetDressing.ts        # 桌面/远景墙/台灯/卷宗堆（侦探办公桌环境层，随 loadBoardData 重建）
+├─ AmbientEnv.ts         # PMREM 程序化暖色环境贴图（图钉/黄铜金属反射）
+├─ DustParticles.ts      # 台灯光锥尘埃微粒（additive Points）
+└─ shaders/directionalFog.ts # 方向雾 onBeforeCompile 注入（过去浓/今天清，不注入卡片）
 ```
 
 ### 动画库分工
@@ -310,6 +314,18 @@ detective-wall/
 - `CardGroup` 使用 canvas procedural 档案袋作为 `CanvasTexture`，在同一纹理内绘制固定边界的标题、`CASE #id`、状态、文章/线索计数，并优先渲染 section 关联文章中的首张 `image_url`；无真实图片时绘制案件路线式默认缩略图。卡片点击热区仍由 3D mesh + CSS2D `data-card-id` tooltip 双路承担。
 - `RedString` 不从卡片中心连线，而是根据相对方向锚定在卡片边缘附近；路径使用轻微折线并抬到卡片前方，普通状态为暗红低透明，生命线高亮时变为证据红且线宽增加。
 - `TopicWallScene` 在卡片范围后方动态铺一块暗软木墙面，使用 procedural texture 提供磨砂颗粒、暗格和关卡路线式装饰点；选中红色 PointLight 绑定卡片当前 world position 并沿 z 轴打到卡片前方，随 `loadBoardData()` 重建并在 `clearScene()` dispose。
+
+### 环境纵深层（detective-wall-ambiance）
+
+在“面对软木墙钉卡片”的核心视角之外，叠加一层“侦探办公桌台灯下”的环境纵深，强化空间感与叙事氛围（change `detective-wall-ambiance`）：
+
+- **桌面 + 远景墙 + 台灯 + 卷宗堆**（`SetDressing.ts`）：前景水平桌面建立空间纵深参考系；台灯（banker's lamp：黄铜底座/立柱 + 墨绿灯罩 + emissive 灯泡）成为主 SpotLight 的视觉来源——暖光锥从灯罩射向今天列卡片。主软木墙退到 `z=-0.6`（卡片更多浮出厚度），后方 `z=-4` 一面暗远景墙靠雾衰减。随 `loadBoardData()` 按 `latestDayX`/`minX` 重建。
+- **环境贴图**（`AmbientEnv.ts`）：PMREMGenerator 从程序化暖色场景（深棕底 + 台灯位置暖色发光球 + 顶部冷光）烘焙 env map 赋给 `scene.environment`，图钉/黄铜金属从此反射出暖色高光（不替换背景）。
+- **方向性雾**（`shaders/directionalFog.ts`）：通过 `material.onBeforeCompile` 给环境表面（桌面/墙/卷宗/台灯/软木墙）的 MeshStandardMaterial 注入 X 方向雾项——越往左（越早的日期）越浓，今天列附近最清，契合“抽丝剥茧”叙事。**不注入卡片**（保持 CardGroup 的 highlight/dim 语义干净）。共享 `fogUniforms` 一处更新全局生效。
+- **半球光**（`lighting.ts`）：`AmbientLight` → `HemisphereLight(暖天/冷地)`，上下色温差异带出空气感。
+- **光锥尘埃**（`DustParticles.ts`）：~150 个 additive Points 在台灯光锥内正弦漂移，配合 Bloom + Vignette 形成“档案室浮尘”厚重感。
+
+surgical 边界：不改相机坐标系/布局算法/交互/BFS/红线/全局迷雾/后处理；卡片材质不注入方向雾。无新增依赖（PMREMGenerator/HemisphereLight/Points 均属已装 three）。
 
 ### BFS 生命线
 

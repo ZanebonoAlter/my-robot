@@ -12,12 +12,11 @@
 import { ref, onMounted, onBeforeUnmount, watch } from 'vue'
 import { Icon } from '@iconify/vue'
 import { useDailyReportsApi } from '~/api/dailyReports'
-import type { SectionTimelineNode, SectionRelation } from '~/api/dailyReports'
+import type { SectionTimelineNode, SectionRelation, DailyReportThread } from '~/api/dailyReports'
+import { useArticlesApi } from '~/api/articles'
 import { TopicWallScene } from './detective-wall/TopicWallScene'
 import { DirectorCamera } from './detective-wall/DirectorCamera'
 import { InteractionLayer } from './detective-wall/InteractionLayer'
-import { ChapterTransition } from './detective-wall/ChapterTransition'
-import type { ChapterTransitionData } from './detective-wall/ChapterTransition'
 import { SUPPORTED_DAYS } from './detective-wall/types'
 import { latestDayX } from './detective-wall/utils'
 
@@ -27,13 +26,11 @@ const emit = defineEmits<{
   openArticle: [articleId: number]
 }>()
 
-const { getBoardSectionTimeline } = useDailyReportsApi()
+const { getBoardSectionTimeline, getDailyReportDetail } = useDailyReportsApi()
+const { getArticle } = useArticlesApi()
 
 const canvasRef = ref<HTMLCanvasElement | null>(null)
 const css2dContainerRef = ref<HTMLDivElement | null>(null)
-const wipeRef = ref<HTMLDivElement | null>(null)
-const coverRef = ref<HTMLDivElement | null>(null)
-const titleRef = ref<HTMLSpanElement | null>(null)
 
 const loading = ref(true)
 const error = ref(false)
@@ -45,6 +42,10 @@ const relations = ref<SectionRelation[]>([])
 const showDetailPanel = ref(false)
 const focusedNode = ref<SectionTimelineNode | null>(null)
 const lifelineNodes = ref<SectionTimelineNode[]>([])
+// Per-lifeline-node thread/article expansion (spec §面板操作 "查看详细线索").
+const expandedNodeId = ref<number | null>(null)
+const nodeThreads = ref<Map<number, DailyReportThread[]>>(new Map())
+const nodeThreadsLoading = ref<number | null>(null)
 
 // --- WebGL detection ---
 function hasWebGL(): boolean {
@@ -60,7 +61,6 @@ const webglOk = hasWebGL()
 let scene: TopicWallScene | null = null
 let directorCamera: DirectorCamera | null = null
 let interaction: InteractionLayer | null = null
-let chapterTransition: ChapterTransition | null = null
 let resizeObserver: ResizeObserver | null = null
 
 onMounted(async () => {
@@ -89,13 +89,6 @@ onMounted(async () => {
     },
   })
   interaction.enable()
-
-  chapterTransition = new ChapterTransition(
-    wipeRef.value!,
-    coverRef.value!,
-    titleRef.value!,
-    { onReload: () => loadBoardData() },
-  )
 
   scene.startRenderLoop()
 
@@ -143,20 +136,6 @@ watch(() => days.value, () => {
   loadBoardData()
 })
 
-watch(() => props.boardId, (_id, oldId) => {
-  if (oldId !== _id && chapterTransition) {
-    const data: ChapterTransitionData = {
-      name: `板块 #${_id}`,
-      dateRange: `${days.value}天`,
-      topicCount: sections.value.length,
-    }
-    interaction?.disable()
-    chapterTransition.play(data)
-    // Re-enable after transition completes.
-    setTimeout(() => interaction?.enable(), 1000)
-  }
-})
-
 function setDays(d: 7 | 14 | 30 | 60) {
   days.value = d
 }
@@ -174,6 +153,57 @@ function close() {
 
 function openArticle(id: number) {
   emit('openArticle', id)
+}
+
+// --- §3.3: lifeline node "查看详细线索" (spec §面板操作) ---
+// Clicking a lifeline node expands its threads + articles, fetched via
+// getDailyReportDetail(report_id). Section id disambiguates the thread set
+// inside that report (SectionTimelineNode carries report_id + section id).
+async function toggleNodeThreads(node: SectionTimelineNode) {
+  // Collapse if already expanded.
+  if (expandedNodeId.value === node.id) {
+    expandedNodeId.value = null
+    return
+  }
+  expandedNodeId.value = node.id
+
+  // Cached: a single section may appear on the lifeline once.
+  if (nodeThreads.value.has(node.id)) return
+
+  nodeThreadsLoading.value = node.id
+  try {
+    const res = await getDailyReportDetail(node.report_id)
+    if (res.success && res.data) {
+      // Match the section inside the report by section id (node.id).
+      const section = res.data.report.sections?.find(s => s.id === node.id)
+      nodeThreads.value = new Map(nodeThreads.value).set(node.id, section?.threads || [])
+    }
+  } finally {
+    nodeThreadsLoading.value = null
+  }
+}
+
+async function openThreadFirstArticle(thread: DailyReportThread) {
+  const id = thread.related_article_ids?.[0]
+  if (id != null) {
+    emit('openArticle', id)
+  }
+}
+
+/** Resolve a thread's first article title for display (best-effort). */
+const threadTitles = ref<Map<number, string>>(new Map())
+async function ensureThreadTitle(thread: DailyReportThread) {
+  if (threadTitles.value.has(thread.id)) return
+  const id = thread.related_article_ids?.[0]
+  if (id == null) return
+  try {
+    const res = await getArticle(id)
+    if (res.success && res.data) {
+      threadTitles.value = new Map(threadTitles.value).set(thread.id, res.data.title || '(无标题)')
+    }
+  } catch {
+    // best-effort; title stays as the thread title.
+  }
 }
 </script>
 
@@ -218,23 +248,51 @@ function openArticle(id: number) {
           <div
             v-for="n in lifelineNodes.slice(0, 10)"
             :key="n.id"
-            class="tdw-lifeline-item"
-            @click="openArticle(n.report_id)"
+            class="tdw-lifeline-node"
           >
-            <span class="tdw-lifeline-date">{{ n.period_date.slice(0, 10) }}</span>
-            <span class="tdw-lifeline-label">{{ n.cluster_label }}</span>
+            <div
+              class="tdw-lifeline-item"
+              :class="{ 'tdw-lifeline-item--expanded': expandedNodeId === n.id }"
+              @click="toggleNodeThreads(n)"
+            >
+              <span class="tdw-lifeline-date">{{ n.period_date.slice(0, 10) }}</span>
+              <span class="tdw-lifeline-label">{{ n.cluster_label }}</span>
+              <Icon icon="mdi:chevron-right" width="12" class="tdw-lifeline-arrow" />
+            </div>
+
+            <!-- Expanded threads for this lifeline node (spec §面板操作 查看详细线索) -->
+            <div v-if="expandedNodeId === n.id" class="tdw-lifeline-threads">
+              <div v-if="nodeThreadsLoading === n.id" class="tdw-lifeline-threads-loading">
+                加载中…
+              </div>
+              <template v-else>
+                <div
+                  v-for="thread in (nodeThreads.get(n.id) || [])"
+                  :key="thread.id"
+                  class="tdw-lifeline-thread"
+                  @click="openThreadFirstArticle(thread); ensureThreadTitle(thread)"
+                >
+                  <Icon icon="mdi:file-document-outline" width="11" class="tdw-lifeline-thread-icon" />
+                  <span class="tdw-lifeline-thread-title">
+                    {{ threadTitles.get(thread.id) || thread.title }}
+                  </span>
+                  <span v-if="thread.related_article_ids?.length" class="tdw-lifeline-thread-count">
+                    {{ thread.related_article_ids.length }}篇
+                  </span>
+                </div>
+                <div
+                  v-if="(nodeThreads.get(n.id) || []).length === 0"
+                  class="tdw-lifeline-threads-empty"
+                >
+                  无关联线索
+                </div>
+              </template>
+            </div>
           </div>
         </div>
         <button class="tdw-btn tdw-btn-back" @click="close">返回总览</button>
       </div>
     </Transition>
-
-    <!-- Chapter transition DOM (animated by ChapterTransition.ts) -->
-    <div ref="wipeRef" class="tdw-wipe" />
-    <div ref="coverRef" class="tdw-cover">
-      <span class="tdw-cover-stamp">CONFIDENTIAL</span>
-      <span ref="titleRef" data-chapter-title class="tdw-cover-title" />
-    </div>
 
     <!-- Loading / error states -->
     <div v-if="loading" class="tdw-loading">载入中…</div>
@@ -352,16 +410,60 @@ function openArticle(id: number) {
   color: #4B5563;
   margin-bottom: 0.3rem;
 }
+.tdw-lifeline-node {
+  border-bottom: 1px dotted rgba(26, 26, 26, 0.1);
+}
 .tdw-lifeline-item {
   display: flex;
-  gap: 0.5rem;
+  align-items: center;
+  gap: 0.4rem;
   padding: 0.25rem 0;
   font-size: 0.75rem;
   cursor: pointer;
-  border-bottom: 1px dotted rgba(26, 26, 26, 0.1);
 }
 .tdw-lifeline-item:hover { background: rgba(220, 38, 38, 0.05); }
+.tdw-lifeline-item--expanded .tdw-lifeline-arrow { transform: rotate(90deg); }
+.tdw-lifeline-arrow {
+  margin-left: auto;
+  color: #4B5563;
+  transition: transform 0.12s ease;
+  flex-shrink: 0;
+}
 .tdw-lifeline-date { color: #D97706; min-width: 5.5rem; }
+.tdw-lifeline-label { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tdw-lifeline-threads {
+  padding: 0.2rem 0 0.3rem 1rem;
+}
+.tdw-lifeline-threads-loading,
+.tdw-lifeline-threads-empty {
+  font-size: 0.7rem;
+  color: #4B5563;
+  padding: 0.15rem 0;
+}
+.tdw-lifeline-thread {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.2rem 0.25rem;
+  border-radius: 3px;
+  cursor: pointer;
+  transition: background 0.1s ease;
+}
+.tdw-lifeline-thread:hover { background: rgba(220, 38, 38, 0.08); }
+.tdw-lifeline-thread-icon { color: #6B7280; flex-shrink: 0; }
+.tdw-lifeline-thread-title {
+  flex: 1;
+  font-size: 0.72rem;
+  color: #1F2937;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tdw-lifeline-thread-count {
+  font-size: 0.62rem;
+  color: #6B7280;
+  flex-shrink: 0;
+}
 .tdw-btn-back { margin-top: 0.75rem; width: 100%; justify-content: center; }
 
 /* motion-v-style transition (Vue <Transition>) */
@@ -377,39 +479,8 @@ function openArticle(id: number) {
   opacity: 1;
 }
 
-/* Chapter transition */
-.tdw-wipe {
-  display: none;
-  position: absolute;
-  inset: 0;
-  background: #DC2626;
-  z-index: 60;
-}
-.tdw-cover {
-  display: none;
-  position: absolute;
-  inset: 0;
-  align-items: center;
-  justify-content: center;
-  flex-direction: column;
-  gap: 1rem;
-  background: rgba(10, 15, 20, 0.85);
-  z-index: 61;
-}
-.tdw-cover-stamp {
-  color: #DC2626;
-  font-family: 'JetBrains Mono', monospace;
-  font-weight: 700;
-  letter-spacing: 0.2em;
-  border: 3px solid #DC2626;
-  padding: 0.3rem 0.8rem;
-  transform: rotate(-8deg);
-}
-.tdw-cover-title {
-  color: #FFFBEB;
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 1.5rem;
-}
+/* Chapter transition DOM removed (no BoardSelector entry yet — see HANDOFF §3.2).
+   ChapterTransition.ts is retained for future board-switch support. */
 
 .tdw-loading, .tdw-error {
   position: absolute;
@@ -418,5 +489,35 @@ function openArticle(id: number) {
   transform: translate(-50%, -50%);
   color: rgba(255, 255, 255, 0.7);
   font-size: 1rem;
+}
+</style>
+
+<!-- Global (non-scoped) styles for CSS2DRenderer-injected tooltip elements.
+     CSS2DRenderer appends its DOM outside this component's scoped scope, into
+     .tdw-css2d, so these rules must not be scoped. -->
+<style>
+.tdw-card-tooltip {
+  pointer-events: none;
+  background: #FFFBEB;
+  border: 1px solid rgba(26, 26, 26, 0.2);
+  border-radius: 0.3rem;
+  padding: 0.25rem 0.5rem;
+  font-family: 'JetBrains Mono', 'Courier New', monospace;
+  font-size: 0.72rem;
+  color: #1A1A1A;
+  white-space: nowrap;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+  transform: translate(-50%, -100%);
+}
+.tdw-card-tooltip-label {
+  font-weight: 600;
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.tdw-card-tooltip-status {
+  font-size: 0.62rem;
+  color: #6B7280;
+  margin-top: 0.1rem;
 }
 </style>

@@ -11,11 +11,21 @@ import {
   Group, Mesh, BoxGeometry, CylinderGeometry, SphereGeometry,
   MeshStandardMaterial, Color, Scene, PlaneGeometry, Vector3,
 } from 'three'
+import { CSS2DObject } from 'three/examples/jsm/renderers/CSS2DRenderer.js'
 import SpriteText from 'three-spritetext'
 import gsap from 'gsap'
 import type { PinCard as IPinCard, SectionTimelineNode, SectionRelation, DateRange } from './types'
 import { STYLE } from './types'
 import { layoutCards } from './utils'
+
+/** Status → 中文标签（tooltip 与详情面板共用）。 */
+const STATUS_LABELS: Record<string, string> = {
+  emerging: '新兴',
+  continuing: '持续',
+  split: '分化',
+  merge: '合并',
+  ending: '结束',
+}
 
 export class PinCardImpl implements IPinCard {
   readonly data: SectionTimelineNode
@@ -23,6 +33,8 @@ export class PinCardImpl implements IPinCard {
   readonly position: Vector3
   private readonly paperMaterial: MeshStandardMaterial
   private readonly pinMaterial: MeshStandardMaterial
+  /** CSS2D tooltip that follows the card in screen space (spec §Card Tooltip). */
+  readonly tooltip: CSS2DObject
   private baseZ = 0
   private state: 'normal' | 'elevated' | 'highlighted' | 'dimmed' = 'normal'
 
@@ -83,6 +95,19 @@ export class PinCardImpl implements IPinCard {
     const meta = new SpriteText(`${data.article_count}篇 · ${data.thread_count}线索`, 0.15, '#4B5563')
     meta.position.set(0, -0.45, card.depth / 2 + 0.01)
     this.group.add(meta)
+
+    // CSS2D tooltip (spec §Card Tooltip): shown on hover, hidden otherwise.
+    // Positioned above the card; CSS2DRenderer projects it into screen space.
+    const tooltipEl = document.createElement('div')
+    tooltipEl.className = 'tdw-card-tooltip'
+    tooltipEl.style.display = 'none'
+    const statusLabel = STATUS_LABELS[data.status] ?? data.status
+    tooltipEl.innerHTML =
+      `<div class="tdw-card-tooltip-label">${data.cluster_label}</div>` +
+      `<div class="tdw-card-tooltip-status">${statusLabel} · ${data.article_count}篇</div>`
+    this.tooltip = new CSS2DObject(tooltipEl)
+    this.tooltip.position.set(0, card.height / 2 + 0.5, 0)
+    this.group.add(this.tooltip)
   }
 
   /** Apply a layout result (position + rotation). */
@@ -97,28 +122,34 @@ export class PinCardImpl implements IPinCard {
     if (this.state === 'elevated') return
     this.state = 'elevated'
     gsap.to(this.group.position, { z: this.baseZ + 0.2, duration: 0.2, ease: 'power2.out' })
+    this.tooltip.element.style.display = 'block'
   }
 
   settle(): void {
     if (this.state !== 'elevated') return
     this.state = 'normal'
     gsap.to(this.group.position, { z: this.baseZ, duration: 0.2, ease: 'power2.out' })
+    this.tooltip.element.style.display = 'none'
   }
 
   highlight(): void {
     this.state = 'highlighted'
     gsap.to(this.paperMaterial, { emissiveIntensity: 0.5, duration: 0.3 })
+    // Hide tooltip in lifeline mode (detail panel shows the info instead).
+    this.tooltip.element.style.display = 'none'
   }
 
   dim(): void {
     this.state = 'dimmed'
     gsap.to(this.paperMaterial, { opacity: 0.35, transparent: true, duration: 0.3 })
+    this.tooltip.element.style.display = 'none'
   }
 
   reset(): void {
     this.state = 'normal'
     gsap.to(this.group.position, { z: this.baseZ, duration: 0.2, ease: 'power2.out' })
     gsap.to(this.paperMaterial, { emissiveIntensity: 0, opacity: 1, transparent: false, duration: 0.3 })
+    this.tooltip.element.style.display = 'none'
   }
 }
 
@@ -194,6 +225,8 @@ export class CardGroup {
   clear(scene: Scene): void {
     for (const card of this.cards) {
       scene.remove(card.group)
+      // Remove the CSS2D tooltip element from the DOM (it lives outside the canvas).
+      card.tooltip.element.remove()
       card.group.traverse((obj) => {
         const mesh = obj as Mesh
         if (mesh.geometry) mesh.geometry.dispose()

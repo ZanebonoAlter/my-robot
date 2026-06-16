@@ -8,6 +8,13 @@
         "--no-watch"
       ],
       "directTools": true
+    },
+    "playwright": {
+      "command": "npx",
+      "args": [
+        "@playwright/mcp@latest"
+      ],
+      "directTools": true
     }
   }
 }

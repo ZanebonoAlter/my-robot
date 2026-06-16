@@ -19,6 +19,13 @@ import type { DirectorCamera } from './DirectorCamera'
 import { bfsLifeline, edgeKey } from './utils'
 
 const CLICK_MAX_MOVE_PX = 5
+/**
+ * Extra hit padding (screen px) added to Line2's linewidth when raycasting red
+ * strings. Line2's raycast uses `material.linewidth + threshold` as the half-width
+ * of the clickable band (see LineSegments2.raycast). Base linewidth is 2 (half-width
+ * 1px), which is too narrow to click reliably; +4 makes the band ~3px wide.
+ */
+const STRING_RAYCAST_PADDING_PX = 4
 
 export class InteractionLayer {
   private readonly raycaster = new Raycaster()
@@ -47,7 +54,11 @@ export class InteractionLayer {
     private readonly directorCamera: DirectorCamera,
     private readonly canvas: HTMLCanvasElement,
     private readonly callbacks: InteractionCallbacks,
-  ) {}
+  ) {
+    // Widen the Line2 click/hover band so thin red strings stay easy to hit.
+    // Raycaster.params.Line2 is not defined by default, so create it here.
+    this.raycaster.params.Line2 = { threshold: STRING_RAYCAST_PADDING_PX }
+  }
 
   /** Cache the latest board data (called by TopicWallScene.loadBoardData). */
   setData(

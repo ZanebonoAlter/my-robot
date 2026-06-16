@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, watch } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { Icon } from '@iconify/vue'
 import { useDailyReportsApi, type SectionTimelineNode, type SectionRelation, type DailyReportThread } from '~/api/dailyReports'
 import { useArticlesApi } from '~/api/articles'
@@ -63,9 +63,10 @@ const showDetectiveEntry = computed(() => {
     return false
   }
 })
-if (typeof window !== 'undefined') {
-  window.addEventListener('resize', () => { viewportWidth.value = window.innerWidth })
-}
+// Named handler so it can be removed on unmount (avoid leaked listeners).
+function onViewportResize() { viewportWidth.value = window.innerWidth }
+onMounted(() => window.addEventListener('resize', onViewportResize))
+onUnmounted(() => window.removeEventListener('resize', onViewportResize))
 
 // Theme-aware SVG colors
 const svgGridColor = computed(() => theme.value === 'dark' ? 'rgba(255,255,255,0.04)' : 'rgba(26,26,26,0.06)')

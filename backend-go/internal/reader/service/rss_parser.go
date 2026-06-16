@@ -22,7 +22,7 @@ type RSSParser struct {
 func NewRSSParser() *RSSParser {
 	return &RSSParser{
 		client: &http.Client{
-			Timeout: 30 * time.Second,
+			Timeout: 20 * time.Second,
 		},
 	}
 }

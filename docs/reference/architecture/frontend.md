@@ -307,7 +307,7 @@ detective-wall/
 
 侦探墙的 3D 对象应优先服务“证据墙”隐喻，而不是普通关系图：
 
-- `CardGroup` 使用 canvas procedural 档案袋作为 `CanvasTexture`，在同一纹理内绘制固定边界的标题、`CASE #id`、状态、文章/线索计数，并优先渲染 section 关联文章中的首张 `image_url`；卡片点击热区仍由 3D mesh + CSS2D `data-card-id` tooltip 双路承担。
+- `CardGroup` 使用 canvas procedural 档案袋作为 `CanvasTexture`，在同一纹理内绘制固定边界的标题、`CASE #id`、状态、文章/线索计数，并优先渲染 section 关联文章中的首张 `image_url`；无真实图片时绘制案件路线式默认缩略图。卡片点击热区仍由 3D mesh + CSS2D `data-card-id` tooltip 双路承担。
 - `RedString` 不从卡片中心连线，而是根据相对方向锚定在卡片边缘附近；路径使用轻微折线并抬到卡片前方，普通状态为暗红低透明，生命线高亮时变为证据红且线宽增加。
 - `TopicWallScene` 在卡片范围后方动态铺一块暗软木墙面，使用 procedural texture 提供磨砂颗粒、暗格和关卡路线式装饰点；选中红色 PointLight 绑定卡片当前 world position 并沿 z 轴打到卡片前方，随 `loadBoardData()` 重建并在 `clearScene()` dispose。
 
@@ -317,7 +317,7 @@ detective-wall/
 
 ### 数据层
 
-复用现有 API，无新增后端接口：`getBoardSectionTimeline(boardId, days)`、`getSectionLifecycle(sectionId)`、`getDailyReportDetail(id)`（均来自 `~/api/dailyReports`）。其中 timeline/lifecycle section node 扩展可选 `image_url`，由后端从该 section 关联文章中选择第一张非空图片，用于侦探墙档案袋卡面展示。
+复用现有 API，无新增后端接口：`getBoardSectionTimeline(boardId, days)`、`getSectionLifecycle(sectionId)`、`getDailyReportDetail(id)`（均来自 `~/api/dailyReports`）。其中 timeline/lifecycle section node 扩展 `image_url` 字符串字段，由后端优先从该 section 的线程关联文章选择第一张非空图片，找不到时再从 cluster tags 当天文章里选择第一张非空图片；仍无图时返回空字符串，由侦探墙卡面渲染默认缩略图。
 
 ## 设计系统
 

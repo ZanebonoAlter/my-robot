@@ -113,16 +113,58 @@ function drawPhoto(ctx: CanvasRenderingContext2D, image: HTMLImageElement | null
     ctx.drawImage(image, -w / 2, -h / 2 - 5, w, h)
     ctx.restore()
   } else {
-    const grad = ctx.createLinearGradient(-frame.w / 2, -frame.h / 2, frame.w / 2, frame.h / 2)
-    grad.addColorStop(0, '#2F241B')
-    grad.addColorStop(0.52, '#5A3827')
-    grad.addColorStop(1, '#101827')
+    const boxX = -frame.w / 2 + 12
+    const boxY = -frame.h / 2 + 12
+    const boxW = frame.w - 24
+    const boxH = frame.h - 34
+    const grad = ctx.createLinearGradient(boxX, boxY, boxX + boxW, boxY + boxH)
+    grad.addColorStop(0, '#25313A')
+    grad.addColorStop(0.42, '#705038')
+    grad.addColorStop(1, '#1B1512')
     ctx.fillStyle = grad
-    ctx.fillRect(-frame.w / 2 + 12, -frame.h / 2 + 12, frame.w - 24, frame.h - 34)
-    ctx.fillStyle = 'rgba(255, 245, 210, 0.22)'
+    ctx.fillRect(boxX, boxY, boxW, boxH)
+
+    ctx.strokeStyle = 'rgba(255, 238, 190, 0.18)'
+    ctx.lineWidth = 2
+    ctx.setLineDash([8, 7])
     ctx.beginPath()
-    ctx.arc(28, -18, 36, 0, Math.PI * 2)
+    ctx.moveTo(boxX + 22, boxY + boxH - 26)
+    ctx.bezierCurveTo(boxX + 70, boxY + 78, boxX + 112, boxY + 92, boxX + 168, boxY + 26)
+    ctx.stroke()
+    ctx.setLineDash([])
+
+    const dots = [
+      [boxX + 24, boxY + boxH - 26, 7],
+      [boxX + 88, boxY + 76, 5],
+      [boxX + 168, boxY + 26, 9],
+    ] as const
+    for (const [x, y, r] of dots) {
+      ctx.fillStyle = 'rgba(120, 25, 25, 0.46)'
+      ctx.beginPath()
+      ctx.arc(x + 2, y + 2, r + 4, 0, Math.PI * 2)
+      ctx.fill()
+      ctx.fillStyle = '#DC2626'
+      ctx.beginPath()
+      ctx.arc(x, y, r, 0, Math.PI * 2)
+      ctx.fill()
+    }
+
+    ctx.fillStyle = 'rgba(255, 245, 210, 0.2)'
+    ctx.beginPath()
+    ctx.arc(boxX + boxW - 38, boxY + 34, 28, 0, Math.PI * 2)
     ctx.fill()
+    ctx.strokeStyle = 'rgba(255, 251, 235, 0.16)'
+    ctx.lineWidth = 1
+    for (let y = boxY + 18; y < boxY + boxH; y += 20) {
+      ctx.beginPath()
+      ctx.moveTo(boxX + 12, y)
+      ctx.lineTo(boxX + boxW - 12, y)
+      ctx.stroke()
+    }
+
+    ctx.fillStyle = 'rgba(255, 251, 235, 0.68)'
+    ctx.font = '900 18px "Courier New", monospace'
+    ctx.fillText('NO IMAGE', boxX + 16, boxY + 28)
   }
 
   ctx.fillStyle = '#2B2116'

@@ -14,7 +14,15 @@ import (
 )
 
 // staleRefreshTimeout is the duration after which a "refreshing" feed is considered stale.
-const staleRefreshTimeout = 5 * time.Minute
+const staleRefreshTimeout = 2 * time.Minute
+
+// maxConcurrentRefreshes caps the number of feeds refreshed in parallel.
+// A slow/hung feed occupies only one slot, leaving the rest available so
+// a single bad feed cannot starve or stall refreshes of other feeds.
+const maxConcurrentRefreshes = 8
+
+// refreshSemaphore limits concurrent feed refreshes globally.
+var refreshSemaphore = make(chan struct{}, maxConcurrentRefreshes)
 
 // AutoRefreshSummary contains the result metrics for an auto-refresh cycle.
 type AutoRefreshSummary struct {
@@ -135,6 +143,11 @@ func markFeedRefreshing(feedID uint) {
 }
 
 func refreshFeedAsync(ctx context.Context, feedID uint, feedService *feed.FeedService) {
+	// Acquire a slot so that one slow/hung feed cannot exhaust upstream
+	// capacity or starve refreshes of other feeds.
+	refreshSemaphore <- struct{}{}
+	defer func() { <-refreshSemaphore }()
+
 	defer func() {
 		if r := recover(); r != nil {
 			logging.Errorf("PANIC in refreshFeedAsync for feed %d: %v", feedID, r)

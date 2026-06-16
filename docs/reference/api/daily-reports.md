@@ -59,7 +59,7 @@ Response `data`：
 }
 ```
 
-`image_url` 可为空或省略，后端从该 section 关联文章中选择第一张非空图片。
+`image_url` 始终回传；无可用图片时为空字符串。后端优先从该 section 的线程关联文章中选择第一张非空图片，找不到时再从该 section 的 cluster tags 当天文章里选择第一张非空图片。
 
 ## GET `/daily-reports/sections/:id/lifecycle`
 

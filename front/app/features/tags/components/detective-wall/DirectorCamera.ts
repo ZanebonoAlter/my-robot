@@ -54,9 +54,9 @@ export class DirectorCamera {
   /** Focus on the latest day column (today), slightly elevated, slight tilt. */
   todayFocus(latestDayXValue: number): CameraShot {
     return {
-      position: new Vector3(latestDayXValue, 5.5, 8),
-      target: new Vector3(latestDayXValue, 0, 0),
-      fov: 50,
+      position: new Vector3(latestDayXValue, 6.4, 9),
+      target: new Vector3(latestDayXValue, 0.4, 0),
+      fov: 55,
       duration: 0.6,
       ease: 'power2.inOut',
       name: 'todayFocus',
@@ -81,9 +81,9 @@ export class DirectorCamera {
   topicFocus(card: PinCard): CameraShot {
     const p = card.position
     return {
-      position: new Vector3(p.x, p.y + 1, 5),
+      position: new Vector3(p.x, p.y + 1.2, 5.8),
       target: new Vector3(p.x, p.y, 0),
-      fov: 45,
+      fov: 48,
       duration: 0.5,
       ease: 'power2.out',
       name: 'topicFocus',

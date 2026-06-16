@@ -288,9 +288,9 @@ Topic Graph 页面的复杂度已按内聚行为拆分为多个深 Module：
 detective-wall/
 ├─ types.ts              # 共享类型 + STYLE 常量 + SUPPORTED_DAYS
 ├─ utils.ts              # 可测纯函数：bfsLifeline / layoutCards / densityForDays / edgeKey
-├─ TopicWallScene.ts     # 场景管理（renderer/camera/scene/CSS2D/render loop/dispose）
-├─ CardGroup.ts          # PinCardImpl（纸卡片+图钉+SpriteText）+ CardGroup（布局/动画）
-├─ RedString.ts          # Line2 粗红线 + RedStringCollection（距离衰减 opacity）
+├─ TopicWallScene.ts     # 场景管理（renderer/camera/scene/CSS2D/软木墙面/render loop/dispose）
+├─ CardGroup.ts          # PinCardImpl（档案袋 CanvasTexture + 可选文章配图 + 图钉/胶带）+ CardGroup
+├─ RedString.ts          # Line2 红线绳（边缘锚点折线 + 距离衰减 opacity）+ RedStringCollection
 ├─ FogSystem.ts          # FogExp2（密度映射天数窗口，gsap 动画）
 ├─ lighting.ts           # AmbientLight + SpotLight + 跟随相机 PointLight + 选中红色 PointLight
 ├─ WallPostProcessing.ts # pmndrs EffectComposer + Bloom + Vignette + three/examples FilmPass
@@ -303,13 +303,21 @@ detective-wall/
 
 3D 场景用 **gsap**（对 `THREE.Object3D`/材质属性的逐帧补间 + `timeline()` 多轨编排），2D overlay 用项目已装的 **motion-v**（Vue 组件声明式过渡）。详情面板是普通 Vue `position:fixed` overlay（非 CSS2DRenderer）；仅卡片悬停 tooltip 用 CSS2DRenderer（跟随 3D 坐标）。
 
+### 视觉对象语义
+
+侦探墙的 3D 对象应优先服务“证据墙”隐喻，而不是普通关系图：
+
+- `CardGroup` 使用 canvas procedural 档案袋作为 `CanvasTexture`，在同一纹理内绘制固定边界的标题、`CASE #id`、状态、文章/线索计数，并优先渲染 section 关联文章中的首张 `image_url`；卡片点击热区仍由 3D mesh + CSS2D `data-card-id` tooltip 双路承担。
+- `RedString` 不从卡片中心连线，而是根据相对方向锚定在卡片边缘附近；路径使用轻微折线并抬到卡片前方，普通状态为暗红低透明，生命线高亮时变为证据红且线宽增加。
+- `TopicWallScene` 在卡片范围后方动态铺一块暗软木墙面，使用 procedural texture 提供磨砂颗粒、暗格和关卡路线式装饰点；选中红色 PointLight 绑定卡片当前 world position 并沿 z 轴打到卡片前方，随 `loadBoardData()` 重建并在 `clearScene()` dispose。
+
 ### BFS 生命线
 
 `utils.bfsLifeline` 与现有 `topic-graph/utils/graphBfsHighlight.bfsHighlight` **语义不同**：后者返回连通分量（带启发式截断、无日期约束），前者严格受日期窗口约束。两者不互相复用。
 
 ### 数据层
 
-复用现有 API，无新增后端接口：`getBoardSectionTimeline(boardId, days)`、`getSectionLifecycle(sectionId)`、`getDailyReportDetail(id)`（均来自 `~/api/dailyReports`）。
+复用现有 API，无新增后端接口：`getBoardSectionTimeline(boardId, days)`、`getSectionLifecycle(sectionId)`、`getDailyReportDetail(id)`（均来自 `~/api/dailyReports`）。其中 timeline/lifecycle section node 扩展可选 `image_url`，由后端从该 section 关联文章中选择第一张非空图片，用于侦探墙档案袋卡面展示。
 
 ## 设计系统
 

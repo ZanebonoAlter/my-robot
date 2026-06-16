@@ -492,10 +492,42 @@ async function exitLifecycle() {
 .tdw-root {
   position: fixed;
   inset: 0;
-  background: #0a0f14;
+  background:
+    radial-gradient(circle at 20% 18%, rgba(235, 203, 139, 0.12), transparent 28%),
+    radial-gradient(circle at 72% 60%, rgba(124, 45, 18, 0.16), transparent 34%),
+    linear-gradient(135deg, #080B0E 0%, #17100C 48%, #050709 100%);
   z-index: 50;
+  overflow: hidden;
+}
+.tdw-root::before,
+.tdw-root::after {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  content: "";
+}
+.tdw-root::before {
+  z-index: 1;
+  opacity: 0.28;
+  background-image:
+    url("data:image/svg+xml,%3Csvg viewBox='0 0 360 520' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M58 438 C126 360 96 300 178 244 C252 193 214 119 302 72' fill='none' stroke='%23EBCB8B' stroke-opacity='.5' stroke-width='3' stroke-dasharray='10 12'/%3E%3Cg fill='%23EBCB8B' fill-opacity='.58' stroke='%23140D0B' stroke-opacity='.55' stroke-width='5'%3E%3Ccircle cx='58' cy='438' r='13'/%3E%3Ccircle cx='112' cy='344' r='10'/%3E%3Ccircle cx='178' cy='244' r='15'/%3E%3Ccircle cx='242' cy='164' r='10'/%3E%3Ccircle cx='302' cy='72' r='14'/%3E%3C/g%3E%3Cg fill='none' stroke='%23FFF4D6' stroke-opacity='.22' stroke-width='1.5'%3E%3Ccircle cx='178' cy='244' r='34'/%3E%3Ccircle cx='302' cy='72' r='30'/%3E%3C/g%3E%3C/svg%3E"),
+    linear-gradient(rgba(255, 244, 214, 0.028) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 244, 214, 0.018) 1px, transparent 1px),
+    url("data:image/svg+xml,%3Csvg viewBox='0 0 180 180' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.88' numOctaves='4' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.34'/%3E%3C/svg%3E");
+  background-repeat: no-repeat, repeat, repeat, repeat;
+  background-position: calc(100% - 92px) 48%, 0 0, 0 0, 0 0;
+  background-size: 360px 520px, 42px 42px, 42px 42px, 180px 180px;
+  mix-blend-mode: screen;
+}
+.tdw-root::after {
+  z-index: 2;
+  background:
+    radial-gradient(circle at 50% 42%, transparent 0 64%, rgba(0, 0, 0, 0.28) 100%),
+    linear-gradient(90deg, rgba(0, 0, 0, 0.26), transparent 18%, transparent 86%, rgba(0, 0, 0, 0.24));
 }
 .tdw-canvas {
+  position: relative;
+  z-index: 0;
   display: block;
   width: 100%;
   height: 100%;
@@ -503,6 +535,7 @@ async function exitLifecycle() {
 .tdw-css2d {
   position: absolute;
   inset: 0;
+  z-index: 3;
   pointer-events: none;
 }
 .tdw-topbar {
@@ -513,6 +546,7 @@ async function exitLifecycle() {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  z-index: 4;
   pointer-events: none;
 }
 .tdw-topbar > * { pointer-events: auto; }
@@ -555,6 +589,7 @@ async function exitLifecycle() {
   position: absolute;
   right: 2rem;
   top: 50%;
+  z-index: 4;
   transform: translateY(-50%);
   width: 280px;
   max-height: 70vh;
@@ -765,6 +800,7 @@ async function exitLifecycle() {
   position: absolute;
   top: 50%;
   left: 50%;
+  z-index: 4;
   transform: translate(-50%, -50%);
   color: rgba(255, 255, 255, 0.7);
   font-size: 1rem;
@@ -776,27 +812,45 @@ async function exitLifecycle() {
      .tdw-css2d, so these rules must not be scoped. -->
 <style>
 .tdw-card-tooltip {
-  pointer-events: none;
-  background: #FFFBEB;
-  border: 1px solid rgba(26, 26, 26, 0.2);
-  border-radius: 0.3rem;
-  padding: 0.25rem 0.5rem;
+  pointer-events: auto;
+  background:
+    linear-gradient(180deg, rgba(255, 251, 235, 0.98), rgba(239, 221, 180, 0.96));
+  border: 1px solid rgba(73, 42, 15, 0.32);
+  border-radius: 0.22rem;
+  padding: 0.3rem 0.55rem 0.28rem;
   font-family: 'JetBrains Mono', 'Courier New', monospace;
   font-size: 0.72rem;
   color: #1A1A1A;
   white-space: nowrap;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+  box-shadow:
+    0 8px 18px rgba(0, 0, 0, 0.45),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.24);
   transform: translate(-50%, -100%);
+  cursor: pointer;
+  z-index: 2;
+}
+.tdw-card-tooltip::before {
+  content: '';
+  position: absolute;
+  left: 0.45rem;
+  right: 0.45rem;
+  top: -0.16rem;
+  height: 0.28rem;
+  background: rgba(231, 185, 107, 0.78);
+  border-radius: 1px;
+  transform: rotate(-1.5deg);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.18);
 }
 .tdw-card-tooltip-label {
   font-weight: 600;
   max-width: 220px;
   overflow: hidden;
   text-overflow: ellipsis;
+  letter-spacing: 0;
 }
 .tdw-card-tooltip-status {
   font-size: 0.62rem;
-  color: #6B7280;
+  color: #7C2D12;
   margin-top: 0.1rem;
 }
 </style>

@@ -52,6 +52,7 @@ type SectionTimelineNode struct {
 	Status       string    `json:"status"`
 	ArticleCount int       `json:"article_count"`
 	ThreadCount  int       `json:"thread_count"`
+	ImageURL     string    `json:"image_url,omitempty"`
 }
 
 // GetBoardSectionTimeline fetches all sections and their relations for a board within a date range.
@@ -343,8 +344,19 @@ func (r *TopicGraphRepository) GetBoardSectionTimeline(boardID uint, days int) (
 	var nodes []SectionTimelineNode
 	err := r.db.Raw(`
 		SELECT ds.id, ds.report_id, bdr.period_date, ds.cluster_label,
-		       ds.article_count,
-		       (SELECT COUNT(*) FROM daily_report_threads t WHERE t.section_id = ds.id) AS thread_count
+	       ds.article_count,
+	       (SELECT COUNT(*) FROM daily_report_threads t WHERE t.section_id = ds.id) AS thread_count,
+	       COALESCE((
+	         SELECT a.image_url
+	         FROM daily_report_threads t
+	         JOIN LATERAL jsonb_array_elements_text(COALESCE(t.related_article_ids, '[]'::jsonb)) aid(article_id) ON true
+	         JOIN articles a ON a.id = aid.article_id::bigint
+	         WHERE t.section_id = ds.id
+	           AND a.image_url IS NOT NULL
+	           AND a.image_url != ''
+	         ORDER BY t.id ASC, a.pub_date DESC NULLS LAST, a.id ASC
+	         LIMIT 1
+	       ), '') AS image_url
 		FROM daily_report_sections ds
 		JOIN board_daily_reports bdr ON bdr.id = ds.report_id
 		WHERE bdr.semantic_board_id = ?
@@ -438,8 +450,19 @@ func (r *TopicGraphRepository) GetSectionLifecycle(sectionID uint) (SectionTimel
 	var nodes []SectionTimelineNode
 	if err := r.db.Raw(`
 		SELECT ds.id, ds.report_id, bdr.period_date, ds.cluster_label,
-		       ds.article_count,
-		       (SELECT COUNT(*) FROM daily_report_threads t WHERE t.section_id = ds.id) AS thread_count
+	       ds.article_count,
+	       (SELECT COUNT(*) FROM daily_report_threads t WHERE t.section_id = ds.id) AS thread_count,
+	       COALESCE((
+	         SELECT a.image_url
+	         FROM daily_report_threads t
+	         JOIN LATERAL jsonb_array_elements_text(COALESCE(t.related_article_ids, '[]'::jsonb)) aid(article_id) ON true
+	         JOIN articles a ON a.id = aid.article_id::bigint
+	         WHERE t.section_id = ds.id
+	           AND a.image_url IS NOT NULL
+	           AND a.image_url != ''
+	         ORDER BY t.id ASC, a.pub_date DESC NULLS LAST, a.id ASC
+	         LIMIT 1
+	       ), '') AS image_url
 		FROM daily_report_sections ds
 		JOIN board_daily_reports bdr ON bdr.id = ds.report_id
 		WHERE ds.id IN ?

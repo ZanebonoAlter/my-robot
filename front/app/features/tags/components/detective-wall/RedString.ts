@@ -1,9 +1,9 @@
 /**
  * RedString + RedStringCollection — stylized red lines connecting related cards.
  *
- * Uses Line2 (fat lines) for controllable screen-space width. Straight lines
- * (no bezier / physics sag) per design.md §RedString. Distance attenuates
- * opacity (near = solid, far = faint).
+ * Uses Line2 (fat lines) for controllable screen-space width. The string is a
+ * subtly kinked polyline anchored near card edges, so it reads like a taut
+ * detective-wall thread without introducing physics.
  *
  * @see specs/detective-wall-scene/spec.md §RedString
  */
@@ -35,11 +35,12 @@ export class RedStringImpl implements IRedString {
     const falloff = Math.max(0.3, 1 - this.distance / MAX_OPACITY_DISTANCE)
     this.baseOpacity = STYLE.string.baseOpacity * falloff
 
+    const points = stringPoints(from, to, rel)
     const geometry = new LineGeometry()
-    geometry.setPositions([from.x, from.y, from.z, to.x, to.y, to.z])
+    geometry.setPositions(points.flatMap(p => [p.x, p.y, p.z]))
 
     this.material = new LineMaterial({
-      color: new Color(STYLE.string.color),
+      color: new Color(STYLE.string.darkColor),
       linewidth: STYLE.string.baseLinewidth,
       transparent: true,
       opacity: this.baseOpacity,
@@ -59,6 +60,7 @@ export class RedStringImpl implements IRedString {
   }
 
   highlight(): void {
+    this.material.color.set(STYLE.string.color)
     gsap.to(this.material, {
       opacity: STYLE.string.highlightOpacity,
       linewidth: STYLE.string.highlightLinewidth,
@@ -74,6 +76,7 @@ export class RedStringImpl implements IRedString {
   }
 
   reset(): void {
+    this.material.color.set(STYLE.string.darkColor)
     gsap.to(this.material, {
       opacity: this.baseOpacity,
       linewidth: STYLE.string.baseLinewidth,
@@ -89,6 +92,27 @@ export class RedStringImpl implements IRedString {
     this.line.geometry.dispose()
     this.material.dispose()
   }
+}
+
+function stringPoints(from: Vector3, to: Vector3, rel: SectionRelation): Vector3[] {
+  const direction = to.x >= from.x ? 1 : -1
+  const yDirection = to.y >= from.y ? 1 : -1
+  const edgeOffset = STYLE.card.width * 0.42
+  const frontZ = Math.max(from.z, to.z) + STYLE.card.depth / 2 + 0.05
+  const start = new Vector3(from.x + direction * edgeOffset, from.y + yDirection * 0.08, frontZ)
+  const end = new Vector3(to.x - direction * edgeOffset, to.y - yDirection * 0.08, frontZ)
+
+  const midX = (start.x + end.x) / 2
+  const midY = (start.y + end.y) / 2
+  const bend = (((rel.from_id * 37 + rel.to_id * 17) % 7) - 3) * 0.09
+  const sag = Math.min(0.28, start.distanceTo(end) * 0.035)
+
+  return [
+    start,
+    new Vector3(midX - direction * 0.18, midY + bend + sag, frontZ + 0.035),
+    new Vector3(midX + direction * 0.18, midY + bend - sag * 0.35, frontZ + 0.035),
+    end,
+  ]
 }
 
 export class RedStringCollection {

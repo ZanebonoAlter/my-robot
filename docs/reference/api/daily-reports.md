@@ -33,6 +33,38 @@ WebSocket 进度消息：
 }
 ```
 
+## GET `/semantic-boards/:id/section-timeline?days=30`
+
+查询板块日报 section 时间线，供 2D 线索浏览和 3D 侦探墙复用。
+
+Response `data`：
+
+```json
+{
+  "sections": [
+    {
+      "id": 101,
+      "report_id": 12,
+      "period_date": "2026-05-26T12:00:00Z",
+      "cluster_label": "...",
+      "status": "continuing",
+      "article_count": 5,
+      "thread_count": 2,
+      "image_url": "https://..."
+    }
+  ],
+  "relations": [
+    { "from_id": 100, "to_id": 101, "distance": 0.23 }
+  ]
+}
+```
+
+`image_url` 可为空或省略，后端从该 section 关联文章中选择第一张非空图片。
+
+## GET `/daily-reports/sections/:id/lifecycle`
+
+查询一个 section 所在连通分量的完整生命周期。响应结构与 `section-timeline` 相同，同样可能包含可选 `image_url`。
+
 终态总会广播：
 
 ```json

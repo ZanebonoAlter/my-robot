@@ -27,6 +27,8 @@ export interface SectionTimelineNode {
   status: string  // emerging / continuing / split / merge / ending (dynamically derived)
   article_count: number
   thread_count: number
+  image_url?: string
+  imageUrl?: string
 }
 
 export interface SectionRelation {

@@ -8,13 +8,14 @@ Three.js 3D 侦探照片墙场景，负责卡片、红线、迷雾、光照和�
 
 ```typescript
 class TopicWallScene {
-  constructor(canvas: HTMLCanvasElement)
+  constructor(canvas: HTMLCanvasElement, css2dContainer: HTMLElement)
 
   // 数据加载
   loadBoardData(
     sections: SectionTimelineNode[],
     relations: SectionRelation[],
-    dateRange: { start: string; end: string }
+    dateRange: { start: string; end: string },
+    days: number
   ): void
 
   // 清空场景（切换板块前调用）
@@ -25,6 +26,12 @@ class TopicWallScene {
   stopRenderLoop(): void
   onResize(width: number, height: number): void
 
+  // 注册每帧回调（如 OrbitControls.update）
+  addFrameCallback(fn: () => void): void
+
+  // 选中灯：聚焦卡片时移到其上方 + intensity 1.0，传 null 关闭（intensity 0）
+  setSelectionLight(card: PinCard | null): void
+
   // 生命周期
   dispose(): void
 
@@ -32,9 +39,13 @@ class TopicWallScene {
   readonly scene: THREE.Scene
   readonly camera: THREE.PerspectiveCamera
   readonly renderer: THREE.WebGLRenderer
+  readonly css2d: CSS2DRenderer
   readonly composer: EffectComposer
   readonly cardGroup: CardGroup
   readonly redStrings: RedString[]
+  readonly fog: FogSystem
+  readonly followLight: THREE.PointLight      // 每帧跟随相机（探险灯）
+  readonly selectionLight: THREE.PointLight   // 聚焦卡片上方红光
 }
 ```
 
@@ -71,15 +82,21 @@ interface PinCard {
   readonly data: SectionTimelineNode
   readonly group: THREE.Group       // 包含 paper + pin + text
   readonly position: THREE.Vector3  // 世界坐标
+  readonly tooltip: CSS2DObject     // 卡片上方 CSS2D tooltip（悬停显示，data-card-id）
 
   // 动画
-  elevate(): void                   // 悬停：沿 Z 抬起
-  settle(): void                    // 取消悬停：回到原位
-  highlight(): void                 // 生命线点亮：emissive 增强
+  elevate(): void                   // 悬停：沿 Z 抬起 + 显示 tooltip
+  settle(): void                    // 取消悬停：回到原位 + 隐藏 tooltip
+  highlight(): void                 // 生命线点亮：emissive 增强到 0.2（非 0.5，避免盖住文字）
   dim(): void                       // 退入背景：opacity 降低
   reset(): void                     // 恢复正常状态
 }
 ```
+
+> tooltip：CSS2DObject，DOM 挂 `data-card-id` + `pointer-events:auto`。hover 时
+> 显示话题名 + 状态（中文），失焦隐藏。点击 tooltip 文字转发为卡片点击（见
+> interaction spec §InteractionLayer）。标题截断超 14 字符加 `…`。
+> highlight 的 `emissiveIntensity` 为 0.2（早期 0.5 会过曝、盖住卡片表面文字）。
 
 ### RedString
 
@@ -180,6 +197,10 @@ FilmGrainPass:
   AMBIENT_INTENSITY = 0.15
   SPOT_ANGLE = 45°
   SPOT_PENUMBRA = 0.5
+  FOLLOW_LIGHT（探险灯）：PointLight，每帧 followLight.position.copy(camera.position)，
+    相机移到远端时远端卡片仍被照亮
+  SELECTION_LIGHT（选中灯）：红色 PointLight，聚焦卡片时移到其上方 (x, y+2, z+1) +
+    intensity 1.0，reset 时 intensity 0
 
 尺寸:
   CARD_WIDTH = 2.0 (世界单位)

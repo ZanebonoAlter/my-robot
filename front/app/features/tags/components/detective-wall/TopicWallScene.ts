@@ -6,12 +6,13 @@
  *
  * @see specs/detective-wall-scene/spec.md
  */
-import { Scene, PerspectiveCamera, WebGLRenderer, Color } from 'three'
+import { Scene, PerspectiveCamera, WebGLRenderer, Color, PointLight } from 'three'
 import { CSS2DRenderer } from 'three/examples/jsm/renderers/CSS2DRenderer.js'
 import type { SectionTimelineNode, SectionRelation, DateRange } from './types'
 import { STYLE } from './types'
 import { densityForDays } from './utils'
 import { CardGroup } from './CardGroup'
+import type { PinCard } from './types'
 import { RedStringCollection } from './RedString'
 import { FogSystem } from './FogSystem'
 import { setupLighting } from './lighting'
@@ -26,12 +27,18 @@ export class TopicWallScene {
   readonly redStrings = new RedStringCollection()
   readonly fog: FogSystem
   readonly composer: WallPostProcessing
+  /** Camera-following explorer lamp (updated each frame). */
+  readonly followLight: PointLight
+  /** Red light above the selected card; intensity 0 unless focused. */
+  readonly selectionLight: PointLight
 
   private rafId = 0
   private disposed = false
   private lastTime = 0
   private readonly canvas: HTMLCanvasElement
   private readonly css2dContainer: HTMLElement
+  /** Per-frame callbacks (e.g. orbit controls update). */
+  private readonly frameCallbacks: Array<() => void> = []
 
   constructor(canvas: HTMLCanvasElement, css2dContainer: HTMLElement) {
     this.canvas = canvas
@@ -54,9 +61,26 @@ export class TopicWallScene {
     this.css2dContainer.appendChild(this.css2d.domElement)
 
     this.fog = new FogSystem(this.scene, STYLE.fog)
-    setupLighting(this.scene)
+    const lights = setupLighting(this.scene)
+    this.followLight = lights.followLight
+    this.selectionLight = lights.selectionLight
 
     this.composer = new WallPostProcessing(this.renderer, this.scene, this.camera)
+  }
+
+  /** Move the selection light above a focused card, or turn it off. */
+  setSelectionLight(card: PinCard | null): void {
+    if (card) {
+      this.selectionLight.position.set(card.position.x, card.position.y + 2, card.position.z + 1)
+      this.selectionLight.intensity = 1.0
+    } else {
+      this.selectionLight.intensity = 0
+    }
+  }
+
+  /** Register a per-frame callback (e.g. OrbitControls.update). */
+  addFrameCallback(fn: () => void): void {
+    this.frameCallbacks.push(fn)
   }
 
   /** Load sections + relations and build all 3D objects. Replaces prior data. */
@@ -86,6 +110,10 @@ export class TopicWallScene {
       const now = performance.now()
       const dt = (now - this.lastTime) / 1000
       this.lastTime = now
+      // Explorer lamp follows the camera so far-away cards stay lit.
+      this.followLight.position.copy(this.camera.position)
+      // Run registered frame callbacks (orbit pan/zoom, etc.) before rendering.
+      for (const fn of this.frameCallbacks) fn()
       this.cardGroup.update(dt)
       this.composer.render(dt)
       this.css2d.render(this.scene, this.camera)

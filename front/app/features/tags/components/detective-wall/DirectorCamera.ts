@@ -17,6 +17,16 @@ const FOV_MIN = 35
 const FOV_MAX = 65
 const Y_MIN = 2
 
+/** Hooks injected by an orbit controller to stay in sync with GSAP transitions. */
+export interface DirectorCameraHooks {
+  /** Called when a transition/snap begins; orbit should disable itself. */
+  onTransitionStart?: () => void
+  /** Called when a transition completes; orbit may re-enable and sync target. */
+  onTransitionComplete?: (shot: CameraShot) => void
+  /** Called each frame a transition updates the lookAt target. */
+  onTargetUpdate?: (x: number, y: number, z: number) => void
+}
+
 function clampFov(fov: number): number {
   return Math.min(FOV_MAX, Math.max(FOV_MIN, fov))
 }
@@ -24,6 +34,8 @@ function clampFov(fov: number): number {
 export class DirectorCamera {
   currentShot: CameraShot
   private activeTimeline: gsap.core.Timeline | null = null
+  /** Optional hooks for orbit synchronization (set by WallCameraControls). */
+  hooks: DirectorCameraHooks = {}
 
   constructor(private readonly camera: PerspectiveCamera) {
     // Default: a neutral overview shot; callers snapTo a real preset at init.
@@ -96,7 +108,10 @@ export class DirectorCamera {
   transitionTo(shot: CameraShot): gsap.core.Timeline {
     if (this.activeTimeline) this.activeTimeline.kill()
 
-    const tl = gsap.timeline()
+    this.hooks.onTransitionStart?.()
+    const tl = gsap.timeline({
+      onComplete: () => this.hooks.onTransitionComplete?.(shot),
+    })
     this.currentShot = shot
 
     const fovTarget = clampFov(shot.fov)
@@ -123,6 +138,7 @@ export class DirectorCamera {
       ease: shot.ease,
       onUpdate: () => {
         this.camera.lookAt(lookProxy.x, lookProxy.y, lookProxy.z)
+        this.hooks.onTargetUpdate?.(lookProxy.x, lookProxy.y, lookProxy.z)
       },
     }, 0)
     tl.to(this.camera, {
@@ -151,6 +167,8 @@ export class DirectorCamera {
     this.camera.lookAt(shot.target.x, shot.target.y, shot.target.z)
     this.camera.fov = clampFov(shot.fov)
     this.camera.updateProjectionMatrix()
+    // Sync orbit target immediately for snap jumps.
+    this.hooks.onTargetUpdate?.(shot.target.x, shot.target.y, shot.target.z)
   }
 }
 

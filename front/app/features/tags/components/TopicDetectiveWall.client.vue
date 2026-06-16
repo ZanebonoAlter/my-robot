@@ -9,7 +9,7 @@
  *
  * @see design.md §Architecture Overview
  */
-import { ref, onMounted, onBeforeUnmount, watch } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import { Icon } from '@iconify/vue'
 import { useDailyReportsApi } from '~/api/dailyReports'
 import type { SectionTimelineNode, SectionRelation, DailyReportThread } from '~/api/dailyReports'
@@ -17,6 +17,7 @@ import { useArticlesApi } from '~/api/articles'
 import { TopicWallScene } from './detective-wall/TopicWallScene'
 import { DirectorCamera } from './detective-wall/DirectorCamera'
 import { InteractionLayer } from './detective-wall/InteractionLayer'
+import { WallCameraControls } from './detective-wall/WallCameraControls'
 import { SUPPORTED_DAYS } from './detective-wall/types'
 import { latestDayX } from './detective-wall/utils'
 
@@ -26,7 +27,7 @@ const emit = defineEmits<{
   openArticle: [articleId: number]
 }>()
 
-const { getBoardSectionTimeline, getDailyReportDetail } = useDailyReportsApi()
+const { getBoardSectionTimeline, getDailyReportDetail, getSectionLifecycle } = useDailyReportsApi()
 const { getArticle } = useArticlesApi()
 
 const canvasRef = ref<HTMLCanvasElement | null>(null)
@@ -46,6 +47,9 @@ const lifelineNodes = ref<SectionTimelineNode[]>([])
 const expandedNodeId = ref<number | null>(null)
 const nodeThreads = ref<Map<number, DailyReportThread[]>>(new Map())
 const nodeThreadsLoading = ref<number | null>(null)
+// Full lifecycle mode (spec §面板操作 查看完整生命周期).
+const lifecycleActive = ref(false)
+const lifecycleLoading = ref(false)
 
 // --- WebGL detection ---
 function hasWebGL(): boolean {
@@ -61,6 +65,7 @@ const webglOk = hasWebGL()
 let scene: TopicWallScene | null = null
 let directorCamera: DirectorCamera | null = null
 let interaction: InteractionLayer | null = null
+let cameraControls: WallCameraControls | null = null
 let resizeObserver: ResizeObserver | null = null
 
 onMounted(async () => {
@@ -78,6 +83,11 @@ onMounted(async () => {
     },
     onStringClick: () => { /* handled internally via re-BFS */ },
     onBackgroundClick: () => {
+      if (lifecycleActive.value) {
+        // Lifecycle mode: background click exits back to the timeline.
+        exitLifecycle()
+        return
+      }
       showDetailPanel.value = false
       focusedNode.value = null
       lifelineNodes.value = []
@@ -90,6 +100,19 @@ onMounted(async () => {
   })
   interaction.enable()
 
+  // Orbit-style pan + zoom (2.5D, rotation disabled). Coordinates with
+  // DirectorCamera via hooks (disable during transitions, sync target).
+  cameraControls = new WallCameraControls(
+    scene.camera,
+    canvasRef.value,
+    directorCamera,
+    {
+      onInteractStart: () => interaction?.setHoverSuspended(true),
+      onInteractEnd: () => interaction?.setHoverSuspended(false),
+    },
+  )
+  scene.addFrameCallback(() => cameraControls?.update())
+
   scene.startRenderLoop()
 
   resizeObserver = new ResizeObserver(() => {
@@ -98,8 +121,22 @@ onMounted(async () => {
   })
   resizeObserver.observe(canvasRef.value)
 
+  // ESC: close detail panel (or exit lifecycle) first, then exit the wall.
+  window.addEventListener('keydown', onKeyDown)
+
   await loadBoardData()
 })
+
+function onKeyDown(e: KeyboardEvent) {
+  if (e.key !== 'Escape') return
+  if (lifecycleActive.value) {
+    exitLifecycle()
+  } else if (showDetailPanel.value) {
+    closePanel()
+  } else {
+    close()
+  }
+}
 
 async function loadBoardData() {
   if (!scene || !interaction) return
@@ -141,14 +178,24 @@ function setDays(d: 7 | 14 | 30 | 60) {
 }
 
 onBeforeUnmount(() => {
+  window.removeEventListener('keydown', onKeyDown)
   resizeObserver?.disconnect()
   interaction?.dispose()
+  cameraControls?.dispose()
   scene?.dispose()
   scene = null
 })
 
 function close() {
   emit('close')
+}
+
+/** Close just the detail panel (stay in 3D). Mirrors InteractionLayer.resetToOverview. */
+function closePanel() {
+  interaction?.resetToOverview()
+  showDetailPanel.value = false
+  focusedNode.value = null
+  lifelineNodes.value = []
 }
 
 function openArticle(id: number) {
@@ -183,27 +230,106 @@ async function toggleNodeThreads(node: SectionTimelineNode) {
   }
 }
 
-async function openThreadFirstArticle(thread: DailyReportThread) {
-  const id = thread.related_article_ids?.[0]
-  if (id != null) {
-    emit('openArticle', id)
+// --- §线索下钻:点击 thread 展开其文章列表,再点击具体文章才跳转 ---
+// (之前直接取 related_article_ids[0],多篇文章时无法选择。)
+const expandedThreadId = ref<number | null>(null)
+const threadArticles = ref<Map<number, { id: number; title: string }[]>>(new Map())
+const threadArticlesLoading = ref<number | null>(null)
+
+/** Toggle a thread's article list open/closed, fetching titles lazily. */
+async function toggleThreadArticles(thread: DailyReportThread) {
+  if (expandedThreadId.value === thread.id) {
+    expandedThreadId.value = null
+    return
+  }
+  expandedThreadId.value = thread.id
+  // Already fetched for this thread → keep cached list.
+  if (threadArticles.value.has(thread.id)) return
+
+  const ids = thread.related_article_ids ?? []
+  if (ids.length === 0) return
+
+  threadArticlesLoading.value = thread.id
+  try {
+    // Fetch titles for up to 10 articles (mirror BoardThreadBrowser's cap).
+    const batch = ids.slice(0, 10)
+    const results = await Promise.allSettled(batch.map(id => getArticle(id)))
+    const articles = results.map((r, i) => {
+      const aid = batch[i]!
+      if (r.status === 'fulfilled' && r.value.success && r.value.data) {
+        return { id: aid, title: r.value.data.title || '(无标题)' }
+      }
+      return { id: aid, title: `文章 #${aid}` }
+    })
+    threadArticles.value = new Map(threadArticles.value).set(thread.id, articles)
+  } finally {
+    threadArticlesLoading.value = null
   }
 }
 
-/** Resolve a thread's first article title for display (best-effort). */
-const threadTitles = ref<Map<number, string>>(new Map())
-async function ensureThreadTitle(thread: DailyReportThread) {
-  if (threadTitles.value.has(thread.id)) return
-  const id = thread.related_article_ids?.[0]
-  if (id == null) return
-  try {
-    const res = await getArticle(id)
-    if (res.success && res.data) {
-      threadTitles.value = new Map(threadTitles.value).set(thread.id, res.data.title || '(无标题)')
-    }
-  } catch {
-    // best-effort; title stays as the thread title.
+// --- §完整生命周期 (spec §面板操作 查看完整生命周期) ---
+// Status → 中文标签 (panel + tooltip 共用).
+const STATUS_LABELS: Record<string, string> = {
+  emerging: '新兴',
+  continuing: '持续',
+  split: '分化',
+  merge: '合并',
+  ending: '结束',
+}
+function statusLabel(status: string): string {
+  return STATUS_LABELS[status] ?? status
+}
+
+// Aggregate stats across the current lifeline/lifecycle node set.
+const lifelineSummary = computed(() => {
+  const nodes = lifelineNodes.value
+  let articles = 0
+  let threads = 0
+  const statusCounts = new Map<string, number>()
+  for (const n of nodes) {
+    articles += n.article_count
+    threads += n.thread_count
+    statusCounts.set(n.status, (statusCounts.get(n.status) ?? 0) + 1)
   }
+  return { articles, threads, statusCounts }
+})
+
+// Enter: fetch the topic's full evolution (no day limit), rebuild the scene
+// with only that line, disable fog, move camera to lifecycleFull.
+async function enterLifecycle(sectionId: number) {
+  if (!interaction || lifecycleActive.value) return
+  lifecycleLoading.value = true
+  try {
+    const res = await getSectionLifecycle(sectionId)
+    if (!res.success || !res.data) return
+    const lcSections = res.data.sections
+    const lcRelations = res.data.relations
+    // Derive a date window spanning the lifecycle's own range.
+    const dates = lcSections.map(s => s.period_date.slice(0, 10)).sort()
+    const dateRange = {
+      start: dates[0] ?? '',
+      end: dates[dates.length - 1] ?? '',
+    }
+    interaction.enterLifecycle(lcSections, lcRelations, dateRange)
+    lifecycleActive.value = true
+    // Panel reflects the lifecycle node set.
+    lifelineNodes.value = lcSections
+  } finally {
+    lifecycleLoading.value = false
+  }
+}
+
+// Exit: re-enable fog for the timeline window, reload the timeline data, and
+// return the camera to the today-focus shot.
+async function exitLifecycle() {
+  if (!interaction || !lifecycleActive.value) return
+  interaction.exitLifecycle()
+  lifecycleActive.value = false
+  focusedNode.value = null
+  lifelineNodes.value = []
+  showDetailPanel.value = false
+  // Reload the timeline (restores cards + fog for the current days window).
+  await loadBoardData()
 }
 </script>
 
@@ -241,56 +367,118 @@ async function ensureThreadTitle(thread: DailyReportThread) {
         <div class="tdw-detail-title">{{ focusedNode.cluster_label }}</div>
         <div class="tdw-detail-meta">
           <span>{{ focusedNode.article_count }}篇 · {{ focusedNode.thread_count }}线索</span>
-          <span class="tdw-detail-status">{{ focusedNode.status }}</span>
+          <span class="tdw-detail-status">{{ statusLabel(focusedNode.status) }}</span>
+        </div>
+        <!-- Lifeline/lifecycle aggregate summary -->
+        <div v-if="lifelineNodes.length > 0" class="tdw-detail-summary">
+          <span>共 {{ lifelineSummary.articles }}篇 · {{ lifelineSummary.threads }}线索</span>
+          <span
+            v-for="[status, count] in lifelineSummary.statusCounts"
+            :key="status"
+            class="tdw-summary-chip"
+          >
+            <span class="tdw-summary-dot" :class="`tdw-status-${status}`" />
+            {{ statusLabel(status) }} {{ count }}
+          </span>
         </div>
         <div v-if="lifelineNodes.length > 0" class="tdw-detail-lifeline">
-          <div class="tdw-detail-section-label">生命线 ({{ lifelineNodes.length }}节点)</div>
-          <div
-            v-for="n in lifelineNodes.slice(0, 10)"
-            :key="n.id"
-            class="tdw-lifeline-node"
-          >
+          <div class="tdw-detail-section-label">
+            {{ lifecycleActive ? '完整生命周期' : '生命线' }} ({{ lifelineNodes.length }}节点)
+          </div>
+          <div class="tdw-lifeline-list">
             <div
-              class="tdw-lifeline-item"
-              :class="{ 'tdw-lifeline-item--expanded': expandedNodeId === n.id }"
-              @click="toggleNodeThreads(n)"
+              v-for="n in lifelineNodes"
+              :key="n.id"
+              class="tdw-lifeline-node"
             >
-              <span class="tdw-lifeline-date">{{ n.period_date.slice(0, 10) }}</span>
-              <span class="tdw-lifeline-label">{{ n.cluster_label }}</span>
-              <Icon icon="mdi:chevron-right" width="12" class="tdw-lifeline-arrow" />
-            </div>
-
-            <!-- Expanded threads for this lifeline node (spec §面板操作 查看详细线索) -->
-            <div v-if="expandedNodeId === n.id" class="tdw-lifeline-threads">
-              <div v-if="nodeThreadsLoading === n.id" class="tdw-lifeline-threads-loading">
-                加载中…
+              <div
+                class="tdw-lifeline-item"
+                :class="{ 'tdw-lifeline-item--expanded': expandedNodeId === n.id }"
+                @click="toggleNodeThreads(n)"
+              >
+                <span class="tdw-lifeline-date">{{ n.period_date.slice(0, 10) }}</span>
+                <span class="tdw-lifeline-label">{{ n.cluster_label }}</span>
+                <Icon icon="mdi:chevron-right" width="12" class="tdw-lifeline-arrow" />
               </div>
-              <template v-else>
-                <div
-                  v-for="thread in (nodeThreads.get(n.id) || [])"
-                  :key="thread.id"
-                  class="tdw-lifeline-thread"
-                  @click="openThreadFirstArticle(thread); ensureThreadTitle(thread)"
-                >
-                  <Icon icon="mdi:file-document-outline" width="11" class="tdw-lifeline-thread-icon" />
-                  <span class="tdw-lifeline-thread-title">
-                    {{ threadTitles.get(thread.id) || thread.title }}
-                  </span>
-                  <span v-if="thread.related_article_ids?.length" class="tdw-lifeline-thread-count">
-                    {{ thread.related_article_ids.length }}篇
-                  </span>
+
+              <!-- Expanded threads for this lifeline node (spec §面板操作 查看详细线索) -->
+              <div v-if="expandedNodeId === n.id" class="tdw-lifeline-threads">
+                <div v-if="nodeThreadsLoading === n.id" class="tdw-lifeline-threads-loading">
+                  加载中…
                 </div>
-                <div
-                  v-if="(nodeThreads.get(n.id) || []).length === 0"
-                  class="tdw-lifeline-threads-empty"
-                >
-                  无关联线索
-                </div>
-              </template>
+                <template v-else>
+                  <div
+                    v-for="thread in (nodeThreads.get(n.id) || [])"
+                    :key="thread.id"
+                    class="tdw-lifeline-thread-wrap"
+                  >
+                    <div
+                      class="tdw-lifeline-thread"
+                      :class="{ 'tdw-lifeline-thread--expanded': expandedThreadId === thread.id }"
+                      @click="toggleThreadArticles(thread)"
+                    >
+                      <Icon icon="mdi:chevron-right" width="11" class="tdw-lifeline-thread-arrow" />
+                      <span class="tdw-lifeline-thread-title">{{ thread.title }}</span>
+                      <span v-if="thread.related_article_ids?.length" class="tdw-lifeline-thread-count">
+                        {{ thread.related_article_ids.length }}篇
+                      </span>
+                    </div>
+
+                    <!-- Article list (click an article to open its preview). -->
+                    <div v-if="expandedThreadId === thread.id" class="tdw-thread-articles">
+                      <div v-if="threadArticlesLoading === thread.id" class="tdw-thread-articles-loading">
+                        加载中…
+                      </div>
+                      <template v-else>
+                        <div
+                          v-for="art in (threadArticles.get(thread.id) || [])"
+                          :key="art.id"
+                          class="tdw-thread-article"
+                          @click="openArticle(art.id)"
+                        >
+                          <Icon icon="mdi:file-document-outline" width="10" class="tdw-thread-article-icon" />
+                          <span class="tdw-thread-article-title">{{ art.title }}</span>
+                          <Icon icon="mdi:open-in-new" width="9" class="tdw-thread-article-external" />
+                        </div>
+                        <div
+                          v-if="thread.related_article_ids && thread.related_article_ids.length > 10"
+                          class="tdw-thread-articles-more"
+                        >
+                          还有 {{ thread.related_article_ids.length - 10 }} 篇…
+                        </div>
+                        <div
+                          v-if="(threadArticles.get(thread.id) || []).length === 0"
+                          class="tdw-thread-articles-empty"
+                        >
+                          无关联文章
+                        </div>
+                      </template>
+                    </div>
+                  </div>
+                  <div
+                    v-if="(nodeThreads.get(n.id) || []).length === 0"
+                    class="tdw-lifeline-threads-empty"
+                  >
+                    无关联线索
+                  </div>
+                </template>
+              </div>
             </div>
           </div>
         </div>
-        <button class="tdw-btn tdw-btn-back" @click="close">返回总览</button>
+        <!-- Lifecycle entry (only in BFS lifeline mode, not already in lifecycle). -->
+        <button
+          v-if="!lifecycleActive"
+          class="tdw-btn tdw-btn-lifecycle"
+          :disabled="lifecycleLoading"
+          @click="enterLifecycle(focusedNode.id)"
+        >
+          <Icon icon="mdi:timeline-clock-outline" width="14" />
+          <span>{{ lifecycleLoading ? '加载中…' : '查看完整生命周期' }}</span>
+        </button>
+        <button class="tdw-btn tdw-btn-back" @click="lifecycleActive ? exitLifecycle() : closePanel()">
+          {{ lifecycleActive ? '返回时间线' : '关闭面板' }}
+        </button>
       </div>
     </Transition>
 
@@ -405,6 +593,37 @@ async function ensureThreadTitle(thread: DailyReportThread) {
   color: #DC2626;
   font-weight: 600;
 }
+/* Lifeline/lifecycle aggregate summary */
+.tdw-detail-summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.68rem;
+  color: #4B5563;
+  padding: 0.35rem 0;
+  border-top: 1px dashed rgba(26, 26, 26, 0.12);
+  border-bottom: 1px dashed rgba(26, 26, 26, 0.12);
+  margin-bottom: 0.5rem;
+}
+.tdw-summary-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+}
+.tdw-summary-dot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #9ca3af;
+}
+/* Status colors mirror STYLE.statusColors (types.ts). */
+.tdw-status-emerging { background: #16a34a; }
+.tdw-status-continuing { background: #2563eb; }
+.tdw-status-split { background: #ea580c; }
+.tdw-status-merge { background: #9333ea; }
+.tdw-status-ending { background: #9ca3af; }
 .tdw-detail-section-label {
   font-size: 0.7rem;
   color: #4B5563;
@@ -450,7 +669,12 @@ async function ensureThreadTitle(thread: DailyReportThread) {
   transition: background 0.1s ease;
 }
 .tdw-lifeline-thread:hover { background: rgba(220, 38, 38, 0.08); }
-.tdw-lifeline-thread-icon { color: #6B7280; flex-shrink: 0; }
+.tdw-lifeline-thread-arrow {
+  color: #6B7280;
+  flex-shrink: 0;
+  transition: transform 0.12s ease;
+}
+.tdw-lifeline-thread--expanded .tdw-lifeline-thread-arrow { transform: rotate(90deg); }
 .tdw-lifeline-thread-title {
   flex: 1;
   font-size: 0.72rem;
@@ -464,7 +688,62 @@ async function ensureThreadTitle(thread: DailyReportThread) {
   color: #6B7280;
   flex-shrink: 0;
 }
+/* Expanded article list under a thread */
+.tdw-thread-articles {
+  padding: 0.15rem 0 0.25rem 1.1rem;
+}
+.tdw-thread-articles-loading,
+.tdw-thread-articles-empty {
+  font-size: 0.65rem;
+  color: #6B7280;
+  padding: 0.15rem 0;
+}
+.tdw-thread-article {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.18rem 0.25rem;
+  border-radius: 3px;
+  cursor: pointer;
+  transition: background 0.1s ease;
+}
+.tdw-thread-article:hover { background: rgba(220, 38, 38, 0.08); }
+.tdw-thread-article-icon { color: #9CA3AF; flex-shrink: 0; }
+.tdw-thread-article-title {
+  flex: 1;
+  font-size: 0.66rem;
+  color: #374151;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tdw-thread-article:hover .tdw-thread-article-title { color: #DC2626; }
+.tdw-thread-article-external { color: #9CA3AF; flex-shrink: 0; }
+.tdw-thread-articles-more {
+  font-size: 0.6rem;
+  color: #9CA3AF;
+  padding: 0.1rem 0.25rem;
+}
 .tdw-btn-back { margin-top: 0.75rem; width: 100%; justify-content: center; }
+.tdw-btn-lifecycle {
+  margin-top: 0.5rem;
+  width: 100%;
+  justify-content: center;
+  border-color: rgba(220, 38, 38, 0.4);
+  color: #DC2626;
+}
+.tdw-btn-lifecycle:hover:not(:disabled) {
+  background: rgba(220, 38, 38, 0.1);
+}
+.tdw-btn-lifecycle:disabled {
+  opacity: 0.6;
+  cursor: wait;
+}
+/* Scrollable lifeline node list (was slice(0,10); now unlimited + scrolls). */
+.tdw-lifeline-list {
+  max-height: 40vh;
+  overflow-y: auto;
+}
 
 /* motion-v-style transition (Vue <Transition>) */
 .tdw-panel-enter-active, .tdw-panel-leave-active {

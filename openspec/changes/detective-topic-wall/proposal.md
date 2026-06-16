@@ -11,8 +11,9 @@
 - **红线连接**：风格化直线（不做物理悬垂），`CatmullRomCurve3` → `Line2`，发光材质，选中时脉动动画
 - **迷雾系统**：`FogExp2` 遮蔽时间窗口外的区域，切换时间范围时迷雾推进/后退（GSAP 动画）
 - **导演相机**：GSAP Timeline 驱动的运镜系统，默认聚焦今天，支持总览/聚焦/飞越三种镜头
-- **板块切换转场**：红色 wipe 扫过 → 档案封面浮现（打字机字体、CONFIDENTIAL 盖章）→ 相机飞入新板块
-- **话题聚焦模式（BFS 生命线）**：点击卡片后 BFS 沿 relations 扩展，严格受日期窗口约束，只点亮窗口内节点，非相关卡片退入背景
+- **相机拖拽（OrbitControls）**：鼠标拖拽平移相机 + 滚轮缩放（禁旋转，保持 2.5D 轴测视角）。封装为 `WallCameraControls`，与 DirectorCamera 的 GSAP 运镜协调——运镜期间禁用 orbit、每帧同步 target
+- **板块切换转场**：红色 wipe 扫过 → 档案封面浮现（打字机字体、CONFIDENTIAL 盖章）→ 相机飞入新板块（当前无 BoardSelector 入口，`ChapterTransition.ts` 类保留待用，watch/DOM 已移除）
+- **话题聚焦模式（BFS 生命线）**：点击卡片后 BFS 沿 relations 扩展，严格受日期窗口约束，只点亮窗口内节点，非相关卡片退入背景。动画按 BFS depth（跳数）stagger 点亮，从焦点向外扩散
 - **完整生命周期视图**：点击"查看完整生命周期"调用 `getSectionLifecycle(id)`（不限天数），迷雾消失，只渲染该话题的完整演化线
 - **2D 详情面板叠加**：详情面板用普通 Vue overlay（`position: fixed` 屏幕固定位置，motion-v 过渡）叠加在 3D 场景上，呈现案件档案风格（案件编号、线索链、文章列表）；卡片悬停 tooltip 才用 CSS2DRenderer（跟随 3D 卡片坐标）
 - **后处理管线**：FilmGrain + Vignette + Bloom（红线发光），使用 `pmndrs/postprocessing`
@@ -22,7 +23,7 @@
 
 ### New Capabilities
 - `detective-wall-scene`: Three.js 3D 侦探照片墙场景，含卡片、红线、迷雾、光照、后处理管线
-- `detective-wall-camera`: 导演相机系统，GSAP 驱动的运镜（聚焦今天、板块飞越、话题追踪），板块切换的档案封面转场
+- `detective-wall-camera`: 导演相机系统，GSAP 驱动的运镜（聚焦今天、板块飞越、话题追踪）+ OrbitControls 拖拽平移/缩放（WallCameraControls，禁旋转）+ 板块切换的档案封面转场
 - `detective-wall-interaction`: 交互层——点击卡片触发 BFS 生命线展开（日期窗口约束）、Raycaster 悬停/点击、2D 面板叠加、时间范围切换
 
 ### Modified Capabilities
@@ -34,14 +35,16 @@
 - **新增文件**：
   - `features/tags/components/TopicDetectiveWall.client.vue`（全屏 3D 容器 + Vue 状态管理）
   - `features/tags/components/detective-wall/`（Three.js 场景子模块）
-    - `TopicWallScene.ts`（场景管理、渲染循环）
-    - `CardGroup.ts`（卡片+图钉创建、布局）
+    - `TopicWallScene.ts`（场景管理、渲染循环、光照引用保存、frameCallbacks）
+    - `CardGroup.ts`（卡片+图钉创建、布局、CSS2D tooltip）
     - `RedString.ts`（红线连接创建、drawProgress 动画）
     - `FogSystem.ts`（迷雾密度管理、时间窗口联动）
-    - `DirectorCamera.ts`（相机运镜、Shot 类型定义）
+    - `DirectorCamera.ts`（相机运镜、Shot 类型定义、orbit 同步 hooks）
+    - `WallCameraControls.ts`（OrbitControls 封装，pan+zoom，与 DirectorCamera 协调）
     - `WallPostProcessing.ts`（后处理管线 setup）
-    - `InteractionLayer.ts`（Raycaster、hover/click）
-    - `ChapterTransition.ts`（板块切换转场、档案封面）
+    - `InteractionLayer.ts`（Raycaster、hover/click、BFS、lifecycle 编排、tooltip 转发）
+    - `lighting.ts`（Ambient+Spot+跟随光+选中光，返回引用供每帧更新）
+    - `ChapterTransition.ts`（板块切换转场、档案封面；当前无入口，类保留待用）
   - `features/tags/components/detective-wall/shaders/`（自定义 shader：卡片纸纹理、迷雾、红线脉动）
 - **修改文件**：
   - `features/tags/components/BoardThreadBrowser.vue`：添加"进入侦探墙"按钮

@@ -7,8 +7,15 @@
 ### DirectorCamera
 
 ```typescript
+interface DirectorCameraHooks {
+  onTransitionStart?: () => void                         // 运镜开始：orbit 禁用
+  onTransitionComplete?: (shot: CameraShot) => void      // 运镜完成：orbit 重启用
+  onTargetUpdate?: (x: number, y: number, z: number) => void  // 每帧同步 orbit target
+}
+
 class DirectorCamera {
-  constructor(camera: THREE.PerspectiveCamera, scene: TopicWallScene)
+  constructor(camera: THREE.PerspectiveCamera)
+  hooks: DirectorCameraHooks   // 由 WallCameraControls 注入
 
   // 当前镜头
   currentShot: CameraShot
@@ -21,7 +28,7 @@ class DirectorCamera {
 
   // 运镜
   transitionTo(shot: CameraShot): gsap.core.Timeline
-  // 返回 Timeline，外部可以 .then() 或组合
+  // 返回 Timeline；transitionTo/lookProxy.onUpdate/snapTo 均触发 hooks 以同步 orbit
 
   // 即时跳转（无动画，初始化用）
   snapTo(shot: CameraShot): void
@@ -81,9 +88,82 @@ lifecycleFull(totalWidth):
   • camera.lookAt(target) 在 GSAP 的 onUpdate 中调用，跟随 target 插值
   • fov 变化不能超过 35~65 范围
   • 相机 Y 值不能低于 2（不能跑到卡片平面以下）
+  • transitionTo/snapTo 触发 hooks：onTransitionStart（orbit 禁用）→
+    onTargetUpdate（每帧同步 orbit target）→ onTransitionComplete（orbit 重启用）
 ```
 
+## Wall Camera Controls（OrbitControls 平移/缩放）
+
+> 侦探墙是 2.5D 软木墙隐喻，相机只需沿墙平移 + 缩放，不需旋转（避免翻到墙后迷失）。
+
+### WallCameraControls
+
+```typescript
+class WallCameraControls {
+  constructor(
+    camera: THREE.PerspectiveCamera,
+    domElement: HTMLElement,
+    directorCamera: DirectorCamera,
+    hooks?: { onInteractStart?: () => void; onInteractEnd?: () => void }
+  )
+  readonly controls: OrbitControls   // three/examples/jsm/controls/OrbitControls.js
+  update(): void                     // 每帧调用（注册到 scene.addFrameCallback）
+  dispose(): void
+}
+```
+
+### 配置
+
+```
+OrbitControls 配置:
+  enableRotate: false              // 禁旋转，保持轴测"看墙"视角
+  enablePan: true                  // 左键拖拽平移
+  enableZoom: true                 // 滚轮缩放
+  mouseButtons: { LEFT: MOUSE.PAN, MIDDLE: MOUSE.DOLLY, RIGHT: MOUSE.PAN }
+  minDistance: 3                   // 缩放下限
+  maxDistance: 40                  // 缩放上限
+```
+
+### 与 DirectorCamera 的协调（核心难点）
+
+```
+问题: DirectorCamera 的 GSAP transition 直接写 camera.position + lookAt；
+      OrbitControls 用自己的 target 重算 position。两者会互相打架——
+      transitionTo 后第一次 orbit.update() 会把相机拉回 orbit.target 附近。
+
+协调（通过 DirectorCameraHooks）:
+  onTransitionStart   → controls.enabled = false（运镜期间禁用 orbit）
+  onTargetUpdate(x,y,z) → controls.target.set(x,y,z)（运镜中同步 target）
+  onTransitionComplete → controls.enabled = true（重启用）
+```
+
+### 拖拽期间暂停 hover
+
+```
+OrbitControls 'start' 事件 → interaction.setHoverSuspended(true)（拖拽时不 raycast）
+OrbitControls 'end' 事件   → interaction.setHoverSuspended(false)
+→ 避免拖拽平移时卡片 hover 动画乱跳
+```
+
+### 渲染循环
+
+```
+scene.addFrameCallback(() => controls.update())  // 每帧 update 才能应用 pan
+→ TopicWallScene.tick 在 composer.render 前调用所有 frameCallbacks
+```
+
+### 依赖
+
+- `@types/three`（devDep，已安装）：补充 OrbitControls/CSS2DRenderer/Line2 的 jsm 类型。
+  注：早期存在的 `front/three.d.ts`（`declare module 'three'`）会遮蔽 @types/three 使
+  全部 three 导入变 any，已在 1.1 任务删除；@types/three 是补充类型不遮蔽。
+
 ## Chapter Transition
+
+> **当前状态**：本 change 无 BoardSelector 入口，板块切换转场暂未启用。
+> `ChapterTransition.ts` 类实现保留（供后续补 BoardSelector 时复用），但 Vue 层的
+> `watch(boardId)`、wipe/cover DOM、ChapterTransition 实例化均已移除（避免死代码）。
+> 以下设计文档保留，待 BoardSelector 落地时按此实现。
 
 ### ChapterTransition
 

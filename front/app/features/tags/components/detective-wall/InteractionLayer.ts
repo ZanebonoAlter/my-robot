@@ -42,6 +42,8 @@ export class InteractionLayer {
   private pendingPointer: { x: number; y: number } | null = null
   private rafScheduled = false
   private downPos: { x: number; y: number } | null = null
+  /** When true (e.g. during orbit drag), hover raycasting is skipped. */
+  private hoverSuspended = false
 
   // Cached data for BFS
   private currentSections: SectionTimelineNode[] = []
@@ -58,6 +60,12 @@ export class InteractionLayer {
     // Widen the Line2 click/hover band so thin red strings stay easy to hit.
     // Raycaster.params.Line2 is not defined by default, so create it here.
     this.raycaster.params.Line2 = { threshold: STRING_RAYCAST_PADDING_PX }
+  }
+
+  /** Suspend/resume hover (used by orbit controls during drag). */
+  setHoverSuspended(suspended: boolean): void {
+    this.hoverSuspended = suspended
+    if (suspended) this.clearHover()
   }
 
   /** Cache the latest board data (called by TopicWallScene.loadBoardData). */
@@ -79,6 +87,8 @@ export class InteractionLayer {
     this.canvas.addEventListener('pointermove', this.onPointerMove)
     this.canvas.addEventListener('pointerdown', this.onPointerDown)
     this.canvas.addEventListener('pointerup', this.onPointerUp)
+    // Tooltip clicks (CSS2D label sits above the mesh) forward to card clicks.
+    this.scene.css2d.domElement.addEventListener('click', this.onTooltipClick)
   }
 
   disable(): void {
@@ -86,6 +96,18 @@ export class InteractionLayer {
     this.canvas.removeEventListener('pointermove', this.onPointerMove)
     this.canvas.removeEventListener('pointerdown', this.onPointerDown)
     this.canvas.removeEventListener('pointerup', this.onPointerUp)
+    this.scene.css2d.domElement.removeEventListener('click', this.onTooltipClick)
+  }
+
+  /** Forward a click on a CSS2D tooltip element to its card's click handler. */
+  private onTooltipClick = (e: MouseEvent) => {
+    const target = e.target as HTMLElement | null
+    const el = target?.closest<HTMLElement>('[data-card-id]')
+    if (!el) return
+    const id = Number(el.dataset.cardId)
+    if (Number.isNaN(id)) return
+    const card = this.scene.cardGroup.getCardById(id)
+    if (card) this.handleCardClick(card)
   }
 
   // --- Event handlers ---
@@ -124,7 +146,7 @@ export class InteractionLayer {
 
   private processHover = () => {
     this.rafScheduled = false
-    if (!this.enabled || !this.pendingPointer) return
+    if (!this.enabled || !this.pendingPointer || this.hoverSuspended) return
     this.updatePointer(this.pendingPointer.x, this.pendingPointer.y)
     this.pendingPointer = null
 
@@ -182,10 +204,11 @@ export class InteractionLayer {
       this.handleStringClick(str)
       return
     }
-    // Background click → reset.
-    if (this.state.mode !== 'idle') {
+    // Background click → reset (focusing) or notify Vue (lifecycle/idle).
+    if (this.state.mode === 'focusing') {
       this.resetToOverview()
     } else {
+      // lifecycle & idle: let Vue decide (lifecycle exit requires re-fetch).
       this.callbacks.onBackgroundClick()
     }
   }
@@ -217,6 +240,14 @@ export class InteractionLayer {
   }
 
   private handleCardClick(card: PinCard): void {
+    // In lifecycle mode the whole scene IS one lifecycle line — no BFS.
+    // Just refocus the selection light + notify Vue (panel updates).
+    if (this.state.mode === 'lifecycle') {
+      this.state.focusedNodeId = card.data.id
+      this.scene.setSelectionLight(card)
+      this.callbacks.onCardClick(card)
+      return
+    }
     // Same card in focusing mode → reset.
     if (this.state.mode === 'focusing' && this.state.focusedNodeId === card.data.id) {
       this.resetToOverview()
@@ -248,20 +279,21 @@ export class InteractionLayer {
       result.edges.has(edgeKey(r.from_id, r.to_id)),
     )
 
-    this.playLifelineAnimation(card, result.nodes, result.edges)
+    this.playLifelineAnimation(card, result.nodes, result.depth)
+    this.scene.setSelectionLight(card)
     this.callbacks.onCardClick(card)
     this.callbacks.onLifelineReady(lifelineNodes, lifelineEdges, card.data)
   }
 
-  /** GSAP timeline: dim non-lifeline cards → camera focus → stagger highlights. */
+  /** GSAP timeline: dim non-lifeline cards → camera focus → stagger highlights by BFS depth. */
   private playLifelineAnimation(
     card: PinCard,
     nodeIds: Set<number>,
-    _edgeKeys: Set<string>,
+    depth: Map<number, number>,
   ): void {
     const tl = gsap.timeline()
 
-    // Dim non-lifeline cards (stagger).
+    // Dim non-lifeline cards (stagger by index — order is cosmetic here).
     const dimCards = this.scene.cardGroup.cards.filter(c => !nodeIds.has(c.data.id))
     dimCards.forEach((c, i) => {
       tl.add(() => c.dim(), i * 0.02)
@@ -273,17 +305,20 @@ export class InteractionLayer {
       this.directorCamera.transitionTo(shot)
     }, 0)
 
-    // Highlight lifeline nodes + draw their strings (stagger by index as depth proxy).
+    // Highlight lifeline nodes + draw their strings, staggered by BFS depth from
+    // the focus (depth 0 = immediate, depth N = N * 0.08s). Spec §BFS 动画序列.
     const lifelineCards = this.scene.cardGroup.cards.filter(c => nodeIds.has(c.data.id))
-    lifelineCards.forEach((c, i) => {
-      tl.add(() => c.highlight(), 0.1 + i * 0.04)
+    lifelineCards.forEach((c) => {
+      const d = depth.get(c.data.id) ?? 0
+      const nodeDelay = 0.1 + d * 0.08
+      tl.add(() => c.highlight(), nodeDelay)
       // Draw connected strings slightly before the node.
       for (const str of this.scene.redStrings.strings) {
         if (
           (str.fromId === c.data.id && nodeIds.has(str.toId)) ||
           (str.toId === c.data.id && nodeIds.has(str.fromId))
         ) {
-          tl.add(() => str.highlight(), 0.05 + i * 0.04)
+          tl.add(() => str.highlight(), nodeDelay - 0.05)
         }
       }
     })
@@ -315,8 +350,47 @@ export class InteractionLayer {
     this.state.lifelineNodeIds.clear()
     this.state.lifelineEdgeKeys.clear()
     this.scene.cardGroup.resetAll()
+    this.scene.setSelectionLight(null)
     for (const str of this.scene.redStrings.strings) str.reset()
     this.callbacks.onBackgroundClick()
+  }
+
+  /**
+   * Enter full lifecycle mode (spec §面板操作 查看完整生命周期).
+   * Vue fetches lifecycle data via getSectionLifecycle and passes it here;
+   * this rebuilds the scene with only that topic's evolution line, disables
+   * fog, and moves the camera to the lifecycleFull shot.
+   */
+  enterLifecycle(
+    sections: SectionTimelineNode[],
+    relations: SectionRelation[],
+    dateRange: DateRange,
+  ): void {
+    this.currentSections = sections
+    this.currentRelations = relations
+    this.currentDateRange = dateRange
+    // Distinct day count → column count for layout + camera framing.
+    const dayCount = new Set(sections.map(s => s.period_date.slice(0, 10))).size
+    this.state.mode = 'lifecycle'
+    this.state.focusedNodeId = null
+    this.state.lifelineNodeIds.clear()
+    this.state.lifelineEdgeKeys.clear()
+    this.scene.loadBoardData(sections, relations, dateRange, dayCount)
+    this.scene.fog.disable()
+    this.scene.setSelectionLight(null)
+    this.directorCamera.transitionTo(this.directorCamera.lifecycleFull(dayCount))
+  }
+
+  /**
+   * Exit lifecycle mode: re-enable fog (for the current timeline window) and
+   * reset interaction state. Vue is responsible for reloading the timeline
+   * data via loadBoardData afterwards (it owns the fetch).
+   */
+  exitLifecycle(): void {
+    this.state.mode = 'idle'
+    this.state.focusedNodeId = null
+    this.scene.fog.enable(this.currentDays)
+    this.scene.setSelectionLight(null)
   }
 
   dispose(): void {

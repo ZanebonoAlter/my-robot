@@ -98,6 +98,37 @@ describe('bfsLifeline', () => {
     expect(result.nodes.size).toBe(4)
     expect(result.edges.size).toBe(3)
   })
+
+  it('assigns BFS depth from the start node', () => {
+    // Linear chain 1→2→3→4, plus a branch 2→5.
+    const nodes = [
+      node(1, '2026-01-01'),
+      node(2, '2026-01-02'),
+      node(3, '2026-01-03'),
+      node(4, '2026-01-04'),
+      node(5, '2026-01-02'),
+    ]
+    const relations = [rel(1, 2), rel(2, 3), rel(3, 4), rel(2, 5)]
+    const range = { start: '2026-01-01', end: '2026-01-05' }
+
+    const result = bfsLifeline(1, relations, nodeMap(nodes), range)
+
+    expect(result.depth.get(1)).toBe(0)
+    expect(result.depth.get(2)).toBe(1)
+    expect(result.depth.get(3)).toBe(2)
+    expect(result.depth.get(4)).toBe(3)
+    expect(result.depth.get(5)).toBe(2) // same depth as node 3 (both 2-hop neighbors of 2)
+  })
+
+  it('assigns depth 0 to an isolated focus', () => {
+    const nodes = [node(1, '2026-01-01'), node(2, '2026-01-02')]
+    const range = { start: '2026-01-01', end: '2026-01-05' }
+
+    const result = bfsLifeline(1, [], nodeMap(nodes), range)
+
+    expect(result.depth.get(1)).toBe(0)
+    expect(result.depth.size).toBe(1)
+  })
 })
 
 // ---------------------------------------------------------------------------

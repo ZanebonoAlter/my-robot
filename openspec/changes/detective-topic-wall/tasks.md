@@ -41,7 +41,7 @@
 
 > 前端单元测试（vitest），重点覆盖纯逻辑：BFS 算法、layout 算法、edge key 规范化。Three.js 对象渲染类（需要 WebGL 上下文）用 happy-dom 不便测，转为可测的纯函数抽取。
 
-- [x] 6.1 `utils.test.ts` bfsLifeline：日期窗口过滤、孤立焦点、反向遍历 edge key、连通分量（4 测试）。
+- [x] 6.1 `utils.test.ts` bfsLifeline：日期窗口过滤、孤立焦点、反向遍历 edge key、连通分量（4 测试）+ BFS depth 梯度/孤立焦点 depth=0（2 测试，评审修复追加）。共 15 测试。
 - [x] 6.2 `utils.test.ts` layoutCards：同日多话题垂直错开、Z jitter/rotation.z 范围、确定性（3 测试）。
 - [x] 6.3 `utils.test.ts` densityForDays：7/14/30/60 → 对应 density + 最近桶回退（含 edgeKey/timelineWidth/latestDayX 共 6 测试）。
 
@@ -54,10 +54,31 @@
 
 > 归档前重跑本节全部命令，确认零失败（§11.4）。
 
-- [x] 8.1 `cd front && pnpm lint → 0 error`（23 warning 全是预存 topic-graph 代码，detective-wall 零 warning）
+- [x] 8.1 `cd front && pnpm lint → 0 error`（warning 全是预存 topic-graph/articles，detective-wall 零 warning）
 - [x] 8.2 `cmd.exe /C "cd /d D:\project\Syntopica\front && pnpm exec nuxi typecheck" → 0 error`
-- [x] 8.3 `cd front && pnpm test:unit -- detective-wall → PASS`（detective-wall/utils.test.ts 13 测试全通过；topic-graph 的 5 个预存失败经 git stash 验证与本 change 无关）
-- [x] 8.4 `cmd.exe /C "cd /d D:\project\Syntopica\front && pnpm build" → 构建成功（client+server+Nitro，✓ built in 6.69s）`
+- [x] 8.3 `cd front && pnpm test:unit -- detective-wall → PASS`（detective-wall/utils.test.ts 15 测试全通过：原 13 + depth 2；topic-graph 的 5 个预存失败与本 change 无关）
+- [x] 8.4 `cmd.exe /C "cd /d D:\project\Syntopica\front && pnpm build" → 构建成功（✨ Build complete）`
 - [x] 8.5 `Select-String -Path openspec/changes/detective-topic-wall/**/*.md -Pattern 'unify-ui-components' → 0 命中`
 - [x] 8.6 `Select-String -Path openspec/changes/detective-topic-wall/**/*.md -Pattern 'addPass(new BloomEffect' → 0 命中`
 - [x] 8.7 `Select-String -Path openspec/changes/detective-topic-wall/**/*.md -Pattern 'list = adj.get' → 0 命中（仅 tasks.md 自身验证条目文字匹配，proposal/design/spec 零命中）`
+
+## 9. 评审修复（迭代二）
+
+> 基于「侦探墙评审报告」两份评审 + 3 个 Explore agent 核实，修复所有成立的问题。
+> 已剔除 3 条事实性错误（`params.Line2` 确实生效、ChapterTransition 死代码已删、"退出 3D 视图"实为弹窗叠加）。
+
+- [x] 9.1 **光照接线**：`TopicWallScene` 保存 `followLight`/`selectionLight` 引用，渲染循环每帧 `followLight.position.copy(camera)`（探险灯跟随相机）；新增 `setSelectionLight(card)`，`InteractionLayer` 在 triggerLifeline/resetToOverview 接线。修复"跟随光创建后不动、选中灯从未启用"。
+- [x] 9.2 **BFS depth 改造**：`LifelineResult` 加 `depth: Map<number,number>`，`bfsLifeline` 维护 hop 计数；`playLifelineAnimation` 按 depth 计算 stagger delay（`0.1 + depth*0.08`），对齐 spec §BFS 动画序列。新增 2 个 depth 测试（梯度链 + 孤立焦点）。修复"动画按数组索引 stagger、顺序随机"。
+- [x] 9.3 **OrbitControls 相机拖拽**：新增 `WallCameraControls.ts`，仅 pan+zoom（`enableRotate:false`，`mouseButtons.LEFT=PAN`），`minDistance 3 / maxDistance 40`。`DirectorCamera` 加 `hooks`（onTransitionStart→orbit 禁用 / onTargetUpdate→同步 target / onTransitionComplete→重启用），解决"主动 GSAP 动画 vs 被动 orbit"的 target/position 之争。`TopicWallScene` 加 `frameCallbacks`/`addFrameCallback`，渲染循环调 `controls.update()`。orbit start/end 事件 `setHoverSuspended`（拖拽时暂停 hover）。确认 `@types/three` 已安装（jsm 类型就绪）。
+- [x] 9.4 **完整生命周期模式**：`InteractionLayer` 加 `enterLifecycle`（loadBoardData + fog.disable + lifecycleFull 镜头）/`exitLifecycle`（fog.enable）。修隐藏 bug：lifecycle 模式背景点击不再误触发 resetToOverview（改为 onBackgroundClick 交 Vue）；lifecycle 模式卡片点击不触发 BFS。Vue 加「查看完整生命周期」按钮 + `enterLifecycle`/`exitLifecycle` 编排（fetch getSectionLifecycle → 派生 dateRange → 场景重建）。
+- [x] 9.5 **接线类小修**：(a) tooltip `pointer-events:auto` + `data-card-id`，InteractionLayer 监听 css2d click 转发卡片点击（解决"点文字落空"），innerHTML 改 textContent 防注入；(b) 卡片标题超 14 字符加 `…`；(c) status 中文化（emerging→新兴 等）；(d) 键盘 ESC（lifecycle→exit / focusing→closePanel / idle→close）；(e) 详情面板补汇总（总文章/线索数 + 状态分布彩点）、生命线节点改滚动容器（去 slice(0,10) 硬限制）、拆分「关闭面板」/「返回时间线」/「返回」语义。
+- [x] 9.6 **线索→文章二级展开**：线索点击不再默认取首篇 `related_article_ids[0]`，改为 `toggleThreadArticles` 展开该线索的文章列表（批量 getArticle 取标题，最多 10 篇，超出显示"还有 N 篇"），点击具体文章才 `openArticle`。对齐 BoardThreadBrowser 的 2D 下钻模式。
+- [x] 9.7 **卡片高亮光晕**：`highlight()` 的 `emissiveIntensity` 0.5 → 0.2，修复"光晕过曝盖住卡片表面文字"。
+
+## 10. 文档同步（评审修复回写）
+
+- [x] 10.1 interaction spec：bfsLifeline 返回值加 depth、BFS 动画序列按 depth、点击语义加 lifecycle 分支、面板操作改二级展开、API 加 enterLifecycle/exitLifecycle/setHoverSuspended + tooltip 转发/ESC 说明、Constraints 加 lifecycle guard/depth/ChapterTransition 状态。
+- [x] 10.2 scene spec：TopicWallScene API 加 followLight/selectionLight/setSelectionLight/addFrameCallback/css2d/fog、PinCard 加 tooltip、highlight emissive 0.2、光照区加跟随灯/选中灯每帧更新。
+- [x] 10.3 camera spec：DirectorCamera 加 hooks、新增 Wall Camera Controls 整节（配置/协调/hover 暂停/渲染循环/依赖）、Chapter Transition 标注当前无入口状态。
+- [x] 10.4 proposal：What Changes 加 OrbitControls 拖拽 + BFS depth、camera capability 加 OrbitControls、Impact 文件清单加 WallCameraControls.ts/lighting.ts。
+- [x] 10.5 tasks.md：§6.1 单测数 13→15、§8 验证节更新、追加 §9 评审修复任务 + §10 文档同步。

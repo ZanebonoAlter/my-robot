@@ -79,7 +79,9 @@ export class PinCardImpl implements IPinCard {
     this.group.add(shaft, head)
 
     // Title sprite (canvas-rendered text).
-    const label = data.cluster_label.slice(0, 14)
+    // Title sprite (canvas-rendered text). Truncate with ellipsis past 14 chars.
+    const full = data.cluster_label
+    const label = full.length > 14 ? full.slice(0, 14) + '…' : full
     const title = new SpriteText(label, 0.22, '#1A1A1A')
     title.position.set(0, 0.25, card.depth / 2 + 0.01)
     this.group.add(title)
@@ -98,13 +100,22 @@ export class PinCardImpl implements IPinCard {
 
     // CSS2D tooltip (spec §Card Tooltip): shown on hover, hidden otherwise.
     // Positioned above the card; CSS2DRenderer projects it into screen space.
+    // pointer-events are enabled so clicking the tooltip text also selects the
+    // card (the label sits above the 3D mesh, which users naturally click).
     const tooltipEl = document.createElement('div')
     tooltipEl.className = 'tdw-card-tooltip'
+    tooltipEl.dataset.cardId = String(data.id)
     tooltipEl.style.display = 'none'
+    tooltipEl.style.pointerEvents = 'auto'
+    tooltipEl.style.cursor = 'pointer'
+    const labelLine = document.createElement('div')
+    labelLine.className = 'tdw-card-tooltip-label'
+    labelLine.textContent = data.cluster_label
+    const statusLine = document.createElement('div')
+    statusLine.className = 'tdw-card-tooltip-status'
     const statusLabel = STATUS_LABELS[data.status] ?? data.status
-    tooltipEl.innerHTML =
-      `<div class="tdw-card-tooltip-label">${data.cluster_label}</div>` +
-      `<div class="tdw-card-tooltip-status">${statusLabel} · ${data.article_count}篇</div>`
+    statusLine.textContent = `${statusLabel} · ${data.article_count}篇`
+    tooltipEl.append(labelLine, statusLine)
     this.tooltip = new CSS2DObject(tooltipEl)
     this.tooltip.position.set(0, card.height / 2 + 0.5, 0)
     this.group.add(this.tooltip)
@@ -134,7 +145,9 @@ export class PinCardImpl implements IPinCard {
 
   highlight(): void {
     this.state = 'highlighted'
-    gsap.to(this.paperMaterial, { emissiveIntensity: 0.5, duration: 0.3 })
+    // Keep the glow subtle (0.2) — a higher intensity washes out the title/meta
+    // text rendered on the card face.
+    gsap.to(this.paperMaterial, { emissiveIntensity: 0.2, duration: 0.3 })
     // Hide tooltip in lifeline mode (detail panel shows the info instead).
     this.tooltip.element.style.display = 'none'
   }

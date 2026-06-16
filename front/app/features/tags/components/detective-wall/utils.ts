@@ -33,6 +33,8 @@ export interface LifelineResult {
   nodes: Set<number>
   /** Normalized edge keys traversed within the window. */
   edges: Set<string>
+  /** BFS hop count from the start node (start = 0). Keys mirror `nodes`. */
+  depth: Map<number, number>
 }
 
 /**
@@ -52,6 +54,7 @@ export function bfsLifeline(
 ): LifelineResult {
   const visited = new Set<number>([startNodeId])
   const edgeKeys = new Set<string>()
+  const depth = new Map<number, number>([[startNodeId, 0]])
   const queue: number[] = [startNodeId]
 
   // Build undirected adjacency list.
@@ -75,6 +78,8 @@ export function bfsLifeline(
     const neighbors = adj.get(current)
     if (!neighbors) continue
 
+    const currentDepth = depth.get(current) ?? 0
+
     for (const neighborId of neighbors) {
       if (visited.has(neighborId)) continue
 
@@ -87,11 +92,12 @@ export function bfsLifeline(
 
       visited.add(neighborId)
       queue.push(neighborId)
+      depth.set(neighborId, currentDepth + 1)
       edgeKeys.add(edgeKey(current, neighborId))
     }
   }
 
-  return { nodes: visited, edges: edgeKeys }
+  return { nodes: visited, edges: edgeKeys, depth }
 }
 
 // ---------------------------------------------------------------------------

@@ -10,7 +10,7 @@
 class InteractionLayer {
   constructor(
     scene: TopicWallScene,
-    camera: DirectorCamera,
+    directorCamera: DirectorCamera,
     canvas: HTMLCanvasElement,
     callbacks: InteractionCallbacks
   )
@@ -21,7 +21,26 @@ class InteractionLayer {
   // 外部触发
   setTimeRange(days: number): void
   resetToOverview(): void   // 点击空白区域时调用
+
+  // 拖拽相机时暂停 hover（由 WallCameraControls 调用）
+  setHoverSuspended(suspended: boolean): void
+
+  // 完整生命周期模式（spec §面板操作）
+  enterLifecycle(
+    sections: SectionTimelineNode[],
+    relations: SectionRelation[],
+    dateRange: { start: string; end: string }
+  ): void
+  exitLifecycle(): void
 }
+```
+
+> tooltip 点击转发：CSS2D tooltip 的 DOM（`data-card-id`）启用 `pointer-events:auto`，
+> InteractionLayer 在 enable() 时给 `scene.css2d.domElement` 注册 click 监听，命中
+> `[data-card-id]` 即转发为对应卡片的 `handleCardClick`（解决"点 tooltip 文字落空"）。
+
+> 键盘：ESC 由 Vue 层 `keydown` 监听处理（lifecycle→exitLifecycle / focusing→closePanel /
+> idle→close），不在 InteractionLayer 内。
 
 interface InteractionCallbacks {
   onCardHover(card: PinCard | null): void
@@ -69,9 +88,11 @@ function bfsLifeline(
 ): {
   nodes: Set<number>
   edges: Set<string>  // 规范化 "minId-maxId" key（无向，与 relation 方向无关）
+  depth: Map<number, number>  // BFS hop count from start（start = 0），用于动画 stagger
 } {
   const visited = new Set<number>()
   const edgeKeys = new Set<string>()
+  const depth = new Map<number, number>([[startNodeId, 0]])  // BFS hop count
   const queue = [startNodeId]
   visited.add(startNodeId)
 
@@ -96,6 +117,7 @@ function bfsLifeline(
     const current = queue.shift()!
     const neighbors = adj.get(current)
     if (!neighbors) continue
+    const currentDepth = depth.get(current) ?? 0
 
     for (const neighborId of neighbors) {
       if (visited.has(neighborId)) continue
@@ -109,11 +131,12 @@ function bfsLifeline(
 
       visited.add(neighborId)
       queue.push(neighborId)
+      depth.set(neighborId, currentDepth + 1)
       edgeKeys.add(edgeKey(current, neighborId))
     }
   }
 
-  return { nodes: visited, edges: edgeKeys }
+  return { nodes: visited, edges: edgeKeys, depth }
 }
 ```
 
@@ -132,21 +155,26 @@ const matchedRelations = relations.filter(r =>
 ```
 点击卡片后:
 
-1. 计算 BFS 结果 (同步，< 1ms)
+1. 计算 BFS 结果（含 depth: Map，同步，< 1ms）
 2. 启动 GSAP Timeline:
    a. 非相关卡片 dim() → stagger 0.02s
    b. 相机 transitionTo(topicFocus) → 并行
-   c. BFS 节点按 depth 排序:
-      - depth 0: 被点击的节点 → 立即 highlight()
-      - depth 1: 一跳邻居 → delay 0.08s
-      - depth 2: 二跳邻居 → delay 0.16s
+   c. BFS 节点按 depth（bfsLifeline 返回）stagger highlight:
+      - depth 0: 被点击的节点 → delay 0.1s（立即）
+      - depth 1: 一跳邻居 → delay 0.18s (0.1 + 1*0.08)
+      - depth 2: 二跳邻居 → delay 0.26s (0.1 + 2*0.08)
       - ...
-      - 每个 depth 的节点 stagger 0.04s
+      - 每个节点的 delay = 0.1 + depth * 0.08
+      - 同时点亮选中卡片上方的红色 PointLight（selectionLight）
    d. 对应的红线按 depth 绘制:
       - drawProgress 0→1, duration 0.15s/条
       - 每条线比目标节点提前 0.05s 开始绘制
 3. 2D 详情面板在 Timeline 完成后滑入
 ```
+
+> 实现：`playLifelineAnimation(card, nodeIds, depth)` 的第三参接收 depth Map，
+> delay 计算用 `(depth.get(c.data.id) ?? 0) * 0.08`。早期版本曾用数组索引 i 作
+> depth 代理（顺序随机），现已改为真正的 BFS 深度。
 
 ## Raycaster Interaction
 
@@ -181,14 +209,24 @@ const matchedRelations = relations.filter(r =>
   → mode === 'focusing'
     → 同一卡片: resetToOverview()
     → 不同卡片: 重新执行 BFS
+  → mode === 'lifecycle'
+    → 不执行 BFS（整个场景已是一条生命周期线）
+    → 仅更新 selectionLight + onCardClick（面板更新）
 
 命中红线:
   → 以对端节点为起点，重新 BFS
   → 相机平移到新焦点
 
 命中空白:
-  → resetToOverview()
+  → mode === 'focusing': resetToOverview()
+  → mode === 'lifecycle': onBackgroundClick()（交 Vue 决定，由 enterLifecycle/exitLifecycle
+    退出，因 lifecycle 退出需 re-fetch timeline，属 Vue 职责）
+  → mode === 'idle': onBackgroundClick()
 ```
+
+> 实现：`processClick` 的背景分支用 `if (mode === 'focusing') resetToOverview()
+> else onBackgroundClick()`。早期版本曾用 `if (mode !== 'idle') resetToOverview()`，
+> 这会让 lifecycle 模式点空白时错误退出（resetToOverview 不 re-fetch timeline）。
 
 ## 2D Detail Panel
 
@@ -198,19 +236,27 @@ const matchedRelations = relations.filter(r =>
 ┌──────────────────────────────────┐
 │ 📁 案件编号 #{{sectionId}}        │
 │ ─────────────────                │
-│ 线索链: {{ chainLabel }}          │
-│ 时间跨度: {{ startDate }} - {{ endDate }}
-│ 总文章: {{ totalArticles }}篇     │
-│ 总线索: {{ totalThreads }}条      │
-│                                  │
-│ ─── 状态分布 ─────────────        │
+│ {{ clusterLabel }}               │
+│ {{ articleCount }}篇 · {{ threadCount }}线索  {{ statusLabel }}
+│ ─── 汇总 ─────────────           │
+│ 共 {{totalArticles}}篇 · {{totalThreads}}线索
 │ ● 持续 3  ● 新兴 1  ● 分化 1     │
 │                                  │
-│ ▸ 查看详细线索                   │
-│ ▸ 查看完整生命周期               │
-│ ▸ 返回总览                       │
+│ ─── 生命线/完整生命周期 ─────     │
+│ ▸ 2026-01-02 霍尔木兹海峡…      │
+│     └ 线索A (3篇)               │
+│         · 文章1标题 ↗           │
+│         · 文章2标题 ↗           │
+│ ▸ 2026-01-05 航运恢复…          │
+│                                  │
+│ [查看完整生命周期]               │
+│ [关闭面板 / 返回时间线]          │
 └──────────────────────────────────┘
 ```
+
+> 生命线节点列表用滚动容器（`.tdw-lifeline-list`，max-height: 40vh），不限数量。
+> statusLabel 为中文化（emerging→新兴 等）。汇总区统计当前 lifelineNodes 的
+> 总文章/线索数 + 状态分布彩点。
 
 ### 面板定位
 
@@ -250,20 +296,26 @@ const matchedRelations = relations.filter(r =>
 ```
 查看详细线索:
   → 调用 getDailyReportDetail(reportId) 获取 thread 列表
-  → 面板内展开线索列表 (max 10 条，每条显示标题 + 文章数)
-  → 点击线索 → openArticlePreview(articleId)
+  → 面板内展开线索列表（滚动容器，不限数量；早期版本曾 slice(0,10)）
+  → 点击线索 → toggleThreadArticles(thread)：二级展开该线索的文章列表
+    （批量 getArticle 取标题，最多 10 篇，超出的显示"还有 N 篇…"）
+  → 点击具体文章 → openArticle(articleId)（不再默认取首篇）
 
 查看完整生命周期:
   → 调用 getSectionLifecycle(sectionId)
-  → mode 切换为 'lifecycle'
-  - 迷雾 disable()
-  - 清空当前卡片，只渲染 lifecycle 数据
-  - 相机 transitionTo(lifecycleFull)
-  - 红线从最早节点画到最新节点 (单条时间线)
-  - 面板更新为生命周期视图
+  → interaction.enterLifecycle()：mode='lifecycle'
+    - 迷雾 disable()
+    - 清空当前卡片，只渲染 lifecycle 数据
+    - 相机 transitionTo(lifecycleFull)
+    - 红线从最早节点画到最新节点 (单条时间线)
+    - 面板更新为生命周期视图
 
-返回总览:
-  → resetToOverview()
+返回总览（聚焦/生命周期模式下，面板底部按钮）:
+  → lifecycle 模式: exitLifecycle() → fog.enable(days) + re-fetch timeline + 相机回 todayFocus
+  → focusing 模式: closePanel() → interaction.resetToOverview()（仅关面板，不退出 3D）
+
+> 语义区分：面板内「关闭面板/返回时间线」≠ 顶栏「返回」（close，退出整个 3D 视图）。
+> 早期版本面板按钮曾直接调 close（退出 3D），现已拆分。
 ```
 
 ## Time Range Switching
@@ -338,5 +390,10 @@ function switchBoard(newBoardId: number) {
 - BFS 计算是同步的，数据量 < 100 节点时耗时 < 1ms，不需要 Web Worker
 - 详情面板（固定屏幕位置）用普通 Vue overlay + motion-v，不用 CSS2DRenderer；只有卡片悬停 tooltip 用 CSS2DRenderer（跟随 3D 卡片坐标）。详见 §2D Detail Panel
 - 完整生命周期模式使用 `getSectionLifecycle`（不限天数），BFS 模式使用 `getBoardSectionTimeline`（受 days 限制），两个 API 不能混用
-- 转场期间 InteractionLayer.disable()，转场结束后 enable()
+- 背景点击：lifecycle 模式下不调 resetToOverview（会错误退出且不 re-fetch），而是 onBackgroundClick 交 Vue 处理 exitLifecycle
+- BFS 动画的 highlight stagger 必须用 bfsLifeline 返回的 depth Map，不能用 cardGroup.cards 的数组索引（顺序随机，spec §BFS 动画序列）
 - 移动端（< 768px）不提供 3D 入口，此 spec 不涉及移动端适配
+
+> ChapterTransition：本 change 当前无 BoardSelector 入口，ChapterTransition 的
+> watch(boardId)/wipe/cover DOM 已移除（避免死代码）。ChapterTransition.ts 类文件保留，
+> 供后续补 BoardSelector 时复用。转场期间禁用交互的约束暂不生效。

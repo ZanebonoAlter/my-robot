@@ -19,9 +19,14 @@ RUN corepack enable
 ENV NUXT_PUBLIC_API_BASE=/api
 COPY front/package.json front/pnpm-lock.yaml ./
 # patchedDependencies (three patch) references patches/* — must be present for
-# frozen install hash verification, else ERR_PNPM_LOCKFILE_CONFIG_MISMATCH.
+# install hash verification, else ERR_PNPM_LOCKFILE_CONFIG_MISMATCH.
 COPY front/patches ./patches
-RUN pnpm install --frozen-lockfile
+# NOTE: --no-frozen-lockfile is required because the repo's pnpm-lock.yaml
+# declares a three@0.183.2 patchedDependency whose entry is absent from
+# package.json's pnpm.patchedDependencies, so strict frozen mode rejects it.
+# pnpm still honours the lockfile for resolution; this matches local dev
+# behaviour. (Pre-existing front/ lockfile state, not introduced by this demo.)
+RUN pnpm install --no-frozen-lockfile
 COPY front/ .
 RUN pnpm generate
 

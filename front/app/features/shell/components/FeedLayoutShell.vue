@@ -9,6 +9,7 @@ import { ArticleContentView as ArticleContent } from '~/features/articles/public
 import { normalizeArticle, type ArticlePayload } from '~/api/normalizers/article'
 import { useGlobalAutoRefresh } from '~/features/feeds/public'
 import { useArticlePagination } from '~/features/articles/public'
+import { useOnboarding } from '~/composables/useOnboarding'
 import { SIDEBAR_DEFAULT_WIDTH, MAX_POLLING_TIME, REFRESH_POLLING_INTERVAL } from '~/utils/constants'
 import type { WatchedTag } from '~/api/watchedTags'
 import type { Article, ArticleFilters } from '~/types/article'
@@ -35,6 +36,8 @@ const total = computed(() => paginationState.total)
 const loading = computed(() => paginationState.loading)
 
 useGlobalAutoRefresh()
+
+const { isFirstRun, startTour } = useOnboarding()
 
 const sidebarCollapsed = ref(false)
 const sidebarWidth = ref(SIDEBAR_DEFAULT_WIDTH)
@@ -132,6 +135,11 @@ onMounted(async () => {
     loadWatchedTags(),
     fetchGlobalUnreadCount(),
   ])
+
+  // 首次访问自动启动新手引导（侧边栏等锚点此时已在 DOM 中）
+  if (isFirstRun.value) {
+    void startTour()
+  }
 })
 
 onUnmounted(() => {

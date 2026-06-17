@@ -4,6 +4,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"syntopica-backend/internal/admin"
 	"syntopica-backend/internal/platform/database"
+	"syntopica-backend/internal/platform/middleware"
 	"syntopica-backend/internal/platform/tracing"
 	"syntopica-backend/internal/platform/ws"
 	"syntopica-backend/internal/reader"
@@ -21,9 +22,16 @@ func SetupRoutes(r *gin.Engine) {
 
 	r.GET("/api/tasks/status", admin.GetTasksStatus)
 
-	r.GET("/ws", ws.HandleWebSocket)
+	// In public read-only demo mode, the WebSocket endpoint is unused (the
+	// frontend degrades silently) and background schedulers are disabled, so we
+	// skip registering it to avoid an unused connection surface.
+	if !middleware.IsDemoReadOnly() {
+		r.GET("/ws", ws.HandleWebSocket)
+	}
 
 	api := r.Group("/api")
+	// Enforce read-only access when DEMO_READ_ONLY=1; no-op in production.
+	api.Use(middleware.ReadOnly())
 	{
 		reader.RegisterRoutes(api)
 		topicgraph.RegisterRoutes(api)

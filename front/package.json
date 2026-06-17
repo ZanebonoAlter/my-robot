@@ -41,6 +41,7 @@
     "@vueuse/components": "^14.2.1",
     "@vueuse/core": "^14.1.0",
     "dayjs": "^1.11.19",
+    "driver.js": "^1.4.0",
     "gsap": "^3.15.0",
     "katex": "^0.17.0",
     "marked": "^17.0.1",

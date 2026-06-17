@@ -174,12 +174,12 @@ const navigateTo = useNuxtApp().$router ? (path: string) => useNuxtApp().$router
         <span v-if="!sidebarCollapsed && articlesStore.favoriteCount > 0" class="badge badge-amber">{{ articlesStore.favoriteCount }}</span>
       </button>
 
-      <button class="sidebar-item" :class="{ active: selectedCategory === 'topic-graph' }" @click="handleTopicGraphClick">
+      <button class="sidebar-item" :class="{ active: selectedCategory === 'topic-graph' }" data-onboarding="nav-topic-graph" @click="handleTopicGraphClick">
         <Icon icon="mdi:graph-outline" width="20" height="20" class="text-[var(--color-text-secondary)]" />
         <span v-if="!sidebarCollapsed" class="flex-1 text-left font-medium">主题图谱</span>
       </button>
 
-      <button class="sidebar-item" @click="navigateTo('/tags')">
+      <button class="sidebar-item" data-onboarding="nav-tags" @click="navigateTo('/tags')">
         <Icon icon="mdi:tag-multiple" width="20" height="20" class="text-[var(--color-text-secondary)]" />
         <span v-if="!sidebarCollapsed" class="flex-1 text-left font-medium">标签管理</span>
       </button>
@@ -187,7 +187,7 @@ const navigateTo = useNuxtApp().$router ? (path: string) => useNuxtApp().$router
       <div v-if="!sidebarCollapsed" class="divider" />
 
       <div v-if="!sidebarCollapsed" class="watched-tags-section">
-        <div class="watched-tags-header">
+        <div class="watched-tags-header" data-onboarding="watched-tags">
           <Icon icon="mdi:heart-outline" width="14" style="color: var(--color-text-muted)" />
           <span class="text-xs font-medium" style="color: var(--color-text-muted)">关注标签</span>
         </div>
@@ -223,7 +223,7 @@ const navigateTo = useNuxtApp().$router ? (path: string) => useNuxtApp().$router
 
       <div v-if="!sidebarCollapsed" class="divider" />
 
-      <div v-if="!sidebarCollapsed" class="categories">
+      <div v-if="!sidebarCollapsed" class="categories" data-onboarding="sidebar-feeds">
         <div v-for="category in feedsStore.categories" :key="category.id" class="category-group">
           <div class="category-item" :class="{ active: selectedCategory === category.id }">
             <button class="category-btn" :class="{ active: selectedCategory === category.id }" @click="handleCategoryClick(category.id)">

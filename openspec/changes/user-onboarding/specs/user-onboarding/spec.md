@@ -36,8 +36,8 @@ The system SHALL present a guided tour consisting of exactly 5 sequential steps.
 - **THEN** the system displays 5 steps in order, each highlighting the corresponding `data-onboarding` element with a popover containing Chinese title and description
 
 #### Scenario: Tour step skips missing DOM element
-- **WHEN** a tour step targets a `data-onboarding` element that is not present in the DOM (e.g., sidebar is collapsed)
-- **THEN** the system skips that step and proceeds to the next available step
+- **WHEN** a tour step targets a `data-onboarding` element that is not present in the DOM (e.g., sidebar is collapsed, hiding `.categories` / `.watched-tags-section` behind `v-if="!sidebarCollapsed"`)
+- **THEN** the system skips that step before passing steps to driver.js (driver.js v1 does not natively skip missing elements — the composable MUST pre-filter steps via `document.querySelector` after `await nextTick()`, dropping any step whose selector returns null), and proceeds to the next available step
 
 ### Requirement: Guided tour navigation
 The system SHALL provide Next, Previous, and Skip controls on each tour step. The user MUST be able to advance through all steps, go back to a previous step, or dismiss the tour entirely at any point.
@@ -105,44 +105,21 @@ When no daily reports exist, the system SHALL display a `DailyReportEmptyGuide` 
 - **WHEN** at least one daily report is available
 - **THEN** the `DailyReportEmptyGuide` component is not displayed
 
-### Requirement: Feature discovery tooltips
-The system SHALL display feature discovery tooltips on first interaction with designated feature entry points. Each tooltip MUST be identified by a unique `tipId` and MUST only be shown once per user. The system MUST track shown tooltips in localStorage under `syntopica_feature_tips` as a JSON object mapping `tipId` to `true`.
-
-Initial feature discovery tooltips:
-- `topic-graph-filter`: Topic graph filter controls
-- `tag-merge-suggestions`: Tag merge suggestion panel
-- `daily-report-timeline`: Daily report timeline view
-
-#### Scenario: Feature tooltip shown on first interaction
-- **WHEN** the user interacts with a feature entry point marked with `data-feature-tip="<tipId>"` and that `tipId` is not recorded in `syntopica_feature_tips`
-- **THEN** the system displays a tooltip with a brief Chinese description of the feature
-
-#### Scenario: Feature tooltip not shown again after first display
-- **WHEN** the user interacts with a feature entry point and the corresponding `tipId` is already recorded in `syntopica_feature_tips`
-- **THEN** the tooltip is not displayed
-
-#### Scenario: Feature tip recorded after display
-- **WHEN** a feature discovery tooltip is displayed to the user
-- **THEN** the corresponding `tipId` is saved to `syntopica_feature_tips` in localStorage
-
 ### Requirement: prefers-reduced-motion accessibility
-The system SHALL respect the `prefers-reduced-motion: reduce` media query. When reduced motion is preferred, the guided tour highlight animations MUST be disabled (instant transitions only), and feature discovery tooltip animations MUST be replaced with immediate appearance.
+The system SHALL respect the `prefers-reduced-motion: reduce` media query. When reduced motion is preferred, the guided tour highlight animations MUST be disabled (instant transitions only).
 
 #### Scenario: Tour with reduced motion preference
 - **WHEN** the user's system has `prefers-reduced-motion: reduce` enabled and the guided tour is active
 - **THEN** all tour highlight transitions and popover animations are disabled, using instant state changes instead
 
-#### Scenario: Feature tooltip with reduced motion preference
-- **WHEN** the user's system has `prefers-reduced-motion: reduce` enabled and a feature discovery tooltip appears
-- **THEN** the tooltip appears immediately without transition animation
-
 ### Requirement: useOnboarding composable API
-The system SHALL provide a `useOnboarding` Vue composable exposing: `isFirstRun` (computed boolean), `isTourActive` (computed boolean), `startTour()` (function), `dismissTour()` (function), `isFeatureTipShown(tipId)` (function), `markFeatureTipShown(tipId)` (function), and `resetOnboarding()` (function). The composable MUST only initialize driver.js on the client side (not during SSR).
+The system SHALL provide a `useOnboarding` Vue composable exposing: `isFirstRun` (computed boolean), `isTourActive` (computed boolean), `startTour()` (function), `dismissTour()` (function), and `resetOnboarding()` (function). The composable MUST guard all `document` / `localStorage` / driver.js access with an `import.meta.client` check, so that it remains safe if SSR is ever enabled.
 
 #### Scenario: Composable provides reactive state
 - **WHEN** a Vue component calls `useOnboarding()`
 - **THEN** the composable returns `isFirstRun` and `isTourActive` as reactive computed refs, and all functions are callable
 
-#### Scenario: Composable SSR-safe initialization
-- **WHEN** `useOnboarding()` is called during server-side rendering
+#### Scenario: Composable client-guard (defensive, current app is SPA)
+- **WHEN** `useOnboarding()` is called and `import.meta.client` is `false` (e.g., if SSR is enabled in the future, or during a Vitest run with the guard mocked off)
 - **THEN** no driver.js instance is created and no localStorage access occurs; `isFirstRun` defaults to false and `isTourActive` defaults to false
+- **NOTE** The Syntopica frontend currently runs with `ssr: false` (`front/nuxt.config.ts`), so this guard is a defensive reservation, not a response to an active SSR risk.

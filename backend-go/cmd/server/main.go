@@ -80,8 +80,13 @@ func main() {
 
 	appbootstrap.SetupStaticFiles(r)
 	appbootstrap.SetupRoutes(r)
-	runtime := appbootstrap.StartRuntime()
-	appbootstrap.SetupGracefulShutdown(runtime)
+	// In public read-only demo mode (DEMO_READ_ONLY=1) we skip all background
+	// schedulers (RSS refresh, LLM daily reports, firecrawl crawling, etc.) so
+	// they cannot mutate the sanitized snapshot or burn non-existent AI credits.
+	if os.Getenv("DEMO_READ_ONLY") != "1" {
+		runtime := appbootstrap.StartRuntime()
+		appbootstrap.SetupGracefulShutdown(runtime)
+	}
 
 	addr := fmt.Sprintf(":%s", config.AppConfig.Server.Port)
 	logging.Infof("Server starting on %s", addr)

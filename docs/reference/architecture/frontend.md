@@ -50,6 +50,7 @@ front/
 │  │  ├─ useDailyReportProgress.ts
 │  │  ├─ useAI.ts
 │  │  ├─ useFirecrawlConfig.ts
+│  │  ├─ useOnboarding.ts  # 首次使用引导（driver.js 分步教程 + localStorage 标记）
 │  │  └─ useReadingPreferences.ts
 │  ├─ features/            # 业务实现主体（见下文详细说明）
 │  ├─ pages/               # Nuxt 路由入口
@@ -80,7 +81,8 @@ features/
 │  ├─ composables/     # useArticleContentView、useArticlePagination、useContentCompletion、useTagWebSocket
 │  ├─ utils/           # normalizeArticle（feature 私有）
 │  └─ public.ts        # 跨 feature 共享的稳定 facade
-├─ feeds/              # 自动刷新和刷新轮询
+├─ feeds/              # 自动刷新和刷新轮询、空状态引导
+│  ├─ components/      # FeedEmptyGuide（RSS 源空状态引导卡片）
 │  ├─ composables/     # useAutoRefresh、useRefreshPolling
 │  └─ public.ts        # 跨 feature 共享 facade
 ├─ summaries/          # AI 总结列表、队列进度（通过 useEventStream 实时更新）
@@ -93,7 +95,7 @@ features/
 │  ├─ components/detective-wall/  # 3D 侦探照片墙（Three.js 子模块，见 §3D 侦探墙）
 │  └─ composables/     # useTagsPage、useBoardCRUD、useBoardTimeline、useAuxiliaryLabels
 ├─ topic-graph/        # 主题图谱、热点标签、话题详情、analysis、timeline、标签层级、合并预览
-│  ├─ components/      # TopicGraphPage、Canvas、Sidebar、Timeline、TagHierarchy、TagMergePreview 等
+│  ├─ components/      # TopicGraphPage、Canvas、Sidebar、Timeline、TagHierarchy、TagMergePreview、TopicGraphEmptyGuide 等
 │  ├─ composables/     # useTopicGraph、useTopicTimeline、useArticlePreview、useFloatingPanelDrag 等
 │  ├─ utils/           # buildDisplayedTopicGraph、buildTopicGraphViewModel、normalizeTopicCategory
 │  └─ public.ts        # 跨 feature 共享 facade（TagMergePreview）

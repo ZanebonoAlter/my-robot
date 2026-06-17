@@ -378,7 +378,8 @@ watch(() => props.boardId, () => {
 
       <div v-else-if="reports.length === 0" class="drt-empty">
         <Icon icon="mdi:file-document-outline" width="28" class="text-white/15" />
-        <p>暂无日报</p>
+        <p>日报需要积累数据</p>
+        <p class="drt-empty-hint">系统会按板块聚合每日热点，等文章抓取与打标积累后，日报会自动生成。</p>
       </div>
 
       <div v-else class="drt-list">
@@ -603,6 +604,15 @@ watch(() => props.boardId, () => {
   padding: 2.5rem 0;
   color: var(--color-text-muted);
   font-size: 0.8rem;
+}
+
+.drt-empty-hint {
+  margin: 0;
+  max-width: 16rem;
+  font-size: 0.72rem;
+  line-height: 1.5;
+  opacity: 0.85;
+  text-align: center;
 }
 
 .drt-list {

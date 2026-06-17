@@ -123,7 +123,8 @@
 | `description` | TEXT | 描述 |
 | `url` | VARCHAR(500) UNIQUE NOT NULL | RSS URL |
 | `category_id` | INTEGER | 所属分类 ID |
-| `icon` | VARCHAR(1000) DEFAULT 'rss' | 图标 |
+| `icon` | VARCHAR(1000) DEFAULT 'rss' | 图标值（iconify id 或图片 URL） |
+| `icon_source` | VARCHAR(20) DEFAULT 'fallback' | 图标来源状态机：`auto`（系统抓取，可刷新）/ `custom`（用户设定，不可覆盖）/ `fallback`（兜底 `mdi:rss`） |
 | `color` | VARCHAR(20) DEFAULT '#8b5cf6' | 颜色 |
 | `last_updated` | TIMESTAMP | 最后更新时间 |
 | `created_at` | TIMESTAMP | 创建时间 |

@@ -166,6 +166,8 @@ prompt version 升级为 "3.0"。
 ### Requirement: 日报存储
 系统 SHALL 提供 `SaveReport`（创建或更新日报+关联 sections）、`GetReport(boardID, date)`（查询单篇）、`ListReports(boardID, days)`（查询列表）三个存储接口。
 
+`ListReports` SHALL 在 `days <= 0` 时使用 7 天默认值。对于任意正数 `days`，系统 SHALL 按请求天数查询，不得静默截断到 30 天。
+
 #### Scenario: 保存日报和分组
 - **WHEN** 流水线完成生成
 - **THEN** 系统 SHALL 创建一条 BoardDailyReport 记录（status="done"）和多条 DailyReportSection 记录（每个聚类一条），并在事务中完成
@@ -173,6 +175,14 @@ prompt version 升级为 "3.0"。
 #### Scenario: 查询最近 7 天日报
 - **WHEN** 请求 `ListReports(boardID=5, days=7)`
 - **THEN** 系统 SHALL 返回 board #5 最近 7 天的日报列表，按 period_date 倒序
+
+#### Scenario: 查询超过 30 天日报
+- **WHEN** 请求 `ListReports(boardID=5, days=42)`
+- **THEN** 系统 SHALL 查询最近 42 天，不得将范围截断为 30 天
+
+#### Scenario: 非正数天数使用默认值
+- **WHEN** 请求 `ListReports(boardID=5, days=0)`
+- **THEN** 系统 SHALL 查询最近 7 天
 
 ### Requirement: 日报生成 API — 异步触发
 系统 SHALL 提供 `POST /api/daily-reports/generate` 端点，接受 `{date: string, board_id?: number}` 参数。board_id 为空时生成所有活跃 board 的日报。端点 SHALL 立即返回 `{job_id: string, status: "processing"}`，后台 goroutine 异步执行生成。
@@ -204,6 +214,8 @@ prompt version 升级为 "3.0"。
 - `GET /api/daily-reports/:id`：查询单篇日报详情（含关联 sections，每个 section 通过 GORM Preload 包含 threads 列表）
 - `GET /api/semantic-boards/:id/section-timeline?days=14`：查询板块 section 时间线（含关系）
 
+`GET /api/semantic-boards/:id/daily-reports` SHALL 在未提供有效正数 `days` 时使用 7 天默认值，并对任意正数 `days` 查询实际请求范围，不得静默截断到 30 天。
+
 `GetReportByID` SHALL 使用嵌套 Preload `"Sections.Threads"` 加载 section 及其关联线程。`DailyReportSection` 的 JSON 响应中 `threads` 字段 SHALL 包含 `[]DailyReportThread` 对象数组（每条含 id、report_id、section_id、title、summary、tag_ids、confidence），section 和 thread 均不含 status/prev_*_id 字段。
 
 #### Scenario: 查询板块日报列表
@@ -213,6 +225,10 @@ prompt version 升级为 "3.0"。
 #### Scenario: 查询日报详情含线程
 - **WHEN** 请求 `GET /api/daily-reports/42`
 - **THEN** 系统 SHALL 返回日报 #42 完整内容，每个 section 包含 threads 列表（每条含 id、title、summary、tag_ids、confidence、related_article_ids），section 和 thread 均不含 status/prev_*_id 字段
+
+#### Scenario: API 查询超过 30 天
+- **WHEN** 请求 `GET /api/semantic-boards/5/daily-reports?days=42`
+- **THEN** 系统 SHALL 返回最近 42 天范围内的全部匹配日报
 
 #### Scenario: 无日报时返回空
 - **WHEN** 请求 `GET /api/semantic-boards/5/daily-reports?days=7`，但该 board 无日报
@@ -239,6 +255,8 @@ prompt version 升级为 "3.0"。
 **线索文章浮窗**：使用 `@floating-ui/vue`，展示 `related_article_ids` 对应的文章标题列表。首批加载 5 篇，支持"加载更多"。点选文章→emit `openArticle(articleId)`。
 
 `dynamics` 为空时前端不渲染"板块动态"区块。
+
+"加载更早" SHALL 每次将 `days` 增加 7 并重新请求该完整时间范围。组件 SHALL 用响应替换当前列表，避免累计请求造成重复日报。
 
 #### Scenario: 展示日报卡片列表
 - **WHEN** 选中 board "AI与机器学习"，该 board 有 3 天的日报
@@ -272,9 +290,13 @@ prompt version 升级为 "3.0"。
 - **WHEN** 选中 board 但该 board 无日报
 - **THEN** 组件 SHALL 展示"暂无日报"
 
-#### Scenario: 加载更早
-- **WHEN** 用户点击"加载更早"
-- **THEN** 组件 SHALL 增大 days 参数重新请求，追加展示更早的日报
+#### Scenario: 加载超过 30 天
+- **WHEN** 当前 `days=28`，用户连续两次点击"加载更早"
+- **THEN** 组件 SHALL 依次以 `days=35` 和 `days=42` 请求，并展示对应范围内的日报
+
+#### Scenario: 切换 board 重置时间范围
+- **WHEN** 用户从一个 board 切换到另一个 board
+- **THEN** 组件 SHALL 将 `days` 重置为 7 并加载新 board 的日报
 
 ### Requirement: 日报生成进度前端
 前端 SHALL 提供 `useDailyReportProgress.ts` composable，连接 `/ws`，过滤 `daily_report_progress`/`daily_report_done` 消息。`NarrativeGenerateDialog.vue` SHALL 改为触发日报生成（调用 `generateDailyReport`），触发后显示进度板模式：每个 board 一行，实时更新状态（等待/生成中/完成+条数），使用 `useDailyReportProgress` composable。

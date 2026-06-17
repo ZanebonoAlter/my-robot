@@ -22,6 +22,7 @@ import { MOUSE } from 'three'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
 import type { PerspectiveCamera } from 'three'
 import type { DirectorCamera } from './DirectorCamera'
+import type { WallCameraBounds } from './TopicWallScene'
 
 export interface WallCameraControlsHooks {
   /** Called when an orbit pan/zoom begins; hover should pause. */
@@ -33,9 +34,10 @@ export interface WallCameraControlsHooks {
 export class WallCameraControls {
   readonly controls: OrbitControls
   private readonly hooks: WallCameraControlsHooks
+  private bounds: WallCameraBounds | null = null
 
   constructor(
-    camera: PerspectiveCamera,
+    private readonly camera: PerspectiveCamera,
     domElement: HTMLElement,
     directorCamera: DirectorCamera,
     hooks: WallCameraControlsHooks = {},
@@ -55,7 +57,7 @@ export class WallCameraControls {
     }
     // Keep the camera within a sensible zoom range of the wall.
     this.controls.minDistance = 3
-    this.controls.maxDistance = 40
+    this.controls.maxDistance = 28
 
     // Pause hover while the user drags/zooms.
     this.controls.addEventListener('start', () => this.hooks.onInteractStart?.())
@@ -68,16 +70,38 @@ export class WallCameraControls {
       },
       onTargetUpdate: (x, y, z) => {
         this.controls.target.set(x, y, z)
+        this.clampToBounds()
       },
       onTransitionComplete: () => {
         this.controls.enabled = true
+        this.clampToBounds()
       },
     }
+  }
+
+  setBounds(bounds: WallCameraBounds | null): void {
+    this.bounds = bounds
+    this.clampToBounds()
+  }
+
+  private clampToBounds(): void {
+    if (!this.bounds) return
+    const target = this.controls.target
+    const nextX = Math.min(Math.max(target.x, this.bounds.minX), this.bounds.maxX)
+    const nextY = Math.min(Math.max(target.y, this.bounds.minY), this.bounds.maxY)
+    const dx = nextX - target.x
+    const dy = nextY - target.y
+    if (Math.abs(dx) < 0.0001 && Math.abs(dy) < 0.0001) return
+    target.x = nextX
+    target.y = nextY
+    this.camera.position.x += dx
+    this.camera.position.y += dy
   }
 
   /** Must be called every frame (OrbitControls requires update to apply pan). */
   update(): void {
     this.controls.update()
+    this.clampToBounds()
   }
 
   dispose(): void {

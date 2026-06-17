@@ -168,25 +168,57 @@ func extractFeedTags(item *gofeed.Item) []string {
 	return tags
 }
 
+// extractItemImage resolves the best available preview image for a feed item.
+//
+// Priority (covers the common image carriers that gofeed itself misses):
+//  1. item.Image — gofeed already aggregates enclosure, media:content,
+//     itunes:image and the first <img> in content/description here.
+//  2. <media:thumbnail> — a known gofeed gap; many news/podcast feeds expose
+//     the thumbnail only through this Media RSS element.
+//  3. <enclosure type="image/*"> — final fallback for feeds that rely solely
+//     on enclosures but whose type gofeed failed to classify into item.Image.
 func extractItemImage(item *gofeed.Item) string {
-	if len(item.Enclosures) > 0 {
-		for _, enc := range item.Enclosures {
-			if strings.HasPrefix(enc.Type, "image/") {
-				return enc.URL
-			}
+	if item.Image != nil && item.Image.URL != "" {
+		return item.Image.URL
+	}
+	if url := mediaThumbnailURL(item); url != "" {
+		return url
+	}
+	for _, enc := range item.Enclosures {
+		if strings.HasPrefix(enc.Type, "image/") && enc.URL != "" {
+			return enc.URL
 		}
 	}
 	return ""
 }
 
-func (p *RSSParser) FetchFaviconURL(feedURL string) string {
-	parsedURL, err := url.Parse(feedURL)
-	if err != nil {
-		return "mdi:rss"
+// mediaThumbnailURL pulls the first <media:thumbnail url="..."> from the
+// Media RSS extension. Gofeed stores Media RSS under Extensions["media"] and
+// never surfaces thumbnails on item.Image, so this must be read explicitly.
+func mediaThumbnailURL(item *gofeed.Item) string {
+	media := item.Extensions["media"]
+	thumbs := media["thumbnail"]
+	for _, t := range thumbs {
+		if u := t.Attrs["url"]; u != "" {
+			return u
+		}
 	}
+	return ""
+}
 
-	// Use Google's favicon service as it's more reliable
-	return fmt.Sprintf("https://www.google.com/s2/favicons?domain=%s&sz=32", parsedURL.Host)
+// FetchFaviconURL derives a site's favicon URL from its homepage URL.
+//
+// siteURL should be the content site's homepage (typically the RSS channel
+// <link>), NOT the RSS feed URL — using the feed URL would yield the
+// aggregator's favicon (feedburner, rsshub, etc.) rather than the content
+// site's. Returns "" when the URL can't be parsed so callers keep the feed in
+// the fallback state rather than showing a broken image.
+func (p *RSSParser) FetchFaviconURL(siteURL string) string {
+	parsedURL, err := url.Parse(siteURL)
+	if err != nil || parsedURL.Host == "" || parsedURL.Scheme == "" {
+		return ""
+	}
+	return fmt.Sprintf("%s://%s/favicon.ico", parsedURL.Scheme, parsedURL.Host)
 }
 
 func (p *RSSParser) FetchFeedMetadata(feedURL string) (title, description string, err error) {

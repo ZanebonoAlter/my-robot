@@ -46,7 +46,7 @@ export class DustParticles {
   private readonly amp = 0.18
   private disposed = false
 
-  constructor(origin: Vector3) {
+  constructor(origin: Vector3, target: Vector3) {
     const count = STYLE.dust.count
     const positions = new Float32Array(count * 3)
     this.baseX = new Float32Array(count)
@@ -54,23 +54,32 @@ export class DustParticles {
     this.baseZ = new Float32Array(count)
     this.phase = new Float32Array(count)
 
-    // Sample inside an ellipsoidal cone: apex at lamp, opening toward -z (wall),
-    // widening and rising gently with distance.
+    const axis = target.clone().sub(origin)
+    const axisLength = Math.max(axis.length(), 1)
+    const direction = axis.normalize()
+    const side = new Vector3(direction.z, 0, -direction.x)
+    if (side.lengthSq() < 0.001) side.set(1, 0, 0)
+    side.normalize()
+    const up = new Vector3(0, 1, 0)
+
+    // Sample inside the actual lamp cone from shade opening to photo wall.
     for (let i = 0; i < count; i++) {
       const t = Math.random() // 0..1 along the cone depth
-      const depth = 1 + t * 5.5 // how far toward the wall
-      const spread = 0.6 + t * 2.6 // widens with distance
-      const x = origin.x + (Math.random() - 0.5) * spread * 2.2
-      const y = origin.y - 0.3 + (Math.random() - 0.5) * spread + Math.random() * 1.6
-      const z = origin.z - depth
+      const center = origin.clone().addScaledVector(direction, 0.55 + t * axisLength * 0.92)
+      const spread = 0.12 + t * 0.72
+      const sideOffset = (Math.random() - 0.5) * spread * 1.9
+      const upOffset = (Math.random() - 0.42) * spread * 0.95
+      const point = center
+        .addScaledVector(side, sideOffset)
+        .addScaledVector(up, upOffset)
 
       const i3 = i * 3
-      positions[i3] = x
-      positions[i3 + 1] = y
-      positions[i3 + 2] = z
-      this.baseX[i] = x
-      this.baseY[i] = y
-      this.baseZ[i] = z
+      positions[i3] = point.x
+      positions[i3 + 1] = point.y
+      positions[i3 + 2] = point.z
+      this.baseX[i] = point.x
+      this.baseY[i] = point.y
+      this.baseZ[i] = point.z
       this.phase[i] = Math.random() * Math.PI * 2
     }
 
@@ -83,7 +92,7 @@ export class DustParticles {
       color: new Color(STYLE.dust.color),
       size: STYLE.dust.size,
       transparent: true,
-      opacity: 0.7,
+      opacity: 0.32,
       depthWrite: false,
       blending: AdditiveBlending,
       sizeAttenuation: true,

@@ -37,10 +37,12 @@ type ScrapeResponse struct {
 		Markdown   string `json:"markdown"`
 		Screenshot string `json:"screenshot,omitempty"`
 		Metadata   struct {
-			Title       string `json:"title"`
-			Description string `json:"description"`
-			Language    string `json:"language"`
-			SourceURL   string `json:"sourceURL"`
+			Title        string `json:"title"`
+			Description  string `json:"description"`
+			Language     string `json:"language"`
+			SourceURL    string `json:"sourceURL"`
+			OgImage      string `json:"ogImage"`
+			TwitterImage string `json:"twitterImage"`
 		} `json:"metadata"`
 	} `json:"data"`
 	Error string `json:"error,omitempty"`

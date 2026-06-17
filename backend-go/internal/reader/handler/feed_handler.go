@@ -236,6 +236,9 @@ func CreateFeed(c *gin.Context) {
 	}
 	if feed.Icon == "" {
 		feed.Icon = "mdi:rss"
+		feed.IconSource = "fallback"
+	} else {
+		feed.IconSource = "custom"
 	}
 	if feed.Color == "" {
 		feed.Color = "#8b5cf6"
@@ -332,6 +335,7 @@ func UpdateFeed(c *gin.Context) {
 	}
 	if req.Icon != "" {
 		updates["icon"] = req.Icon
+		updates["icon_source"] = "custom"
 	}
 	if req.Color != "" {
 		updates["color"] = req.Color

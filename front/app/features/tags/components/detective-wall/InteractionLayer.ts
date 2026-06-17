@@ -355,6 +355,20 @@ export class InteractionLayer {
     this.callbacks.onBackgroundClick()
   }
 
+  /** Focus an already-visible card without recomputing the current lifeline. */
+  focusNode(nodeId: number): void {
+    const card = this.scene.cardGroup.getCardById(nodeId)
+    if (!card) return
+    if (this.state.mode === 'idle') {
+      this.triggerLifeline(card)
+      return
+    }
+    this.state.focusedNodeId = card.data.id
+    this.scene.setSelectionLight(card)
+    this.directorCamera.transitionTo(this.directorCamera.topicFocus(card))
+    this.callbacks.onCardClick(card)
+  }
+
   /**
    * Enter full lifecycle mode (spec §面板操作 查看完整生命周期).
    * Vue fetches lifecycle data via getSectionLifecycle and passes it here;

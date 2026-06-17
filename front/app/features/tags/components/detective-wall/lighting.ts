@@ -11,8 +11,8 @@
 import { HemisphereLight, SpotLight, PointLight, Scene, Color } from 'three'
 import { STYLE } from './types'
 
-/** Spotlight half-angle in radians (~28°): a focused desk-lamp cone. */
-const SPOT_HALF_ANGLE = 0.5
+/** Spotlight half-angle in radians (~31°): a focused desk-lamp cone. */
+const SPOT_HALF_ANGLE = 0.54
 
 /**
  * Adds the scene lights. `spot` is returned so TopicWallScene can reposition it
@@ -36,7 +36,7 @@ export function setupLighting(scene: Scene): {
   const spot = new SpotLight(
     new Color(STYLE.lamp.spotColor),
     STYLE.lamp.spotIntensity,
-    0, // no distance limit
+    34,
     SPOT_HALF_ANGLE,
     STYLE.lighting.spotPenumbra,
     1.5, // gentle physical decay
@@ -47,7 +47,7 @@ export function setupLighting(scene: Scene): {
   scene.add(spot.target)
 
   // 3. PointLight — follows the camera (explorer lamp), warm.
-  const followLight = new PointLight(new Color(STYLE.lighting.followColor), 0.6, 20, 2)
+  const followLight = new PointLight(new Color(STYLE.lighting.followColor), 0.24, 18, 2)
   followLight.position.set(0, 0, 8)
   scene.add(followLight)
 

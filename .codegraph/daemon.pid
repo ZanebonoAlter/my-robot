@@ -1,6 +1,6 @@
 {
-  "pid": 14746,
+  "pid": 22416,
   "version": "0.9.6",
-  "socketPath": "/mnt/d/project/Syntopica/.codegraph/daemon.sock",
-  "startedAt": 1781608384766
+  "socketPath": "\\\\.\\pipe\\codegraph-9a4e925354816386",
+  "startedAt": 1781681372207
 }

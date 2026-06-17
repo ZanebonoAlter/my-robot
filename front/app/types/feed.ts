@@ -40,6 +40,7 @@ export interface RssFeed {
   url: string
   category: string
   icon?: string
+  icon_source?: 'auto' | 'custom' | 'fallback'
   color?: string
   lastUpdated: string
   articleCount: number

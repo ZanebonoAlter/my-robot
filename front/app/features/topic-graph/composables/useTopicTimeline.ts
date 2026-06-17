@@ -201,7 +201,7 @@ export function useTopicTimeline(
                 link: article.link,
                 pubDate: article.pub_date,
                 feedName: article.feed_name,
-                feedIcon: article.image_url || '',
+                feedIcon: article.feed_icon || '',
                 tags: (article.tags || []).map((t: any) => ({
                   slug: t.slug, label: t.label, category: t.category,
                 })),

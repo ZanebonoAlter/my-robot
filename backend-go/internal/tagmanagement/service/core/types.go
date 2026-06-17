@@ -121,6 +121,7 @@ type TopicArticleCard struct {
 	Link     string            `json:"link"`
 	PubDate  *time.Time        `json:"pub_date,omitempty"`
 	FeedName string            `json:"feed_name,omitempty"`
+	FeedIcon string            `json:"feed_icon,omitempty"`
 	FeedID   uint              `json:"feed_id"`
 	ImageURL string            `json:"image_url,omitempty"`
 	Summary  string            `json:"summary,omitempty"`

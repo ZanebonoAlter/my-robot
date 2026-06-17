@@ -82,3 +82,116 @@
 - [x] 10.3 camera spec：DirectorCamera 加 hooks、新增 Wall Camera Controls 整节（配置/协调/hover 暂停/渲染循环/依赖）、Chapter Transition 标注当前无入口状态。
 - [x] 10.4 proposal：What Changes 加 OrbitControls 拖拽 + BFS depth、camera capability 加 OrbitControls、Impact 文件清单加 WallCameraControls.ts/lighting.ts。
 - [x] 10.5 tasks.md：§6.1 单测数 13→15、§8 验证节更新、追加 §9 评审修复任务 + §10 文档同步。
+
+## 11. 评审修复（迭代三：氛围与导航）
+
+- [x] 11.1 **台灯光锥修正**：降低半球/跟随环境光占比，提高台灯 SpotLight 强度；主光目标改为照片墙中心；实际光源与 DustParticles 锥顶移到灯罩下沿并向墙面探出，避免被灯罩遮挡；桌面后沿补暗边，拉开书桌与远背景层次。
+- [x] 11.2 **右侧案件抽屉**：详情面板改为右侧全高抽屉，生命线/线索/文章标题改为可换行，避免 overflow 截断；案件编号区新增上一个/下一个快捷导航。
+- [x] 11.3 **分化节点导航与摄像头聚焦**：新增 `InteractionLayer.focusNode(nodeId)`，抽屉导航选中节点后同步选中灯与 `DirectorCamera.topicFocus`；“下一个”若存在多个同时间分化候选，显示可选择的案件编号。
+- [x] 11.4 **版块切换与生命周期回退**：顶部新增 `主墙 / 生命线 / 生命周期` 分段切换；完整生命周期进入后保持右侧抽屉可见，并提供返回主墙入口。
+
+## 12. 测试
+
+- [x] 12.1 前端 lint：`cmd.exe /C "cd /d D:\project\Syntopica\front && pnpm lint"` → exit 0（仍有 23 个预存 warning，0 errors）。
+- [x] 12.2 前端类型检查：`cmd.exe /C "cd /d D:\project\Syntopica\front && pnpm exec nuxi typecheck"` → exit 0。
+- [x] 12.3 前端单元测试：`cmd.exe /C "cd /d D:\project\Syntopica\front && pnpm test:unit"` → exit 0（17 files / 90 tests passed；happy-dom teardown 有预存 AbortError stderr，但测试通过）。
+- [x] 12.4 前端构建：`cmd.exe /C "cd /d D:\project\Syntopica\front && pnpm build"` → exit 0（构建成功；存在预存 CSS nesting warning 与 Nuxt 依赖 deprecation warning）。
+
+## 13. 文档
+
+- [x] 13.1 更新 `docs/reference/architecture/frontend.md`：记录右侧案件抽屉、分段切换、生命周期回主墙、分化候选导航，以及台灯出光口/照片墙中心照明语义。
+
+## 14. 验证
+
+> 归档前重跑本节全部命令，确认零失败（§11.4）。
+
+- [x] 14.1 `cmd.exe /C "cd /d D:\project\Syntopica\front && pnpm lint"` → exit 0（0 errors）。
+- [x] 14.2 `cmd.exe /C "cd /d D:\project\Syntopica\front && pnpm exec nuxi typecheck"` → exit 0。
+- [x] 14.3 `cmd.exe /C "cd /d D:\project\Syntopica\front && pnpm test:unit"` → exit 0（17 files / 90 tests passed）。
+- [x] 14.4 `cmd.exe /C "cd /d D:\project\Syntopica\front && pnpm build"` → exit 0。
+
+## 15. 评审修复（迭代四：主题与材质）
+
+- [x] 15.1 **抽屉主题 token 化**：右侧案件抽屉改用 `--color-dialog-bg`、`--color-text-*`、`--color-border-*`、`--color-accent*`、`--shadow-*`，避免硬编码米黄色/深色按钮破坏 editorial/dark 主题适配。
+- [x] 15.2 **书桌/背景层次**：调整 `STYLE` 的桌面、远景墙、软木墙、全局背景色，桌面偏暖木色、远景墙偏冷灰绿低明度，避免读成两个黑色集合体。
+- [x] 15.3 **灰尘光锥收敛**：`DustParticles` 改为接收 origin + target，沿“灯罩出光口 → 照片墙中心”的真实光束采样；最终将 `STYLE.dust.count` 设为 0，先移除右下角割裂的独立尘埃团。
+- [x] 15.4 **台灯重新收束**：台灯灯罩改回不透明实体材质，只让实际 SpotLight 从灯罩下沿外侧发出，避免“透出灯泡”的廉价透明感。
+- [x] 15.5 **真实材质贴图**：下载并压缩 Poly Haven CC0 纹理到 `front/public/textures/detective-wall/`，桌面使用 `oak_veneer_01`，主墙使用 `beige_wall_001` plaster；`SetDressing` 与 `TopicWallScene.rebuildWall()` 通过 `TextureLoader` 加载本地 1K JPEG 贴图，删除 4K 原始大图。
+
+## 16. 测试
+
+- [x] 16.1 前端 lint：`cmd.exe /C "cd /d D:\project\Syntopica\front && pnpm lint"` → exit 0（0 errors，预存 23 warnings）。
+- [x] 16.2 前端类型检查：`cmd.exe /C "cd /d D:\project\Syntopica\front && pnpm exec nuxi typecheck"` → exit 0。
+
+## 17. 文档
+
+- [x] 17.1 更新 `docs/reference/architecture/frontend.md`：补充抽屉 token 规范、半透明灯罩、书桌/远景墙材质区分、真实光锥尘埃采样。
+- [x] 17.2 新增 `front/public/textures/detective-wall/README.md`：记录贴图来源与 CC0 授权。
+
+## 18. 验证
+
+> 归档前重跑本节全部命令，确认零失败（§11.4）。
+
+- [x] 18.1 `cmd.exe /C "cd /d D:\project\Syntopica\front && pnpm lint"` → exit 0（0 errors）。
+- [x] 18.2 `cmd.exe /C "cd /d D:\project\Syntopica\front && pnpm exec nuxi typecheck"` → exit 0。
+
+## 19. 评审修复（迭代五：布景边界与立体感）
+
+- [x] 19.1 **移除黑色几何体**：删除 `SetDressing` 中远景暗墙、黑色桌面后沿与额外桌面前沿，避免与主墙/桌面重叠形成穿帮块；主墙盒体侧边改为独立暖灰边缘材质，不注入方向雾，避免俯视角出现黑色横条。
+- [x] 19.2 **墙面与桌面实体化**：主墙由 `PlaneGeometry` 改为超宽超高 `BoxGeometry` 实体墙板；桌面由水平平面改为超宽实体桌板，并增加暖棕前沿表达厚度。
+- [x] 19.3 **扩大布景覆盖**：桌面中心改为 `minX + timelineWidth / 2`，宽度/深度按墙面安全范围外扩；主墙尺寸增加到足以覆盖相机活动区，并强制向下延伸到桌面后方以下，避免卡片墙与桌面之间露出场景背景。
+- [x] 19.4 **相机边界限制**：`TopicWallScene.getCameraBounds()` 暴露墙内安全范围，`WallCameraControls.setBounds()` 在 pan/zoom 与运镜 target 更新时限制目标点，并收紧最大缩放距离，避免看到墙面/桌面边缘。
+
+## 20. 测试
+
+- [x] 20.1 前端 lint：`cmd.exe /C "cd /d D:\project\Syntopica\front && pnpm lint"` → exit 0（0 errors，预存 warnings）。
+- [x] 20.2 前端类型检查：`cmd.exe /C "cd /d D:\project\Syntopica\front && pnpm exec nuxi typecheck"` → exit 0。
+- [x] 20.3 前端单元测试：`cmd.exe /C "cd /d D:\project\Syntopica\front && pnpm test:unit"` → exit 0。
+- [x] 20.4 前端构建：`cmd.exe /C "cd /d D:\project\Syntopica\front && pnpm build"` → exit 0。
+
+## 21. 文档
+
+- [x] 21.1 更新 `docs/reference/architecture/frontend.md`：记录实体墙板/桌板、移除远景黑墙、相机安全边界与材质来源。
+
+## 22. 验证
+
+> 归档前重跑本节全部命令，确认零失败（§11.4）。
+
+- [x] 22.1 `cmd.exe /C "cd /d D:\project\Syntopica\front && pnpm lint"` → exit 0（0 errors）。
+- [x] 22.2 `cmd.exe /C "cd /d D:\project\Syntopica\front && pnpm exec nuxi typecheck"` → exit 0。
+- [x] 22.3 `cmd.exe /C "cd /d D:\project\Syntopica\front && pnpm test:unit"` → exit 0。
+- [x] 22.4 `cmd.exe /C "cd /d D:\project\Syntopica\front && pnpm build"` → exit 0。
+- [x] 22.5 `cmd.exe /C "cd /d D:\project\Syntopica && git diff --check"` → exit 0（仅 CRLF warning）。
+- [x] 22.6 `openspec instructions apply --change detective-topic-wall --json` → all_done。
+
+## 23. 待排查（迭代六：黑色横条残留）
+
+> 2026-06-16 用户截图确认：即使删除远景暗墙、额外桌面前沿，并扩大主墙/桌面覆盖范围后，画面中仍存在大面积黑色横条。先记录，次日继续排查。
+
+- [ ] 23.1 **定位黑色横条真实来源**：不要继续凭截图猜测；需要在本地浏览器/Three.js inspector 或临时 debug material 中逐个确认是 scene background、wall mesh、desk mesh、postprocessing vignette/film、directional fog，还是 CSS overlay。
+- [ ] 23.2 **加临时材质诊断开关**：将墙、桌、背景、后处理分别换成高对比纯色（例如墙红/桌绿/background 蓝），截图确认黑条归属后再做正式修复。
+- [ ] 23.3 **复查相机裁切与坐标**：确认 `DirectorCamera.todayFocus/lifecycleFull`、`WallCameraControls` pan/zoom、`wallBottom` 与 `desk.zBack/zFront` 在实际数据布局下没有让相机看到未覆盖区域。
+- [ ] 23.4 **复查后处理**：临时禁用 Vignette/FilmPass/方向雾，确认黑条不是后处理或雾 shader 按 world position 造成的分层。
+
+## 24. 测试
+
+- [ ] 24.1 前端类型检查：`cmd.exe /C "cd /d D:\project\Syntopica\front && pnpm exec nuxi typecheck"`。
+- [ ] 24.2 前端 lint：`cmd.exe /C "cd /d D:\project\Syntopica\front && pnpm lint"`。
+- [ ] 24.3 前端单元测试：`cmd.exe /C "cd /d D:\project\Syntopica\front && pnpm test:unit"`。
+- [ ] 24.4 前端构建：`cmd.exe /C "cd /d D:\project\Syntopica\front && pnpm build"`。
+
+## 25. 文档
+
+- [x] 25.1 在本任务清单记录黑色横条仍未解决、已尝试方向与下一步诊断计划。
+- [ ] 25.2 若最终修复涉及场景结构/材质/后处理，更新 `docs/reference/architecture/frontend.md` 对应 3D 侦探墙说明。
+
+## 26. 验证
+
+> 归档前重跑本节全部命令，确认零失败（§11.4）。
+
+- [ ] 26.1 `cmd.exe /C "cd /d D:\project\Syntopica\front && pnpm lint"`。
+- [ ] 26.2 `cmd.exe /C "cd /d D:\project\Syntopica\front && pnpm exec nuxi typecheck"`。
+- [ ] 26.3 `cmd.exe /C "cd /d D:\project\Syntopica\front && pnpm test:unit"`。
+- [ ] 26.4 `cmd.exe /C "cd /d D:\project\Syntopica\front && pnpm build"`。
+- [ ] 26.5 `cmd.exe /C "cd /d D:\project\Syntopica && git diff --check"`。
+- [ ] 26.6 `openspec instructions apply --change detective-topic-wall --json`。

@@ -556,6 +556,7 @@ func (r *TopicGraphRepository) getTopicArticles(tagIDs []uint, startDate, endDat
 
 		if article.Feed.ID != 0 {
 			card.FeedName = article.Feed.Title
+			card.FeedIcon = article.Feed.Icon
 		}
 
 		if t, ok := tagMap[article.ID]; ok {

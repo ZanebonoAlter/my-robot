@@ -11,6 +11,7 @@ type Feed struct {
 	URL             string     `gorm:"size:500;unique;not null" json:"url"`
 	CategoryID      *uint      `gorm:"index" json:"category_id"`
 	Icon            string     `gorm:"size:1000;default:rss" json:"icon"`
+	IconSource      string     `gorm:"size:20;default:fallback" json:"icon_source"`
 	Color           string     `gorm:"size:20;default:#8b5cf6" json:"color"`
 	LastUpdated     *time.Time `json:"last_updated"`
 	CreatedAt       time.Time  `json:"created_at"`
@@ -46,6 +47,7 @@ func (f *Feed) ToDict(stats *FeedStats) map[string]interface{} {
 		"url":              f.URL,
 		"category_id":      f.CategoryID,
 		"icon":             f.Icon,
+		"icon_source":      f.IconSource,
 		"color":            f.Color,
 		"last_updated":     FormatDatetimeCSTPtr(f.LastUpdated),
 		"created_at":       FormatDatetimeCST(f.CreatedAt),

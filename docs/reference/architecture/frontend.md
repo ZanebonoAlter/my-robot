@@ -297,7 +297,7 @@ detective-wall/
 ├─ DirectorCamera.ts     # gsap 运镜（todayFocus/overview/topicFocus/lifecycleFull）
 ├─ InteractionLayer.ts   # Raycaster hover/click + BFS 生命线编排 + 状态机
 ├─ ChapterTransition.ts  # 板块切换 wipe + 档案封面打字机（gsap Timeline）
-├─ SetDressing.ts        # 桌面/远景墙/台灯/卷宗堆（侦探办公桌环境层，随 loadBoardData 重建）
+├─ SetDressing.ts        # 实体桌板/台灯/卷宗堆（侦探办公桌环境层，随 loadBoardData 重建）
 ├─ AmbientEnv.ts         # PMREM 程序化暖色环境贴图（图钉/黄铜金属反射）
 ├─ DustParticles.ts      # 台灯光锥尘埃微粒（additive Points）
 └─ shaders/directionalFog.ts # 方向雾 onBeforeCompile 注入（过去浓/今天清，不注入卡片）
@@ -305,7 +305,7 @@ detective-wall/
 
 ### 动画库分工
 
-3D 场景用 **gsap**（对 `THREE.Object3D`/材质属性的逐帧补间 + `timeline()` 多轨编排），2D overlay 用项目已装的 **motion-v**（Vue 组件声明式过渡）。详情面板是普通 Vue `position:fixed` overlay（非 CSS2DRenderer）；仅卡片悬停 tooltip 用 CSS2DRenderer（跟随 3D 坐标）。
+3D 场景用 **gsap**（对 `THREE.Object3D`/材质属性的逐帧补间 + `timeline()` 多轨编排），2D overlay 用项目已装的 **motion-v**（Vue 组件声明式过渡）。案件详情是普通 Vue 右侧抽屉（非 CSS2DRenderer），样式必须使用项目 semantic token（`--color-dialog-bg`、`--color-text-*`、`--color-border-*`、`--color-accent*`），跟随 editorial/dark 主题；仅卡片悬停 tooltip 用 CSS2DRenderer（跟随 3D 坐标）。
 
 ### 视觉对象语义
 
@@ -313,19 +313,26 @@ detective-wall/
 
 - `CardGroup` 使用 canvas procedural 档案袋作为 `CanvasTexture`，在同一纹理内绘制固定边界的标题、`CASE #id`、状态、文章/线索计数，并优先渲染 section 关联文章中的首张 `image_url`；无真实图片时绘制案件路线式默认缩略图。卡片点击热区仍由 3D mesh + CSS2D `data-card-id` tooltip 双路承担。
 - `RedString` 不从卡片中心连线，而是根据相对方向锚定在卡片边缘附近；路径使用轻微折线并抬到卡片前方，普通状态为暗红低透明，生命线高亮时变为证据红且线宽增加。
-- `TopicWallScene` 在卡片范围后方动态铺一块暗软木墙面，使用 procedural texture 提供磨砂颗粒、暗格和关卡路线式装饰点；选中红色 PointLight 绑定卡片当前 world position 并沿 z 轴打到卡片前方，随 `loadBoardData()` 重建并在 `clearScene()` dispose。
+- `TopicWallScene` 在卡片范围后方动态生成一块超出相机活动范围的实体墙板（`BoxGeometry`），加载本地 plaster 纹理并叠暖灰 tint；选中红色 PointLight 绑定卡片当前 world position 并沿 z 轴打到卡片前方，随 `loadBoardData()` 重建并在 `clearScene()` dispose。
 
 ### 环境纵深层（detective-wall-ambiance）
 
 在“面对软木墙钉卡片”的核心视角之外，叠加一层“侦探办公桌台灯下”的环境纵深，强化空间感与叙事氛围（change `detective-wall-ambiance`）：
 
-- **桌面 + 远景墙 + 台灯 + 卷宗堆**（`SetDressing.ts`）：前景水平桌面建立空间纵深参考系；台灯（banker's lamp：黄铜底座/立柱 + 墨绿灯罩 + emissive 灯泡）成为主 SpotLight 的视觉来源——暖光锥从灯罩射向今天列卡片。主软木墙退到 `z=-0.6`（卡片更多浮出厚度），后方 `z=-4` 一面暗远景墙靠雾衰减。随 `loadBoardData()` 按 `latestDayX`/`minX` 重建。
+- **实体桌板 + 实体主墙 + 台灯 + 卷宗堆**（`SetDressing.ts` + `TopicWallScene.ts`）：前景桌面不再是 2D 平面，而是超宽 `BoxGeometry` 桌板，使用本地压缩的 Poly Haven CC0 `oak_veneer_01` 纹理，厚度由桌板盒体自身表达，不再额外叠加横贯屏幕的暗色前沿；台灯（banker's lamp：黄铜底座/立柱 + 不透明墨绿灯罩 + emissive 灯泡）成为主 SpotLight 的视觉来源。实际光锥起点放在灯罩下沿、略向照片墙探出，避免被灯罩遮住，并打向当前照片墙中心。卡片后方真正可见的主墙由 `TopicWallScene.rebuildWall()` 生成超宽超高实体墙板，加载 `beige_wall_001` plaster 纹理并叠暖灰 tint，底部固定延伸到桌面后方以下，不再使用程序化黑色软木纹，也不再额外放置远景黑墙或黑色几何遮挡物。主墙前面退到 `z=-0.6`（卡片更多浮出厚度）；WebGL 场景 fallback 背景改为深暖色，极端视角露底时也不会出现冷黑横条。随 `loadBoardData()` 按 `latestDayX`/`minX` 重建。
+- **相机边界**（`WallCameraControls.ts` + `TopicWallScene.getCameraBounds()`）：主墙重建后暴露留有内边距的安全范围，OrbitControls 的 pan/zoom 目标被限制在墙内，最大缩放距离收紧，避免拖拽或聚焦后看到墙面/桌面边界造成穿帮。
 - **环境贴图**（`AmbientEnv.ts`）：PMREMGenerator 从程序化暖色场景（深棕底 + 台灯位置暖色发光球 + 顶部冷光）烘焙 env map 赋给 `scene.environment`，图钉/黄铜金属从此反射出暖色高光（不替换背景）。
 - **方向性雾**（`shaders/directionalFog.ts`）：通过 `material.onBeforeCompile` 给环境表面（桌面/墙/卷宗/台灯/软木墙）的 MeshStandardMaterial 注入 X 方向雾项——越往左（越早的日期）越浓，今天列附近最清，契合“抽丝剥茧”叙事。**不注入卡片**（保持 CardGroup 的 highlight/dim 语义干净）。共享 `fogUniforms` 一处更新全局生效。
 - **半球光**（`lighting.ts`）：`AmbientLight` → `HemisphereLight(暖天/冷地)`，上下色温差异带出空气感。
-- **光锥尘埃**（`DustParticles.ts`）：~150 个 additive Points 在台灯光锥内正弦漂移，配合 Bloom + Vignette 形成“档案室浮尘”厚重感。
+- **光锥尘埃**（`DustParticles.ts`）：当前关闭粒子（`STYLE.dust.count = 0`），保留实现接口以便后续在真实视觉验收后再恢复弱体积光效果。
 
 surgical 边界：不改相机坐标系/布局算法/交互/BFS/红线/全局迷雾/后处理；卡片材质不注入方向雾。无新增依赖（PMREMGenerator/HemisphereLight/Points 均属已装 three）。
+
+### 墙内导航与案件抽屉
+
+`TopicDetectiveWall.client.vue` 顶部提供 `主墙 / 生命线 / 生命周期` 分段切换。主墙回到当前 board timeline；生命线保留当前 BFS 结果；生命周期通过 `getSectionLifecycle(sectionId)` 重建为单话题完整演化视图，并可从抽屉按钮或分段切换回主墙。
+
+案件详情改为右侧抽屉，避免从照片墙左侧与详情面板右侧来回跳视线。抽屉内的生命线节点、线索标题和文章标题允许换行，不再单行 overflow 截断；案件编号区提供上一个/下一个导航。若“下一个”存在分化，抽屉显示多个候选案件编号，用户选择后 `InteractionLayer.focusNode(nodeId)` 聚焦对应卡片并移动摄像头。
 
 ### BFS 生命线
 

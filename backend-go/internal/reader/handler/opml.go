@@ -135,7 +135,8 @@ func ImportOPML(c *gin.Context) {
 				Description: "",
 				URL:         xmlURL,
 				CategoryID:  &category.ID,
-				Icon:        "rss",
+				Icon:        "mdi:rss",
+				IconSource:  "fallback",
 				Color:       "#8b5cf6",
 				LastUpdated: &now,
 			}

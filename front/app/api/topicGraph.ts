@@ -170,6 +170,7 @@ export interface TopicArticlesResponse {
     content?: string
     pub_date: string
     feed_name: string
+    feed_icon?: string
     feed_id: string
     tags: Array<{
       slug: string

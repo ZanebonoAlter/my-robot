@@ -5,6 +5,7 @@ interface ArticleCard {
   id: number | string
   title: string
   feedName?: string
+  feedIcon?: string
   pubDate?: string | Date
 }
 
@@ -34,7 +35,10 @@ const emit = defineEmits<{
     class="topic-related-card"
     @click="emit('click', article.id)"
   >
-    <p class="topic-related-card__meta">{{ article.feedName || '来源文章' }}</p>
+    <p class="topic-related-card__meta">
+      <FeedIcon v-if="article.feedIcon" :icon="article.feedIcon" :size="12" />
+      {{ article.feedName || '来源文章' }}
+    </p>
     <h3 class="topic-related-card__title">{{ article.title }}</h3>
     <p v-if="context" class="topic-related-card__context">{{ context }}</p>
     <p v-if="note" class="topic-related-card__note" :class="{ 'topic-related-card__note--soft': noteSoft }">

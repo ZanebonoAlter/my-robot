@@ -21,6 +21,8 @@ import { WallCameraControls } from './detective-wall/WallCameraControls'
 import { SUPPORTED_DAYS } from './detective-wall/types'
 import { latestDayX } from './detective-wall/utils'
 
+type WallSection = 'timeline' | 'lifeline' | 'lifecycle'
+
 const props = defineProps<{ boardId: number }>()
 const emit = defineEmits<{
   close: []
@@ -43,6 +45,7 @@ const relations = ref<SectionRelation[]>([])
 const showDetailPanel = ref(false)
 const focusedNode = ref<SectionTimelineNode | null>(null)
 const lifelineNodes = ref<SectionTimelineNode[]>([])
+const lifelineRelations = ref<SectionRelation[]>([])
 // Per-lifeline-node thread/article expansion (spec §面板操作 "查看详细线索").
 const expandedNodeId = ref<number | null>(null)
 const nodeThreads = ref<Map<number, DailyReportThread[]>>(new Map())
@@ -50,6 +53,7 @@ const nodeThreadsLoading = ref<number | null>(null)
 // Full lifecycle mode (spec §面板操作 查看完整生命周期).
 const lifecycleActive = ref(false)
 const lifecycleLoading = ref(false)
+const lifecycleOriginNode = ref<SectionTimelineNode | null>(null)
 
 // --- WebGL detection ---
 function hasWebGL(): boolean {
@@ -91,9 +95,11 @@ onMounted(async () => {
       showDetailPanel.value = false
       focusedNode.value = null
       lifelineNodes.value = []
+      lifelineRelations.value = []
     },
-    onLifelineReady: (nodes, _edges, start) => {
+    onLifelineReady: (nodes, edges, start) => {
       lifelineNodes.value = nodes
+      lifelineRelations.value = edges
       focusedNode.value = start
       showDetailPanel.value = true
     },
@@ -154,6 +160,7 @@ async function loadBoardData() {
       const start = endDate.toISOString().slice(0, 10)
       const dateRange = { start, end }
       scene.loadBoardData(res.data.sections, res.data.relations, dateRange, days.value)
+      cameraControls?.setBounds(scene.getCameraBounds())
       interaction.setData(res.data.sections, res.data.relations, dateRange, days.value)
       // Snap camera to today focus.
       const tx = latestDayX(res.data.sections)
@@ -174,6 +181,7 @@ watch(() => days.value, () => {
 })
 
 function setDays(d: 7 | 14 | 30 | 60) {
+  if (lifecycleActive.value) return
   days.value = d
 }
 
@@ -196,6 +204,7 @@ function closePanel() {
   showDetailPanel.value = false
   focusedNode.value = null
   lifelineNodes.value = []
+  lifelineRelations.value = []
 }
 
 function openArticle(id: number) {
@@ -294,6 +303,95 @@ const lifelineSummary = computed(() => {
   return { articles, threads, statusCounts }
 })
 
+const activeWallSection = computed<WallSection>(() => {
+  if (lifecycleActive.value) return 'lifecycle'
+  if (showDetailPanel.value && lifelineNodes.value.length > 0) return 'lifeline'
+  return 'timeline'
+})
+
+const wallSections: Array<{ key: WallSection; label: string; icon: string }> = [
+  { key: 'timeline', label: '主墙', icon: 'mdi:view-dashboard-outline' },
+  { key: 'lifeline', label: '生命线', icon: 'mdi:vector-polyline' },
+  { key: 'lifecycle', label: '生命周期', icon: 'mdi:timeline-clock-outline' },
+]
+
+const orderedLifelineNodes = computed(() => [...lifelineNodes.value].sort(compareNodesByTime))
+const previousCaseNodes = computed(() => directionalCaseCandidates('previous'))
+const nextCaseNodes = computed(() => directionalCaseCandidates('next'))
+
+function nodeTime(node: SectionTimelineNode): number {
+  return new Date(node.period_date).getTime()
+}
+
+function compareNodesByTime(a: SectionTimelineNode, b: SectionTimelineNode): number {
+  const diff = nodeTime(a) - nodeTime(b)
+  return diff !== 0 ? diff : a.id - b.id
+}
+
+function isConnectedToFocused(node: SectionTimelineNode, focusedId: number): boolean {
+  return lifelineRelations.value.some(r =>
+    (r.from_id === focusedId && r.to_id === node.id)
+    || (r.to_id === focusedId && r.from_id === node.id),
+  )
+}
+
+function directionalCaseCandidates(direction: 'previous' | 'next'): SectionTimelineNode[] {
+  const focused = focusedNode.value
+  if (!focused) return []
+  const ordered = orderedLifelineNodes.value
+  const currentTime = nodeTime(focused)
+  const related = ordered.filter((node) => {
+    if (node.id === focused.id || !isConnectedToFocused(node, focused.id)) return false
+    return direction === 'next' ? nodeTime(node) > currentTime : nodeTime(node) < currentTime
+  })
+  if (related.length > 0) {
+    const sorted = direction === 'next' ? related : related.reverse()
+    const nearestTime = nodeTime(sorted[0]!)
+    return sorted.filter(node => nodeTime(node) === nearestTime)
+  }
+
+  const currentIndex = ordered.findIndex(node => node.id === focused.id)
+  const fallback = ordered[currentIndex + (direction === 'next' ? 1 : -1)]
+  return fallback ? [fallback] : []
+}
+
+function selectCaseNode(node: SectionTimelineNode) {
+  focusedNode.value = node
+  showDetailPanel.value = true
+  interaction?.focusNode(node.id)
+}
+
+function selectAndToggleNodeThreads(node: SectionTimelineNode) {
+  selectCaseNode(node)
+  toggleNodeThreads(node)
+}
+
+async function switchWallSection(section: WallSection) {
+  if (section === 'timeline') {
+    if (lifecycleActive.value) {
+      await exitLifecycle()
+    } else {
+      closePanel()
+    }
+    return
+  }
+  if (section === 'lifeline') {
+    if (lifecycleActive.value) {
+      const origin = lifecycleOriginNode.value
+      await exitLifecycle(origin)
+      return
+    }
+    if (focusedNode.value && lifelineNodes.value.length > 0) {
+      showDetailPanel.value = true
+      selectCaseNode(focusedNode.value)
+    }
+    return
+  }
+  if (focusedNode.value && !lifecycleActive.value) {
+    await enterLifecycle(focusedNode.value.id)
+  }
+}
+
 // Enter: fetch the topic's full evolution (no day limit), rebuild the scene
 // with only that line, disable fog, move camera to lifecycleFull.
 async function enterLifecycle(sectionId: number) {
@@ -310,10 +408,15 @@ async function enterLifecycle(sectionId: number) {
       start: dates[0] ?? '',
       end: dates[dates.length - 1] ?? '',
     }
+    lifecycleOriginNode.value = focusedNode.value ?? sections.value.find(s => s.id === sectionId) ?? null
     interaction.enterLifecycle(lcSections, lcRelations, dateRange)
+    cameraControls?.setBounds(scene?.getCameraBounds() ?? null)
     lifecycleActive.value = true
     // Panel reflects the lifecycle node set.
+    focusedNode.value = lcSections.find(s => s.id === sectionId) ?? lcSections[0] ?? focusedNode.value
     lifelineNodes.value = lcSections
+    lifelineRelations.value = lcRelations
+    showDetailPanel.value = true
   } finally {
     lifecycleLoading.value = false
   }
@@ -321,15 +424,22 @@ async function enterLifecycle(sectionId: number) {
 
 // Exit: re-enable fog for the timeline window, reload the timeline data, and
 // return the camera to the today-focus shot.
-async function exitLifecycle() {
+async function exitLifecycle(restoreNode: SectionTimelineNode | null = null) {
   if (!interaction || !lifecycleActive.value) return
   interaction.exitLifecycle()
   lifecycleActive.value = false
+  lifecycleOriginNode.value = null
   focusedNode.value = null
   lifelineNodes.value = []
+  lifelineRelations.value = []
   showDetailPanel.value = false
   // Reload the timeline (restores cards + fog for the current days window).
   await loadBoardData()
+  if (restoreNode) {
+    focusedNode.value = sections.value.find(s => s.id === restoreNode.id) ?? restoreNode
+    showDetailPanel.value = true
+    interaction.focusNode(restoreNode.id)
+  }
 }
 </script>
 
@@ -344,12 +454,29 @@ async function exitLifecycle() {
         <Icon icon="mdi:arrow-left" width="18" />
         <span>返回</span>
       </button>
+      <div class="tdw-section-switch">
+        <button
+          v-for="section in wallSections"
+          :key="section.key"
+          class="tdw-section-btn"
+          :class="{ active: activeWallSection === section.key }"
+          :disabled="
+            (section.key === 'lifeline' && lifelineNodes.length === 0)
+              || (section.key === 'lifecycle' && (!focusedNode || lifecycleLoading))
+          "
+          @click="switchWallSection(section.key)"
+        >
+          <Icon :icon="section.icon" width="14" />
+          <span>{{ section.label }}</span>
+        </button>
+      </div>
       <div class="tdw-days-toggle">
         <button
           v-for="d in SUPPORTED_DAYS"
           :key="d"
           class="tdw-days-btn"
           :class="{ active: days === d }"
+          :disabled="lifecycleActive"
           @click="setDays(d)"
         >
           {{ d }}天
@@ -363,6 +490,39 @@ async function exitLifecycle() {
         <div class="tdw-detail-header">
           <Icon icon="mdi:folder" width="16" />
           <span>案件编号 #{{ focusedNode.id }}</span>
+        </div>
+        <div class="tdw-case-nav">
+          <button
+            class="tdw-case-nav-btn"
+            :disabled="previousCaseNodes.length === 0"
+            @click="previousCaseNodes[0] && selectCaseNode(previousCaseNodes[0])"
+          >
+            <Icon icon="mdi:chevron-left" width="15" />
+            <span>上一个</span>
+          </button>
+          <div class="tdw-case-next">
+            <button
+              v-if="nextCaseNodes.length <= 1"
+              class="tdw-case-nav-btn"
+              :disabled="nextCaseNodes.length === 0"
+              @click="nextCaseNodes[0] && selectCaseNode(nextCaseNodes[0])"
+            >
+              <span>下一个</span>
+              <Icon icon="mdi:chevron-right" width="15" />
+            </button>
+            <div v-else class="tdw-branch-picker">
+              <span class="tdw-branch-label">下一个分化</span>
+              <button
+                v-for="node in nextCaseNodes"
+                :key="node.id"
+                class="tdw-branch-btn"
+                :title="node.cluster_label"
+                @click="selectCaseNode(node)"
+              >
+                #{{ node.id }}
+              </button>
+            </div>
+          </div>
         </div>
         <div class="tdw-detail-title">{{ focusedNode.cluster_label }}</div>
         <div class="tdw-detail-meta">
@@ -394,7 +554,7 @@ async function exitLifecycle() {
               <div
                 class="tdw-lifeline-item"
                 :class="{ 'tdw-lifeline-item--expanded': expandedNodeId === n.id }"
-                @click="toggleNodeThreads(n)"
+                @click="selectAndToggleNodeThreads(n)"
               >
                 <span class="tdw-lifeline-date">{{ n.period_date.slice(0, 10) }}</span>
                 <span class="tdw-lifeline-label">{{ n.cluster_label }}</span>
@@ -477,7 +637,7 @@ async function exitLifecycle() {
           <span>{{ lifecycleLoading ? '加载中…' : '查看完整生命周期' }}</span>
         </button>
         <button class="tdw-btn tdw-btn-back" @click="lifecycleActive ? exitLifecycle() : closePanel()">
-          {{ lifecycleActive ? '返回时间线' : '关闭面板' }}
+          {{ lifecycleActive ? '返回主墙' : '关闭面板' }}
         </button>
       </div>
     </Transition>
@@ -543,8 +703,9 @@ async function exitLifecycle() {
   top: 1rem;
   left: 1rem;
   right: 1rem;
-  display: flex;
-  justify-content: space-between;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 0.75rem;
   align-items: center;
   z-index: 4;
   pointer-events: none;
@@ -563,6 +724,39 @@ async function exitLifecycle() {
   cursor: pointer;
 }
 .tdw-btn:hover { background: rgba(255, 255, 255, 0.14); }
+.tdw-section-switch {
+  justify-self: center;
+  display: inline-flex;
+  gap: 0.25rem;
+  min-width: 0;
+  max-width: 100%;
+  padding: 0.22rem;
+  background: rgba(5, 7, 9, 0.66);
+  border: 1px solid rgba(255, 244, 214, 0.12);
+  border-radius: 0.45rem;
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.26);
+}
+.tdw-section-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  min-height: 2rem;
+  padding: 0.28rem 0.62rem;
+  border: 0;
+  border-radius: 0.32rem;
+  background: transparent;
+  color: rgba(255, 251, 235, 0.66);
+  font-size: 0.78rem;
+  cursor: pointer;
+}
+.tdw-section-btn.active {
+  background: rgba(220, 38, 38, 0.92);
+  color: #fff;
+}
+.tdw-section-btn:disabled {
+  opacity: 0.38;
+  cursor: not-allowed;
+}
 .tdw-days-toggle {
   display: flex;
   gap: 0.25rem;
@@ -583,23 +777,28 @@ async function exitLifecycle() {
   background: #DC2626;
   color: #fff;
 }
+.tdw-days-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
 
-/* Detail panel — fixed position Vue overlay */
+/* Detail panel — right-side case drawer */
 .tdw-detail-panel {
   position: absolute;
-  right: 2rem;
-  top: 50%;
+  top: 0;
+  right: 0;
+  bottom: 0;
   z-index: 4;
-  transform: translateY(-50%);
-  width: 280px;
-  max-height: 70vh;
+  width: min(520px, calc(100vw - 2rem));
+  max-height: none;
   overflow-y: auto;
-  background: #FFFBEB;
-  border: 1px solid rgba(26, 26, 26, 0.15);
-  border-radius: 0.5rem;
-  padding: 1rem;
-  color: #1A1A1A;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+  background: var(--color-dialog-bg);
+  border: 1px solid var(--color-border-medium);
+  border-right: 0;
+  border-radius: 0.55rem 0 0 0.55rem;
+  padding: 1rem 1.1rem 1.25rem;
+  color: var(--color-text-primary);
+  box-shadow: -18px 0 42px rgba(0, 0, 0, 0.32), var(--shadow-strong);
   font-family: 'JetBrains Mono', 'Courier New', monospace;
 }
 .tdw-detail-header {
@@ -607,25 +806,82 @@ async function exitLifecycle() {
   align-items: center;
   gap: 0.4rem;
   font-size: 0.75rem;
-  color: #4B5563;
-  border-bottom: 1px solid rgba(26, 26, 26, 0.1);
+  color: var(--color-text-secondary);
+  border-bottom: 1px solid var(--color-dialog-divider);
   padding-bottom: 0.5rem;
   margin-bottom: 0.5rem;
+}
+.tdw-case-nav {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.35fr);
+  gap: 0.45rem;
+  margin-bottom: 0.65rem;
+}
+.tdw-case-next {
+  min-width: 0;
+}
+.tdw-case-nav-btn,
+.tdw-branch-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.25rem;
+  min-height: 2rem;
+  width: 100%;
+  border: 1px solid var(--color-border-medium);
+  border-radius: 0.35rem;
+  background: var(--color-bg-hover);
+  color: var(--color-text-secondary);
+  font-size: 0.72rem;
+  cursor: pointer;
+}
+.tdw-case-nav-btn:hover:not(:disabled),
+.tdw-branch-btn:hover {
+  background: var(--color-accent-subtle);
+  border-color: var(--color-accent);
+}
+.tdw-case-nav-btn:disabled {
+  opacity: 0.42;
+  cursor: not-allowed;
+}
+.tdw-branch-picker {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 0.25rem;
+}
+.tdw-branch-label {
+  font-size: 0.62rem;
+  color: var(--color-accent);
+}
+.tdw-branch-btn {
+  width: auto;
+  min-height: 1.65rem;
 }
 .tdw-detail-title {
   font-size: 1rem;
   font-weight: 600;
+  line-height: 1.35;
   margin-bottom: 0.4rem;
+}
+.tdw-detail-panel .tdw-btn {
+  background: var(--color-bg-hover);
+  border-color: var(--color-border-medium);
+  color: var(--color-text-secondary);
+}
+.tdw-detail-panel .tdw-btn:hover {
+  background: var(--color-accent-subtle);
+  border-color: var(--color-accent);
+  color: var(--color-accent);
 }
 .tdw-detail-meta {
   display: flex;
   justify-content: space-between;
   font-size: 0.75rem;
-  color: #4B5563;
+  color: var(--color-text-secondary);
   margin-bottom: 0.75rem;
 }
 .tdw-detail-status {
-  color: #DC2626;
+  color: var(--color-accent);
   font-weight: 600;
 }
 /* Lifeline/lifecycle aggregate summary */
@@ -635,10 +891,10 @@ async function exitLifecycle() {
   align-items: center;
   gap: 0.4rem;
   font-size: 0.68rem;
-  color: #4B5563;
+  color: var(--color-text-secondary);
   padding: 0.35rem 0;
-  border-top: 1px dashed rgba(26, 26, 26, 0.12);
-  border-bottom: 1px dashed rgba(26, 26, 26, 0.12);
+  border-top: 1px dashed var(--color-border-medium);
+  border-bottom: 1px dashed var(--color-border-medium);
   margin-bottom: 0.5rem;
 }
 .tdw-summary-chip {
@@ -661,11 +917,11 @@ async function exitLifecycle() {
 .tdw-status-ending { background: #9ca3af; }
 .tdw-detail-section-label {
   font-size: 0.7rem;
-  color: #4B5563;
+  color: var(--color-text-secondary);
   margin-bottom: 0.3rem;
 }
 .tdw-lifeline-node {
-  border-bottom: 1px dotted rgba(26, 26, 26, 0.1);
+  border-bottom: 1px dotted var(--color-border-subtle);
 }
 .tdw-lifeline-item {
   display: flex;
@@ -675,23 +931,28 @@ async function exitLifecycle() {
   font-size: 0.75rem;
   cursor: pointer;
 }
-.tdw-lifeline-item:hover { background: rgba(220, 38, 38, 0.05); }
+.tdw-lifeline-item:hover { background: var(--color-accent-subtle); }
 .tdw-lifeline-item--expanded .tdw-lifeline-arrow { transform: rotate(90deg); }
 .tdw-lifeline-arrow {
   margin-left: auto;
-  color: #4B5563;
+  color: var(--color-text-muted);
   transition: transform 0.12s ease;
   flex-shrink: 0;
 }
-.tdw-lifeline-date { color: #D97706; min-width: 5.5rem; }
-.tdw-lifeline-label { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tdw-lifeline-date { color: var(--color-secondary); min-width: 5.5rem; }
+.tdw-lifeline-label {
+  flex: 1;
+  min-width: 0;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
 .tdw-lifeline-threads {
   padding: 0.2rem 0 0.3rem 1rem;
 }
 .tdw-lifeline-threads-loading,
 .tdw-lifeline-threads-empty {
   font-size: 0.7rem;
-  color: #4B5563;
+  color: var(--color-text-secondary);
   padding: 0.15rem 0;
 }
 .tdw-lifeline-thread {
@@ -703,9 +964,9 @@ async function exitLifecycle() {
   cursor: pointer;
   transition: background 0.1s ease;
 }
-.tdw-lifeline-thread:hover { background: rgba(220, 38, 38, 0.08); }
+.tdw-lifeline-thread:hover { background: var(--color-accent-subtle); }
 .tdw-lifeline-thread-arrow {
-  color: #6B7280;
+  color: var(--color-text-muted);
   flex-shrink: 0;
   transition: transform 0.12s ease;
 }
@@ -713,14 +974,14 @@ async function exitLifecycle() {
 .tdw-lifeline-thread-title {
   flex: 1;
   font-size: 0.72rem;
-  color: #1F2937;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  color: var(--color-text-primary);
+  min-width: 0;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
 }
 .tdw-lifeline-thread-count {
   font-size: 0.62rem;
-  color: #6B7280;
+  color: var(--color-text-muted);
   flex-shrink: 0;
 }
 /* Expanded article list under a thread */
@@ -730,7 +991,7 @@ async function exitLifecycle() {
 .tdw-thread-articles-loading,
 .tdw-thread-articles-empty {
   font-size: 0.65rem;
-  color: #6B7280;
+  color: var(--color-text-secondary);
   padding: 0.15rem 0;
 }
 .tdw-thread-article {
@@ -742,21 +1003,21 @@ async function exitLifecycle() {
   cursor: pointer;
   transition: background 0.1s ease;
 }
-.tdw-thread-article:hover { background: rgba(220, 38, 38, 0.08); }
-.tdw-thread-article-icon { color: #9CA3AF; flex-shrink: 0; }
+.tdw-thread-article:hover { background: var(--color-accent-subtle); }
+.tdw-thread-article-icon { color: var(--color-text-muted); flex-shrink: 0; }
 .tdw-thread-article-title {
   flex: 1;
   font-size: 0.66rem;
-  color: #374151;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  color: var(--color-text-secondary);
+  min-width: 0;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
 }
-.tdw-thread-article:hover .tdw-thread-article-title { color: #DC2626; }
-.tdw-thread-article-external { color: #9CA3AF; flex-shrink: 0; }
+.tdw-thread-article:hover .tdw-thread-article-title { color: var(--color-accent); }
+.tdw-thread-article-external { color: var(--color-text-muted); flex-shrink: 0; }
 .tdw-thread-articles-more {
   font-size: 0.6rem;
-  color: #9CA3AF;
+  color: var(--color-text-muted);
   padding: 0.1rem 0.25rem;
 }
 .tdw-btn-back { margin-top: 0.75rem; width: 100%; justify-content: center; }
@@ -764,11 +1025,11 @@ async function exitLifecycle() {
   margin-top: 0.5rem;
   width: 100%;
   justify-content: center;
-  border-color: rgba(220, 38, 38, 0.4);
-  color: #DC2626;
+  border-color: var(--color-accent);
+  color: var(--color-accent);
 }
 .tdw-btn-lifecycle:hover:not(:disabled) {
-  background: rgba(220, 38, 38, 0.1);
+  background: var(--color-accent-subtle);
 }
 .tdw-btn-lifecycle:disabled {
   opacity: 0.6;
@@ -785,12 +1046,28 @@ async function exitLifecycle() {
   transition: transform 0.3s ease, opacity 0.3s ease;
 }
 .tdw-panel-enter-from, .tdw-panel-leave-to {
-  transform: translate(50px, -50%);
+  transform: translateX(100%);
   opacity: 0;
 }
 .tdw-panel-enter-to, .tdw-panel-leave-from {
-  transform: translate(0, -50%);
+  transform: translateX(0);
   opacity: 1;
+}
+
+@media (max-width: 900px) {
+  .tdw-topbar {
+    grid-template-columns: 1fr;
+    align-items: stretch;
+  }
+  .tdw-section-switch,
+  .tdw-days-toggle {
+    justify-self: stretch;
+    overflow-x: auto;
+  }
+  .tdw-detail-panel {
+    width: min(460px, 100vw);
+    border-radius: 0;
+  }
 }
 
 /* Chapter transition DOM removed (no BoardSelector entry yet — see HANDOFF §3.2).

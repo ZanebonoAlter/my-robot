@@ -146,8 +146,8 @@ export const STYLE = {
     baseLinewidth: 2.6,
     highlightLinewidth: 5.2,
   },
-  background: '#0a0f14',
-  cork: '#2A1710',
+  background: '#241f1b',
+  cork: '#7A6754',
   fog: '#0a0f14',
   /** Day spacing → fog density mapping (scene spec §FogSystem). */
   fogDensityByDays: { 7: 0.08, 14: 0.05, 30: 0.03, 60: 0.02 } as Record<number, number>,
@@ -166,24 +166,24 @@ export const STYLE = {
     rotationZDeg: 3,
   },
   lighting: {
-    ambient: 0.15,
+    ambient: 0.08,
     spotAngleDeg: 45,
-    spotPenumbra: 0.5,
+    spotPenumbra: 0.42,
     hemiSky: '#3a2a1a',
     hemiGround: '#0a0f14',
-    hemiIntensity: 0.55,
+    hemiIntensity: 0.28,
     followColor: '#fff0d0',
   },
   desk: {
     y: -1.6,
-    zBack: -2,
-    zFront: 12,
-    color: '#3a2418',
+    zBack: -6,
+    zFront: 24,
+    color: '#A06F45',
   },
   wall: {
     backZ: -0.6,
     farZ: -4,
-    farColor: '#06090c',
+    farColor: '#1B2528',
   },
   lamp: {
     offset: { x: 2.8, z: 5.2 },
@@ -192,7 +192,7 @@ export const STYLE = {
     bulb: '#ffe9b0',
     bulbEmissive: 1.5,
     spotColor: '#ffd9a0',
-    spotIntensity: 2.0,
+    spotIntensity: 4.2,
   },
   dossier: {
     stackColor: '#e8d4a5',
@@ -203,9 +203,9 @@ export const STYLE = {
     color: '#0a0f14',
   },
   dust: {
-    count: 150,
+    count: 0,
     color: '#ffe9c8',
-    size: 0.06,
+    size: 0.038,
   },
 } as const
 

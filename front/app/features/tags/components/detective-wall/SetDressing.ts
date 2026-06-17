@@ -1,8 +1,8 @@
 /**
  * SetDressing — the detective desk environment layer.
  *
- * Builds the foreground desk surface, a far background wall, a banker's desk
- * lamp (the visual source of the main spotlight), and dossier stacks. All
+ * Builds the foreground desk slab, a banker's desk lamp (the visual source of
+ * the main spotlight), and dossier stacks. All
  * StandardMaterials get the shared directional-fog injection so the scene reads
  * "clear at today, fogged into the past".
  *
@@ -13,8 +13,9 @@
  * @see openspec/changes/detective-wall-ambiance/design.md §SetDressing
  */
 import {
-  Group, Mesh, PlaneGeometry, BoxGeometry, CylinderGeometry, SphereGeometry,
+  Group, Mesh, BoxGeometry, CylinderGeometry, SphereGeometry,
   MeshStandardMaterial, Color, CanvasTexture, RepeatWrapping, Vector3, Scene,
+  TextureLoader, SRGBColorSpace, type Texture,
   type Material,
 } from 'three'
 import { STYLE } from './types'
@@ -46,52 +47,6 @@ function seededNoise(seed: number): () => number {
     r ^= r + Math.imul(r ^ (r >>> 7), 61 | r)
     return ((r ^ (r >>> 14)) >>> 0) / 4294967296
   }
-}
-
-function makeDeskTexture(): CanvasTexture {
-  const c = document.createElement('canvas')
-  c.width = 512
-  c.height = 512
-  const ctx = c.getContext('2d')!
-  const rnd = seededNoise(7)
-
-  const base = ctx.createLinearGradient(0, 0, c.width, c.height)
-  base.addColorStop(0, '#2A1A10')
-  base.addColorStop(0.5, STYLE.desk.color)
-  base.addColorStop(1, '#1A0F08')
-  ctx.fillStyle = base
-  ctx.fillRect(0, 0, c.width, c.height)
-
-  // Wood grain streaks.
-  for (let i = 0; i < 90; i++) {
-    const y = rnd() * c.height
-    const warm = 40 + Math.floor(rnd() * 30)
-    ctx.strokeStyle = `rgba(${warm + 20}, ${warm}, ${warm - 18}, ${0.05 + rnd() * 0.12})`
-    ctx.lineWidth = 0.6 + rnd() * 1.6
-    ctx.beginPath()
-    ctx.moveTo(0, y)
-    let x = 0
-    while (x < c.width) {
-      x += 24 + rnd() * 40
-      ctx.lineTo(x, y + (rnd() - 0.5) * 6)
-    }
-    ctx.stroke()
-  }
-
-  // Aged wear specks.
-  for (let i = 0; i < 1800; i++) {
-    const dark = rnd() > 0.6
-    ctx.fillStyle = dark
-      ? `rgba(10, 6, 4, ${0.04 + rnd() * 0.1})`
-      : `rgba(120, 80, 40, ${0.03 + rnd() * 0.08})`
-    ctx.fillRect(rnd() * c.width, rnd() * c.height, 1 + rnd() * 2, 1)
-  }
-
-  const tex = new CanvasTexture(c)
-  tex.wrapS = tex.wrapT = RepeatWrapping
-  tex.repeat.set(4, 4)
-  tex.needsUpdate = true
-  return tex
 }
 
 function makeDossierTexture(seed: number): CanvasTexture {
@@ -126,15 +81,23 @@ function makeDossierTexture(seed: number): CanvasTexture {
   return tex
 }
 
+function loadRepeatingTexture(path: string, repeatX: number, repeatY: number): Texture {
+  const tex = new TextureLoader().load(path)
+  tex.colorSpace = SRGBColorSpace
+  tex.wrapS = tex.wrapT = RepeatWrapping
+  tex.repeat.set(repeatX, repeatY)
+  return tex
+}
+
 export class SetDressing {
   readonly group = new Group()
   readonly lampPosition: Vector3
   readonly fogUniforms: DirectionalFogUniforms
-  private readonly textures: CanvasTexture[] = []
+  private readonly textures: Texture[] = []
 
   constructor(opts: SetDressingOptions) {
     const { latestDayX, minX, timelineWidth } = opts
-    const { desk, wall, lamp, directionalFog } = STYLE
+    const { desk, lamp, directionalFog } = STYLE
 
     this.fogUniforms = {
       uFogOriginX: { value: latestDayX },
@@ -143,11 +106,13 @@ export class SetDressing {
       uDirFogColor: { value: new Color(directionalFog.color) },
     }
 
-    const deskWidth = Math.max(timelineWidth + 16, 26)
-    const centerX = timelineWidth / 2
+    const deskWidth = Math.max(timelineWidth + 36, 72)
+    const centerX = minX + timelineWidth / 2
+    const deskDepth = desk.zFront - desk.zBack
+    const deskThickness = 0.3
 
-    // --- Desk surface (horizontal plane) ---
-    const deskTex = makeDeskTexture()
+    // --- Desk slab (oversized box, not a 2D plane) ---
+    const deskTex = loadRepeatingTexture('/textures/detective-wall/desk_oak_diff.jpg', 8, 4)
     this.textures.push(deskTex)
     const deskMat = new MeshStandardMaterial({
       color: new Color(desk.color),
@@ -156,21 +121,9 @@ export class SetDressing {
       metalness: 0.05,
     })
     injectDirectionalFog(deskMat, this.fogUniforms)
-    const deskMesh = new Mesh(new PlaneGeometry(deskWidth, desk.zFront - desk.zBack), deskMat)
-    deskMesh.rotation.x = -Math.PI / 2
-    deskMesh.position.set(centerX, desk.y, (desk.zBack + desk.zFront) / 2)
+    const deskMesh = new Mesh(new BoxGeometry(deskWidth, deskThickness, deskDepth), deskMat)
+    deskMesh.position.set(centerX, desk.y - deskThickness / 2, (desk.zBack + desk.zFront) / 2)
     this.group.add(deskMesh)
-
-    // --- Far background wall (vertical, dim, eaten by fog) ---
-    const farMat = new MeshStandardMaterial({
-      color: new Color(wall.farColor),
-      roughness: 1,
-      metalness: 0,
-    })
-    injectDirectionalFog(farMat, this.fogUniforms)
-    const farWall = new Mesh(new PlaneGeometry(deskWidth, 14), farMat)
-    farWall.position.set(centerX, 2, wall.farZ)
-    this.group.add(farWall)
 
     // --- Desk lamp (banker's style: base + stem + green shade + bulb + cap) ---
     this.lampPosition = lampPositionFor(latestDayX, lamp.offset, desk.y)
@@ -191,8 +144,11 @@ export class SetDressing {
     })
     injectDirectionalFog(brass, this.fogUniforms)
     const glass = new MeshStandardMaterial({
-      color: new Color(lamp.glass), roughness: 0.4, metalness: 0.6,
-      emissive: new Color(lamp.glass), emissiveIntensity: 0.15,
+      color: new Color(lamp.glass),
+      roughness: 0.36,
+      metalness: 0.18,
+      emissive: new Color(lamp.glass),
+      emissiveIntensity: 0.08,
     })
     injectDirectionalFog(glass, this.fogUniforms)
     const bulb = new MeshStandardMaterial({

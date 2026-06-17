@@ -654,5 +654,51 @@ func postgresMigrations() []Migration {
 				}).Error
 			},
 		},
+
+		// ── Feed icon_source backfill ───────────────────────────────────
+		// AutoMigrate adds feeds.icon_source with default 'fallback', but
+		// existing rows carry legacy icon values with mixed semantics. This
+		// one-shot data migration classifies them by their icon value: URLs
+		// -> auto, placeholder strings -> fallback, other iconify ids ->
+		// custom (conservatively preserved as user-owned).
+		//
+		// Idempotency: versioned migrations run exactly once (tracked in
+		// schema_migrations), so unconditional classification is safe here.
+		// Rows created after this migration set icon_source correctly at write
+		// time and are never touched by this block again.
+		{
+			Version:     "20260617_0001",
+			Description: "Backfill feeds.icon_source from legacy icon values and normalize placeholders.",
+			Up: func(db *gorm.DB) error {
+				if !tableExists(db, "feeds") {
+					return nil
+				}
+				// Classify every legacy row by its current icon value.
+				if err := db.Exec(`
+					UPDATE feeds SET icon_source = CASE
+						WHEN icon IS NULL OR icon = '' OR icon = 'rss' OR icon = 'mdi:rss' THEN 'fallback'
+						WHEN icon LIKE 'http://%' OR icon LIKE 'https://%' THEN 'auto'
+						ELSE 'custom'
+					END
+					WHERE icon_source IS DISTINCT FROM (
+						CASE
+							WHEN icon IS NULL OR icon = '' OR icon = 'rss' OR icon = 'mdi:rss' THEN 'fallback'
+							WHEN icon LIKE 'http://%' OR icon LIKE 'https://%' THEN 'auto'
+							ELSE 'custom'
+						END
+					)
+				`).Error; err != nil {
+					return fmt.Errorf("backfill feeds.icon_source: %w", err)
+				}
+				// Normalize placeholder icon values for fallback rows (rss/"" -> mdi:rss)
+				if err := db.Exec(`
+					UPDATE feeds SET icon = 'mdi:rss'
+					WHERE icon_source = 'fallback' AND icon IN ('', 'rss')
+				`).Error; err != nil {
+					return fmt.Errorf("normalize feeds.icon placeholders: %w", err)
+				}
+				return nil
+			},
+		},
 	}
 }

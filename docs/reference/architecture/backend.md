@@ -381,6 +381,22 @@ topicgraph/service/
 - `refresh_interval`
 - `refresh_status`
 
+#### Feed 图标状态机（`icon` + `icon_source`）
+
+`icon` 只承载值（iconify id 或图片 URL），`icon_source` 承载来源语义，三态流转：
+
+```
+fallback ──refresh──▶ auto      系统抓 RSS <image> / 站点 /favicon.ico
+   │                    │
+   └── 用户编辑 ──▶ custom ★冻结 永不被 RefreshFeed 覆盖
+```
+
+- **`fallback`**：系统兜底（`mdi:rss`），RefreshFeed 会尝试升级到 auto
+- **`auto`**：系统自动抓取的 URL，可被刷新换更优图
+- **`custom`**：用户显式设定，RefreshFeed 永不覆盖（硬契约）
+
+favicon 获取走 RSS channel link（`parsed.Link`，站点首页）的 host 拼 `/favicon.ico`，**不依赖 Google s2**（国内被墙）。`resolveFeedIcon` 纯函数承载状态机逻辑（`feed_service.go`），便于单测。
+
 ### `articles`
 
 - `image_url`

@@ -8,7 +8,8 @@
  */
 import {
   Scene, PerspectiveCamera, WebGLRenderer, Color, PointLight, SpotLight, Mesh,
-  PlaneGeometry, MeshStandardMaterial, CanvasTexture, RepeatWrapping, Vector3,
+  BoxGeometry, MeshStandardMaterial, RepeatWrapping, Vector3,
+  TextureLoader, SRGBColorSpace,
 } from 'three'
 import { CSS2DRenderer } from 'three/examples/jsm/renderers/CSS2DRenderer.js'
 import type { SectionTimelineNode, SectionRelation, DateRange } from './types'
@@ -24,6 +25,13 @@ import { AmbientEnv } from './AmbientEnv'
 import { SetDressing } from './SetDressing'
 import { DustParticles } from './DustParticles'
 import { injectDirectionalFog } from './shaders/directionalFog'
+
+export interface WallCameraBounds {
+  minX: number
+  maxX: number
+  minY: number
+  maxY: number
+}
 
 export class TopicWallScene {
   readonly scene = new Scene()
@@ -54,6 +62,7 @@ export class TopicWallScene {
   /** Per-frame callbacks (e.g. orbit controls update). */
   private readonly frameCallbacks: Array<() => void> = []
   private wallMesh: Mesh | null = null
+  private cameraBounds: WallCameraBounds | null = null
   private readonly selectionLightPosition = new Vector3()
 
   constructor(canvas: HTMLCanvasElement, css2dContainer: HTMLElement) {
@@ -122,9 +131,12 @@ export class TopicWallScene {
     const minX = hasCards ? Math.min(...xs) : 0
     const latestDayX = hasCards ? Math.max(...xs) : 0
     const tw = hasCards ? latestDayX - minX : 0
+    const ys = this.cardGroup.cards.map(c => c.position.y)
+    const centerX = hasCards ? (minX + latestDayX) / 2 : 0
+    const centerY = ys.length > 0 ? (Math.min(...ys) + Math.max(...ys)) / 2 : 0
 
     // Environment first: it owns the shared fog uniforms the cork wall injects below.
-    this.buildEnvironment(latestDayX, minX, tw)
+    this.buildEnvironment(latestDayX, minX, tw, centerX, centerY)
 
     this.rebuildWall()
     this.redStrings.build(relations, this.cardGroup, this.scene)
@@ -132,14 +144,26 @@ export class TopicWallScene {
   }
 
   /** (Re)build the desk/lamp/dust layer and aim the main spotlight from the lamp. */
-  private buildEnvironment(latestDayX: number, minX: number, timelineWidth: number): void {
+  private buildEnvironment(
+    latestDayX: number,
+    minX: number,
+    timelineWidth: number,
+    wallCenterX: number,
+    wallCenterY: number,
+  ): void {
     this.setDressing = new SetDressing({ latestDayX, minX, timelineWidth })
     this.scene.add(this.setDressing.group)
-    this.dust = new DustParticles(this.setDressing.lampPosition)
+    const lampConeOrigin = new Vector3(
+      this.setDressing.lampPosition.x,
+      this.setDressing.lampPosition.y + 0.82,
+      this.setDressing.lampPosition.z - 0.42,
+    )
+    const lampTarget = new Vector3(wallCenterX, wallCenterY + 0.35, 0)
+    this.dust = new DustParticles(lampConeOrigin, lampTarget)
     this.scene.add(this.dust.points)
-    // Warm desk-lamp cone: from the shade toward today's column on the wall.
-    this.spot.position.copy(this.setDressing.lampPosition)
-    this.spot.target.position.set(latestDayX, 0, 0)
+    // Warm desk-lamp cone: start just outside the shade opening, toward the wall.
+    this.spot.position.copy(lampConeOrigin)
+    this.spot.target.position.copy(lampTarget)
     this.spot.target.updateMatrixWorld()
   }
 
@@ -154,6 +178,10 @@ export class TopicWallScene {
     this.dust = null
   }
 
+  getCameraBounds(): WallCameraBounds | null {
+    return this.cameraBounds ? { ...this.cameraBounds } : null
+  }
+
   private rebuildWall(): void {
     this.disposeWall()
     const cards = this.cardGroup.cards
@@ -165,35 +193,69 @@ export class TopicWallScene {
     const maxX = Math.max(...xs)
     const minY = Math.min(...ys)
     const maxY = Math.max(...ys)
-    const width = Math.max(18, maxX - minX + 7)
-    const height = Math.max(12, maxY - minY + 5)
+    const width = Math.max(96, maxX - minX + 48)
+    const wallTop = Math.max(maxY + 12, 16)
+    const wallBottom = Math.min(minY - 12, STYLE.desk.y - 16)
+    const height = Math.max(52, wallTop - wallBottom)
+    const depth = 0.16
     const centerX = (minX + maxX) / 2
-    const centerY = (minY + maxY) / 2
+    const centerY = (wallTop + wallBottom) / 2
 
-    const texture = makeCorkTexture()
+    const texture = new TextureLoader().load('/textures/detective-wall/wall_plaster_diff.jpg')
+    texture.colorSpace = SRGBColorSpace
     texture.wrapS = RepeatWrapping
     texture.wrapT = RepeatWrapping
     texture.repeat.set(Math.max(2, width / 5), Math.max(2, height / 4))
-    const material = new MeshStandardMaterial({
+    const frontMaterial = new MeshStandardMaterial({
       color: new Color(STYLE.cork),
       map: texture,
       roughness: 0.95,
       metalness: 0,
+      emissive: new Color('#2f281f'),
+      emissiveIntensity: 0.26,
     })
-    if (this.setDressing) injectDirectionalFog(material, this.setDressing.fogUniforms)
-    this.wallMesh = new Mesh(new PlaneGeometry(width, height), material)
-    this.wallMesh.position.set(centerX, centerY, STYLE.wall.backZ)
+    if (this.setDressing) injectDirectionalFog(frontMaterial, this.setDressing.fogUniforms)
+    const edgeMaterial = new MeshStandardMaterial({
+      color: new Color('#6f5e50'),
+      roughness: 0.96,
+      metalness: 0,
+      emissive: new Color('#3a3028'),
+      emissiveIntensity: 0.34,
+    })
+    this.wallMesh = new Mesh(
+      new BoxGeometry(width, height, depth),
+      [edgeMaterial, edgeMaterial, edgeMaterial, edgeMaterial, frontMaterial, frontMaterial],
+    )
+    this.wallMesh.position.set(centerX, centerY, STYLE.wall.backZ - depth / 2)
     this.scene.add(this.wallMesh)
+    this.cameraBounds = {
+      minX: centerX - width / 2 + 12,
+      maxX: centerX + width / 2 - 12,
+      minY: centerY - height / 2 + 8,
+      maxY: centerY + height / 2 - 8,
+    }
   }
 
   private disposeWall(): void {
     if (!this.wallMesh) return
     this.scene.remove(this.wallMesh)
     this.wallMesh.geometry.dispose()
-    const mat = this.wallMesh.material as MeshStandardMaterial & { map?: { dispose: () => void } | null }
-    mat.map?.dispose()
-    mat.dispose()
+    const materials = Array.isArray(this.wallMesh.material)
+      ? this.wallMesh.material as MeshStandardMaterial[]
+      : [this.wallMesh.material as MeshStandardMaterial]
+    const disposedMaps = new Set<{ dispose: () => void }>()
+    const disposedMaterials = new Set<MeshStandardMaterial>()
+    for (const mat of materials) {
+      if (disposedMaterials.has(mat)) continue
+      if (mat.map && !disposedMaps.has(mat.map)) {
+        mat.map.dispose()
+        disposedMaps.add(mat.map)
+      }
+      mat.dispose()
+      disposedMaterials.add(mat)
+    }
     this.wallMesh = null
+    this.cameraBounds = null
   }
 
   startRenderLoop(): void {
@@ -246,108 +308,4 @@ export class TopicWallScene {
 /** Resolve initial fog density helper (re-exported for callers). */
 export function initialFogDensity(days: number): number {
   return densityForDays(days)
-}
-
-function makeCorkTexture(): CanvasTexture {
-  const canvas = document.createElement('canvas')
-  canvas.width = 512
-  canvas.height = 512
-  const ctx = canvas.getContext('2d')!
-  const rnd = seededWallNoise(42)
-
-  const base = ctx.createLinearGradient(0, 0, canvas.width, canvas.height)
-  base.addColorStop(0, '#3A2116')
-  base.addColorStop(0.46, STYLE.cork)
-  base.addColorStop(1, '#140D0B')
-  ctx.fillStyle = base
-  ctx.fillRect(0, 0, canvas.width, canvas.height)
-
-  for (let i = 0; i < 7600; i++) {
-    const warm = 18 + Math.floor(rnd() * 42)
-    const alpha = 0.04 + rnd() * 0.16
-    ctx.fillStyle = `rgba(${warm + 38}, ${warm + 18}, ${warm}, ${alpha})`
-    ctx.fillRect(rnd() * canvas.width, rnd() * canvas.height, 1 + rnd() * 3, 1 + rnd() * 2)
-  }
-
-  const frost = ctx.createRadialGradient(132, 120, 10, 132, 120, 360)
-  frost.addColorStop(0, 'rgba(255, 244, 214, 0.11)')
-  frost.addColorStop(0.54, 'rgba(255, 244, 214, 0.035)')
-  frost.addColorStop(1, 'rgba(255, 244, 214, 0)')
-  ctx.fillStyle = frost
-  ctx.fillRect(0, 0, canvas.width, canvas.height)
-
-  ctx.strokeStyle = 'rgba(255, 244, 214, 0.05)'
-  ctx.lineWidth = 1
-  for (let x = 32; x < canvas.width; x += 32) {
-    ctx.beginPath()
-    ctx.moveTo(x + rnd() * 2, 0)
-    ctx.lineTo(x + rnd() * 2, canvas.height)
-    ctx.stroke()
-  }
-
-  ctx.strokeStyle = 'rgba(255, 244, 214, 0.045)'
-  ctx.lineWidth = 1
-  for (let y = 32; y < canvas.height; y += 32) {
-    ctx.beginPath()
-    ctx.moveTo(0, y + rnd() * 2)
-    ctx.lineTo(canvas.width, y + rnd() * 2)
-    ctx.stroke()
-  }
-
-  // Faint visual-novel chapter-route decoration behind the actual red strings.
-  const routePoints = [
-    [58, 394], [116, 324], [184, 352], [248, 272],
-    [324, 296], [392, 216], [456, 250],
-  ] as const
-  ctx.strokeStyle = 'rgba(255, 238, 190, 0.12)'
-  ctx.lineWidth = 3
-  ctx.setLineDash([12, 9])
-  ctx.beginPath()
-  routePoints.forEach(([x, y], index) => {
-    if (index === 0) ctx.moveTo(x, y)
-    else ctx.lineTo(x, y)
-  })
-  ctx.stroke()
-  ctx.setLineDash([])
-
-  routePoints.forEach(([x, y], index) => {
-    ctx.fillStyle = 'rgba(18, 11, 8, 0.55)'
-    ctx.beginPath()
-    ctx.arc(x + 3, y + 4, 13, 0, Math.PI * 2)
-    ctx.fill()
-    ctx.fillStyle = 'rgba(235, 203, 139, 0.72)'
-    ctx.beginPath()
-    ctx.arc(x, y, 11, 0, Math.PI * 2)
-    ctx.fill()
-    ctx.fillStyle = '#2A1710'
-    ctx.font = '800 12px "Courier New", monospace'
-    ctx.fillText(String(index + 1).padStart(2, '0'), x - 8, y + 4)
-  })
-
-  ctx.fillStyle = 'rgba(255, 238, 190, 0.08)'
-  ctx.font = '900 54px "Courier New", monospace'
-  ctx.rotate(-0.08)
-  ctx.fillText('CASE MAP', 278, 88)
-  ctx.setTransform(1, 0, 0, 1, 0, 0)
-
-  ctx.fillStyle = 'rgba(255, 250, 230, 0.045)'
-  for (let i = 0; i < 80; i++) {
-    ctx.beginPath()
-    ctx.arc(rnd() * canvas.width, rnd() * canvas.height, 0.5 + rnd() * 1.8, 0, Math.PI * 2)
-    ctx.fill()
-  }
-
-  const texture = new CanvasTexture(canvas)
-  texture.needsUpdate = true
-  return texture
-}
-
-function seededWallNoise(seed: number): () => number {
-  let t = seed + 0x6D2B79F5
-  return () => {
-    t += 0x6D2B79F5
-    let r = Math.imul(t ^ (t >>> 15), 1 | t)
-    r ^= r + Math.imul(r ^ (r >>> 7), 61 | r)
-    return ((r ^ (r >>> 14)) >>> 0) / 4294967296
-  }
 }

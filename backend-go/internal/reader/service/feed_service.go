@@ -56,23 +56,9 @@ func (s *FeedService) RefreshFeed(ctx context.Context, feedID uint) (err error) 
 	feed.RefreshStatus = "success"
 	feed.RefreshError = ""
 
-	var firstArticleImage string
-	for _, entry := range parsed.Entries {
-		if entry.ImageURL != "" && firstArticleImage == "" {
-			firstArticleImage = entry.ImageURL
-			break
-		}
-	}
-
-	if feed.Icon == "" || feed.Icon == "rss" || feed.Icon == "mdi:rss" {
-		switch {
-		case parsed.Image != "":
-			feed.Icon = parsed.Image
-		case firstArticleImage != "":
-			feed.Icon = firstArticleImage
-		default:
-			feed.Icon = s.rssParser.FetchFaviconURL(feed.URL)
-		}
+	if newIcon, newSource, ok := resolveFeedIcon(feed.IconSource, parsed.Image, s.rssParser.FetchFaviconURL(parsed.Link)); ok {
+		feed.Icon = newIcon
+		feed.IconSource = newSource
 	}
 
 	var existingTitles []string
@@ -233,7 +219,7 @@ func (s *FeedService) buildArticleFromEntry(feed models.Feed, entry ParsedEntry)
 		PubDate:         entry.PubDate,
 		Author:          entry.Author,
 		SummaryStatus:   "complete",
-		FirecrawlStatus: "complete",
+		FirecrawlStatus: "completed",
 	}
 
 	if feed.FirecrawlEnabled {
@@ -246,4 +232,27 @@ func (s *FeedService) buildArticleFromEntry(feed models.Feed, entry ParsedEntry)
 	}
 
 	return article
+}
+
+// resolveFeedIcon applies the icon source state machine to decide whether and
+// how to recompute a feed's icon during RefreshFeed.
+//
+// Returns (icon, iconSource, ok): ok=false means the source is `custom` (or
+// any non-empty non-auto/fallback value) and the icon must be left untouched.
+//
+// Priority when recompute runs: parsed.Image (RSS <image>) → siteFavicon
+// (site /favicon.ico) → fallback mdi:rss. Article cover images are intentionally
+// NOT used — they are article-level resources, not site logos.
+func resolveFeedIcon(currentSource, parsedImage, siteFavicon string) (icon, source string, ok bool) {
+	if currentSource != "auto" && currentSource != "fallback" && currentSource != "" {
+		return "", "", false // custom (or unknown): do not touch
+	}
+	switch {
+	case parsedImage != "":
+		return parsedImage, "auto", true
+	case siteFavicon != "":
+		return siteFavicon, "auto", true
+	default:
+		return "mdi:rss", "fallback", true
+	}
 }

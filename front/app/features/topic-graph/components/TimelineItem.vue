@@ -91,7 +91,10 @@ function openArticle(article: TimelineAggregationArticle) {
             @click.stop="openArticle(article)"
           >
             <span class="timeline-item__article-title">{{ article.title }}</span>
-            <span class="timeline-item__article-feed">{{ article.feedName }}</span>
+            <span class="timeline-item__article-feed">
+              <FeedIcon v-if="article.feedIcon" :icon="article.feedIcon" :size="12" />
+              {{ article.feedName }}
+            </span>
           </button>
         </div>
       </div>

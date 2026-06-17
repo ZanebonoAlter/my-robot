@@ -36,7 +36,7 @@
 | `title` | string | 否 | 默认 `Untitled Feed` |
 | `description` | string | 否 | 描述 |
 | `category_id` | uint* | 否 | 分类 ID |
-| `icon` | string | 否 | 默认 `mdi:rss` |
+| `icon` | string | 否 | 图标值（iconify id 或图片 URL）。传入非空值时 `icon_source` 置为 `custom`；不传则默认 `mdi:rss` + `icon_source=fallback` |
 | `color` | string | 否 | 默认 `#8b5cf6` |
 | `max_articles` | int | 否 | 默认 `100` |
 | `refresh_interval` | int | 否 | 刷新间隔（分钟），默认 `60` |
@@ -51,6 +51,8 @@
 ### PUT /api/feeds/:feed_id
 
 只更新请求体中明确提供的字段。布尔字段需显式包含才生效。
+
+传入非空 `icon` 时，`icon_source` 自动置为 `custom`（用户主权图标，后续 RefreshFeed 不会覆盖）。
 
 ### DELETE /api/feeds/:feed_id
 

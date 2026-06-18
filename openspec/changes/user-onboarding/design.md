@@ -142,9 +142,60 @@ composable 内部管理 driver.js 实例生命周期，提供响应式状态给 
 
 ### D7: 重新触发引导的入口
 
-**选择**：在 `front/app/features/settings/components/SettingsSectionPreferences.vue`（偏好设置区）添加"重播引导"按钮，调用 `useOnboarding().resetOnboarding()` 后自动刷新页面。
+**选择**：在 `front/app/features/shell/components/AppHeaderView.vue` 顶部工具栏（`.header-right`）添加「新手引导」图标按钮（`mdi:compass-outline`），与主题切换按钮同一层级，调用 `useOnboarding().startTour()` 直接重启教程。
 
-**理由**：`SettingsSectionPreferences` 语义最贴合（偏好类设置），`pages/settings.vue` 是持久入口（非 `GlobalSettingsDialog` 弹窗、非 header 临时菜单），重置策略简单不增加路由状态管理复杂度。
+**决策反转说明**（原 D7 草案放在 `SettingsSectionPreferences.vue`）：上线前审查认为引导入口应高可发现，埋在设置二级页过深；主题切换、设置等高频操作都在顶部工具栏，引导作为同类「主动唤起」操作宜与之平级。`startTour()` 直接运行（不调 `resetOnboarding()` 的 `location.reload()`），交互更轻。
+
+`resetOnboarding()` 仍保留在 composable API（spec 要求的接口面），但顶部工具栏按钮不再使用它。
+
+**理由**：顶部工具栏是高频入口的集中点，引导与主题切换并列更符合「主动唤起」语义，无需路由跳转或刷新。
+
+### D8: 标签管理页引导（tags tour）
+
+**选择**：为 `/tags`（语义板块管理）页新增一套独立的 driver.js 引导，与首页引导同构但步骤不同。
+
+**步骤（5 步，覆盖核心流转）**：
+
+| 步骤 | 目标元素（`data-onboarding`） | 说明 |
+|------|------|------|
+| 1 | 欢迎弹窗（无元素） | 「语义板块管理：把 AI 自动标签组织成可阅读的板块」|
+| 2 | `tags-board-list`（`.sb-list` 容器，`BoardListSidebar.vue`） | 语义板块列表介绍 |
+| 3 | `tags-content-tabs`（`.tags-content-tabs`，`TagsPage.vue`） | 板块内容 / 日报 / 文章三视图 |
+| 4 | `tags-board-actions`（`.sb-actions`，`BoardListSidebar.vue`） | 升级建议 / 匹配回填 / 标签合并 / 匹配参数核心操作 |
+| 5 | `tags-add-board`（`.sb-action-btn--primary`，`BoardListSidebar.vue`） | 创建第一个语义板块 |
+
+**复用与隔离**：
+- 复用同一 `useOnboarding` composable 的 driver 实例管理、`prefers-reduced-motion` 检测、缺失元素预检过滤（重构为 `preFilterSteps` + `runTour(id, steps)`，两个 preset 各自注入步骤）。
+- 每个 tour 有独立的 localStorage 完成标记：`syntopica_onboarding_complete`（首页）、`syntopica_onboarding_tags_complete`（标签页）。两者互不影响。
+- 触发方式：`TagsPage.vue` 顶部工具栏（`ThemeToggle` 旁）放「引导」图标按钮手动唤起；`onMounted` 检测 `isTagsFirstRun` 自动启动（与首页一致，首次访问自动弹）。
+
+**锚点挂点约束**：`tags-board-list` / `tags-board-actions` / `tags-add-board` 均挂在 `BoardListSidebar.vue` 的容器或按钮上（无 `v-if`、始终渲染）；`tags-content-tabs` 挂在 `TagsPage.vue` 的 Tab 容器（`v-if="selectedBoardId !== null"` 内但首次访问通常有默认选中）。若某步骤选择器查不到，走 §2.3 的预检过滤路径。
+
+**理由**：标签管理是 Syntopica 最复杂的功能区（板块 CRUD / 标签合并 / 回填 / 日报），缺少操作指导会让用户无从下手；与首页引导同构降低认知成本，独立标记避免重复打扰。
+
+### D9: 设置页引导（settings tour）
+
+**选择**：为 `/settings`（设置中心）页新增一套独立的 driver.js 引导，与首页 / 标签管理引导同构。设置页 7 个分区复杂，引导聚焦**核心配置链路**（数据源 → AI 配置 → 后台任务）而非逐一介绍每个分区。
+
+**步骤（5 步，覆盖配置主链路）**：
+
+| 步骤 | 目标元素（`data-onboarding`） | 说明 |
+|------|------|------|
+| 1 | 欢迎弹窗（无元素） | 「设置中心：配置数据源、AI 能力与运行参数」|
+| 2 | `settings-nav`（`.settings-sidebar__nav` 容器，`SettingsSidebar.vue`） | 七个分区总览 |
+| 3 | `settings-nav-feeds`（订阅源导航项） | 数据入口：RSS 源刷新/抓取/标签配置 |
+| 4 | `settings-nav-ai-providers`（AI 模型导航项） | 主/备模型 + 能力路由 |
+| 5 | `settings-nav-schedulers`（定时任务导航项） | 后台任务执行与手动触发 |
+
+`capability-routes` / `queues` / `preferences` / `firecrawl` 在第 2 步总览带过，不单独成步。
+
+**复用与隔离**：与 tags tour 相同，复用 `useOnboarding` 的 `runTour(id, steps)` / 实例管理 / reduced-motion / 预检过滤；独立完成标记 `syntopica_onboarding_settings_complete`，三个 tour 互不影响。
+
+**锚点挂点约束**：`settings-nav` 挂在桌面侧栏 nav 容器（移动端 drawer 默认不渲染，querySelector 命中桌面套）；各 section 导航项是 `v-for` 渲染，用动态属性 `:data-onboarding="\`settings-nav-${section.key}\`"` 挂载，每个 section 都有 `settings-nav-{key}` 锚点，缺一走预检过滤。
+
+**触发方式**：`SettingsWorkspace.vue` 顶部 header（主题切换按钮旁）放「引导」按钮手动唤起；`onMounted` 检测 `isSettingsFirstRun` 自动启动，与首页 / 标签管理一致。
+
+**理由**：设置页配置项繁多，新手易迷路；引导聚焦配置主链路（数据进 → AI 处理 → 任务调度）最符合首次使用心智，与另两个 tour 同构保持一致性。
 
 ## Risks / Trade-offs
 

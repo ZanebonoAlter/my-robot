@@ -23,11 +23,12 @@ const emit = defineEmits<{
 <template>
   <!-- Desktop sidebar -->
   <aside class="settings-sidebar">
-    <nav class="settings-sidebar__nav">
+    <nav class="settings-sidebar__nav" data-onboarding="settings-nav">
       <button
         v-for="section in sections"
         :key="section.key"
         class="settings-sidebar__item"
+        :data-onboarding="`settings-nav-${section.key}`"
         :class="{ 'settings-sidebar__item--active': activeSection === section.key }"
         @click="emit('select', section.key)"
       >

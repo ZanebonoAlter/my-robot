@@ -1,5 +1,3 @@
-# syntax=docker/dockerfile:1
-#
 # Multi-stage, self-contained build for the public read-only demo.
 # Unlike the production Dockerfile (which expects a pre-built local Go binary),
 # this image compiles both frontend and backend from source so anyone can build
@@ -35,8 +33,14 @@ RUN pnpm generate
 # ----------------------------------------------------------------------------
 FROM golang:1.25-alpine AS back-build
 WORKDIR /app
+ARG GOPROXY=https://goproxy.cn,direct
+ENV GOPROXY=${GOPROXY}
 COPY backend-go/go.mod backend-go/go.sum ./
-RUN go mod download
+RUN for i in 1 2 3; do \
+      go mod download && break; \
+      if [ "$i" = "3" ]; then exit 1; fi; \
+      sleep 5; \
+    done
 COPY backend-go/ .
 RUN CGO_ENABLED=0 go build -trimpath -o /syntopica ./cmd/server
 

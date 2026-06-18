@@ -24,6 +24,36 @@ until curl -sf http://localhost:5000/health >/dev/null 2>&1; do
 done
 echo "[demo] backend healthy, schema ready."
 
+echo "[demo] clearing bootstrap/default data before seed import..."
+psql -v ON_ERROR_STOP=1 <<'SQL'
+TRUNCATE TABLE
+  daily_report_section_relations,
+  daily_report_threads,
+  daily_report_sections,
+  board_daily_reports,
+  narrative_summaries,
+  article_topic_tags,
+  topic_tag_relations,
+  ai_route_providers,
+  board_composition,
+  topic_tag_board_labels,
+  topic_tag_semantic_labels,
+  articles,
+  feeds,
+  topic_tags,
+  narrative_boards,
+  scheduler_tasks,
+  embedding_config,
+  ai_settings,
+  ai_routes,
+  ai_providers,
+  semantic_labels,
+  categories,
+  reading_behaviors,
+  user_preferences
+RESTART IDENTITY CASCADE;
+SQL
+
 echo "[demo] importing sanitized seed data..."
 psql -v ON_ERROR_STOP=1 -f /app/seed.sql
 echo "[demo] seed import complete."

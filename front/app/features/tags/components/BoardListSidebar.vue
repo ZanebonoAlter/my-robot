@@ -44,7 +44,7 @@ function sourceTitle(source: string): string {
       <Icon icon="mdi:alert-circle-outline" width="14" />
       <span>{{ boardsError }}</span>
     </div>
-    <div class="sb-list">
+    <div class="sb-list" data-onboarding="tags-board-list">
       <div class="sb-list-header">
         <span class="sb-list-title">语义板块</span>
         <span class="sb-list-count">{{ boards.length }}</span>
@@ -107,8 +107,8 @@ function sourceTitle(source: string): string {
         </div>
       </div>
 
-      <div class="sb-actions">
-        <button type="button" class="sb-action-btn sb-action-btn--primary" @click="emit('add-board')">
+      <div class="sb-actions" data-onboarding="tags-board-actions">
+        <button type="button" class="sb-action-btn sb-action-btn--primary" data-onboarding="tags-add-board" @click="emit('add-board')">
           <Icon icon="mdi:plus" width="14" />
           添加板块
         </button>

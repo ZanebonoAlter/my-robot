@@ -1,0 +1,71 @@
+/**
+ * driver.js 引导 popover 主题适配。
+ *
+ * driver.js v1 无 CSS 变量，popover 默认硬编码白底黑字（background:#fff; color:#2d2d2d），
+ * 在 dark 主题下不可读。这里用应用主题变量（--color-*）覆盖 .driver-popover-* 系列，
+ * 使其随 editorial / dark 主题自动切换。
+ *
+ * 经 useOnboarding.ts 在 driver.css 之后导入，保证覆盖优先级。
+ */
+.driver-popover {
+  background-color: var(--color-bg-elevated);
+  color: var(--color-text-primary);
+  border: 1px solid var(--color-border-medium);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.18);
+  font-family: inherit;
+}
+
+.driver-popover-title {
+  color: var(--color-text-primary);
+  font-weight: 600;
+}
+
+.driver-popover-description {
+  color: var(--color-text-secondary);
+}
+
+.driver-popover-progress-text {
+  color: var(--color-text-muted);
+}
+
+.driver-popover-close-btn {
+  color: var(--color-text-muted);
+}
+
+.driver-popover-close-btn:hover,
+.driver-popover-close-btn:focus {
+  color: var(--color-text-primary);
+}
+
+/* 底部上一步 / 下一步 / 完成按钮 */
+.driver-popover-footer button {
+  background-color: var(--color-bg-sunken);
+  color: var(--color-text-primary);
+  border: 1px solid var(--color-border-medium);
+  text-shadow: none; /* 移除 driver.js 默认的白色阴影（dark 下难看） */
+  border-radius: 6px;
+  transition: background-color 0.12s ease, border-color 0.12s ease;
+}
+
+.driver-popover-footer button:hover,
+.driver-popover-footer button:focus {
+  background-color: var(--color-bg-hover);
+  border-color: var(--color-border-strong);
+}
+
+/* 最后一个导航按钮（下一步 / 完成）用 accent 强调主操作 */
+.driver-popover-footer .driver-popover-navigation-btns button:last-child {
+  background-color: var(--color-accent);
+  color: var(--color-text-inverted, #fff);
+  border-color: var(--color-accent);
+}
+
+.driver-popover-footer .driver-popover-navigation-btns button:last-child:hover,
+.driver-popover-footer .driver-popover-navigation-btns button:last-child:focus {
+  background-color: var(--color-accent-hover, var(--color-accent));
+  border-color: var(--color-accent-hover, var(--color-accent));
+}
+
+.driver-popover-btn-disabled {
+  opacity: 0.4;
+}

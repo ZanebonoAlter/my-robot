@@ -10,6 +10,7 @@ import { normalizeArticle, type ArticlePayload } from '~/api/normalizers/article
 import { useGlobalAutoRefresh } from '~/features/feeds/public'
 import { useArticlePagination } from '~/features/articles/public'
 import { useOnboarding } from '~/composables/useOnboarding'
+import FeedEmptyGuide from '~/features/feeds/components/FeedEmptyGuide.vue'
 import { SIDEBAR_DEFAULT_WIDTH, MAX_POLLING_TIME, REFRESH_POLLING_INTERVAL } from '~/utils/constants'
 import type { WatchedTag } from '~/api/watchedTags'
 import type { Article, ArticleFilters } from '~/types/article'
@@ -38,6 +39,11 @@ const loading = computed(() => paginationState.loading)
 useGlobalAutoRefresh()
 
 const { isFirstRun, startTour } = useOnboarding()
+
+// Feed 空状态引导：无订阅源且无分类时显示
+const hasAnyFeedsOrCategories = computed(
+  () => feedsStore.feeds.length > 0 || feedsStore.categories.length > 0,
+)
 
 const sidebarCollapsed = ref(false)
 const sidebarWidth = ref(SIDEBAR_DEFAULT_WIDTH)
@@ -511,7 +517,12 @@ import '~/components/FeedLayout.css'
 
 <!-- 文章内容 -->
       <div class="content-panel">
+        <FeedEmptyGuide
+          v-if="!hasAnyFeedsOrCategories"
+          @add="showAddFeedDialog = true"
+        />
         <ArticleContent
+          v-else
           :article="selectedArticle"
           :articles="articles"
           @favorite="handleArticleFavorite"

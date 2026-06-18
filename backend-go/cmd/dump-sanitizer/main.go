@@ -147,6 +147,13 @@ func exportTable(w *bufio.Writer, db *sql.DB, spec ExportSpec, days int) (int, i
 
 	const batchSize = 500
 	var batch strings.Builder
+	endInsert := func() {
+		if spec.ConflictClause != "" {
+			batch.WriteByte(' ')
+			batch.WriteString(spec.ConflictClause)
+		}
+		batch.WriteString(";\n")
+	}
 	flushBatch := func() error {
 		if batch.Len() == 0 {
 			return nil
@@ -205,7 +212,7 @@ func exportTable(w *bufio.Writer, db *sql.DB, spec ExportSpec, days int) (int, i
 		count++
 		// Mark that the current batch needs a terminator before the next one.
 		if count%batchSize == 0 {
-			batch.WriteString(";\n")
+			endInsert()
 		}
 	}
 	if err := rows.Err(); err != nil {
@@ -214,7 +221,7 @@ func exportTable(w *bufio.Writer, db *sql.DB, spec ExportSpec, days int) (int, i
 
 	// Terminate the final partial batch.
 	if count%batchSize != 0 && batch.Len() > 0 {
-		batch.WriteString(";\n")
+		endInsert()
 	}
 	if err := flushBatch(); err != nil {
 		return count, written, err

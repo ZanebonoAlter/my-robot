@@ -7,6 +7,7 @@ import { normalizeTopicCategory } from '~/features/topic-graph/utils/normalizeTo
 import { ArticleContentView } from '~/features/articles/public'
 import FeedCategoryFilter from '~/features/topic-graph/components/FeedCategoryFilter.vue'
 import TopicGraphCanvas from '~/features/topic-graph/components/TopicGraphCanvas.client.vue'
+import TopicGraphEmptyGuide from '~/features/topic-graph/components/TopicGraphEmptyGuide.vue'
 import TopicGraphFooterPanels from '~/features/topic-graph/components/TopicGraphFooterPanels.vue'
 import TopicGraphHeader from '~/features/topic-graph/components/TopicGraphHeader.vue'
 import TopicGraphSidebar from '~/features/topic-graph/components/TopicGraphSidebar.vue'
@@ -55,6 +56,11 @@ const {
   // Actions
   loadGraph,
 } = useTopicGraph()
+
+// 图谱无标签数据时显示空状态引导（区别于加载中/请求失败）
+const graphHasData = computed(
+  () => !loadingGraph.value && !!graphPayload.value && viewModel.value.graph.nodes.length > 0,
+)
 </script>
 
 <template>
@@ -103,7 +109,15 @@ const {
               </aside>
 
               <div class="space-y-4">
+                <div
+                  v-if="!loadingGraph && graphPayload && !graphHasData"
+                  class="rounded-[30px] min-h-[420px] flex items-center justify-center"
+                  style="background: var(--color-bg-sunken)"
+                >
+                  <TopicGraphEmptyGuide />
+                </div>
                 <TopicGraphCanvas
+                  v-else
                   :nodes="displayedGraph.nodes"
                   :edges="displayedGraph.edges"
                   :featured-node-ids="displayedGraph.featuredNodeIds"

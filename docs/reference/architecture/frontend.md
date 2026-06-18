@@ -50,7 +50,7 @@ front/
 │  │  ├─ useDailyReportProgress.ts
 │  │  ├─ useAI.ts
 │  │  ├─ useFirecrawlConfig.ts
-│  │  ├─ useOnboarding.ts  # 首次使用引导（driver.js 分步教程 + localStorage 标记）
+│  │  ├─ useOnboarding.ts  # 分步引导（driver.js）：首页 + 标签管理页 + 设置页三个 tour，各含独立 localStorage 完成标记，首次访问自动启动
 │  │  └─ useReadingPreferences.ts
 │  ├─ features/            # 业务实现主体（见下文详细说明）
 │  ├─ pages/               # Nuxt 路由入口

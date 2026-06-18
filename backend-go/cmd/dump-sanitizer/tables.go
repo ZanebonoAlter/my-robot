@@ -41,6 +41,9 @@ func exportSpecs() []ExportSpec {
 		{
 			Table:   "ai_settings",
 			Columns: []string{"id", "key", "value", "description", "created_at", "updated_at"},
+			Sanitizers: map[string]func(string) string{
+				"value": emptyJSON,
+			},
 		},
 		{
 			Table:   "embedding_config",
@@ -85,6 +88,7 @@ func exportSpecs() []ExportSpec {
 				"url":           stripQuery,
 				"refresh_error": clearAll,
 			},
+			ConflictClause: "ON CONFLICT (url) DO NOTHING",
 		},
 		{
 			// NOTE: category_id is excluded — it is a gorm:"-" virtual field on the
@@ -100,8 +104,8 @@ func exportSpecs() []ExportSpec {
 				"completion_error":  clearAll,
 				// Cap long text to keep the seed small; the demo only needs a
 				// readable preview, not full article bodies.
-				"content":            truncateContent(2000),
-				"ai_content_summary": truncateContent(2000),
+				"content":            composeSanitizers(redactSensitiveTokens, truncateContent(2000)),
+				"ai_content_summary": composeSanitizers(redactSensitiveTokens, truncateContent(2000)),
 			},
 		},
 

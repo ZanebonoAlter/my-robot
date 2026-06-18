@@ -20,6 +20,9 @@ type ExportSpec struct {
 	// Sanitizers map column name → transformation applied to the raw string
 	// value before it is emitted as an INSERT literal.
 	Sanitizers map[string]func(string) string
+	// ConflictClause is appended before the INSERT terminator for tables whose
+	// sanitized values may collapse unique keys, e.g. stripped feed URLs.
+	ConflictClause string
 	// NoSequence is true for composite-key tables that have no `id` sequence
 	// (e.g. board_composition). Skips the trailing setval() statement.
 	NoSequence bool
@@ -44,6 +47,25 @@ func truncateContent(maxLen int) func(string) string {
 		}
 		return s[:maxLen] + "…[truncated for demo]"
 	}
+}
+
+func composeSanitizers(fns ...func(string) string) func(string) string {
+	return func(s string) string {
+		for _, fn := range fns {
+			s = fn(s)
+		}
+		return s
+	}
+}
+
+func redactSensitiveTokens(s string) string {
+	replacer := strings.NewReplacer(
+		"api_key", "[redacted-token]",
+		"API_KEY", "[redacted-token]",
+		"api-key", "[redacted-token]",
+		"API-Key", "[redacted-token]",
+	)
+	return replacer.Replace(s)
 }
 
 // stripQuery removes the query string from a URL to drop tracking tokens.

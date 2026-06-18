@@ -3,6 +3,7 @@ import { computed, ref, onMounted, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { Icon } from '@iconify/vue'
 import { useTheme } from '~/composables/useTheme'
+import { useOnboarding } from '~/composables/useOnboarding'
 import SettingsSidebar from './SettingsSidebar.vue'
 
 export type SectionKey =
@@ -34,6 +35,13 @@ const sections: SectionMeta[] = [
 const router = useRouter()
 const route = useRoute()
 const { toggleTheme, isDark } = useTheme()
+const { isSettingsFirstRun, startSettingsTour } = useOnboarding()
+
+onMounted(() => {
+  if (isSettingsFirstRun.value) {
+    void startSettingsTour()
+  }
+})
 
 const sidebarOpen = ref(false)
 
@@ -78,6 +86,13 @@ function goHome() {
           @click="sidebarOpen = !sidebarOpen"
         >
           <Icon icon="mdi:menu" width="20" height="20" />
+        </button>
+        <button
+          class="settings-header__theme"
+          title="设置引导"
+          @click="startSettingsTour"
+        >
+          <Icon icon="mdi:compass-outline" width="20" height="20" />
         </button>
         <button
           class="settings-header__theme"

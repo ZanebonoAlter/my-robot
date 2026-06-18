@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { Icon } from '@iconify/vue'
 import ThemeToggle from '~/components/ui/ThemeToggle.vue'
+import { useOnboarding } from '~/composables/useOnboarding'
 import AddSemanticBoardDialog from './AddSemanticBoardDialog.vue'
 import BoardCompositionPanel from './BoardCompositionPanel.vue'
 import AuxiliaryLabelPool from './AuxiliaryLabelPool.vue'
@@ -57,6 +58,14 @@ const {
   openArticlePreview, closeArticlePreview,
   handleArticleFavorite, handleArticleUpdate,
 } = useTagsPage()
+
+const { isTagsFirstRun, startTagsTour } = useOnboarding()
+
+onMounted(() => {
+  if (isTagsFirstRun.value) {
+    void startTagsTour()
+  }
+})
 </script>
 
 <template>
@@ -72,6 +81,9 @@ const {
           <h1 class="tags-page-title">语义板块管理</h1>
         </div>
         <div class="flex items-center gap-2">
+          <button type="button" class="tags-guide-btn" title="语义板块引导" @click="startTagsTour">
+            <Icon icon="mdi:compass-outline" width="18" />
+          </button>
           <ThemeToggle />
         </div>
       </div>
@@ -96,7 +108,7 @@ const {
 
       <main class="tags-content">
         <div v-if="selectedBoardId !== null">
-          <div class="tags-content-tabs">
+          <div class="tags-content-tabs" data-onboarding="tags-content-tabs">
             <button type="button" class="tags-content-tab" :class="{ 'tags-content-tab--active': contentTab === 'composition' }" @click="contentTab = 'composition'">
               <Icon icon="mdi:view-dashboard-outline" width="14" /> 板块内容
             </button>
@@ -229,6 +241,8 @@ const {
 .tags-back-btn { display: flex; align-items: center; justify-content: center; width: 28px; height: 28px; border: 1px solid var(--color-border-medium); border-radius: 8px; color: var(--color-text-muted); text-decoration: none; transition: all 0.12s ease; }
 .tags-back-btn:hover { border-color: var(--color-border-strong); color: var(--color-text-secondary); background: var(--color-bg-hover); }
 .tags-page-title { font-family: serif; font-size: 1.1rem; font-weight: 600; color: var(--color-text-primary); letter-spacing: 0.02em; }
+.tags-guide-btn { display: flex; align-items: center; justify-content: center; width: 28px; height: 28px; border: 1px solid var(--color-border-medium); border-radius: 8px; background: none; color: var(--color-text-muted); cursor: pointer; transition: all 0.12s ease; }
+.tags-guide-btn:hover { border-color: var(--color-border-strong); color: var(--color-text-secondary); background: var(--color-bg-hover); }
 .tags-main { display: flex; flex: 1; min-height: 0; max-width: min(1800px, 95vw); width: 100%; margin: 0 auto; }
 .tags-content { flex: 1; min-width: 0; padding: 1.25rem 1.5rem 3.5rem; overflow-y: auto; }
 .tags-content-tabs { display: flex; gap: 0.25rem; padding: 0 0 0.75rem; margin-bottom: 1rem; border-bottom: 1px solid var(--color-border-subtle); }

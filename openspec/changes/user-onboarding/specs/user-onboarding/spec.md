@@ -65,12 +65,12 @@ The system SHALL allow the user to dismiss the tour at any step by clicking a "S
 - **WHEN** the user clicks outside the highlighted area or popover during the tour
 - **THEN** the tour ends and `syntopica_onboarding_complete` is set to `"true"` in localStorage
 
-### Requirement: Guided tour re-trigger from settings
-The system SHALL provide a "重新播放引导" (Replay Guide) button in the settings/preferences area. When clicked, the system MUST reset `syntopica_onboarding_complete` from localStorage and start the guided tour.
+### Requirement: Guided tour re-trigger from header toolbar
+The system SHALL provide a "新手引导" (Onboarding Guide) icon button in the homepage top toolbar (`.header-right` in `AppHeaderView.vue`), at the same level as the theme toggle button. When clicked, the system MUST start the guided tour via `useOnboarding().startTour()` without a page reload.
 
-#### Scenario: User triggers tour replay from settings
-- **WHEN** the user clicks the "重新播放引导" button in settings
-- **THEN** `syntopica_onboarding_complete` is removed from localStorage and the guided tour starts
+#### Scenario: User triggers tour replay from header toolbar
+- **WHEN** the user clicks the "新手引导" button in the top toolbar
+- **THEN** the guided tour starts immediately (no page reload, no localStorage mutation required)
 
 ### Requirement: Empty state guide for feeds
 When the user has no RSS feeds and no feed categories, the system SHALL display a `FeedEmptyGuide` component in the sidebar or main content area. The guide MUST include a message encouraging the user to add their first RSS feed and an action button to trigger the feed addition dialog.
@@ -123,3 +123,33 @@ The system SHALL provide a `useOnboarding` Vue composable exposing: `isFirstRun`
 - **WHEN** `useOnboarding()` is called and `import.meta.client` is `false` (e.g., if SSR is enabled in the future, or during a Vitest run with the guard mocked off)
 - **THEN** no driver.js instance is created and no localStorage access occurs; `isFirstRun` defaults to false and `isTourActive` defaults to false
 - **NOTE** The Syntopica frontend currently runs with `ssr: false` (`front/nuxt.config.ts`), so this guard is a defensive reservation, not a response to an active SSR risk.
+
+### Requirement: Tags page guided tour
+The system SHALL present a separate guided tour on the tag management page (`/tags`, `TagsPage.vue`) covering the core semantic-board workflow. The tour SHALL consist of sequential steps highlighting: the board list (`data-onboarding="tags-board-list"`), the three content tabs (`data-onboarding="tags-content-tabs"`), the board actions group (`data-onboarding="tags-board-actions"`), and the add-board button (`data-onboarding="tags-add-board"`). The tour MUST use an independent completion key (`syntopica_onboarding_tags_complete`) so it does not interfere with the home tour, and MUST reuse the same `useOnboarding` driver-instance management, `prefers-reduced-motion` detection, and missing-element pre-filtering.
+
+#### Scenario: Tags tour auto-starts on first visit
+- **WHEN** a first-time visitor loads `/tags` and `syntopica_onboarding_tags_complete` is absent
+- **THEN** the tags guided tour starts automatically after the page mounts
+
+#### Scenario: Tags tour re-trigger from toolbar
+- **WHEN** the user clicks the guide icon button in the `TagsPage.vue` top toolbar (next to `ThemeToggle`)
+- **THEN** the tags guided tour starts immediately (no page reload)
+
+#### Scenario: Independent completion markers
+- **WHEN** the home tour is completed and the user visits `/tags`
+- **THEN** the tags tour still runs (its `syntopica_onboarding_tags_complete` key is independent) until it is also completed
+
+### Requirement: Settings page guided tour
+The system SHALL present a separate guided tour on the settings page (`/settings`, `SettingsWorkspace.vue`) covering the core configuration chain (data source → AI capability → scheduled tasks). The tour SHALL highlight: the sidebar nav (`data-onboarding="settings-nav"`), the feeds section (`data-onboarding="settings-nav-feeds"`), the AI providers section (`data-onboarding="settings-nav-ai-providers"`), and the schedulers section (`data-onboarding="settings-nav-schedulers"`). The tour MUST use an independent completion key (`syntopica_onboarding_settings_complete`) and reuse the same `useOnboarding` driver management, `prefers-reduced-motion` detection, and missing-element pre-filtering.
+
+#### Scenario: Settings tour auto-starts on first visit
+- **WHEN** a first-time visitor loads `/settings` and `syntopica_onboarding_settings_complete` is absent
+- **THEN** the settings guided tour starts automatically after the page mounts
+
+#### Scenario: Settings tour re-trigger from header
+- **WHEN** the user clicks the guide icon button in the `SettingsWorkspace.vue` header (next to the theme toggle)
+- **THEN** the settings guided tour starts immediately (no page reload)
+
+#### Scenario: Settings tour independent of other tours
+- **WHEN** the home and tags tours are completed and the user visits `/settings`
+- **THEN** the settings tour still runs (its `syntopica_onboarding_settings_complete` key is independent) until it is also completed

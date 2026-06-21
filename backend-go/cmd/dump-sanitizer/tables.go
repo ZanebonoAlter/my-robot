@@ -85,7 +85,12 @@ func exportSpecs() []ExportSpec {
 			Columns: []string{"id", "title", "description", "url", "category_id", "icon", "icon_source", "color", "last_updated", "created_at", "max_articles", "refresh_interval", "refresh_status", "refresh_error", "last_refresh_at", "article_summary_enabled", "completion_on_refresh", "max_completion_retries", "firecrawl_enabled", "tagging_enabled"},
 			Where:   recent,
 			Sanitizers: map[string]func(string) string{
-				"url":           stripQuery,
+				// Rewrite self-hosted RSSHub to the public instance first (avoids
+				// leaking private infra), then strip tracking query strings.
+				"url":  composeSanitizers(rewriteRSSHubHost, stripQuery),
+				"icon": composeSanitizers(rewriteRSSHubHost, stripQuery),
+				// icon may embed the self-host host as a favicon-service domain
+				// param (e.g. google favicons ?domain=...); stripQuery drops it.
 				"refresh_error": clearAll,
 			},
 			ConflictClause: "ON CONFLICT (url) DO NOTHING",

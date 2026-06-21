@@ -35,11 +35,26 @@ func RegisterDailyReportRoutes(api *gin.RouterGroup) {
 	// GET /api/daily-reports/sections/:id/lifecycle
 	api.GET("/daily-reports/sections/:id/lifecycle", getSectionLifecycle)
 
+	// GET /api/daily-reports/topics/:id/lifeline — all sections of one persistent
+	// topic (no day limit), aggregated by persistent_topic_id.
+	api.GET("/daily-reports/topics/:id/lifeline", getTopicLifeline)
+
+	// PATCH /api/daily-reports/topics/:id — manual rename / archive / reactivate.
+	api.PATCH("/daily-reports/topics/:id", updateTopic)
+	// POST /api/daily-reports/topics/:id/merge — merge source topics into :id.
+	api.POST("/daily-reports/topics/:id/merge", mergeTopic)
+	// POST /api/daily-reports/topics/:id/split — carve sections into a new topic.
+	api.POST("/daily-reports/topics/:id/split", splitTopic)
+
 	// POST /api/daily-reports/backfill-embeddings
 	api.POST("/daily-reports/backfill-embeddings", triggerBackfillEmbeddings)
 
 	// POST /api/daily-reports/backfill-relations
 	api.POST("/daily-reports/backfill-relations", triggerBackfillRelations)
+
+	// POST /api/daily-reports/backfill-topics — reconstruct persistent topics
+	// from historical sections. Optional ?board_id scopes to one board.
+	api.POST("/daily-reports/backfill-topics", triggerBackfillTopics)
 }
 
 // triggerGenerateDailyReport handles POST /api/daily-reports/generate
@@ -258,6 +273,121 @@ func getSectionLifecycle(c *gin.Context) {
 	}})
 }
 
+// getTopicLifeline handles GET /api/daily-reports/topics/:id/lifeline.
+// Returns all sections of a persistent topic aggregated by topic id, with the
+// internal relations among them. Unlike section lifecycle (embedding-graph
+// based), this is identity-key based and survives label drift.
+func getTopicLifeline(c *gin.Context) {
+	topicIDStr := c.Param("id")
+	topicID, err := strconv.ParseUint(topicIDStr, 10, 32)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "invalid topic id"})
+		return
+	}
+
+	resp, err := repository.Repo.GetTopicLifeline(uint(topicID))
+	if err != nil {
+		logging.Errorf("get topic lifeline: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "failed to get topic lifeline"})
+		return
+	}
+	if resp.Sections == nil {
+		resp.Sections = []repository.SectionTimelineNode{}
+	}
+	if resp.Relations == nil {
+		resp.Relations = []repository.SectionRelationResult{}
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": gin.H{
+		"sections":  resp.Sections,
+		"relations": resp.Relations,
+	}})
+}
+
+// parseTopicID extracts and validates the :id path param as a topic id. Writes
+// the error response when invalid, so callers return immediately on err.
+func parseTopicID(c *gin.Context) (uint, error) {
+	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "invalid topic id"})
+		return 0, err
+	}
+	return uint(id), nil
+}
+
+// updateTopic handles PATCH /api/daily-reports/topics/:id.
+// Body: {"label": "...", "status": "active|archived"} — either field optional;
+// omit a field to leave it unchanged. status is restricted to active/archived.
+func updateTopic(c *gin.Context) {
+	topicID, err := parseTopicID(c)
+	if err != nil {
+		return
+	}
+	var req struct {
+		Label  *string `json:"label"`
+		Status *string `json:"status"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "invalid body"})
+		return
+	}
+	topic, err := repository.Repo.UpdateTopic(topicID, req.Label, req.Status)
+	if err != nil {
+		logging.Errorf("update topic %d: %v", topicID, err)
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": topic})
+}
+
+// mergeTopic handles POST /api/daily-reports/topics/:id/merge.
+// Body: {"source_topic_ids": [2, 3]} — every section on those topics is
+// reassigned to :id and the sources are archived.
+func mergeTopic(c *gin.Context) {
+	targetID, err := parseTopicID(c)
+	if err != nil {
+		return
+	}
+	var req struct {
+		SourceTopicIDs []uint `json:"source_topic_ids"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "invalid body"})
+		return
+	}
+	topic, err := repository.Repo.MergeTopics(targetID, req.SourceTopicIDs)
+	if err != nil {
+		logging.Errorf("merge into topic %d: %v", targetID, err)
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": topic})
+}
+
+// splitTopic handles POST /api/daily-reports/topics/:id/split.
+// Body: {"section_ids": [10, 11], "label": "..."} — the listed sections are
+// carved out of :id into a freshly created topic.
+func splitTopic(c *gin.Context) {
+	sourceID, err := parseTopicID(c)
+	if err != nil {
+		return
+	}
+	var req struct {
+		SectionIDs []uint `json:"section_ids"`
+		Label      string `json:"label"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "invalid body"})
+		return
+	}
+	topic, err := repository.Repo.SplitTopic(sourceID, req.SectionIDs, req.Label)
+	if err != nil {
+		logging.Errorf("split topic %d: %v", sourceID, err)
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": topic})
+}
+
 // broadcastProgress sends a WebSocket progress message.
 func broadcastProgress(jobID string, status string, boardID uint, boardName string, saved int, progress string) {
 	msg := buildProgressMessage(jobID, status, boardID, boardName, saved, progress)
@@ -347,6 +477,45 @@ func triggerBackfillRelations(c *gin.Context) {
 			}
 			for bid, cnt := range results {
 				logging.Infof("daily-report: board %d: %d relations rebuilt", bid, cnt)
+			}
+		}()
+	}
+
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": gin.H{"status": "processing"}})
+}
+
+// triggerBackfillTopics handles POST /api/daily-reports/backfill-topics.
+// Reconstructs persistent topics from historical sections lacking a topic
+// assignment. Optional ?board_id scopes the run to one board; without it, all
+// boards with unassigned sections are processed.
+func triggerBackfillTopics(c *gin.Context) {
+	boardIDStr := c.Query("board_id")
+	_, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+	defer cancel()
+
+	if boardIDStr != "" {
+		boardID, err := strconv.ParseUint(boardIDStr, 10, 32)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid board_id"})
+			return
+		}
+		go func() {
+			created, err := repository.Repo.BackfillPersistentTopics(uint(boardID))
+			if err != nil {
+				logging.Errorf("daily-report: backfill topics for board %d failed: %v", boardID, err)
+				return
+			}
+			logging.Infof("daily-report: backfill topics for board %d complete: %d topics created", boardID, created)
+		}()
+	} else {
+		go func() {
+			results, err := repository.Repo.BackfillAllPersistentTopics()
+			if err != nil {
+				logging.Errorf("daily-report: backfill all topics failed: %v", err)
+				return
+			}
+			for bid, cnt := range results {
+				logging.Infof("daily-report: board %d: %d topics created", bid, cnt)
 			}
 		}()
 	}

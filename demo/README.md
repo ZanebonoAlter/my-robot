@@ -24,7 +24,8 @@ docker compose -f demo/docker-compose.demo.yml down
 
 - **数据来源**：从一个真实运行的 Syntopica 实例导出最近 30 天的业务数据，经保守脱敏后作为只读快照（见 `demo/seed/seed.sql`）。
 - **只读**：所有非 GET 请求返回 `405 {"error":"read-only demo"}`；两个会触发后台计算的 GET SSE 端点也被拦截；后台定时任务（RSS 刷新、日报生成、Firecrawl 爬取）全部关闭；WebSocket 未启用。
-- **脱敏**：AI 凭证（`api_key`/`base_url`）已清空，`reading_behaviors.session_id` 已 SHA-256 哈希，错误日志/Firecrawl 原文已清空，URL query 已剥离，向量列置 NULL，`ai_call_logs`/`schema_migrations` 等敏感表完全不导出。详见 [`seed/README.md`](seed/README.md)。
+- **数据安全（文章不会被清理）**：demo 快照的两层防护确保 `articles` 数据稳定不变——① `DEMO_READ_ONLY=1` 时 `main.go` 跳过 `StartRuntime`，所有 scheduler（含按 `MaxArticles` 上限裁剪旧文的 `auto_refresh`→`CleanupOldArticles`）都不注册；② `ReadOnly` 中间件拦截所有写/刷新入口（`POST /feeds/:id/refresh`、`PUT /feeds/:id`、`DELETE /feeds/:id`、`POST /feeds/refresh-all`、`POST /import-opml`）。无任何残留路径会 DELETE articles。
+- **脱敏**：AI 凭证（`api_key`/`base_url`/`metadata`）已清空，`ai_settings.value` 配置整体清空，`reading_behaviors.session_id` 已 SHA-256 哈希，错误日志/Firecrawl 原文已清空，URL query 已剥离，正文中的敏感 token 字面量（如 `api_key`）已替换，向量列置 NULL，`ai_call_logs`/`schema_migrations` 等敏感表完全不导出。详见 [`seed/README.md`](seed/README.md)。
 - **自包含镜像**：`Dockerfile.demo` 多阶段构建前端（`NUXT_PUBLIC_API_BASE=/api` 同源相对路径）+ 后端 Go 二进制，运行时由后端在 5000 端口同源 serve 前端静态文件。
 
 ## 可浏览的内容
@@ -65,7 +66,7 @@ go run ./cmd/dump-sanitizer
 ```
 demo/
 ├── README.md                      本文档
-├── entrypoint.sh                  容器启动：起后端 → 等 health → 导入 seed
+├── entrypoint.sh                  容器启动：起后端 → 等 health → TRUNCATE 清场 → 导入 seed
 ├── docker-compose.demo.yml        demo 编排（postgres + syntopica-demo）
 └── seed/
     ├── seed.sql                   脱敏数据快照（由 dump-sanitizer 生成）

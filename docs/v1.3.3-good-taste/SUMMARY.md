@@ -24,6 +24,7 @@
 | `2026-06-14-board-embedding-perf` | 版块 embedding 性能 | `MatchTopicTag` 全量加载 O(N×T×B×d) 暴力比较、HNSW 索引被删未重建、版块升级只支持"发现新版块"模式缺"扩充已有版块方向"、backfill 逐条顺序无法并行 |
 | `2026-06-14-scheduler-cron` | 定时任务缺陷 | `next_run` 状态字反了、DailyReport 永不自动执行、4 个调度器执行结果不落库、前端面板几乎不展示信息 |
 | `2026-06-14-unify-ui-components` | UI 组件统一 | 三大入口页 + GlobalSettings 的 UI 分裂：四套对话框、三种 toggle/按钮/输入框样式、两套视觉语言、暗色全硬编码 |
+| `2026-06-19-persistent-topic` | 持久叙事话题 | 板块下话题关联纯靠匈牙利+embedding 漂移散乱；新增 PersistentTopic 持久层（强制 1:N 归属 + 自动升级 + 身份边），ClusterTags 注入历史框架，侦探墙生命周期升级为话题生命线 |
 
 ### 分组 changes
 

@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"net/url"
+	"os"
 	"strings"
 )
 
@@ -39,13 +40,14 @@ func emptyJSON(string) string { return "{}" }
 // truncateContent caps a long text field (e.g. article body) at maxLen
 // characters, appending an ellipsis marker when truncated. This keeps the demo
 // readable while shrinking the seed file, since the full text is not needed to
-// browse the product.
+// browse the product. Slicing is rune-based so multi-byte UTF-8 (e.g. Chinese)
+// is never split mid-character, which would corrupt the output.
 func truncateContent(maxLen int) func(string) string {
 	return func(s string) string {
-		if len(s) <= maxLen {
+		if len([]rune(s)) <= maxLen {
 			return s
 		}
-		return s[:maxLen] + "…[truncated for demo]"
+		return string([]rune(s)[:maxLen]) + "…[truncated for demo]"
 	}
 }
 
@@ -83,6 +85,40 @@ func stripQuery(s string) string {
 	}
 	u.RawQuery = ""
 	u.Fragment = ""
+	return u.String()
+}
+
+// defaultRSSHubRewrite rewrites this demo's self-hosted RSSHub to the public
+// instance. Operators with a different source host override via RSSHUB_REWRITE.
+const defaultRSSHubRewrite = "47.110.71.194:1200=rsshub.app"
+
+// rewriteRSSHubHost rewrites a self-hosted RSSHub host to the public instance
+// so the demo never leaks private infrastructure (e.g. an operator's public IP).
+// Configured via the RSSHUB_REWRITE env var as "sourceHost=targetHost"; falls
+// back to defaultRSSHubRewrite when unset. The target is always served over
+// https. Non-URL or non-matching values pass through untouched.
+func rewriteRSSHubHost(s string) string {
+	rule := strings.TrimSpace(os.Getenv("RSSHUB_REWRITE"))
+	if rule == "" {
+		rule = defaultRSSHubRewrite
+	}
+	if s == "" {
+		return s
+	}
+	parts := strings.SplitN(rule, "=", 2)
+	if len(parts) != 2 {
+		return s
+	}
+	srcHost, dstHost := strings.TrimSpace(parts[0]), strings.TrimSpace(parts[1])
+	if srcHost == "" || dstHost == "" {
+		return s
+	}
+	u, err := url.Parse(s)
+	if err != nil || u.Host == "" || u.Host != srcHost {
+		return s
+	}
+	u.Scheme = "https"
+	u.Host = dstHost
 	return u.String()
 }
 

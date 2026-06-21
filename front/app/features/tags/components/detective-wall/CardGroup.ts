@@ -337,12 +337,19 @@ export class PinCardImpl implements IPinCard {
     this.group.add(shadow)
 
     // Paper card. A small canvas texture gives every card a non-flat evidence-file feel.
+    // Cards tint by persistent topic so a narrative's sections share a hue across
+    // days; cards without a topic keep the default warm paper. Candidate (under
+    // observation) topics use the aged paper tone so they read as provisional.
+    const topic = data.persistent_topic
+    const isCandidate = topic?.status === 'candidate'
+    const paperColor = topic?.color ?? card.paperWarm
     this.paperMaterial = new MeshStandardMaterial({
-      color: new Color(card.paperWarm),
+      color: new Color(isCandidate ? card.paperAged : paperColor),
       roughness: card.roughness,
       metalness: card.metalness,
-      emissive: new Color('#F7E7C4'),
-      emissiveIntensity: 0.18,
+      emissive: new Color(isCandidate ? card.paperAged : paperColor),
+      // Candidate cards dim slightly to signal "under observation".
+      emissiveIntensity: isCandidate ? 0.10 : 0.18,
     })
     const paper = new Mesh(
       new BoxGeometry(card.width, card.height, card.depth),
@@ -483,8 +490,9 @@ export class CardGroup {
     _relations: SectionRelation[],
     _dateRange: DateRange,
     scene: Scene,
+    viewMode: 'timeline' | 'lanes' = 'timeline',
   ): void {
-    const layout = layoutCards(sections)
+    const layout = layoutCards(sections, viewMode)
     for (const section of sections) {
       const card = new PinCardImpl(section)
       const pos = layout.get(section.id)

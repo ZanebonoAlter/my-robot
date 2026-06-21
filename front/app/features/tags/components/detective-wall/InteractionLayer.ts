@@ -16,7 +16,7 @@ import type {
 } from './types'
 import type { TopicWallScene } from './TopicWallScene'
 import type { DirectorCamera } from './DirectorCamera'
-import { bfsLifeline, edgeKey } from './utils'
+import { bfsLifeline, edgeKey, topicLifelineNodes } from './utils'
 
 const CLICK_MAX_MOVE_PX = 5
 /**
@@ -267,7 +267,11 @@ export class InteractionLayer {
 
   private triggerLifeline(card: PinCard): void {
     const nodeMap = new Map(this.currentSections.map(n => [n.id, n] as const))
-    const result = bfsLifeline(card.data.id, this.currentRelations, nodeMap, this.currentDateRange)
+    // Fold in every section sharing the focus's persistent topic as BFS roots,
+    // so a narrative's cards light up together even when their similarity
+    // edges were severed by label drift.
+    const preset = topicLifelineNodes(card.data, this.currentSections)
+    const result = bfsLifeline(card.data.id, this.currentRelations, nodeMap, this.currentDateRange, preset)
 
     this.state.mode = 'focusing'
     this.state.focusedNodeId = card.data.id

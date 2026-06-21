@@ -75,18 +75,44 @@ if os.Getenv("DEMO_READ_ONLY") != "1" {
 
 **注意**：alpine 镜像需装 `curl` 和 `postgresql-client`（psql）。`Dockerfile.demo` runtime 阶段 `apk add curl postgresql-client`。
 
+## D5a. seed 导入前必须 TRUNCATE 清场（踩坑后补充）
+
+**问题**：实测容器反复 restart，seed 导入阶段报 duplicate key（`ai_settings`、`categories` 等）。
+
+**根因**：后端启动不仅 AutoMigrate 建表，迁移（`postgres_migrations.go`）还会 seed 一批默认配置数据（`ai_settings`、`embedding_config`、`daily_report_time` 等）。随后 `psql -f seed.sql` 再导入真实快照，就撞唯一键。"等迁移完成" ≠ "数据库仍为空"。
+
+**决策**：entrypoint 在 seed 导入前显式 `TRUNCATE TABLE <所有 demo 涉及表> RESTART IDENTITY CASCADE` 清场，再导入 seed.sql，最后 `wait` 后端。`RESTART IDENTITY` 把序列也重置（避免与 setval 不一致）；`CASCADE` 处理物理 FK（`topic_tags_merged_into_id_fkey`）。清场表清单必须覆盖所有被默认初始化或 seed 涉及的表。
+
+**经验**：这个补丁最初没在 D5 写明，是 hard-lessons 硬骨头 2 暴露的。entrypoint.sh 当前已含完整 TRUNCATE 块。
+
 ## D6. 导出工具实现策略——通用行扫描 + 统一转义
 
 **问题**：逐表写 GORM struct 映射样板代码量大（20+ 表，含 JSONB/timestamp/NULL/vector 多种类型）。
 
-**决策**：用 `database/sql` + `sql.RawBytes` 通用扫描，配合：
-- 每张表一个 `ExportTable` 配置（表名、列清单、WHERE 条件、字段脱敏函数 map、SELECT 投影覆盖如向量列置 NULL）
-- 统一的 `sqlValueLiteral(interface{}) string` 把任意 SQL 值转成 PG INSERT 字面量（处理 NULL、字符串转义、bool、数字、[]byte JSONB、time.Time）
+**决策**：用 `database/sql` + `sql.NullString` 通用扫描，配合：
+- 每张表一个 `ExportSpec` 配置：`Table`、`Columns`（显式列，排除假列如 `articles.category_id`）、`Where`（`:days` 占位运行时替换）、`VectorColumns`（SELECT 投影置 `NULL::vector`）、`Sanitizers`（字段脱敏函数 map）、`ConflictClause`（脱敏后可能撞唯一键时的 `ON CONFLICT ...`）、`NoSequence`（复合主键表跳过 setval）
+- 单一 `quoteString(s)` 路径：所有值统一单引号转义（`'`→`''`），依赖 PG unknown 字面量对目标列类型的隐式转换（integer/numeric/bool/timestamp/jsonb 都成立）；NULL 单独由 exporter 在值无效时输出关键字
 - 向量列在 SELECT 投影里用 `NULL::vector AS embedding`（而非取出来再转）
 - 自引用 FK（`topic_tags.merged_into_id`）：分两批 WHERE，先 `IS NULL` 后 `IS NOT NULL`
 - 每张表导完附 `SELECT setval(pg_get_serial_sequence(...), COALESCE(MAX(id),0)+1, false)` 重置序列
+- 每 500 行一条 `INSERT ... VALUES (...), (...)` 批量语句，`ConflictClause` 拼在 `;` 前
 
 **排除列**：`articles.category_id`（`gorm:"-"` 假列，不在 DB）——通过显式列清单控制，不 SELECT 它。
+
+## D6a. 脱敏副作用——唯一键碰撞、token 逃逸、基础设施泄露、编码切断（踩坑后补充）
+
+四个脱敏边界，已落到 sanitizer：
+
+1. **唯一键碰撞（hard-lessons 硬骨头 3）**：脱敏会改变数据分布。`feeds.url` 剥 query 后，原本不同的带 token URL 可能合并成同一个，撞 `uni_feeds_url`。解法：`ExportSpec.ConflictClause`，feeds 用 `ON CONFLICT (url) DO NOTHING`（demo 快照少量去重可接受）。
+
+2. **token 逃逸到正文（hard-lessons 硬骨头 4）**：安全抽查发现 `api_key` 不只在凭证列，还会作为字面量出现在技术文章正文和配置 JSON 里。解法：
+   - `ai_settings.value` 整列清空为 `{}`（配置 JSON 整体清空，避免字段级猜测）
+   - `articles.content` / `ai_content_summary` 用 `composeSanitizers(redactSensitiveTokens, truncateContent(2000))`：先做 `api_key/API_KEY/api-key/API-Key` → `[redacted-token]` 文本替换，再截断
+   - 验证口径：`api_key` 只允许作为 `INSERT INTO ai_providers (...,api_key,...)` 的列名出现，VALUES 侧为空串
+
+3. **基础设施 host 泄露**：真实 feed URL 可能指向运营者自建的 RSSHub（如 `http://<公网IP>:1200/...`），公网 demo 会暴露其基础设施。解法：`feeds.url` 用 `composeSanitizers(rewriteRSSHubHost, stripQuery)`，`rewriteRSSHubHost` 把自建 host 替换成官方 `https://rsshub.app`（保留路径，官方实例兼容同套路由），由 `RSSHUB_REWRITE=源host=目标host` 环境变量配置，默认替换本 demo 数据源的 `47.110.71.194:1200`。
+
+4. **UTF-8 多字节切断**：`truncateContent` 早期按 byte 切（`s[:maxLen]`），会把中文等多字节字符从中间切断产生非法 UTF-8 字节，导致 seed.sql 解码失败。解法：按 rune 切（`[]rune(s)[:maxLen]`），保证不切断字符边界。
 
 ## D7. 脱敏字段映射表（保守策略）
 
@@ -95,12 +121,16 @@ if os.Getenv("DEMO_READ_ONLY") != "1" {
 | ai_providers | api_key | `""` | 凭证 |
 | ai_providers | base_url | `""` | 可能含内网网关 |
 | ai_providers | metadata | `"{}"` | 可能含 headers |
+| ai_settings | value | `"{}"` | 配置 JSON 可能含内部地址/token，整体清空（D6a） |
+| articles | content | redactSensitiveTokens + 按 rune 截断 2000 | token 逃逸到正文 + 控体积，rune 切不破坏 UTF-8（D6a） |
+| articles | ai_content_summary | 同 content | 同上 |
 | articles | link | 剥 query string | 去跟踪参数 |
 | articles | image_url | 剥 query string | 同上 |
 | articles | firecrawl_content | `""` | 最可能含 PII |
 | articles | firecrawl_error | `""` | 可能泄露内部 URL |
 | articles | completion_error | `""` | 同上 |
-| feeds | url | 剥 query string | 去私域 token |
+| feeds | url | `rewriteRSSHubHost`（自建→官方 rsshub.app）+ 剥 query + `ON CONFLICT (url) DO NOTHING` | 防基础设施泄露 + 去私域 token，脱敏后防唯一键碰撞（D6a） |
+| feeds | icon | `rewriteRSSHubHost` + 剥 query | favicon 服务 URL 的 `?domain=` 参数可能内嵌自建 host（如 google favicons），同需清掉防泄露（D6a） |
 | feeds | refresh_error | `""` | 错误文本 |
 | reading_behaviors | session_id | sha256 哈希 | 用户会话标识 |
 | ai_call_logs | 整表 | 跳过 | request_meta/response_snippet 高危 |
@@ -126,11 +156,21 @@ if os.Getenv("DEMO_READ_ONLY") != "1" {
 ## D9. Dockerfile.demo 多阶段构建
 
 现有 `Dockerfile` 要求本地预编译 Go 二进制（`ARG BINARY_PATH`），demo 要自包含。三阶段：
-1. `node:22-alpine`：`pnpm generate`（`NUXT_PUBLIC_API_BASE=/api` 通过 `ENV` 注入）
-2. `golang:1.24-alpine`：`go build -o syntopica ./cmd/server`
+1. `node:22-alpine`：`corepack enable` → COPY `package.json`+`pnpm-lock.yaml`+`patches/` → `ENV NUXT_PUBLIC_API_BASE=/api` → `pnpm install --no-frozen-lockfile` → COPY `front/` → `pnpm generate`
+2. `golang:1.25-alpine`：`ARG GOPROXY`（默认国内代理）+ `ENV GOPROXY` → COPY `go.mod/go.sum` → `go mod download`（带 3 次重试） → COPY `backend-go/` → `CGO_ENABLED=0 go build -trimpath -o /syntopica ./cmd/server`
 3. `alpine:3.22`：拷前端（`.output/public` → `frontend/`）+ go 二进制 + `backend-go/configs` + `demo/seed/seed.sql` + `demo/entrypoint.sh`；`apk add curl postgresql-client`；`ENTRYPOINT ["/app/entrypoint.sh"]`
 
-**Go 版本**：以 `backend-go/go.mod` 的 go directive 为准（实现时确认，预期 1.24）。
+**Go 版本**：`backend-go/go.mod` go directive = `1.25.0`，镜像用 `golang:1.25-alpine`。
+
+## D9a. 构建期网络与前端 lockfile（踩坑后补充）
+
+三个 hard-lessons 硬骨头 1 暴露的构建期问题，已落到 Dockerfile.demo：
+
+1. **Go 依赖下载不稳定**：默认 Go proxy 在 Docker build 内偶发 `unexpected EOF`。解法：`ARG GOPROXY=https://goproxy.cn,direct`（可覆盖）+ `go mod download` 外包 3 次重试循环。
+2. **`# syntax=docker/dockerfile:1` 触发额外镜像拉取**：该 frontend directive 会去拉 `docker/dockerfile:1`，Docker mirror 同样可能 EOF。解法：移除 `# syntax` 行（demo 不需要 BuildKit 高级特性）。
+3. **pnpm `--frozen-lockfile` 失败**：仓库 `pnpm-lock.yaml` 声明了 `three@0.183.2` patchedDependency，但 `package.json` 的 `pnpm.patchedDependencies` 缺对应条目，strict frozen 模式拒绝。这是仓库既有前端 lockfile 状态（非本 change 引入），为不扩大改动范围改用 `--no-frozen-lockfile`（pnpm 仍读 lockfile 解析，仅不因配置不一致而失败），并先 COPY `patches/` 目录供 patch 校验。
+
+**教训**：公网 demo 的 Dockerfile 要尽量少依赖构建期网络的隐式步骤；可覆盖的 `ARG GOPROXY` 比写死环境更适合跨环境协作。先区分"编译失败"和"构建期网络失败"——错误发生在 `go mod download` 或拉 frontend，多半不是业务代码问题。
 
 ## Risks
 

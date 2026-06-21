@@ -44,6 +44,12 @@ export interface LifelineResult {
  * connected component with small/dense heuristics and NO date constraint. This
  * one strictly excludes nodes outside `dateRange`. Treats edges as undirected.
  *
+ * `presetNodes` (optional) seeds the visited set alongside the start node.
+ * Used to fold in every section sharing the start's persistent topic, so a
+ * narrative's sections all light up together even when the embedding-graph
+ * edges between them were severed by label drift. Preset nodes are treated as
+ * BFS roots (depth 0) and expand outward like the start.
+ *
  * @see interaction spec §BFS Lifeline Algorithm (fixed version)
  */
 export function bfsLifeline(
@@ -51,11 +57,28 @@ export function bfsLifeline(
   relations: SectionRelation[],
   nodeMap: Map<number, SectionTimelineNode>,
   dateRange: DateRange,
+  presetNodes?: Set<number>,
 ): LifelineResult {
   const visited = new Set<number>([startNodeId])
   const edgeKeys = new Set<string>()
   const depth = new Map<number, number>([[startNodeId, 0]])
   const queue: number[] = [startNodeId]
+
+  // Seed preset topic-mates as BFS roots (depth 0). They must be in-window to
+  // participate; out-of-window mates are ignored just like ordinary traversal.
+  if (presetNodes) {
+    for (const id of presetNodes) {
+      if (id === startNodeId) continue
+      const node = nodeMap.get(id)
+      if (!node) continue
+      const date = node.period_date.slice(0, 10)
+      if (date < dateRange.start || date > dateRange.end) continue
+      if (visited.has(id)) continue
+      visited.add(id)
+      depth.set(id, 0)
+      queue.push(id)
+    }
+  }
 
   // Build undirected adjacency list.
   const adj = new Map<number, Set<number>>()
@@ -72,6 +95,7 @@ export function bfsLifeline(
     ensure(r.to_id).add(r.from_id)
   }
   ensure(startNodeId) // guarantee isolated focus exists
+  for (const id of visited) ensure(id)
 
   while (queue.length > 0) {
     const current = queue.shift()!
@@ -100,6 +124,28 @@ export function bfsLifeline(
   return { nodes: visited, edges: edgeKeys, depth }
 }
 
+/**
+ * Collects every section sharing the start node's persistent topic, by
+ * identity key (persistent_topic_id) rather than embedding-graph reachability.
+ *
+ * This is the identity-key aggregation that survives cluster-label drift: two
+ * sections of the same topic are grouped even when their similarity edge was
+ * dropped by the 0.28 match penalty. Returns an empty set when the start has
+ * no topic, so callers fall back to plain BFS.
+ */
+export function topicLifelineNodes(
+  startNode: SectionTimelineNode,
+  sections: SectionTimelineNode[],
+): Set<number> {
+  const topicId = startNode.persistent_topic_id
+  if (topicId == null) return new Set<number>()
+  const ids = new Set<number>([startNode.id])
+  for (const s of sections) {
+    if (s.persistent_topic_id === topicId) ids.add(s.id)
+  }
+  return ids
+}
+
 // ---------------------------------------------------------------------------
 // Layout
 // ---------------------------------------------------------------------------
@@ -116,6 +162,7 @@ export function bfsLifeline(
  */
 export function layoutCards(
   sections: SectionTimelineNode[],
+  mode: 'timeline' | 'lanes' = 'timeline',
 ): Map<number, LayoutResult> {
   const { colWidth, rowHeight, zJitter, rotationZDeg } = STYLE.layout
   const rotRad = (rotationZDeg * Math.PI) / 180
@@ -123,6 +170,50 @@ export function layoutCards(
   // Unique sorted day keys.
   const days = Array.from(new Set(sections.map(s => s.period_date.slice(0, 10)))).sort()
   const dayIndex = new Map<string, number>(days.map((d, i) => [d, i]))
+
+  if (mode === 'lanes') {
+    // 话题泳道模式：Y = 话题索引（每个话题一条横向赛道），X = 天。
+    // 同话题同天的多节点在赛道内 Y 方向小幅偏移，避免重叠。未归类话题
+    // 归入最后一条“未分类”赛道。归档话题不参与（由上层过滤）。
+    const laneKey = (s: SectionTimelineNode) =>
+      s.persistent_topic ? `t${s.persistent_topic.id}` : 'unassigned'
+    const laneOrder = Array.from(new Set(sections.map(laneKey)))
+    const laneIndex = new Map<string, number>(laneOrder.map((k, i) => [k, i]))
+    const laneSpacing = rowHeight * 2.6 // 赛道间距，大于同天堆叠跨度
+
+    // 每 (lane,day) 的节点计数，用于同赛道同天居中偏移
+    const subCount = new Map<string, number>()
+    for (const s of sections) {
+      const k = `${laneKey(s)}:${s.period_date.slice(0, 10)}`
+      subCount.set(k, (subCount.get(k) ?? 0) + 1)
+    }
+    const seen = new Map<string, number>()
+
+    const result = new Map<number, LayoutResult>()
+    // 按话题 + 天稳定顺序，保证同赛道同天节点的偏移顺序确定
+    const sorted = [...sections].sort((a, b) => {
+      const la = laneIndex.get(laneKey(a)) ?? 0
+      const lb = laneIndex.get(laneKey(b)) ?? 0
+      if (la !== lb) return la - lb
+      return (dayIndex.get(a.period_date.slice(0, 10)) ?? 0) - (dayIndex.get(b.period_date.slice(0, 10)) ?? 0)
+    })
+    for (const s of sorted) {
+      const li = laneIndex.get(laneKey(s)) ?? 0
+      const x = (dayIndex.get(s.period_date.slice(0, 10)) ?? 0) * colWidth
+      const laneY = -li * laneSpacing
+      const k = `${laneKey(s)}:${s.period_date.slice(0, 10)}`
+      const total = subCount.get(k) ?? 1
+      const idx = seen.get(k) ?? 0
+      seen.set(k, idx + 1)
+      const subOffset = (idx - (total - 1) / 2) * rowHeight * 0.55
+      const { z, rot } = seededJitter(s.id, zJitter, rotRad)
+      result.set(s.id, {
+        position: new Vector3(x, laneY + subOffset, z),
+        rotationZ: rot,
+      })
+    }
+    return result
+  }
 
   // Group sections by day.
   const byDay = new Map<string, SectionTimelineNode[]>()

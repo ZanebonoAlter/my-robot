@@ -692,10 +692,128 @@ func postgresMigrations() []Migration {
 				}
 				// Normalize placeholder icon values for fallback rows (rss/"" -> mdi:rss)
 				if err := db.Exec(`
-					UPDATE feeds SET icon = 'mdi:rss'
-					WHERE icon_source = 'fallback' AND icon IN ('', 'rss')
-				`).Error; err != nil {
+				UPDATE feeds SET icon = 'mdi:rss'
+				WHERE icon_source = 'fallback' AND icon IN ('', 'rss')
+			`).Error; err != nil {
 					return fmt.Errorf("normalize feeds.icon placeholders: %w", err)
+				}
+				return nil
+			},
+		},
+
+		// ── Persistent topic layer ───────────────────────────────────────
+		// board_persistent_topics is created by AutoMigrate (registered by
+		// internal/topicgraph). This migration adds the domain-specific constraints
+		// AutoMigrate cannot express: the status CHECK, the (board, status) lookup
+		// index, and the relation_type column on section relations with its default
+		// backfill. The embedding HNSW index is created at startup by
+		// ensurePersistentTopicEmbeddingDimension (dimension-dependent, ≤2000 only),
+		// so it is NOT created here.
+		{
+			Version:     "20260619_0001",
+			Description: "Add persistent topic constraints and section relation_type column.",
+			Up: func(db *gorm.DB) error {
+				if tableExists(db, "board_persistent_topics") {
+					if err := db.Exec(`
+					DO $$ BEGIN
+						IF NOT EXISTS (
+							SELECT 1 FROM information_schema.table_constraints
+							WHERE constraint_name = 'chk_board_persistent_topics_status'
+							  AND table_name = 'board_persistent_topics'
+						) THEN
+							ALTER TABLE board_persistent_topics
+								ADD CONSTRAINT chk_board_persistent_topics_status
+								CHECK (status IN ('candidate', 'active', 'archived'));
+						END IF;
+					END $$
+				`).Error; err != nil {
+						return fmt.Errorf("add board_persistent_topics status CHECK: %w", err)
+					}
+					if err := db.Exec(`CREATE INDEX IF NOT EXISTS idx_persistent_topics_board_status
+					ON board_persistent_topics(semantic_board_id, status)`).Error; err != nil {
+						return fmt.Errorf("add board_persistent_topics (board, status) index: %w", err)
+					}
+				}
+
+				if tableExists(db, "daily_report_section_relations") {
+					// Add relation_type column (AutoMigrate adds it on fresh DBs; this
+					// ALTER covers DBs that had the table before the model gained the
+					// column, and backfills legacy rows to 'similarity').
+					var typeColExists bool
+					if err := db.Raw(`SELECT EXISTS (
+					SELECT 1 FROM information_schema.columns
+					WHERE table_name = 'daily_report_section_relations' AND column_name = 'relation_type'
+				)`).Scan(&typeColExists).Error; err == nil && !typeColExists {
+						if err := db.Exec(`ALTER TABLE daily_report_section_relations
+						ADD COLUMN relation_type VARCHAR(20) NOT NULL DEFAULT 'similarity'`).Error; err != nil {
+							return fmt.Errorf("add daily_report_section_relations.relation_type: %w", err)
+						}
+					}
+					if err := db.Exec(`CREATE INDEX IF NOT EXISTS idx_section_relations_type
+					ON daily_report_section_relations(relation_type)`).Error; err != nil {
+						return fmt.Errorf("add section_relations relation_type index: %w", err)
+					}
+				}
+				return nil
+			},
+		},
+
+		// ── Seed persistent topic config keys ───────────────────────────
+		{
+			Version:     "20260619_0002",
+			Description: "Seed persistent topic lifecycle config into ai_settings.",
+			Up: func(db *gorm.DB) error {
+				defaults := []struct {
+					Key, Value, Description string
+				}{
+					{"persistent_topic_match_threshold", "0.30", "Section-to-topic assignment embedding distance ceiling (dual confirmation)"},
+					{"persistent_topic_upgrade_threshold", "3", "Consecutive hit days for a candidate topic to auto-promote to active"},
+					{"persistent_topic_decay_window", "30", "Days an active topic can go without a hit before auto-archiving"},
+					{"persistent_topic_cluster_threshold", "0.28", "Complete-link clustering distance for backfilling topics from historical sections (0.28 calibrated on real data: 0.30 chained to 1 topic, 0.25 fragmented)"},
+				}
+				for _, d := range defaults {
+					var existing models.AISettings
+					if err := db.Where("key = ?", d.Key).First(&existing).Error; err != nil {
+						if err := db.Create(&models.AISettings{
+							Key:         d.Key,
+							Value:       d.Value,
+							Description: d.Description,
+						}).Error; err != nil {
+							logging.Warnf("Warning: failed to seed ai_settings key %s: %v", d.Key, err)
+						}
+					}
+				}
+				return nil
+			},
+		},
+
+		// ── Widen section_relations unique constraint to (from, to, type) ───
+		// Lets an identity edge (same persistent topic) and a similarity edge
+		// (Hungarian match) on the same section pair coexist as two rows.
+		// Before this, identity silently overwrote a strong Hungarian match,
+		// dropping the edge from the similarity-only timeline view. No data
+		// migration is needed: the old (from, to) constraint already forbade
+		// duplicates per pair, so widening to (from, to, relation_type) cannot
+		// introduce a violation — every existing (from, to, type) is already
+		// unique. Relation rows are rebuilt by RebuildBoardRelations.
+		{
+			Version:     "20260620_0001",
+			Description: "Widen section_relations unique constraint to (from_section_id, to_section_id, relation_type) so identity and similarity edges coexist.",
+			Up: func(db *gorm.DB) error {
+				if !tableExists(db, "daily_report_section_relations") {
+					return nil
+				}
+				if err := db.Exec(`
+					ALTER TABLE daily_report_section_relations
+					DROP CONSTRAINT IF EXISTS uq_section_relations_pair
+				`).Error; err != nil {
+					return fmt.Errorf("drop old section_relations pair constraint: %w", err)
+				}
+				if err := db.Exec(`
+					ALTER TABLE daily_report_section_relations
+					ADD CONSTRAINT uq_section_relations_pair UNIQUE (from_section_id, to_section_id, relation_type)
+				`).Error; err != nil {
+					return fmt.Errorf("add widened section_relations pair constraint: %w", err)
 				}
 				return nil
 			},

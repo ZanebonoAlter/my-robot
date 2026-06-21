@@ -390,9 +390,9 @@ func RebuildBoardRelations(tx *gorm.DB, boardID uint) error {
 
 		for _, r := range pairWritten {
 			if err := tx.Exec(`
-				INSERT INTO daily_report_section_relations (from_section_id, to_section_id, distance)
-				VALUES (?, ?, ?)
-				ON CONFLICT (from_section_id, to_section_id) DO UPDATE SET distance = EXCLUDED.distance
+				INSERT INTO daily_report_section_relations (from_section_id, to_section_id, distance, relation_type)
+				VALUES (?, ?, ?, 'similarity')
+				ON CONFLICT (from_section_id, to_section_id, relation_type) DO UPDATE SET distance = EXCLUDED.distance
 			`, r.FromID, r.ToID, r.Distance).Error; err != nil {
 				return fmt.Errorf("write relation %d→%d: %w", r.FromID, r.ToID, err)
 			}
@@ -414,9 +414,9 @@ func RebuildBoardRelations(tx *gorm.DB, boardID uint) error {
 				for _, rSec := range skipRight {
 					if d, ok := skipDist[[2]uint{lSec.ID, rSec.ID}]; ok && d < SkipDayThresh {
 						if err := tx.Exec(`
-							INSERT INTO daily_report_section_relations (from_section_id, to_section_id, distance)
-							VALUES (?, ?, ?)
-							ON CONFLICT (from_section_id, to_section_id) DO UPDATE SET distance = EXCLUDED.distance
+							INSERT INTO daily_report_section_relations (from_section_id, to_section_id, distance, relation_type)
+							VALUES (?, ?, ?, 'similarity')
+							ON CONFLICT (from_section_id, to_section_id, relation_type) DO UPDATE SET distance = EXCLUDED.distance
 						`, lSec.ID, rSec.ID, d).Error; err != nil {
 							return fmt.Errorf("write skip-day relation %d→%d: %w", lSec.ID, rSec.ID, err)
 						}
@@ -429,7 +429,75 @@ func RebuildBoardRelations(tx *gorm.DB, boardID uint) error {
 		}
 	}
 
+	// Identity-edge overlay: for each persistent topic, connect adjacent-day
+	// sections that share it. These edges bypass the 0.28 match penalty so a
+	// narrative chain survives cluster-label drift across days (root cause B).
+	// The unique constraint is (from, to, relation_type), so identity and
+	// similarity edges on the same section pair coexist as two rows — neither
+	// overwrites the other. The UI renders identity as a solid line (same
+	// topic) and similarity as a dashed line (Hungarian match).
+	if err := writeIdentityEdges(tx, boardID); err != nil {
+		// Non-fatal: identity edges are an enhancement, not a correctness gate.
+		logging.Warnf("RebuildBoardRelations: identity-edge overlay failed for board %d: %v", boardID, err)
+	}
+
 	logging.Infof("RebuildBoardRelations: board %d rebuilt %d relations across %d days",
 		boardID, len(allWritten), len(sortedDates))
+	return nil
+}
+
+// writeIdentityEdges connects adjacent-day sections that share a persistent
+// topic. Unlike the Hungarian similarity edges, identity edges are written
+// regardless of embedding distance, so a chain persists through cluster-label
+// drift. The distance is the true cosine distance (which may exceed
+// MatchPenalty); relation_type marks the edge so the UI can render it as a
+// solid line.
+//
+// "Adjacent day" means the next report date for that board (calendar-adjacent
+// days may be missing reports, so we use the ordered distinct period_date set).
+// Identity edges run strictly forward in time (earlier → later).
+//
+// Identity and similarity edges coexist: the ON CONFLICT target is the
+// (from, to, relation_type) triple, so an identity INSERT only clashes with
+// a prior identity row, never with a similarity row on the same pair. This
+// fixes the regression where a strong Hungarian match (distance << 0.28) on
+// an adjacent-day same-topic pair was silently replaced by an identity row,
+// making the timeline view (similarity-only) drop the edge entirely.
+func writeIdentityEdges(tx *gorm.DB, boardID uint) error {
+	// For each topic, pair each section with the earliest later section in the
+	// same topic. Using DISTINCT ON per (topic, from_section) keeps the chain
+	// to the immediate successor, avoiding a fully-connected topic subgraph.
+	if err := tx.Exec(`
+		WITH ordered AS (
+			SELECT s.id AS section_id,
+			       s.persistent_topic_id AS topic_id,
+			       r.period_date::date AS day,
+			       s.embedding
+			FROM daily_report_sections s
+			JOIN board_daily_reports r ON r.id = s.report_id
+			WHERE r.semantic_board_id = ?
+			  AND s.persistent_topic_id IS NOT NULL
+			  AND s.embedding IS NOT NULL
+		),
+		pairs AS (
+			SELECT DISTINCT ON (o1.section_id)
+			       o1.section_id AS from_id,
+			       o2.section_id AS to_id,
+			       o1.embedding <=> o2.embedding AS dist
+			FROM ordered o1
+			JOIN ordered o2
+			  ON o2.topic_id = o1.topic_id
+			 AND o2.day > o1.day
+			ORDER BY o1.section_id, o2.day ASC, o2.section_id ASC
+		)
+		INSERT INTO daily_report_section_relations (from_section_id, to_section_id, distance, relation_type)
+		SELECT from_id, to_id, dist, 'identity'
+		FROM pairs
+		WHERE to_id IS NOT NULL
+		ON CONFLICT (from_section_id, to_section_id, relation_type) DO UPDATE
+			SET distance = EXCLUDED.distance
+	`, boardID).Error; err != nil {
+		return fmt.Errorf("write identity edges: %w", err)
+	}
 	return nil
 }

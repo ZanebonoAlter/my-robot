@@ -89,6 +89,8 @@ export interface RedString {
   readonly fromId: number
   readonly toId: number
   readonly distance: number
+  /** 'identity' (same persistent topic, solid) or 'similarity' (Hungarian, dashed). */
+  readonly relationType: string
   /** Animate draw progress 0→1. */
   draw(progress: number): void
   highlight(): void

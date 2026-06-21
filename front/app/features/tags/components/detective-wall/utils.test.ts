@@ -4,7 +4,7 @@
  * @see specs/detective-wall-interaction/spec.md §BFS Lifeline Algorithm
  */
 import { describe, it, expect } from 'vitest'
-import { bfsLifeline, layoutCards, densityForDays, edgeKey, timelineWidth, latestDayX } from './utils'
+import { bfsLifeline, layoutCards, densityForDays, edgeKey, timelineWidth, latestDayX, topicLifelineNodes } from './utils'
 import { STYLE } from './types'
 import type { SectionTimelineNode, SectionRelation } from '~/api/dailyReports'
 
@@ -25,6 +25,9 @@ function rel(from: number, to: number, distance = 1): SectionRelation {
 }
 function nodeMap(nodes: SectionTimelineNode[]) {
   return new Map(nodes.map(n => [n.id, n] as const))
+}
+function topicNode(id: number, date: string, topicId: number): SectionTimelineNode {
+  return { ...node(id, date), persistent_topic_id: topicId }
 }
 
 // ---------------------------------------------------------------------------
@@ -128,6 +131,66 @@ describe('bfsLifeline', () => {
 
     expect(result.depth.get(1)).toBe(0)
     expect(result.depth.size).toBe(1)
+  })
+
+  it('seeds preset nodes as BFS roots (depth 0)', () => {
+    // Focus 1 has topic-mates 3 and 4 (no similarity edges to them — the chain
+    // was severed by drift). With preset they still join the lifeline.
+    const nodes = [
+      node(1, '2026-01-01'),
+      node(2, '2026-01-02'),
+      node(3, '2026-01-03'),
+      node(4, '2026-01-04'),
+    ]
+    const relations = [rel(1, 2)] // only 1↔2 connected by similarity
+    const range = { start: '2026-01-01', end: '2026-01-05' }
+    const preset = new Set<number>([1, 3, 4])
+
+    const result = bfsLifeline(1, relations, nodeMap(nodes), range, preset)
+
+    expect(result.nodes.has(3)).toBe(true)
+    expect(result.nodes.has(4)).toBe(true)
+    expect(result.depth.get(3)).toBe(0) // preset → root
+    expect(result.depth.get(4)).toBe(0)
+  })
+
+  it('ignores out-of-window preset nodes', () => {
+    const nodes = [node(1, '2026-01-01'), node(3, '2026-01-10')]
+    const range = { start: '2026-01-01', end: '2026-01-05' }
+    const preset = new Set<number>([1, 3]) // 3 is out of window
+
+    const result = bfsLifeline(1, [], nodeMap(nodes), range, preset)
+
+    expect(result.nodes.has(3)).toBe(false)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// topicLifelineNodes
+// ---------------------------------------------------------------------------
+
+describe('topicLifelineNodes', () => {
+  it('collects every section sharing the start topic', () => {
+    const sections = [
+      topicNode(1, '2026-01-01', 7),
+      topicNode(2, '2026-01-02', 7), // same topic
+      topicNode(3, '2026-01-03', 9), // different topic
+      topicNode(4, '2026-01-04', 7), // same topic
+    ]
+    const ids = topicLifelineNodes(sections[0]!, sections)
+    expect(ids.size).toBe(3)
+    expect(ids.has(1)).toBe(true)
+    expect(ids.has(2)).toBe(true)
+    expect(ids.has(4)).toBe(true)
+    expect(ids.has(3)).toBe(false)
+  })
+
+  it('returns an empty set when the start has no topic', () => {
+    // topicLifelineNodes only collects topic-mates; the focus itself is seeded
+    // separately by bfsLifeline, so a topic-less focus yields no presets.
+    const sections = [node(1, '2026-01-01'), topicNode(2, '2026-01-02', 7)]
+    const ids = topicLifelineNodes(sections[0]!, sections)
+    expect(ids.size).toBe(0)
   })
 })
 

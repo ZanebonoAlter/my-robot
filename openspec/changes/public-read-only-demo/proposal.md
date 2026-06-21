@@ -6,12 +6,12 @@ Syntopica 当前没有任何"开箱即看"的体验：陌生人想了解产品�
 
 ## What Changes
 
-- **导出脱敏工具** `backend-go/cmd/dump-sanitizer`：连真实运行库 → 按拓扑序导出脱敏数据 → 生成 `demo/seed/seed.sql`。只导最近 30 天数据（避免后端 `CURRENT_DATE - N days` 查询过滤导致空墙）。保守脱敏：清 AI 凭证/错误日志/firecrawl 原文，剥 URL query，哈希 session_id；保留标题/摘要/正文/标签名（公开新闻非敏感）。向量列置 NULL（展示链路不用向量，且规避维度耦合）。
+- **导出脱敏工具** `backend-go/cmd/dump-sanitizer`：连真实运行库 → 按拓扑序导出脱敏数据 → 生成 `demo/seed/seed.sql`。只导最近 30 天数据（避免后端 `CURRENT_DATE - N days` 查询过滤导致空墙）。保守脱敏：清 AI 凭证/错误日志/firecrawl 原文，剥 URL query，哈希 session_id；保留标题/摘要/正文/标签名（公开新闻非敏感）。向量列置 NULL（展示链路不用向量，且规避维度耦合）。实测深化的脱敏边界（正文 token 字面量替换、`ai_settings.value` 配置清空、`feeds.url` 剥 query 后的唯一键 `ON CONFLICT` 处理）见 design D6a 与 `docs/experience/public-read-only-demo-hard-lessons.md`。
 - **只读加固**：新增 `middleware/readonly.go`，环境变量 `DEMO_READ_ONLY=1` 激活，拦截所有非 GET 请求（返回 405）+ 2 个有副作用的 GET SSE 端点（`merge-preview/scan/stream`、`merge-preview/evaluate/stream`）；`main.go` 在 demo 模式跳过 `StartRuntime`（否则定时任务会拉 RSS、调 LLM 破坏只读快照）；禁用 `/ws`。
 - **demo 部署制品**：
   - `Dockerfile.demo`：多阶段自包含构建（node 构建前端 + golang 构建后端 + alpine 运行），构建期注入 `NUXT_PUBLIC_API_BASE=/api`（同源相对路径）
   - `demo/docker-compose.demo.yml`：postgres（pgvector，不挂载 data 卷即每次 fresh）+ syntopica-demo（注入 `DEMO_READ_ONLY=1`）
-  - `demo/entrypoint.sh`：启动后端 → 等 health → psql 导入 seed.sql
+  - `demo/entrypoint.sh`：启动后端 → 等 health → TRUNCATE 清场（后端启动会 seed 默认数据，不清场撞 duplicate key，design D5a）→ psql 导入 seed.sql
   - `demo/README.md`：使用说明 + 安全警告
 
 ## Capabilities

@@ -19,6 +19,27 @@ export interface DailyReportThread {
   created_at: string
 }
 
+export interface PersistentTopicBrief {
+  id: number
+  label: string
+  status: string  // 'candidate' | 'active' | 'archived'
+  /** Stable colour derived from the topic id by the backend; same topic → same colour across renders. */
+  color: string
+}
+
+/** Full persistent topic row, as returned by the management API (merge/split/update). */
+export interface PersistentTopic {
+  id: number
+  semantic_board_id: number
+  label: string
+  description: string
+  status: string  // 'candidate' | 'active' | 'archived'
+  first_seen_date: string
+  last_seen_date: string
+  hit_count: number
+  consecutive_hits: number
+}
+
 export interface SectionTimelineNode {
   id: number
   report_id: number
@@ -29,12 +50,19 @@ export interface SectionTimelineNode {
   thread_count: number
   image_url?: string
   imageUrl?: string
+  // Persistent topic assignment (optional — historical/unmatched sections may lack it).
+  persistent_topic_id?: number
+  topic_match_distance?: number
+  topic_match_confidence?: string  // 'anchor_hit' | 'auto_new' | 'unmatched'
+  persistent_topic?: PersistentTopicBrief
 }
 
 export interface SectionRelation {
   from_id: number
   to_id: number
   distance: number
+  /** 'identity' = same persistent topic (solid line); 'similarity' = Hungarian match (dashed line). */
+  relation_type?: string
 }
 
 // SectionLifecycleNode has the same shape as SectionTimelineNode
@@ -49,6 +77,11 @@ export interface DailyReportSection {
   article_count: number
   best_tier: number
   avg_score: number
+  // Persistent topic assignment (optional; populated by the daily pipeline).
+  persistent_topic_id?: number
+  topic_match_distance?: number
+  topic_match_confidence?: string
+  persistent_topic?: PersistentTopicBrief
 }
 
 export interface DailyReport {
@@ -103,11 +136,42 @@ export function useDailyReportsApi() {
     return apiClient.get(`/daily-reports/sections/${sectionId}/lifecycle`)
   }
 
+  /** All sections of one persistent topic (no day limit), aggregated by topic id. Identity-key based — survives label drift. */
+  async function getTopicLifeline(topicId: number): Promise<ApiResponse<{ sections: SectionTimelineNode[], relations: SectionRelation[] }>> {
+    return apiClient.get(`/daily-reports/topics/${topicId}/lifeline`)
+  }
+
+  /** Reconstruct persistent topics from historical sections lacking a topic. Optional boardId scopes to one board. */
+  async function backfillPersistentTopics(boardId?: number): Promise<ApiResponse<{ status: string }>> {
+    const query = boardId ? `?board_id=${boardId}` : ''
+    return apiClient.post(`/daily-reports/backfill-topics${query}`, {})
+  }
+
+  /** Rename and/or change status (active|archived) of a topic. Omit a field to leave it unchanged. */
+  async function updateTopic(topicId: number, params: { label?: string; status?: 'active' | 'archived' }): Promise<ApiResponse<PersistentTopic>> {
+    return apiClient.patch(`/daily-reports/topics/${topicId}`, params)
+  }
+
+  /** Merge source topics into the target; sources are archived and their sections reassigned to the target. */
+  async function mergeTopics(targetTopicId: number, sourceTopicIds: number[]): Promise<ApiResponse<PersistentTopic>> {
+    return apiClient.post(`/daily-reports/topics/${targetTopicId}/merge`, { source_topic_ids: sourceTopicIds })
+  }
+
+  /** Carve sections out of a topic into a freshly created topic. */
+  async function splitTopic(sourceTopicId: number, sectionIds: number[], label: string): Promise<ApiResponse<PersistentTopic>> {
+    return apiClient.post(`/daily-reports/topics/${sourceTopicId}/split`, { section_ids: sectionIds, label })
+  }
+
   return {
     generateDailyReport,
     getBoardDailyReports,
     getDailyReportDetail,
     getBoardSectionTimeline,
     getSectionLifecycle,
+    getTopicLifeline,
+    backfillPersistentTopics,
+    updateTopic,
+    mergeTopics,
+    splitTopic,
   }
 }

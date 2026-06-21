@@ -45,25 +45,28 @@ interface QualityZone {
 
 const qualityZones = computed<QualityZone[]>(() => {
   if (!selectedDetail.value) return []
+  // Sort once by quality (tier asc, score desc); preserved within each topic group.
   const sections = [...(selectedDetail.value.sections || [])].sort((a, b) => {
     if (a.best_tier !== b.best_tier) return a.best_tier - b.best_tier
     return b.avg_score - a.avg_score
   })
   if (sections.length === 0) return []
 
+  // Primary grouping is by persistent-topic status: "care" narratives the user
+  // follows (active), "breaking" narratives still under observation (candidate
+  // or freshly auto-assigned), and "unclassified" sections with no topic yet
+  // (historical rows awaiting backfill).
+  const caring = sections.filter(s => s.persistent_topic?.status === 'active')
+  const breaking = sections.filter(s =>
+    s.persistent_topic_id != null
+    && s.persistent_topic?.status !== 'active',
+  )
+  const unclassified = sections.filter(s => s.persistent_topic_id == null)
+
   const zones: QualityZone[] = []
-
-  // Tier 0-1: Core events (2 columns)
-  const core = sections.filter(s => s.best_tier <= 1)
-  if (core.length) zones.push({ label: '核心事件', tier: 1, sections: core, columns: 2 })
-
-  // Tier 2: Related events (single column)
-  const related = sections.filter(s => s.best_tier === 2)
-  if (related.length) zones.push({ label: '相关事件', tier: 2, sections: related, columns: 1 })
-
-  // Tier 3+: Other dynamics (single column)
-  const other = sections.filter(s => s.best_tier >= 3)
-  if (other.length) zones.push({ label: '其他动态', tier: 3, sections: other, columns: 1 })
+  if (caring.length) zones.push({ label: '关心的话题', tier: 1, sections: caring, columns: 2 })
+  if (breaking.length) zones.push({ label: '突发的新话题', tier: 2, sections: breaking, columns: 1 })
+  if (unclassified.length) zones.push({ label: '其他动态', tier: 3, sections: unclassified, columns: 1 })
 
   return zones
 })

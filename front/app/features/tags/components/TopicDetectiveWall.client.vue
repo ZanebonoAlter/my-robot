@@ -29,7 +29,7 @@ const emit = defineEmits<{
   openArticle: [articleId: number]
 }>()
 
-const { getBoardSectionTimeline, getDailyReportDetail, getSectionLifecycle } = useDailyReportsApi()
+const { getBoardSectionTimeline, getDailyReportDetail, getSectionLifecycle, getTopicLifeline, updateTopic, mergeTopics } = useDailyReportsApi()
 const { getArticle } = useArticlesApi()
 
 const canvasRef = ref<HTMLCanvasElement | null>(null)
@@ -54,6 +54,9 @@ const nodeThreadsLoading = ref<number | null>(null)
 const lifecycleActive = ref(false)
 const lifecycleLoading = ref(false)
 const lifecycleOriginNode = ref<SectionTimelineNode | null>(null)
+// 视图模式：timeline=仅匈牙利相似度（默认，隐藏 identity）；lanes=仅话题 identity
+// （同话题延续实线）。镜像 2D BoardThreadBrowser 的语义。
+const viewMode = ref<'timeline' | 'lanes'>('timeline')
 
 // --- WebGL detection ---
 function hasWebGL(): boolean {
@@ -159,7 +162,8 @@ async function loadBoardData() {
       endDate.setDate(endDate.getDate() - (days.value - 1))
       const start = endDate.toISOString().slice(0, 10)
       const dateRange = { start, end }
-      scene.loadBoardData(res.data.sections, res.data.relations, dateRange, days.value)
+      scene.loadBoardData(res.data.sections, res.data.relations, dateRange, days.value, viewMode.value)
+      applyEdgeFilter()
       cameraControls?.setBounds(scene.getCameraBounds())
       interaction.setData(res.data.sections, res.data.relations, dateRange, days.value)
       // Snap camera to today focus.
@@ -179,6 +183,31 @@ watch(() => days.value, () => {
   interaction?.setTimeRange(days.value)
   loadBoardData()
 })
+
+// 按视图模式显隐边：timeline 隐藏 identity（只留匈牙利），lanes 隐藏 similarity
+// （只留话题连续性）。通过 line.visible 开关，零重建开销。生命周期模式重建场景后
+// 也调用，以保持一致。
+function applyEdgeFilter() {
+  if (!scene) return
+  const showIdentity = viewMode.value === 'lanes'
+  scene.redStrings.setVisibleByRelationType('identity', showIdentity)
+  scene.redStrings.setVisibleByRelationType('similarity', !showIdentity)
+}
+function setViewMode(mode: 'timeline' | 'lanes') {
+  if (viewMode.value === mode || lifecycleActive.value || !scene || !interaction) return
+  viewMode.value = mode
+  // 话题泳道模式需重布局卡片（按话题分赛道），不能只切边；用当前缓存数据重建场景。
+  const dates = sections.value.map(s => s.period_date.slice(0, 10)).sort()
+  const end = dates[dates.length - 1] ?? new Date().toISOString().slice(0, 10)
+  const endDate = new Date(end)
+  endDate.setDate(endDate.getDate() - (days.value - 1))
+  const start = endDate.toISOString().slice(0, 10)
+  const dateRange = { start, end }
+  scene.loadBoardData(sections.value, relations.value, dateRange, days.value, viewMode.value)
+  cameraControls?.setBounds(scene.getCameraBounds())
+  interaction.setData(sections.value, relations.value, dateRange, days.value)
+  applyEdgeFilter()
+}
 
 function setDays(d: 7 | 14 | 30 | 60) {
   if (lifecycleActive.value) return
@@ -441,6 +470,127 @@ async function exitLifecycle(restoreNode: SectionTimelineNode | null = null) {
     interaction.focusNode(restoreNode.id)
   }
 }
+
+// --- §9.4/9.6: persistent-topic lifeline + management (merge / rename / archive) ---
+
+const mergePickerOpen = ref(false)
+
+// Topic status labels differ from section status (emerging/continuing…).
+const TOPIC_STATUS_LABELS: Record<string, string> = {
+  candidate: '候选',
+  active: '活跃',
+  archived: '已归档',
+}
+function topicStatusLabel(status: string): string {
+  return TOPIC_STATUS_LABELS[status] ?? status
+}
+
+// All topics visible on the current board timeline (deduped by id). Feeds the
+// merge-target picker — no separate list-topics endpoint exists, so we derive
+// the set from the cached timeline sections.
+const boardTopics = computed(() => {
+  const map = new Map<number, { id: number; label: string; status: string; color: string }>()
+  for (const s of sections.value) {
+    const t = s.persistent_topic
+    if (t) map.set(t.id, { id: t.id, label: t.label, status: t.status, color: t.color })
+  }
+  return [...map.values()]
+})
+
+// Merge candidates exclude the focused topic itself and archived topics.
+const mergeCandidates = computed(() => {
+  const cur = focusedNode.value?.persistent_topic?.id
+  return boardTopics.value.filter(t => t.id !== cur && t.status !== 'archived')
+})
+
+// §9.4 Topic lifeline: fetch every section of one persistent topic (no day
+// limit) and enter lifecycle mode with it. Mirrors enterLifecycle but sources
+// data from getTopicLifeline, so the evolution line survives cluster-label drift.
+async function enterTopicLifeline(topicId: number) {
+  if (!interaction || lifecycleActive.value) return
+  lifecycleLoading.value = true
+  try {
+    const res = await getTopicLifeline(topicId)
+    if (!res.success || !res.data) return
+    const lcSections = res.data.sections
+    const lcRelations = res.data.relations
+    const dates = lcSections.map(s => s.period_date.slice(0, 10)).sort()
+    const dateRange = {
+      start: dates[0] ?? '',
+      end: dates[dates.length - 1] ?? '',
+    }
+    lifecycleOriginNode.value = focusedNode.value
+    interaction.enterLifecycle(lcSections, lcRelations, dateRange)
+    cameraControls?.setBounds(scene?.getCameraBounds() ?? null)
+    lifecycleActive.value = true
+    focusedNode.value = lcSections[0] ?? focusedNode.value
+    lifelineNodes.value = lcSections
+    lifelineRelations.value = lcRelations
+    showDetailPanel.value = true
+  } finally {
+    lifecycleLoading.value = false
+  }
+}
+
+function toggleMergePicker() {
+  mergePickerOpen.value = !mergePickerOpen.value
+}
+
+// §9.6 Rename the focused topic. Patched in place (no full reload) so the
+// user keeps their focal context.
+async function renameCurrentTopic() {
+  const t = focusedNode.value?.persistent_topic
+  if (!t) return
+  const label = window.prompt('重命名话题', t.label)
+  if (!label || label.trim() === '' || label.trim() === t.label) return
+  const res = await updateTopic(t.id, { label: label.trim() })
+  if (res.success && res.data) {
+    const newLabel = res.data.label
+    const patch = (arr: SectionTimelineNode[]) => arr.map(s =>
+      s.persistent_topic?.id === t.id && s.persistent_topic
+        ? { ...s, persistent_topic: { ...s.persistent_topic, label: newLabel } }
+        : s,
+    )
+    sections.value = patch(sections.value)
+    lifelineNodes.value = patch(lifelineNodes.value)
+    if (focusedNode.value?.persistent_topic?.id === t.id) {
+      focusedNode.value = {
+        ...focusedNode.value,
+        persistent_topic: { ...focusedNode.value.persistent_topic!, label: newLabel },
+      }
+    }
+  }
+}
+
+// §9.6 Archive the focused topic. Reloads the board so the topic leaves the
+// active/candidate pool in the timeline.
+async function archiveCurrentTopic() {
+  const t = focusedNode.value?.persistent_topic
+  if (!t) return
+  if (!window.confirm(`归档话题「${t.label}」？归档后不再参与新归属。`)) return
+  const res = await updateTopic(t.id, { status: 'archived' })
+  if (res.success) {
+    mergePickerOpen.value = false
+    closePanel()
+    await loadBoardData()
+  }
+}
+
+// §9.6 Merge the focused topic into the chosen target. The target absorbs the
+// source's sections; the source is archived by the backend.
+async function mergeCurrentTopicInto(targetTopicId: number) {
+  const t = focusedNode.value?.persistent_topic
+  if (!t || t.id === targetTopicId) return
+  const target = boardTopics.value.find(b => b.id === targetTopicId)
+  if (!target) return
+  if (!window.confirm(`将「${t.label}」合并进「${target.label}」？`)) return
+  mergePickerOpen.value = false
+  const res = await mergeTopics(targetTopicId, [t.id])
+  if (res.success) {
+    closePanel()
+    await loadBoardData()
+  }
+}
 </script>
 
 <template>
@@ -480,6 +630,28 @@ async function exitLifecycle(restoreNode: SectionTimelineNode | null = null) {
           @click="setDays(d)"
         >
           {{ d }}天
+        </button>
+      </div>
+      <div class="tdw-view-toggle">
+        <button
+          class="tdw-view-btn"
+          :class="{ active: viewMode === 'timeline' }"
+          :disabled="lifecycleActive"
+          title="仅匈牙利相似度关系（默认）"
+          @click="setViewMode('timeline')"
+        >
+          <Icon icon="mdi:chart-timeline-variant" width="13" />
+          <span>时间线</span>
+        </button>
+        <button
+          class="tdw-view-btn"
+          :class="{ active: viewMode === 'lanes' }"
+          :disabled="lifecycleActive"
+          title="仅话题连续性（同话题实线）"
+          @click="setViewMode('lanes')"
+        >
+          <Icon icon="mdi:view-stream-outline" width="13" />
+          <span>话题泳道</span>
         </button>
       </div>
     </div>
@@ -528,6 +700,50 @@ async function exitLifecycle(restoreNode: SectionTimelineNode | null = null) {
         <div class="tdw-detail-meta">
           <span>{{ focusedNode.article_count }}篇 · {{ focusedNode.thread_count }}线索</span>
           <span class="tdw-detail-status">{{ statusLabel(focusedNode.status) }}</span>
+        </div>
+        <!-- §9.4/9.6: persistent-topic lifeline + management -->
+        <div v-if="focusedNode.persistent_topic" class="tdw-topic-bar">
+          <div class="tdw-topic-info">
+            <span class="tdw-topic-color" :style="{ background: focusedNode.persistent_topic.color }" />
+            <span class="tdw-topic-label">{{ focusedNode.persistent_topic.label }}</span>
+            <span class="tdw-topic-status">{{ topicStatusLabel(focusedNode.persistent_topic.status) }}</span>
+          </div>
+          <div class="tdw-topic-actions">
+            <button
+              v-if="!lifecycleActive"
+              class="tdw-topic-btn"
+              :disabled="lifecycleLoading"
+              @click="focusedNode.persistent_topic && enterTopicLifeline(focusedNode.persistent_topic.id)"
+            >
+              <Icon icon="mdi:sitemap-outline" width="13" />
+              <span>{{ lifecycleLoading ? '加载中…' : '话题生命线' }}</span>
+            </button>
+            <button class="tdw-topic-btn" @click="renameCurrentTopic">
+              <Icon icon="mdi:pencil-outline" width="13" />
+              <span>重命名</span>
+            </button>
+            <button class="tdw-topic-btn" @click="archiveCurrentTopic">
+              <Icon icon="mdi:archive-outline" width="13" />
+              <span>归档</span>
+            </button>
+            <button class="tdw-topic-btn" @click="toggleMergePicker">
+              <Icon icon="mdi:merge" width="13" />
+              <span>合并</span>
+            </button>
+          </div>
+          <div v-if="mergePickerOpen" class="tdw-merge-picker">
+            <div class="tdw-merge-hint">选择目标话题（当前话题将合并进去）</div>
+            <button
+              v-for="cand in mergeCandidates"
+              :key="cand.id"
+              class="tdw-merge-candidate"
+              @click="mergeCurrentTopicInto(cand.id)"
+            >
+              <span class="tdw-topic-color" :style="{ background: cand.color }" />
+              <span>{{ cand.label }}</span>
+            </button>
+            <div v-if="mergeCandidates.length === 0" class="tdw-merge-empty">无其他可合并话题</div>
+          </div>
         </div>
         <!-- Lifeline/lifecycle aggregate summary -->
         <div v-if="lifelineNodes.length > 0" class="tdw-detail-summary">
@@ -779,6 +995,38 @@ async function exitLifecycle(restoreNode: SectionTimelineNode | null = null) {
 }
 .tdw-days-btn:disabled {
   opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* 视图切换（时间线 / 话题泳道）——与 days-toggle 同款深色浮层 */
+.tdw-view-toggle {
+  display: flex;
+  gap: 0.25rem;
+  background: rgba(0, 0, 0, 0.4);
+  border-radius: 0.4rem;
+  padding: 0.2rem;
+}
+.tdw-view-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.3rem 0.55rem;
+  border: none;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.6);
+  border-radius: 0.3rem;
+  cursor: pointer;
+  font-size: 0.78rem;
+}
+.tdw-view-btn:hover:not(:disabled) {
+  color: rgba(255, 255, 255, 0.9);
+}
+.tdw-view-btn.active {
+  background: rgba(96, 165, 250, 0.25);
+  color: #93c5fd;
+}
+.tdw-view-btn:disabled {
+  opacity: 0.4;
   cursor: not-allowed;
 }
 
@@ -1035,6 +1283,103 @@ async function exitLifecycle(restoreNode: SectionTimelineNode | null = null) {
   opacity: 0.6;
   cursor: wait;
 }
+/* §9.4/9.6 persistent-topic lifeline + management bar */
+.tdw-topic-bar {
+  margin-top: 0.5rem;
+  padding: 0.5rem 0.6rem;
+  border: 1px solid rgba(235, 203, 139, 0.22);
+  border-radius: 6px;
+  background: rgba(235, 203, 139, 0.05);
+}
+.tdw-topic-info {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin-bottom: 0.4rem;
+}
+.tdw-topic-color {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.tdw-topic-label {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: rgba(245, 230, 200, 0.92);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tdw-topic-status {
+  flex-shrink: 0;
+  padding: 1px 6px;
+  font-size: 11px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(235, 203, 139, 0.7);
+}
+.tdw-topic-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+}
+.tdw-topic-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.25rem 0.5rem;
+  font-size: 12px;
+  color: rgba(235, 203, 139, 0.75);
+  background: transparent;
+  border: 1px solid rgba(235, 203, 139, 0.28);
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+.tdw-topic-btn:hover:not(:disabled) {
+  background: rgba(235, 203, 139, 0.12);
+  color: rgba(245, 230, 200, 0.95);
+}
+.tdw-topic-btn:disabled {
+  opacity: 0.6;
+  cursor: wait;
+}
+.tdw-merge-picker {
+  margin-top: 0.4rem;
+  padding-top: 0.4rem;
+  border-top: 1px solid rgba(235, 203, 139, 0.15);
+}
+.tdw-merge-hint {
+  margin-bottom: 0.3rem;
+  font-size: 11px;
+  color: rgba(235, 203, 139, 0.55);
+}
+.tdw-merge-candidate {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  width: 100%;
+  margin-bottom: 0.2rem;
+  padding: 0.3rem 0.4rem;
+  font-size: 12px;
+  color: rgba(245, 230, 200, 0.9);
+  text-align: left;
+  background: transparent;
+  border: 1px solid rgba(235, 203, 139, 0.18);
+  border-radius: 4px;
+  cursor: pointer;
+}
+.tdw-merge-candidate:hover {
+  background: rgba(235, 203, 139, 0.12);
+}
+.tdw-merge-empty {
+  padding: 0.3rem 0;
+  font-size: 11px;
+  color: rgba(235, 203, 139, 0.55);
+}
 /* Scrollable lifeline node list (was slice(0,10); now unlimited + scrolls). */
 .tdw-lifeline-list {
   max-height: 40vh;
@@ -1060,7 +1405,8 @@ async function exitLifecycle(restoreNode: SectionTimelineNode | null = null) {
     align-items: stretch;
   }
   .tdw-section-switch,
-  .tdw-days-toggle {
+  .tdw-days-toggle,
+  .tdw-view-toggle {
     justify-self: stretch;
     overflow-x: auto;
   }

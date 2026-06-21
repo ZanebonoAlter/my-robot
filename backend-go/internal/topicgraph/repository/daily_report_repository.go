@@ -53,15 +53,35 @@ type SectionTimelineNode struct {
 	ArticleCount int       `json:"article_count"`
 	ThreadCount  int       `json:"thread_count"`
 	ImageURL     string    `json:"image_url"`
+	// Persistent topic assignment. All optional so historical / unmatched
+	// sections (persistent_topic_id IS NULL) still serialize cleanly.
+	PersistentTopicID    *uint                 `json:"persistent_topic_id,omitempty"`
+	TopicMatchDistance   float64               `json:"topic_match_distance,omitempty"`
+	TopicMatchConfidence string                `json:"topic_match_confidence,omitempty"`
+	PersistentTopic      *PersistentTopicBrief `json:"persistent_topic,omitempty"`
+}
+
+// PersistentTopicBrief is the nested topic descriptor attached to each
+// timeline node. Color is a stable hash of the topic id so the UI can colour
+// same-topic cards consistently without re-hashing on each render.
+type PersistentTopicBrief struct {
+	ID     uint   `json:"id"`
+	Label  string `json:"label"`
+	Status string `json:"status"`
+	Color  string `json:"color"`
 }
 
 // GetBoardSectionTimeline fetches all sections and their relations for a board within a date range.
 
 // SectionRelationResult represents a relation record for API responses.
+// RelationType is "identity" (same persistent topic, bypasses match penalty)
+// or "similarity" (Hungarian bipartite match). The UI renders them as a solid
+// vs dashed line respectively.
 type SectionRelationResult struct {
-	FromID   uint    `json:"from_id"`
-	ToID     uint    `json:"to_id"`
-	Distance float64 `json:"distance"`
+	FromID       uint    `json:"from_id"`
+	ToID         uint    `json:"to_id"`
+	Distance     float64 `json:"distance"`
+	RelationType string  `json:"relation_type,omitempty"`
 }
 
 // SectionTimelineResponse is the response for section timeline/lifecycle APIs.
@@ -190,6 +210,15 @@ func (r *TopicGraphRepository) SaveReport(report *BoardDailyReport, sections []D
 		if len(sections) > 0 {
 			if err := tx.CreateInBatches(sections, 20).Error; err != nil {
 				return fmt.Errorf("create sections: %w", err)
+			}
+
+			// Assign sections to persistent topics and advance the topic
+			// lifecycle, before rebuilding relations — the identity edges
+			// written by RebuildBoardRelations depend on persistent_topic_id
+			// being set. Best-effort non-fatal: a failure degrades to the old
+			// similarity-only graph rather than aborting the whole save.
+			if assignErr := assignAndUpdateTopics(tx, report.SemanticBoardID, report.PeriodDate, sections); assignErr != nil {
+				logging.Warnf("SaveReport: topic assignment failed for board %d: %v", report.SemanticBoardID, assignErr)
 			}
 		}
 
@@ -344,34 +373,37 @@ func (r *TopicGraphRepository) GetBoardSectionTimeline(boardID uint, days int) (
 	var nodes []SectionTimelineNode
 	err := r.db.Raw(`
 		SELECT ds.id, ds.report_id, bdr.period_date, ds.cluster_label,
-	       ds.article_count,
-	       (SELECT COUNT(*) FROM daily_report_threads t WHERE t.section_id = ds.id) AS thread_count,
-	       COALESCE(
-	         (
-	           SELECT a.image_url
-	           FROM daily_report_threads t
-	           JOIN LATERAL jsonb_array_elements_text(COALESCE(t.related_article_ids, '[]'::jsonb)) aid(article_id) ON true
-	           JOIN articles a ON a.id = aid.article_id::bigint
-	           WHERE t.section_id = ds.id
-	             AND a.image_url IS NOT NULL
-	             AND a.image_url != ''
-	           ORDER BY t.id ASC, a.pub_date DESC NULLS LAST, a.id ASC
-	           LIMIT 1
-	         ),
-	         (
-	           SELECT a.image_url
-	           FROM jsonb_array_elements_text(COALESCE(ds.cluster_tag_ids, '[]'::jsonb)) tid(tag_id)
-	           JOIN article_topic_tags att ON att.topic_tag_id = tid.tag_id::bigint
-	           JOIN articles a ON a.id = att.article_id
-	           WHERE a.pub_date >= bdr.period_date
-	             AND a.pub_date < bdr.period_date + INTERVAL '1 day'
-	             AND a.image_url IS NOT NULL
-	             AND a.image_url != ''
-	           ORDER BY a.pub_date DESC NULLS LAST, a.id ASC
-	           LIMIT 1
-	         ),
-	         ''
-	       ) AS image_url
+		       ds.article_count,
+		       ds.persistent_topic_id,
+		       ds.topic_match_distance,
+		       ds.topic_match_confidence,
+		       (SELECT COUNT(*) FROM daily_report_threads t WHERE t.section_id = ds.id) AS thread_count,
+		       COALESCE(
+		         (
+		           SELECT a.image_url
+		           FROM daily_report_threads t
+		           JOIN LATERAL jsonb_array_elements_text(COALESCE(t.related_article_ids, '[]'::jsonb)) aid(article_id) ON true
+		           JOIN articles a ON a.id = aid.article_id::bigint
+		           WHERE t.section_id = ds.id
+		             AND a.image_url IS NOT NULL
+		             AND a.image_url != ''
+		           ORDER BY t.id ASC, a.pub_date DESC NULLS LAST, a.id ASC
+		           LIMIT 1
+		         ),
+		         (
+		           SELECT a.image_url
+		           FROM jsonb_array_elements_text(COALESCE(ds.cluster_tag_ids, '[]'::jsonb)) tid(tag_id)
+		           JOIN article_topic_tags att ON att.topic_tag_id = tid.tag_id::bigint
+		           JOIN articles a ON a.id = att.article_id
+		           WHERE a.pub_date >= bdr.period_date
+		             AND a.pub_date < bdr.period_date + INTERVAL '1 day'
+		             AND a.image_url IS NOT NULL
+		             AND a.image_url != ''
+		           ORDER BY a.pub_date DESC NULLS LAST, a.id ASC
+		           LIMIT 1
+		         ),
+		         ''
+		       ) AS image_url
 		FROM daily_report_sections ds
 		JOIN board_daily_reports bdr ON bdr.id = ds.report_id
 		WHERE bdr.semantic_board_id = ?
@@ -382,6 +414,10 @@ func (r *TopicGraphRepository) GetBoardSectionTimeline(boardID uint, days int) (
 	if err != nil {
 		return SectionTimelineResponse{}, fmt.Errorf("get board section timeline: %w", err)
 	}
+
+	// Attach topic briefs (label/status/colour). Colour is hashed from the id
+	// so it is stable across renders; fetching label/status here avoids an N+1.
+	attachTopicBriefs(r.db, nodes)
 
 	if len(nodes) == 0 {
 		return SectionTimelineResponse{
@@ -405,7 +441,7 @@ func (r *TopicGraphRepository) GetBoardSectionTimeline(boardID uint, days int) (
 	// Query relations involving these sections
 	var relations []SectionRelationResult
 	if err := r.db.Raw(`
-		SELECT from_section_id AS from_id, to_section_id AS to_id, distance
+		SELECT from_section_id AS from_id, to_section_id AS to_id, distance, relation_type
 		FROM daily_report_section_relations
 		WHERE from_section_id IN ? OR to_section_id IN ?
 	`, sectionIDs, sectionIDs).Scan(&relations).Error; err != nil {
@@ -465,8 +501,11 @@ func (r *TopicGraphRepository) GetSectionLifecycle(sectionID uint) (SectionTimel
 	var nodes []SectionTimelineNode
 	if err := r.db.Raw(`
 		SELECT ds.id, ds.report_id, bdr.period_date, ds.cluster_label,
-	       ds.article_count,
-	       (SELECT COUNT(*) FROM daily_report_threads t WHERE t.section_id = ds.id) AS thread_count,
+		       ds.article_count,
+		       ds.persistent_topic_id,
+		       ds.topic_match_distance,
+		       ds.topic_match_confidence,
+		       (SELECT COUNT(*) FROM daily_report_threads t WHERE t.section_id = ds.id) AS thread_count,
 	       COALESCE(
 	         (
 	           SELECT a.image_url
@@ -500,11 +539,12 @@ func (r *TopicGraphRepository) GetSectionLifecycle(sectionID uint) (SectionTimel
 	`, allIDs).Scan(&nodes).Error; err != nil {
 		return SectionTimelineResponse{}, fmt.Errorf("get section lifecycle: %w", err)
 	}
+	attachTopicBriefs(r.db, nodes)
 
 	// Query relations where BOTH endpoints are in the returned sections
 	var relations []SectionRelationResult
 	if err := r.db.Raw(`
-		SELECT from_section_id AS from_id, to_section_id AS to_id, distance
+		SELECT from_section_id AS from_id, to_section_id AS to_id, distance, relation_type
 		FROM daily_report_section_relations
 		WHERE from_section_id IN ? AND to_section_id IN ?
 	`, allIDs, allIDs).Scan(&relations).Error; err != nil {
@@ -527,6 +567,106 @@ func (r *TopicGraphRepository) GetSectionLifecycle(sectionID uint) (SectionTimel
 		}
 	}
 
+	if relations == nil {
+		relations = []SectionRelationResult{}
+	}
+	return SectionTimelineResponse{Sections: nodes, Relations: relations}, nil
+}
+
+// attachTopicBriefs fills in PersistentTopicBrief (label/status/colour) on each
+// node by fetching the referenced topics in a single query. Colour is derived
+// deterministically from the topic id. No-op for nodes without a topic.
+func attachTopicBriefs(db *gorm.DB, nodes []SectionTimelineNode) {
+	topicIDs := make(map[uint]bool)
+	for i := range nodes {
+		if nodes[i].PersistentTopicID != nil {
+			topicIDs[*nodes[i].PersistentTopicID] = true
+		}
+	}
+	if len(topicIDs) == 0 {
+		return
+	}
+	ids := make([]uint, 0, len(topicIDs))
+	for id := range topicIDs {
+		ids = append(ids, id)
+	}
+	var topics []BoardPersistentTopic
+	if err := db.Where("id IN ?", ids).Find(&topics).Error; err != nil {
+		logging.Warnf("attachTopicBriefs: load topics failed: %v", err)
+		return
+	}
+	briefByID := make(map[uint]PersistentTopicBrief, len(topics))
+	for _, t := range topics {
+		briefByID[t.ID] = PersistentTopicBrief{
+			ID: t.ID, Label: t.Label, Status: t.Status,
+			Color: PersistentTopicColor(t.ID),
+		}
+	}
+	for i := range nodes {
+		if nodes[i].PersistentTopicID == nil {
+			continue
+		}
+		if brief, ok := briefByID[*nodes[i].PersistentTopicID]; ok {
+			nodes[i].PersistentTopic = &brief
+		}
+	}
+}
+
+// GetTopicLifeline returns every section assigned to a persistent topic (no
+// day limit) plus the internal relations among them. Unlike
+// GetSectionLifecycle — which walks the embedding relation graph — this
+// aggregates purely by persistent_topic_id, so a narrative chain persists even
+// when cluster-label drift broke the similarity edges.
+func (r *TopicGraphRepository) GetTopicLifeline(topicID uint) (SectionTimelineResponse, error) {
+	var nodes []SectionTimelineNode
+	err := r.db.Raw(`
+		SELECT ds.id, ds.report_id, bdr.period_date, ds.cluster_label,
+		       ds.article_count,
+		       ds.persistent_topic_id,
+		       ds.topic_match_distance,
+		       ds.topic_match_confidence,
+		       (SELECT COUNT(*) FROM daily_report_threads t WHERE t.section_id = ds.id) AS thread_count,
+		       '' AS image_url
+		FROM daily_report_sections ds
+		JOIN board_daily_reports bdr ON bdr.id = ds.report_id
+		WHERE ds.persistent_topic_id = ?
+		ORDER BY bdr.period_date ASC, ds.id ASC
+	`, topicID).Scan(&nodes).Error
+	if err != nil {
+		return SectionTimelineResponse{}, fmt.Errorf("get topic lifeline: %w", err)
+	}
+	attachTopicBriefs(r.db, nodes)
+
+	if len(nodes) == 0 {
+		return SectionTimelineResponse{
+			Sections: []SectionTimelineNode{}, Relations: []SectionRelationResult{},
+		}, nil
+	}
+
+	sectionIDs := make([]uint, len(nodes))
+	sectionDateMap := make(map[uint]time.Time, len(nodes))
+	var latestDate time.Time
+	for i, n := range nodes {
+		sectionIDs[i] = n.ID
+		sectionDateMap[n.ID] = n.PeriodDate
+		if n.PeriodDate.After(latestDate) {
+			latestDate = n.PeriodDate
+		}
+	}
+	var relations []SectionRelationResult
+	if err := r.db.Raw(`
+		SELECT from_section_id AS from_id, to_section_id AS to_id, distance, relation_type
+		FROM daily_report_section_relations
+		WHERE from_section_id IN ? AND to_section_id IN ?
+	`, sectionIDs, sectionIDs).Scan(&relations).Error; err != nil {
+		logging.Warnf("GetTopicLifeline: query relations failed: %v", err)
+	}
+	statuses := DeriveSectionStatuses(sectionIDs, relations, sectionDateMap, latestDate)
+	for i := range nodes {
+		if s, ok := statuses[nodes[i].ID]; ok {
+			nodes[i].Status = s
+		}
+	}
 	if relations == nil {
 		relations = []SectionRelationResult{}
 	}

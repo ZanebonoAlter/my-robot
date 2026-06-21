@@ -42,8 +42,14 @@ func GenerateDailyReport(ctx context.Context, boardID uint, date time.Time) (*re
 		return nil, nil, nil, nil
 	}
 
-	// Step 3: Cluster via LLM
-	clusters, err := ClusterTags(ctx, tags)
+	// Step 3: Cluster via LLM (inject the board's durable narrative frames so
+	// the LLM reuses them and carries a matched_topic_id per group).
+	existingTopics, err := repository.Repo.ListActiveTopicsByBoard(boardID)
+	if err != nil {
+		logging.Warnf("daily-report: load existing topics for board %d failed: %v", boardID, err)
+		existingTopics = nil // non-fatal: cluster from scratch
+	}
+	clusters, err := ClusterTags(ctx, tags, existingTopics)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("cluster tags: %w", err)
 	}
@@ -175,12 +181,13 @@ func GenerateDailyReport(ctx context.Context, boardID uint, date time.Time) (*re
 		}
 
 		sections = append(sections, repository.DailyReportSection{
-			ClusterIndex:  i,
-			ClusterLabel:  cluster.GroupName,
-			ClusterTagIDs: tagIDsJSON,
-			ArticleCount:  clusterArticleCount,
-			BestTier:      bestTier,
-			AvgScore:      avgScore,
+			ClusterIndex:   i,
+			ClusterLabel:   cluster.GroupName,
+			ClusterTagIDs:  tagIDsJSON,
+			ArticleCount:   clusterArticleCount,
+			BestTier:       bestTier,
+			AvgScore:       avgScore,
+			MatchedTopicID: cluster.MatchedTopicID,
 		})
 	}
 

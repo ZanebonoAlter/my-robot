@@ -38,16 +38,58 @@ func (BoardDailyReport) TableName() string {
 }
 
 // SectionRelation represents a many-to-many relation between sections across days.
+// RelationType distinguishes edges produced by the Hungarian bipartite matcher
+// (similarity) from edges written because both endpoints share the same
+// PersistentTopic (identity). Identity edges bypass the 0.28 match penalty so a
+// narrative chain survives cluster-label drift across days.
 type SectionRelation struct {
 	ID            uint      `gorm:"primarykey" json:"id"`
 	FromSectionID uint      `gorm:"not null;index:idx_section_relations_from" json:"from_section_id"`
 	ToSectionID   uint      `gorm:"not null;index:idx_section_relations_to" json:"to_section_id"`
 	Distance      float64   `gorm:"not null" json:"distance"`
+	RelationType  string    `gorm:"size:20;not null;default:similarity;index:idx_section_relations_type" json:"relation_type"`
 	CreatedAt     time.Time `json:"created_at"`
 }
 
 func (SectionRelation) TableName() string {
 	return "daily_report_section_relations"
+}
+
+// Persistent topic status values.
+const (
+	TopicStatusCandidate = "candidate" // freshly emerged narrative, under observation
+	TopicStatusActive    = "active"    // promoted after consecutive hits
+	TopicStatusArchived  = "archived"  // decayed past the decay window
+)
+
+// PersistentTopicConfidence values recorded on each DailyReportSection.
+const (
+	TopicConfAnchorHit = "anchor_hit" // matched an existing topic via dual confirmation
+	TopicConfAutoNew   = "auto_new"   // dual confirmation failed → opened a new candidate
+	TopicConfUnmatched = "unmatched"  // section has no embedding, cannot assign
+)
+
+// BoardPersistentTopic is a durable narrative frame within a SemanticBoard.
+// One board has N topics; each DailyReportSection is assigned to exactly one
+// topic (1:N). Topics auto-promote from candidate→active after consecutive hits
+// and decay to archived when no section references them for decay_window days.
+type BoardPersistentTopic struct {
+	ID              uint      `gorm:"primarykey" json:"id"`
+	SemanticBoardID uint      `gorm:"not null;index:idx_persistent_topics_board_status,priority:1" json:"semantic_board_id"`
+	Label           string    `gorm:"size:200;not null" json:"label"`
+	Description     string    `gorm:"type:text" json:"description"`
+	Embedding       string    `gorm:"type:vector" json:"-"`
+	Status          string    `gorm:"size:20;not null;default:candidate;index:idx_persistent_topics_board_status,priority:2" json:"status"`
+	FirstSeenDate   time.Time `gorm:"type:date;not null" json:"first_seen_date"`
+	LastSeenDate    time.Time `gorm:"type:date;not null" json:"last_seen_date"`
+	HitCount        int       `gorm:"not null;default:1" json:"hit_count"`
+	ConsecutiveHits int       `gorm:"not null;default:0" json:"consecutive_hits"`
+	CreatedAt       time.Time `json:"created_at"`
+	UpdatedAt       time.Time `json:"updated_at"`
+}
+
+func (BoardPersistentTopic) TableName() string {
+	return "board_persistent_topics"
 }
 
 // DailyReportSection — one section per cluster
@@ -62,7 +104,17 @@ type DailyReportSection struct {
 	BestTier      int                 `gorm:"default:0" json:"best_tier"`
 	AvgScore      float64             `gorm:"default:0" json:"avg_score"`
 	Embedding     string              `gorm:"type:vector" json:"-"`
-	CreatedAt     time.Time           `json:"created_at"`
+	// Persistent topic assignment. NOT NULL is intentionally omitted at the DB
+	// layer to tolerate the backfill window and historical rows; the assignment
+	// algorithm guarantees new sections are always assigned (except the
+	// unmatched branch when Embedding is empty).
+	PersistentTopicID    *uint   `gorm:"index" json:"persistent_topic_id,omitempty"`
+	TopicMatchDistance   float64 `json:"topic_match_distance,omitempty"`
+	TopicMatchConfidence string  `gorm:"size:20" json:"topic_match_confidence,omitempty"`
+	// MatchedTopicID is the topic the LLM picked during ClusterTags; carried
+	// transiently (not persisted) for the dual-confirmation assignment step.
+	MatchedTopicID *uint     `gorm:"-" json:"-"`
+	CreatedAt      time.Time `json:"created_at"`
 }
 
 func (DailyReportSection) TableName() string {
@@ -148,9 +200,13 @@ type TagInput struct {
 }
 
 // ClusterGroup represents a group of tags clustered by the LLM.
+// MatchedTopicID carries the LLM's pick of an existing PersistentTopic for
+// this group (nil when the LLM judges it a new narrative). Validated by the
+// assignment step against the supplied topic set to drop hallucinated IDs.
 type ClusterGroup struct {
-	GroupName string `json:"group_name"`
-	TagIDs    []uint `json:"tag_ids"`
+	GroupName      string `json:"group_name"`
+	TagIDs         []uint `json:"tag_ids"`
+	MatchedTopicID *uint  `json:"matched_topic_id,omitempty"`
 }
 
 // Highlight represents a key highlight in the daily report.
@@ -238,6 +294,58 @@ func ensureSectionEmbeddingDimension(dim int) {
 	if needIndex {
 		if err := db.Exec(`CREATE INDEX IF NOT EXISTS idx_daily_report_sections_embedding ON daily_report_sections USING hnsw (embedding vector_cosine_ops)`).Error; err != nil {
 			logging.Warnf("Failed to create HNSW index on daily_report_sections.embedding: %v", err)
+		}
+	}
+}
+
+// ensurePersistentTopicEmbeddingDimension aligns board_persistent_topics.embedding
+// to the active vector dimension and creates the HNSW index when dim ≤ 2000.
+// Mirrors ensureSectionEmbeddingDimension; called at startup via
+// tagging.RegisterVectorDimEnsurer.
+func ensurePersistentTopicEmbeddingDimension(dim int) {
+	db := Repo.DB()
+	if db == nil {
+		return
+	}
+
+	if err := db.Exec("SET LOCAL lock_timeout = '5s'" /* #nosec G201 */).Error; err != nil {
+		logging.Warnf("Failed to set lock_timeout: %v", err)
+	}
+
+	var typeStr string
+	if err := db.Raw(`
+		SELECT format_type(a.atttypid, a.atttypmod)
+		FROM pg_attribute a
+		JOIN pg_class c ON c.oid = a.attrelid
+		WHERE c.relname = 'board_persistent_topics' AND a.attname = 'embedding'
+	`).Row().Scan(&typeStr); err != nil {
+		return // column may not exist yet
+	}
+
+	expected := fmt.Sprintf("vector(%d)", dim)
+	needAlter := typeStr != expected
+	needIndex := true
+
+	if needAlter {
+		logging.Infof("Altering board_persistent_topics.embedding from %s to %s", typeStr, expected)
+		_ = db.Exec("DROP INDEX IF EXISTS idx_board_persistent_topics_embedding").Error
+		if err := db.Exec(fmt.Sprintf(
+			"ALTER TABLE board_persistent_topics ALTER COLUMN embedding TYPE %s", expected,
+		)).Error; err != nil {
+			logging.Warnf("Failed to alter board_persistent_topics.embedding to %s: %v", expected, err)
+			return
+		}
+	}
+
+	// pgvector HNSW supports up to 2000 dimensions.
+	if dim > 2000 {
+		logging.Infof("Skipping HNSW index on board_persistent_topics.embedding: dimension %d > 2000 limit", dim)
+		needIndex = false
+	}
+
+	if needIndex {
+		if err := db.Exec(`CREATE INDEX IF NOT EXISTS idx_board_persistent_topics_embedding ON board_persistent_topics USING hnsw (embedding vector_cosine_ops)`).Error; err != nil {
+			logging.Warnf("Failed to create HNSW index on board_persistent_topics.embedding: %v", err)
 		}
 	}
 }

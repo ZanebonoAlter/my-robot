@@ -33,6 +33,18 @@ The system SHALL provide a Go CLI tool (`backend-go/cmd/dump-sanitizer`) that co
 - **AND** each exported table is followed by a `SELECT setval(...)` statement resetting its `id` sequence to `MAX(id)+1`
 - **AND** the file is idempotent when re-imported into a fresh database (re-running `docker compose down && up` yields consistent data)
 
+#### Scenario: Sanitization closes token leakage and unique-key collapse
+
+- **WHEN** a sensitive token literal (e.g. `api_key`, `API_KEY`) appears inside `articles.content` or `articles.ai_content_summary`, or a configuration value is stored in `ai_settings.value`
+- **THEN** the exporter replaces those token literals with `[redacted-token]` before capping the text to 2000 characters, and clears every `ai_settings.value` to `{}`
+- **AND** for tables whose sanitization can collapse distinct values onto the same unique key (e.g. `feeds.url` after query-string stripping), the emitted `INSERT` carries the configured `ConflictClause` (e.g. `ON CONFLICT (url) DO NOTHING`) so re-import never fails on a unique violation
+
+#### Scenario: Seed import clears bootstrap data before inserting
+
+- **WHEN** the demo container starts against a fresh database
+- **THEN** the entrypoint starts the backend, waits for `/health`, and runs `TRUNCATE TABLE <all demo tables> RESTART IDENTITY CASCADE` before importing `seed.sql`
+- **AND** this avoids duplicate-key conflicts with the default rows (ai_settings, embedding_config, etc.) that migrations seed at backend boot
+
 ### Requirement: Self-contained demo image with same-origin frontend
 
 The system SHALL build a demo Docker image that compiles both frontend and backend from source (no pre-built local binary), serving the frontend static files from the backend on a single port with same-origin API access.
@@ -43,6 +55,18 @@ The system SHALL build a demo Docker image that compiles both frontend and backe
 - **THEN** the frontend is built with `NUXT_PUBLIC_API_BASE=/api` injected at generate time (same-origin relative path, no absolute localhost URL baked in)
 - **AND** the Go backend is compiled inside the image (multi-stage, no host `go build` required)
 - **AND** the runtime stage includes `curl` and `postgresql-client` for the entrypoint health-check and seed import
+
+#### Scenario: Build tolerates flaky upstream networks and a pre-existing lockfile mismatch
+
+- **WHEN** the Go module proxy or Docker registry is intermittent during build
+- **THEN** the Dockerfile declares an overridable `ARG GOPROXY` (defaulting to a CN mirror) and wraps `go mod download` in a short retry loop, and omits the `# syntax=docker/dockerfile:1` directive so no extra frontend image is pulled
+- **AND** when the repo `pnpm-lock.yaml` declares a `patchedDependencies` entry absent from `package.json`, the frontend stage installs with `--no-frozen-lockfile` (still honouring the lockfile for resolution) rather than failing the frozen check
+
+#### Scenario: Entrypoint imports seed deterministically on a fresh database
+
+- **WHEN** the demo container starts
+- **THEN** the entrypoint launches the backend, waits for `/health`, truncates all demo tables (RESTART IDENTITY CASCADE), imports `seed.sql`, and then waits on the backend process
+- **AND** the import succeeds without duplicate-key errors despite migrations seeding default rows at backend boot
 
 ### Requirement: Zero impact on production paths when demo mode is inactive
 

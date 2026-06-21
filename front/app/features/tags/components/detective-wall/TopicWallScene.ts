@@ -121,9 +121,10 @@ export class TopicWallScene {
     relations: SectionRelation[],
     dateRange: DateRange,
     days: number,
+    viewMode: 'timeline' | 'lanes' = 'timeline',
   ): void {
     this.clearScene()
-    this.cardGroup.buildCards(sections, relations, dateRange, this.scene)
+    this.cardGroup.buildCards(sections, relations, dateRange, this.scene, viewMode)
 
     // Layout bounds drive desk/lamp/dust placement and the directional-fog origin.
     const xs = this.cardGroup.cards.map(c => c.position.x)

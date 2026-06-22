@@ -59,6 +59,7 @@ active topic SHALL 提供进入侦探墙完整生命线的出口；无 topic id 
 - **WHEN** lifeline 在周一和周三有节点、周二无节点，且响应包含周一到周三的 identity relation
 - **THEN** mini 生命线 SHALL 用一条贝塞尔路径连接周一和周三的真实节点
 - **AND** SHALL NOT 为周二生成假节点
+- **AND** 该跨天连线 SHALL 以弱化不透明度呈现，与相邻节点的强连线区分
 
 #### Scenario: lifeline 加载失败
 - **WHEN** `getTopicLifeline(topicId)` 返回错误
@@ -72,10 +73,6 @@ active topic SHALL 提供进入侦探墙完整生命线的出口；无 topic id 
 #### Scenario: 进入完整话题生命线
 - **WHEN** active topic 具有 topic id 且当前设备支持侦探墙入口
 - **THEN** 页面 SHALL 显示“在侦探墙打开完整生命线”操作并进入对应 topic lifeline
-
-#### Scenario: 点击 section header 打开 Lifecycle Panel
-- **WHEN** 用户点击 section header
-- **THEN** 系统 SHALL 在 viewport 右侧打开 SectionLifecyclePanel，展示该 section 的跨天生命周期链
 
 #### Scenario: 键盘关闭详情
 - **WHEN** 日报详情打开且用户按 Esc

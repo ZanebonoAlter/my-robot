@@ -74,13 +74,15 @@ mini lifeline 只渲染 `relation_type === 'identity'` 且两个端点都在当�
 
 ### 6. 主题和响应式全部服从现有系统
 
-组件只使用现有语义 token；topic 自带的稳定 `persistent_topic.color` 仅作话题身份强调色。不得新增针对固定浅色背景的 `rgba(0,0,0,*)`。
+组件只使用现有语义 token；topic 自带的稳定 `persistent_topic.color` 仅作话题身份强调色（边栏色块、topic status badge、lifeline 容器左侧细线）。不得新增针对固定浅色背景的 `rgba(0,0,0,*)`。
+
+mini 生命线的连线、节点、今日高亮、hover 光晕与图例 SHALL 统一使用 `--color-accent`（editorial 红烧 / dark 琥珀），与 demo 报刊统一的强调色对齐；topic 身份识别由边栏色块与 badge 承担，避免不同话题色造成连线难辨识。
 
 - `> 1100px`：正文 + sticky 边栏双栏，头条/highlights 可通栏。
 - `721px–1100px`：单栏正文，边栏折叠为顶部目录/日期控制。
 - `<= 720px`：单栏、可换行标题、触控友好的横向 lifeline；不得因桌面端 `nowrap` 产生页面横向溢出。
 
-宽屏 masthead 可使用 `clamp()` 和 `white-space: nowrap`；窄屏显式恢复换行。
+宽屏 masthead 标题 SHALL 使用 `clamp()` 与 `white-space: nowrap`；窄屏显式恢复换行。
 
 ### 7. 保留现有出口与可访问交互
 
@@ -88,22 +90,49 @@ mini lifeline 只渲染 `relation_type === 'identity'` 且两个端点都在当�
 
 所有可点击 header、节点和 thread 使用原生 button 或具备等价键盘/ARIA 语义，loading/error/empty 状态不能只靠颜色表达。
 
+**section 生命周期入口移除**：原 spec 考虑过保留 section-card header 打开 `SectionLifecyclePanel` 的入口，生产实现后确认该入口与 mini 生命线职责重复、且角落 `is-compact` 图标按钮语义不明确，遂从阅读层移除该入口及其在 `BoardDailyReportTimeline` 上的事件链与 `SectionLifecyclePanel` 挂载。`SectionLifecyclePanel.vue` 组件本体及其 BFS 高亮测试保留，侦探墙继续复用其 `statusColorMap`；多 section 时仅以 `<h4>` 标题展示 `cluster_label`，不再提供跳转。
+
+### 8. 报刊装饰 DNA 与 demo 对齐
+
+视觉重构的 demo（`design-demos/daily-report-magazine.html`）是本 change 的对照基线。生产实现 SHALL 在以下装饰层面与 demo 一致，全部走语义 token，避免硬编码黑色或主题专属色：
+
+- **masthead**：kicker（accent 斜体大写）+ 大标题（`clamp()` + 宽屏 `nowrap` + `text-shadow` ink-bleed）+ sub 副标题行 + meta 分隔符使用 accent `.sep` + 刊头下分隔为 `3px double`。
+- **头条**：dateline 以破折号包裹；正文 `column-count:2` 双栏 + `column-rule`；首字母 dropcap，SHALL NOT 同时使用 `text-indent`（二者冲突会错位）。
+- **highlights**：上分隔 `1px` + 下分隔 `4px double`；每项以 `N°NN` 斜体序号起头。
+- **mini 生命线**：节点 `border:2.5px solid bg-base`、今日 `::after` 显示“今”字；跨空白连续的 identity 连线以弱化不透明度区分（见决策 5）。
+- **thread / article / sidebar**：thread 以左竖线 + `::before` 圆点节点呈现（border-top 横向分隔 SHALL 改为此结构）；article 卡片以左侧 accent 色条 + hover accent-soft 背景呈现；历史日报以日历风（serif + 左色条 + 当前项 accent-soft 高亮）呈现。
+- **colophon 页脚**：阅读层底部 SHALL 提供 colophon（顶部 `3px double` + 斜体署名 + accent ornament + 日期）。
+- **进场动画**：masthead/mast、头条、highlights、各 zone、dynamics、colophon SHALL 使用 `ink-fade`（0.7s 上滑淡入，逐区错开 delay）；lifeline 内层使用 `ll-slide`。
+- **暖色径向渐变**：阅读层背景 SHALL 叠加一层 accent 径向暖光（`color-mix` 12% 透明），提供“纸感”而不引入噪声。
+
+**纸张噪声不还原**：demo 中 `body::before` 的 SVG `feTurbulence` 噪声纹理 SHALL NOT 还原到生产。该叠层在 dark 主题下使用 `mix-blend-mode:screen` 会导致整层发白（本 change 上一轮验收记录过），实际需求“纸感”由暖色径向渐变满足。
+
+### 9. 阅读层与跨层弹窗的 z-index
+
+日报阅读层 `.drm-overlay` 使用 `z-index:9000`。`AppDialog`（文章 preview 等弹窗基于此组件）原为硬编码 `z-index:1000`，会被阅读层覆盖导致文章预览不可触发。
+
+`AppDialog` SHALL 暴露 `zIndex` prop（默认 `1000` 保持向后兼容）；`ArticlePreviewModal` SHALL 以 `z-index:9100` 渲染，使预览在阅读层之上可触发。该修复不改变其他场景的弹窗层级。
+
 ## Risks / Trade-offs
 
 - **[组件拆分改变现有事件链]** → 先为关闭、日期切换、section 生命周期和 `openArticle` 写行为测试，再迁移模板。
 - **[lifeline/article 展开触发 N+1]** → 以 topic id 和 article id 去重缓存，并只在用户展开后加载。
-- **[SVG 坐标受字体、展开内容和 resize 影响]** → 将测量集中在 mini lifeline，`nextTick` 后计算，并用 `ResizeObserver`/resize 清理机制重绘。
+- **[SVG 坐标受字体、展开内容和 resize 影响]** → 将测量集中在 mini lifeline，`requestAnimationFrame` 后以 **track 本身**（而非其带 padding 的 scroll 父容器）为基准计算，避免基准偏移导致线点不连接（demo 同类 bug）。用 `ResizeObserver`/resize 清理机制重绘。
+- **[dark 主题整层发白]** → 验证发现 `mix-blend-mode:screen` + 白噪声叠加在 dark 背景上会漂白整个阅读层； SHALL NOT 还原纸张噪声叠层，“纸感”改用 accent 径向暖光渐变（`color-mix` 透明）。
+- **[跨层弹窗被阅读层遮盖]** → 阅读层 `z-index:9000`，原 `AppDialog` 硬编码 `z-index:1000` 导致文章预览不可触发；以可配 `zIndex` prop 并将 `ArticlePreviewModal` 提升至 `9100` 解决。
 - **[大标题 nowrap 在窄屏溢出]** → 只在宽屏启用 nowrap，720px 以下允许换行并限制字号。
 - **[静态 demo 与真实数据结构不一致]** → 所有验收使用真实 API 或 fixture，demo 只用于视觉对照。
 - **[旧 5000 端口后端未重启导致分类仍错误]** → 实施前先确认详情 API 返回 `persistent_topic`；缺失时阻止进入视觉验收。
 
 ## Migration Plan
 
-1. 先补组件行为测试和真实 fixture，冻结现有关闭、日期、文章与 lifecycle 事件。
+1. 先补组件行为测试和真实 fixture，冻结现有关闭、日期与文章事件。
 2. 抽取主题安全的全屏 shell 与视觉组件，保持旧数据流可用。
 3. 接入 masthead、边栏和 topic 分区，再接入 lifeline 与文章内联展开。
-4. 完成双主题、三档 viewport 和键盘流程浏览器验证。
-5. 更新 reference 文档并执行 tasks.md 验证节全部命令。
+4. 按 demo 基线拉齐报刊装饰（刊头双线、dateline、双栏正文、thread 竖线节点、article 色条卡片、sidebar 日历、colophon 页脚、ink-fade 动画、暖光径向渐变）。
+5. 移除 section-card 的 SectionLifecyclePanel 入口及阅读层内对应事件链（组件本体保留）。
+6. 修复跨层弹窗 z-index，并完成双主题、三档 viewport 和键盘流程浏览器验证。
+7. 更新 reference 文档并执行 tasks.md 验证节全部命令。
 
 本 change 没有数据库迁移。回滚时可恢复旧详情模板和样式，API 与存储不受影响。
 

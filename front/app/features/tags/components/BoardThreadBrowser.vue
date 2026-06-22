@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue'
 import { Icon } from '@iconify/vue'
 import { useDailyReportsApi, type SectionTimelineNode, type SectionRelation, type DailyReportThread } from '~/api/dailyReports'
 import { useArticlesApi } from '~/api/articles'
+import { fullComponentHighlight } from '~/features/topic-graph/utils/graphBfsHighlight'
 
 const props = defineProps<{ boardId: number }>()
 
@@ -27,11 +28,11 @@ const threadArticles = ref<Map<number, { id: number, title: string }[]>>(new Map
 const threadArticlesLoading = ref(false)
 
 // --- Constants ---
-const COL_W = 120
-const ROW_H = 48
-const PAD = 28
+const COL_W = 148
+const ROW_H = 60
+const PAD = 32
 const NODE_R = 7
-const LABEL_MAX = 8
+const LABEL_MAX = 10
 const LANE_LABEL_MAX = 12   // 泳道标签截断阈值（比节点标签宽）
 // 泳道视图参数
 const LANE_LABEL_W = 160 // 左侧话题标签列宽（容结 LANE_LABEL_MAX 个字符，不再截断）
@@ -83,17 +84,28 @@ const MAX_SCALE = 3
 const ZOOM_STEP = 0.2
 const zoomPercent = computed(() => Math.round(zoomScale.value * 100))
 
+async function setZoom(nextScale: number) {
+  const el = svgScrollRef.value
+  const oldScale = zoomScale.value
+  const centerX = el ? (el.scrollLeft + el.clientWidth / 2) / oldScale : 0
+  const centerY = el ? (el.scrollTop + el.clientHeight / 2) / oldScale : 0
+  zoomScale.value = nextScale
+  await nextTick()
+  if (el) {
+    el.scrollLeft = Math.max(0, centerX * nextScale - el.clientWidth / 2)
+    el.scrollTop = Math.max(0, centerY * nextScale - el.clientHeight / 2)
+  }
+}
+
 function zoomIn() {
-  zoomScale.value = Math.min(MAX_SCALE, +(zoomScale.value + ZOOM_STEP).toFixed(2))
+  void setZoom(Math.min(MAX_SCALE, +(zoomScale.value + ZOOM_STEP).toFixed(2)))
 }
 function zoomOut() {
-  zoomScale.value = Math.max(MIN_SCALE, +(zoomScale.value - ZOOM_STEP).toFixed(2))
+  void setZoom(Math.max(MIN_SCALE, +(zoomScale.value - ZOOM_STEP).toFixed(2)))
 }
 
 function resetZoom() {
-  zoomScale.value = 1
-  const el = svgScrollRef.value
-  if (el) { el.scrollLeft = 0; el.scrollTop = 0 }
+  void setZoom(1)
 }
 
 // Theme-aware SVG colors
@@ -127,34 +139,26 @@ function truncateLaneLabel(label: string): string {
 
 // --- Hover highlight graph ---
 
-/** node id → set of directly connected node ids */
-const neighborsOf = computed(() => {
-  const map = new Map<number, Set<number>>()
-  for (const r of relations.value) {
-    // 邻居关系跟随当前视图模式：时间线只走匈牙利相似度，泳道只走 identity。
-    const isIdentity = r.relation_type === 'identity'
-    if (viewMode.value === 'timeline' && isIdentity) continue
-    if (viewMode.value === 'lanes' && !isIdentity) continue
-    let s = map.get(r.from_id)
-    if (!s) { s = new Set(); map.set(r.from_id, s) }
-    s.add(r.to_id)
-    s = map.get(r.to_id)
-    if (!s) { s = new Set(); map.set(r.to_id, s) }
-    s.add(r.from_id)
-  }
-  return map
+const visibleRelations = computed(() => relations.value.filter((r) => {
+  const isIdentity = r.relation_type === 'identity'
+  return viewMode.value === 'lanes' ? isIdentity : !isIdentity
+}))
+
+const highlightedNodeIds = computed(() => {
+  if (hoveredId.value === null) return new Set<number>()
+  return fullComponentHighlight(
+    hoveredId.value,
+    visibleRelations.value.map(r => ({ source: r.from_id, target: r.to_id })),
+  )
 })
 
 function isEdgeHighlighted(r: { fromId: number; toId: number }): boolean {
   if (hoveredId.value === null) return false
-  return r.fromId === hoveredId.value || r.toId === hoveredId.value
+  return highlightedNodeIds.value.has(r.fromId) && highlightedNodeIds.value.has(r.toId)
 }
 
 function isNodeHighlighted(nodeId: number): boolean {
-  if (hoveredId.value === null) return false
-  if (nodeId === hoveredId.value) return true
-  const nb = neighborsOf.value.get(hoveredId.value)
-  return nb ? nb.has(nodeId) : false
+  return hoveredId.value !== null && highlightedNodeIds.value.has(nodeId)
 }
 
 // --- Simple timeline layout ---
@@ -184,11 +188,11 @@ const maxRows = computed(() => {
 // --- 泳道视图：按话题归类（topics/unassignedCount 来自下方话题管理块） ---
 interface LaneRow { key: string; label: string; color: string; status: string }
 const laneRows = computed<LaneRow[]>(() => {
-  const rows: LaneRow[] = topics.value.map(t => ({
+  const rows: LaneRow[] = topics.value.filter(t => t.status === 'active').map(t => ({
     key: `topic-${t.id}`, label: t.label, color: t.color, status: t.status,
   }))
-  if (unassignedCount.value > 0) {
-    rows.push({ key: 'unassigned', label: '未分类', color: '#64748b', status: 'none' })
+  if (nonActiveSectionCount.value > 0) {
+    rows.push({ key: 'unassigned', label: '待确认 / 未分类', color: '#64748b', status: 'none' })
   }
   return rows
 })
@@ -203,7 +207,7 @@ const sectionById = computed(() => {
   return m
 })
 function sectionLaneKey(s: SectionTimelineNode): string {
-  if (s.persistent_topic) return `topic-${s.persistent_topic.id}`
+  if (s.persistent_topic?.status === 'active') return `topic-${s.persistent_topic.id}`
   return 'unassigned'
 }
 
@@ -216,8 +220,8 @@ interface PositionedSection {
 // 泳道自适应高度：每条泳道高 = 基础行高 + 该泳道内单天最大节点数 × 节点间距。
 // 固定高度会导致同天多节点的泳道互相覆盖（节点+标签溢出），动态高度让每条
 // 泳道都够容结自己的内容，间隔充裕。
-const LANE_NODE_GAP = 16      // 同泳道同天多节点的纵向间距
-const LANE_BASE = 40         // 基础行高（单节点时的垂直空间）
+const LANE_NODE_GAP = 24      // 同泳道同天多节点的纵向间距
+const LANE_BASE = 52         // 基础行高（单节点时的垂直空间）
 const laneLayout = computed(() => {
   const lanes = laneRows.value
   const laneH = new Array(lanes.length).fill(LANE_BASE)
@@ -253,7 +257,7 @@ const positionedNodes = computed<PositionedSection[]>(() => {
       const total = layout.subMax.get(k) ?? 1
       const idx = seen.get(k) ?? 0
       seen.set(k, idx + 1)
-      const subOffset = (idx - (total - 1) / 2) * 16
+      const subOffset = (idx - (total - 1) / 2) * LANE_NODE_GAP
       return {
         data: s,
         cx: col * COL_W + PAD + COL_W / 2 + LANE_LABEL_W,
@@ -310,14 +314,7 @@ function edgeOpacity(dist: number): number {
 }
 
 const edgePaths = computed<EdgeLine[]>(() => {
-  return relations.value
-    .filter(r => {
-      // 时间线模式默认只显匈牙利相似度边（隐藏 identity）。
-      if (viewMode.value === 'timeline' && r.relation_type === 'identity') return false
-      // 泳道模式只显 identity 边（同话题延续）；跨泳道相似度会切断归类，改看时间线。
-      if (viewMode.value === 'lanes' && r.relation_type !== 'identity') return false
-      return true
-    })
+  return visibleRelations.value
     .map((r, i) => {
       const relType = r.relation_type ?? 'similarity'
       const from = posById.value.get(r.from_id)
@@ -435,6 +432,8 @@ interface TopicRow {
   sectionCount: number
   firstDate: string
   lastDate: string
+  consecutiveHits: number
+  canActivate: boolean
 }
 
 // 话题清单由 section-timeline 的 persistent_topic 字段聚合，无需额外端点。
@@ -446,6 +445,7 @@ const topics = computed<TopicRow[]>(() => {
     const row = map.get(t.id) ?? {
       id: t.id, label: t.label, status: t.status, color: t.color,
       sectionCount: 0, firstDate: s.period_date.slice(0, 10), lastDate: s.period_date.slice(0, 10),
+      consecutiveHits: t.consecutive_hits, canActivate: t.can_activate,
     }
     row.sectionCount++
     const d = s.period_date.slice(0, 10)
@@ -453,6 +453,8 @@ const topics = computed<TopicRow[]>(() => {
     if (d > row.lastDate) row.lastDate = d
     // status 以最新一天的为准（timeline 已按时间排序）。
     row.status = t.status
+    row.consecutiveHits = t.consecutive_hits
+    row.canActivate = t.can_activate
     map.set(t.id, row)
   }
   return [...map.values()].sort((a, b) => {
@@ -476,6 +478,7 @@ const topicStats = computed(() => {
 
 const topicStatusLabel: Record<string, string> = { candidate: '候选', active: '活跃', archived: '已归档' }
 const unassignedCount = computed(() => sections.value.filter(s => !s.persistent_topic_id).length)
+const nonActiveSectionCount = computed(() => sections.value.filter(s => s.persistent_topic?.status !== 'active').length)
 
 async function runBackfill() {
   if (backfilling.value) return
@@ -512,6 +515,16 @@ async function archiveTopic(t: TopicRow) {
   managing.value = true
   try {
     const res = await updateTopic(t.id, { status: 'archived' })
+    if (res.success) await loadData()
+  } finally { managing.value = false }
+}
+
+async function confirmTopic(t: TopicRow) {
+  if (!t.canActivate || managing.value) return
+  if (!window.confirm(`确认将「${t.label}」启用为持久话题？`)) return
+  managing.value = true
+  try {
+    const res = await updateTopic(t.id, { status: 'active' })
     if (res.success) await loadData()
   } finally { managing.value = false }
 }
@@ -557,7 +570,7 @@ async function loadData() {
 }
 
 watch(
-  () => [props.boardId, days],
+  () => [props.boardId, days.value],
   () => { loadData() },
   { immediate: true },
 )
@@ -578,7 +591,8 @@ watch(viewMode, () => {
         <Icon icon="mdi:source-branch" width="15" class="text-white/50" />
         <span class="btb-controls-title">话题总览</span>
       </div>
-      <div class="btb-days-toggle">
+      <div class="btb-controls-actions">
+        <div class="btb-days-toggle">
         <button
           v-for="d in [7, 14, 30, 60]"
           :key="d"
@@ -588,8 +602,8 @@ watch(viewMode, () => {
         >
           {{ d }}天
         </button>
-      </div>
-      <div class="btb-view-toggle">
+        </div>
+        <div class="btb-view-toggle">
         <button
           class="btb-view-btn"
           :class="{ active: viewMode === 'timeline' }"
@@ -608,8 +622,8 @@ watch(viewMode, () => {
           <Icon icon="mdi:view-stream-outline" width="13" />
           <span>话题泳道</span>
         </button>
-      </div>
-      <button
+        </div>
+        <button
         v-if="showDetectiveEntry"
         class="btb-detective-btn"
         title="进入 3D 侦探墙"
@@ -617,8 +631,8 @@ watch(viewMode, () => {
       >
         <Icon icon="mdi:magnify-scan" width="16" />
         <span>侦探墙</span>
-      </button>
-      <button
+        </button>
+        <button
         class="btb-detective-btn"
         :class="{ 'btb-detective-btn--active': showTopicPanel }"
         title="话题管理（回刷 / 重命名 / 归档 / 合并）"
@@ -626,7 +640,8 @@ watch(viewMode, () => {
       >
         <Icon icon="mdi:folder-cog-outline" width="16" />
         <span>话题管理</span>
-      </button>
+        </button>
+      </div>
     </div>
 
     <!-- Topic management panel (§最小版) -->
@@ -657,10 +672,19 @@ watch(viewMode, () => {
           <div class="btb-topic-main">
             <span class="btb-topic-label">{{ t.label }}</span>
             <span class="btb-topic-meta">
-              {{ topicStatusLabel[t.status] || t.status }} · {{ t.sectionCount }} 条 · {{ t.firstDate }}→{{ t.lastDate }}
+              {{ topicStatusLabel[t.status] || t.status }} · {{ t.sectionCount }} 条
+              <template v-if="t.status === 'candidate'"> · 连续 {{ t.consecutiveHits }} 天</template>
+              · {{ t.firstDate }}→{{ t.lastDate }}
             </span>
           </div>
           <div class="btb-topic-ops" v-if="t.status !== 'archived'">
+            <button
+              v-if="t.status === 'candidate'"
+              class="btb-topic-op btb-topic-op--confirm"
+              :disabled="managing || !t.canActivate"
+              :title="t.canActivate ? '人工确认后进入持久话题泳道' : '需先满足连续多天出现条件'"
+              @click="confirmTopic(t)"
+            >确认启用</button>
             <button class="btb-topic-op" :disabled="managing" @click="renameTopic(t)">重命名</button>
             <button class="btb-topic-op" :disabled="managing" @click="mergeTopic(t)">合并</button>
             <button class="btb-topic-op" :disabled="managing" @click="archiveTopic(t)">归档</button>
@@ -682,26 +706,11 @@ watch(viewMode, () => {
 
     <!-- Timeline -->
     <div v-else class="btb-chart">
-      <!-- Date header -->
-      <div class="btb-date-header" :style="{ width: svgWidth + 'px' }">
-        <span
-          v-for="col in dateColumns"
-          :key="col.date"
-          class="btb-date-label"
-          :style="{ left: col.x + 'px' }"
-        >
-          {{ col.label }}
-        </span>
-      </div>
-
-      <!-- SVG canvas（+/− 按钮缩放；transform scale 不改变布局尺寸，故 zoom 容器的
-           width/height 需按缩放后尺寸算，父滚动容器才能正确撑开出现滚动条） -->
+      <!-- SVG canvas: outer spacer owns scaled dimensions; SVG alone is transformed. -->
       <div ref="svgScrollRef" class="btb-svg-scroll">
         <div
           class="btb-svg-zoom"
           :style="{
-            transform: `scale(${zoomScale})`,
-            transformOrigin: '0 0',
             width: Math.round(svgWidth * zoomScale) + 'px',
             height: Math.round(svgHeight * zoomScale) + 'px',
           }"
@@ -710,7 +719,18 @@ watch(viewMode, () => {
           :width="svgWidth"
           :height="svgHeight"
           class="btb-svg"
+          :style="{ transform: `scale(${zoomScale})` }"
         >
+          <!-- Date labels live inside the same pan/zoom coordinate system. -->
+          <text
+            v-for="col in dateColumns"
+            :key="'date-' + col.date"
+            :x="col.x"
+            :y="12"
+            text-anchor="middle"
+            class="btb-date-label"
+          >{{ col.label }}</text>
+
           <!-- Grid lines -->
           <line
             v-for="col in dateColumns"
@@ -906,8 +926,17 @@ watch(viewMode, () => {
 .btb-controls {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-start;
   gap: 0.5rem;
+}
+
+.btb-controls-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-left: auto;
 }
 
 .btb-controls-left {
@@ -1093,7 +1122,11 @@ watch(viewMode, () => {
 }
 .btb-topic-op:disabled {
   opacity: 0.5;
-  cursor: wait;
+  cursor: not-allowed;
+}
+.btb-topic-op--confirm:not(:disabled) {
+  border-color: rgba(52, 211, 153, 0.6);
+  color: #6ee7b7;
 }
 
 /* §视图切换 + 泳道 */
@@ -1162,36 +1195,29 @@ watch(viewMode, () => {
 .btb-chart {
   display: flex;
   flex-direction: column;
-}
-
-/* Date header */
-.btb-date-header {
   position: relative;
-  height: 1.4rem;
-  margin-bottom: 0.15rem;
-  flex-shrink: 0;
 }
 
 .btb-date-label {
-  position: absolute;
-  transform: translateX(-50%);
   font-size: 0.6rem;
-  color: var(--color-text-muted);
-  white-space: nowrap;
+  fill: var(--color-text-muted);
+  pointer-events: none;
 }
 
 /* SVG scroll container（缩放后两向可滚动） */
 .btb-svg-scroll {
   overflow: auto;
   position: relative;
+  max-height: min(68vh, 720px);
 }
 
 .btb-svg-zoom {
-  /* transform 由内联 style 设置；这里只保证布局基准为左上角 */
+  position: relative;
 }
 
 .btb-svg {
   display: block;
+  transform-origin: 0 0;
 }
 
 /* 缩放控制条（右下角浮动，主题适配） */
@@ -1251,10 +1277,24 @@ watch(viewMode, () => {
 
 /* Node label */
 .btb-node-label {
-  font-size: 9px;
+  font-size: 10px;
+  font-weight: 500;
   pointer-events: none;
-  opacity: 0.7;
+  opacity: 0.82;
+  paint-order: stroke;
+  stroke: var(--color-bg-hover);
+  stroke-width: 3px;
+  stroke-linejoin: round;
   transition: opacity 0.12s ease;
+}
+
+@media (max-width: 900px) {
+  .btb-controls {
+    align-items: flex-start;
+  }
+  .btb-controls-actions {
+    gap: 0.35rem;
+  }
 }
 
 /* DAG nodes */

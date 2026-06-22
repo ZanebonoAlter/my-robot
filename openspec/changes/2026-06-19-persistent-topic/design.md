@@ -61,15 +61,15 @@ graph TB
 
 **验证方法**：集成测试构造矛盾场景（embedding 近但 LLM 不标记），验证走 auto_new 分支；成果报告统计 AND/OR 在真实数据下的分歧率（目标分歧率 < 15%，否则 AND 太严需放宽为 OR）。
 
-### 2.3 决策点三：自动升级阈值（upgrade_threshold）
+### 2.3 决策点三：人工确认前置门禁（upgrade_threshold）
 
-**问题**：candidate 连续命中几天转 active？
+**问题**：candidate 连续命中几天后允许人工确认 active？
 
-**默认值**：3 天。理由：单天命中可能是噪声（突发事件），连续 3 天说明是稳定叙事。
+**默认值**：3 天。理由：单天命中可能是噪声（突发事件），连续 3 天说明有稳定叙事迹象；但是否成为用户可见的持久泳道仍由人工确认。
 
-**风险**：噪声事件连续 3 天也可能命中（如奥运开幕式连续几天报道），升级为 active 后污染"关心的话题"栏。缓解：decay_window 到期自动归档。
+**风险**：噪声事件连续 3 天也可能命中。缓解：达到阈值只设置 `can_activate=true`，不自动转正；用户在话题管理中确认后才进入 active。
 
-**验证方法**：集成测试模拟 1/2/3/4 天连续命中，验证第 3 天边界正确转正；成果报告统计真实数据下 candidate → active 转化率、误升级率（需人工抽查 active topic 是否合理）。
+**验证方法**：集成测试模拟 1/2/3/4 天连续命中，验证第 3 天获得确认资格但仍保持 candidate；另测未达阈值时 PATCH active 被拒绝。
 
 ### 2.4 决策点四：decay 窗口（decay_window）
 
@@ -218,9 +218,7 @@ func UpdateTopicLifecycle(ctx, boardID, today, sections) {
             t.ConsecutiveHits++
             t.HitCount++
             t.LastSeenDate = today
-            if t.Status == "candidate" && t.ConsecutiveHits >= upgradeThreshold {
-                t.Status = "active" // 自动转正
-            }
+            // candidate 达阈值后仍保持 candidate；由 PATCH topic 人工确认。
         } else {
             t.ConsecutiveHits = 0 // 断链重置
             if t.Status == "active" && daysBetween(today, t.LastSeenDate) > decayWindow {
@@ -332,6 +330,9 @@ flowchart TD
 - 红线：`relation_type==='identity'` → 实线 + 满 opacity；`'similarity'` → 虚线 + 半透明
 - candidate topic 卡片：虚线边框（PaperMesh 描边）
 - BFS 增强：起点生命线候选 = {同 topic 全部 section} ∪ {BFS 沿相似度边可达 section}
+- 时间线状态：只由 similarity（匈牙利）关系推导；identity 不参与 emerging/continuing/split/merge/ending 计算
+- hover：沿当前视图可见关系高亮完整连通分量，不限前后一级
+- 2D 泳道：仅 active topic 独立成泳道；candidate 进入“待确认 / 未分类”并只在管理面板提供确认入口
 
 ### 6.3 日报分栏
 

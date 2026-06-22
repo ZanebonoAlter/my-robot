@@ -41,11 +41,11 @@
 
 ## 4. UpdateTopicLifecycle 状态机
 
-- [x] 4.1 `daily_report_topic.go` 新增 `UpdateTopicLifecycle(ctx, boardID, today, sections)`：命中则 consecutive_hits+1/hit_count+1/last_seen 更新，candidate 达 upgrade_threshold 转 active；未命中则 consecutive_hits 归 0，active 超 decay_window 转 archived
+- [x] 4.1 `daily_report_topic.go` 新增 `UpdateTopicLifecycle(ctx, boardID, today, sections)`：命中则 consecutive_hits+1/hit_count+1/last_seen 更新，candidate 达 upgrade_threshold 后等待人工确认；未命中则 consecutive_hits 归 0，active 超 decay_window 转 archived
   - **实现位置**：`planLifecycle` + `assignAndUpdateTopics`（repository/daily_report_assignment.go）。
 - [x] 4.2 配置项加载：从 ai_settings 读 4 个参数，未设置用默认值
 - [x] 4.3 `daily_report_orchestrator.go`：AssignSectionsToTopics 后调用 UpdateTopicLifecycle
-- [x] 4.4 单元测试：`TestLifecycle_UpgradeOnConsecutiveHits`（第 3 天边界转正）/ `TestLifecycle_ResetOnBreak`（中断归 0）/ `TestLifecycle_ArchiveOnDecay`（31 天归档）/ `TestLifecycle_KeepWithinDecayWindow`（窗口内保留）
+- [x] 4.4 单元测试：`TestPlanLifecycle_EligibleCandidateStillRequiresManualConfirmation`（第 3 天仍待人工确认）/ `TestUpdateTopic_CandidateRequiresOccurrenceThresholdBeforeActivation`（未达阈值拒绝确认）/ 中断与归档窗口测试
 
 ## 5. 关系叠加身份边（根因 B）
 
@@ -101,6 +101,9 @@
   - **完成情况**：`TopicDetectiveWall.client.vue` 详情面板新增话题操作区——话题生命线 / 重命名（prompt）/ 归档（confirm）/ 合并（board 缓存 topic 选择器），分别调 `getTopicLifeline` / `updateTopic(label)` / `updateTopic(status=archived)` / `mergeTopics`。前端 API 封装见 `dailyReports.ts`（`updateTopic` / `mergeTopics` / `splitTopic`）+ `client.ts` 新增 `patch` 方法。
 - [x] 9.7 后端 topic 管理 API：`POST /api/daily-reports/topics/:id/merge` / `PATCH /api/daily-reports/topics/:id`（重命名/归档）/ `POST /api/daily-reports/topics/:id/split`
   - **完成情况**：`daily_report_handler.go` 新增 `updateTopic`/`mergeTopic`/`splitTopic` + 路由注册；repository 层 `UpdateTopic`/`MergeTopics`/`SplitTopic`（事务 + RebuildBoardRelations 重建身份边）。split 前端入口未做（tasks 9.6 仅要求合并/重命名/归档），后端 API 已就绪。
+- [x] 9.8 修复候选话题发布门禁：candidate 不再自动 active，达到连续天数后由管理面板“确认启用”；只有 active topic 建独立泳道
+- [x] 9.9 修复时间线语义隔离：section 状态只使用 similarity 边推导，identity 不再把 emerging 污染为 continuing
+- [x] 9.10 修复交互与布局：2D/3D hover 高亮完整连通分量；时间筛选精确包含最新 N 天；筛选/视图/侦探墙/管理右对齐；标签间距与缩放画布同步重构
 
 ## 测试 / Test
 
@@ -121,11 +124,10 @@
 ## 文档 / Docs
 
 - [x] D.1 产出 `verification-report.md`（成果报告）：调参前后指标对比表（anchor_hit 占比 / candidate 数 / 分歧率 / topic 数分布），证明算法参数合理；含命名漂移场景实测案例（改造前断链 vs 改造后身份边保持）
-- [ ] D.2 更新 `docs/reference/database/`：board_persistent_topics 表结构、daily_report_sections/daily_report_section_relations 新字段
-- [ ] D.3 更新 `docs/reference/api/`：新增 getTopicLifeline 端点、扩展 getBoardSectionTimeline/getSectionLifecycle 响应字段
-- [ ] D.4 更新 `docs/reference/architecture/`：补充 PersistentTopic 持久层在 board/section/relation 架构中的位置
-- [ ] D.5 更新 `docs/reference/configuration.md`：4 个 persistent_topic_* 配置项说明
-  - **D.2–D.5 未做**：reference 活文档按 `开发执行规范.md` §12.4 在**里程碑收尾时统一更新**，非单个 change 归档门禁。本 change 归档不阻塞；里程碑 v1.3.3 收尾时一并同步。
+- [x] D.2 更新 `docs/reference/database/`：board_persistent_topics 表结构、daily_report_sections/daily_report_section_relations 新字段
+- [x] D.3 更新 `docs/reference/api/`：getTopicLifeline、管理端点、section-timeline 扩展字段与精确时间窗
+- [x] D.4 更新 `docs/reference/architecture/`：PersistentTopic 归属、人工确认、双轨关系语义
+- [x] D.5 更新 `docs/reference/configuration.md`：4 个 persistent_topic_* 配置项说明
 
 ## 验证 / Verify
 
@@ -152,3 +154,7 @@
 - [x] V.15（2026-06-20 补）全量归属验证（真实库）：`docker exec syntopica-postgres psql -U postgres -d syntopica -c "SELECT count(*) FILTER (WHERE persistent_topic_id IS NULL) AS null_secs, count(*) AS total FROM daily_report_sections;"` → null_secs=0（首次 209 total；随新日报增长，2026-06-20 复测 243 total，仍 0 NULL；修复前 154/209 为 NULL）。
 - [x] V.16（2026-06-20 补）prompt + reuse 回归：`cd backend-go && go test ./internal/topicgraph/service/ 2>&1` → `ok`；`go run ./cmd/verify-cluster-prompt` → topic 8 只收 2 个相关事件，无重复 reuse。
 - [x] V.17（2026-06-20 补）后端全量 build：`cd backend-go && go build ./... && echo BUILD_OK` → BUILD_OK（含新运维工具 cmd/rebuild-topics、cmd/verify-cluster-prompt）。
+- [x] V.18（2026-06-21 补）人工确认与状态隔离：`cd backend-go && go test ./internal/topicgraph/repository -run "TestPlanLifecycle_EligibleCandidateStillRequiresManualConfirmation|TestUpdateTopic_CandidateRequiresOccurrenceThresholdBeforeActivation|TestDeriveSectionStatuses_" -count=1`
+- [x] V.19（2026-06-21 补）精确时间窗：`cd backend-go && go test ./internal/topicgraph/repository -run TestGetBoardSectionTimeline_DaysReturnsExactLatestWindow -count=1`
+- [x] V.20（2026-06-21 补）完整连通高亮：`cmd.exe /C "cd /d D:\project\Syntopica\front && pnpm exec vitest run app/features/topic-graph/utils/graphBfsHighlight.test.ts"`
+- [x] V.21（2026-06-21 补）前端完整门禁：`cmd.exe /C "cd /d D:\project\Syntopica\front && pnpm lint && pnpm exec nuxi typecheck && pnpm test:unit && pnpm build"`（lint 0 error；typecheck PASS；19 files / 117 tests PASS；build complete）

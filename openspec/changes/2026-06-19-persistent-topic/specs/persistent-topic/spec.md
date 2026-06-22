@@ -1,6 +1,6 @@
 ## Purpose
 
-PersistentTopic（持久叙事话题）：在 SemanticBoard（板块）和 DailyReportSection（当天聚类）之间引入持久叙事话题层。强制 section 1:N 归属、自动升级生命周期、关系叠加身份边，解决板块下话题因命名漂移而散乱、每日聚类随机的根因问题。
+PersistentTopic（持久叙事话题）：在 SemanticBoard（板块）和 DailyReportSection（当天聚类）之间引入持久叙事话题层。强制 section 1:N 归属、人工确认生命周期、关系叠加身份边，解决板块下话题因命名漂移而散乱、每日聚类随机的根因问题。
 
 ## Requirements
 
@@ -73,16 +73,28 @@ LLM 输出 schema SHALL 为每个 group 增加 `matched_topic_id` 字段（可�
 
 系统 SHALL 在每日报生成并归属后，执行 topic 状态机更新：
 
-- 当天有 section 归属到某 topic：consecutive_hits += 1，hit_count += 1，last_seen_date = 当天；若 status=candidate 且 consecutive_hits ≥ upgrade_threshold（默认 3），SHALL 自动转为 active。
+- 当天有 section 归属到某 topic：consecutive_hits += 1，hit_count += 1，last_seen_date = 当天；若 status=candidate 且 consecutive_hits ≥ upgrade_threshold（默认 3），SHALL 获得人工确认资格，但 SHALL NOT 自动转为 active。
 - 当天无 section 归属：consecutive_hits 归 0；若 status=active 且 today - last_seen_date > decay_window（默认 30 天），SHALL 自动转为 archived。
 
 upgrade_threshold、decay_window SHALL 可通过 ai_settings 配置。
 
-#### Scenario: 候选连续命中升级
+#### Scenario: 候选连续命中后等待人工确认
 
 - **GIVEN** topic #12 status=candidate，consecutive_hits=2
 - **WHEN** 第 3 天有 section 归属到 #12
-- **THEN** #12 SHALL 转为 active，consecutive_hits=3，hit_count+1
+- **THEN** #12 SHALL 保持 candidate，consecutive_hits=3，hit_count+1，并允许用户确认启用
+
+#### Scenario: 未达多天门禁时拒绝确认
+
+- **GIVEN** topic #12 status=candidate，consecutive_hits=2，upgrade_threshold=3
+- **WHEN** 用户尝试将 #12 更新为 active
+- **THEN** 系统 SHALL 拒绝，并返回连续出现天数不足的错误
+
+#### Scenario: 人工确认后进入持久泳道
+
+- **GIVEN** topic #12 status=candidate，consecutive_hits=3
+- **WHEN** 用户确认启用 #12
+- **THEN** #12 SHALL 转为 active；只有 active topic SHALL 形成持久话题泳道
 
 #### Scenario: 连续命中中断重置
 
@@ -105,6 +117,8 @@ upgrade_threshold、decay_window SHALL 可通过 ai_settings 配置。
 ### Requirement: Section 关系叠加身份边
 
 `daily_report_section_relations` SHALL 新增 `relation_type` 列（identity/similarity，默认 similarity）。匈牙利二分匹配产出的关系 SHALL 标记为 similarity（算法实现不动）。
+
+section 的 emerging/continuing/split/merge/ending 状态 SHALL 只由 similarity 关系推导，identity 关系 SHALL NOT 改变时间线状态。
 
 关系重建 SHALL 额外写入身份边：对每个 PersistentTopic 下相邻天（按 period_date）的两个 section，SHALL 写入或覆盖一条 relation_type=identity 的关系。身份边 SHALL NOT 受匈牙利 penalty（0.28）限制——即使两 section embedding distance > penalty，只要归属同一 topic 即写边。
 

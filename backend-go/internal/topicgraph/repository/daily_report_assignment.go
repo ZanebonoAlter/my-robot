@@ -164,8 +164,8 @@ type topicLifecycleChange struct {
 // planLifecycle computes the candidate→active→archived transitions for a
 // board's topics given today's hit set. Pure and unit-testable.
 //
-// hit: consecutive_hits+1, hit_count+1, last_seen=today; candidate promotes
-// to active once consecutive_hits ≥ UpgradeThreshold.
+// hit: consecutive_hits+1, hit_count+1, last_seen=today. Candidates remain
+// candidates until a user confirms them after they reach UpgradeThreshold.
 // miss: consecutive_hits reset to 0; active archives after DecayWindow days.
 //
 // New candidates created by the assignment step already carry consecutive_hits=1
@@ -183,10 +183,14 @@ func planLifecycle(topics []BoardPersistentTopic, today time.Time, hitTopicIDs m
 				status:  t.Status, consecutiveHits: newHits,
 				hitCount: t.HitCount + 1, lastSeen: todayDate,
 			}
-			if t.Status == TopicStatusCandidate && newHits >= cfg.UpgradeThreshold {
-				ch.status = TopicStatusActive
-			}
 			changes = append(changes, ch)
+			continue
+		}
+		if t.Status == TopicStatusCandidate && t.ConsecutiveHits != 0 {
+			changes = append(changes, topicLifecycleChange{
+				topicID: t.ID, status: TopicStatusCandidate,
+				consecutiveHits: 0, hitCount: t.HitCount, lastSeen: lastSeen,
+			})
 			continue
 		}
 		if t.Status == TopicStatusActive {

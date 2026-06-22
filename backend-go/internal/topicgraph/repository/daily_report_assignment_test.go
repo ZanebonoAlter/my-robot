@@ -85,8 +85,9 @@ func TestPlanTopicAssignments_Unmatched_EmptyEmbedding(t *testing.T) {
 	assert.Nil(t, dec[0].newCandidate)
 }
 
-func TestPlanLifecycle_UpgradeOnConsecutiveHits(t *testing.T) {
-	// candidate at consecutive=2, hit today → promoted to active (3 ≥ 3).
+func TestPlanLifecycle_EligibleCandidateStillRequiresManualConfirmation(t *testing.T) {
+	// Reaching the occurrence threshold makes a candidate eligible for manual
+	// confirmation, but the daily pipeline must not publish it automatically.
 	cfg := PersistentTopicConfig{MatchThreshold: 0.30, UpgradeThreshold: 3, DecayWindow: 30}
 	topics := []BoardPersistentTopic{{
 		ID: 1, Status: TopicStatusCandidate, ConsecutiveHits: 2, HitCount: 2,
@@ -94,7 +95,7 @@ func TestPlanLifecycle_UpgradeOnConsecutiveHits(t *testing.T) {
 	}}
 	changes := planLifecycle(topics, time.Now(), map[uint]bool{1: true}, cfg)
 	require.Len(t, changes, 1)
-	assert.Equal(t, TopicStatusActive, changes[0].status)
+	assert.Equal(t, TopicStatusCandidate, changes[0].status)
 	assert.Equal(t, 3, changes[0].consecutiveHits)
 	assert.Equal(t, 3, changes[0].hitCount)
 }
@@ -114,15 +115,16 @@ func TestPlanLifecycle_HitKeepsCandidateBelowThreshold(t *testing.T) {
 
 func TestPlanLifecycle_MissResetsConsecutive(t *testing.T) {
 	// candidate not hit today → consecutive resets to 0; stays candidate.
-	// (No change row produced because only hits and active-decay emit rows.)
 	cfg := PersistentTopicConfig{MatchThreshold: 0.30, UpgradeThreshold: 3, DecayWindow: 30}
 	topics := []BoardPersistentTopic{{
 		ID: 1, Status: TopicStatusCandidate, ConsecutiveHits: 2, HitCount: 2,
 		LastSeenDate: time.Now().AddDate(0, 0, -1),
 	}}
 	changes := planLifecycle(topics, time.Now(), map[uint]bool{}, cfg)
-	// candidate miss emits no row (reset is implicit; no status transition).
-	assert.Len(t, changes, 0)
+	require.Len(t, changes, 1)
+	assert.Equal(t, TopicStatusCandidate, changes[0].status)
+	assert.Equal(t, 0, changes[0].consecutiveHits)
+	assert.Equal(t, 2, changes[0].hitCount)
 }
 
 func TestPlanLifecycle_ArchiveOnDecay(t *testing.T) {

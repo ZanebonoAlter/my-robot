@@ -25,6 +25,8 @@ export interface PersistentTopicBrief {
   status: string  // 'candidate' | 'active' | 'archived'
   /** Stable colour derived from the topic id by the backend; same topic → same colour across renders. */
   color: string
+  consecutive_hits: number
+  can_activate: boolean
 }
 
 /** Full persistent topic row, as returned by the management API (merge/split/update). */

@@ -253,6 +253,12 @@ func (r *TopicGraphRepository) UpdateTopic(topicID uint, label *string, status *
 	if status != nil && *status != "" {
 		switch *status {
 		case TopicStatusActive, TopicStatusArchived:
+			if *status == TopicStatusActive && topic.Status == TopicStatusCandidate {
+				threshold := LoadPersistentTopicConfig(r.db).UpgradeThreshold
+				if topic.ConsecutiveHits < threshold {
+					return nil, fmt.Errorf("话题需连续出现至少 %d 天后才能人工确认（当前 %d 天）", threshold, topic.ConsecutiveHits)
+				}
+			}
 			updates["status"] = *status
 		default:
 			return nil, fmt.Errorf("invalid status %q (allowed: active, archived)", *status)

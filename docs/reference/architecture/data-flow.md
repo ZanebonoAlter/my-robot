@@ -252,6 +252,20 @@ daily_report scheduler 触发
     → cleanEmptyBoards (清理空 Board)
 ```
 
+### PersistentTopic 日报归属与展示
+
+```text
+日报 section 保存
+  → 双重确认归属已有 topic；不一致时创建 candidate
+  → consecutive_hits 达阈值：仅获得人工确认资格，仍保持 candidate
+  → 话题管理 PATCH active：后端复核阈值后启用
+  → 只有 active topic 进入独立持久泳道
+
+关系双轨：
+  similarity（匈牙利）→ 时间线连线 + emerging/continuing/split/merge/ending 状态
+  identity（同 persistent_topic）→ 话题泳道连续性，不参与时间线状态
+```
+
 ### SemanticBoard 管理
 
 ```text

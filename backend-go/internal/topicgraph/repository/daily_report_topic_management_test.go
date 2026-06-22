@@ -79,6 +79,32 @@ func TestUpdateTopic_ArchiveAndReactivate(t *testing.T) {
 	assert.Equal(t, TopicStatusActive, got.Status)
 }
 
+func TestUpdateTopic_CandidateRequiresOccurrenceThresholdBeforeActivation(t *testing.T) {
+	db := testutil.SetupTestDB(t)
+	repo := NewTopicGraphRepository(db)
+	boardID := seedTestBoard(t, db)
+	topic := BoardPersistentTopic{
+		SemanticBoardID: boardID,
+		Label:           "待确认话题",
+		Embedding:       vecStr(1, 0, 0),
+		Status:          TopicStatusCandidate,
+		FirstSeenDate:   NormalizeReportDate(time.Now()),
+		LastSeenDate:    NormalizeReportDate(time.Now()),
+		HitCount:        2,
+		ConsecutiveHits: 2,
+	}
+	require.NoError(t, db.Create(&topic).Error)
+
+	active := TopicStatusActive
+	_, err := repo.UpdateTopic(topic.ID, nil, &active)
+	require.ErrorContains(t, err, "连续出现")
+
+	require.NoError(t, db.Model(&topic).Update("consecutive_hits", 3).Error)
+	got, err := repo.UpdateTopic(topic.ID, nil, &active)
+	require.NoError(t, err)
+	assert.Equal(t, TopicStatusActive, got.Status)
+}
+
 func TestUpdateTopic_RejectsInvalidStatus(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 	repo := NewTopicGraphRepository(db)

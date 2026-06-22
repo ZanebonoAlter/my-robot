@@ -17,6 +17,27 @@ export interface GraphHighlightEdge<T extends string | number> {
   target: T
 }
 
+/** Return the full undirected component without density or hop limits. */
+export function fullComponentHighlight<T extends string | number>(
+  focusId: T,
+  edges: GraphHighlightEdge<T>[],
+): Set<T> {
+  const adj = new Map<T, Set<T>>()
+  const ensureNode = (id: T) => {
+    if (!adj.has(id)) adj.set(id, new Set())
+  }
+
+  for (const edge of edges) {
+    ensureNode(edge.source)
+    ensureNode(edge.target)
+    adj.get(edge.source)!.add(edge.target)
+    adj.get(edge.target)!.add(edge.source)
+  }
+  ensureNode(focusId)
+
+  return bfsCollect(focusId, adj, Infinity, Infinity)
+}
+
 /**
  * Returns the set of node IDs to highlight given a focus node.
  *

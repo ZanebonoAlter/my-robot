@@ -65,10 +65,12 @@ type SectionTimelineNode struct {
 // timeline node. Color is a stable hash of the topic id so the UI can colour
 // same-topic cards consistently without re-hashing on each render.
 type PersistentTopicBrief struct {
-	ID     uint   `json:"id"`
-	Label  string `json:"label"`
-	Status string `json:"status"`
-	Color  string `json:"color"`
+	ID              uint   `json:"id"`
+	Label           string `json:"label"`
+	Status          string `json:"status"`
+	Color           string `json:"color"`
+	ConsecutiveHits int    `json:"consecutive_hits"`
+	CanActivate     bool   `json:"can_activate"`
 }
 
 // GetBoardSectionTimeline fetches all sections and their relations for a board within a date range.
@@ -103,6 +105,9 @@ func DeriveSectionStatuses(sectionIDs []uint, relations []SectionRelationResult,
 	hasOutgoing := make(map[uint]bool)
 
 	for _, r := range relations {
+		if r.RelationType == "identity" {
+			continue
+		}
 		outDegree[r.FromID]++
 		inDegree[r.ToID]++
 		hasOutgoing[r.FromID] = true
@@ -124,6 +129,9 @@ func DeriveSectionStatuses(sectionIDs []uint, relations []SectionRelationResult,
 			// Check if any of its from-sections has out-degree > 1 (split)
 			split := false
 			for _, r := range relations {
+				if r.RelationType == "identity" {
+					continue
+				}
 				if r.ToID == id && outDegree[r.FromID] > 1 {
 					split = true
 					break
@@ -407,10 +415,14 @@ func (r *TopicGraphRepository) GetBoardSectionTimeline(boardID uint, days int) (
 		FROM daily_report_sections ds
 		JOIN board_daily_reports bdr ON bdr.id = ds.report_id
 		WHERE bdr.semantic_board_id = ?
-		  AND bdr.period_date >= CURRENT_DATE - ? * INTERVAL '1 day'
+		  AND bdr.period_date >= (
+		    SELECT MAX(latest.period_date)
+		    FROM board_daily_reports latest
+		    WHERE latest.semantic_board_id = ? AND latest.status = 'completed'
+		  ) - (? - 1) * INTERVAL '1 day'
 		  AND bdr.status = 'completed'
 		ORDER BY bdr.period_date DESC, ds.id ASC
-	`, boardID, days).Scan(&nodes).Error
+	`, boardID, boardID, days).Scan(&nodes).Error
 	if err != nil {
 		return SectionTimelineResponse{}, fmt.Errorf("get board section timeline: %w", err)
 	}
@@ -596,10 +608,12 @@ func attachTopicBriefs(db *gorm.DB, nodes []SectionTimelineNode) {
 		return
 	}
 	briefByID := make(map[uint]PersistentTopicBrief, len(topics))
+	cfg := LoadPersistentTopicConfig(db)
 	for _, t := range topics {
 		briefByID[t.ID] = PersistentTopicBrief{
 			ID: t.ID, Label: t.Label, Status: t.Status,
-			Color: PersistentTopicColor(t.ID),
+			Color: PersistentTopicColor(t.ID), ConsecutiveHits: t.ConsecutiveHits,
+			CanActivate: t.Status == TopicStatusCandidate && t.ConsecutiveHits >= cfg.UpgradeThreshold,
 		}
 	}
 	for i := range nodes {

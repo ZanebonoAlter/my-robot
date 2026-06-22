@@ -269,3 +269,27 @@ board 1980 (47 section, 1081 pair): min=0.065  p50=0.299  max=0.482
 
 - **prompt 只影响新生成的日报**：已存在的污染 topic（如 topic 8）标题仍会被注入后续 prompt。缓解：新 prompt 的复用限定已降低维续污染风险；观察 1-2 天后若仍异常，手动归档（`PATCH /api/daily-reports/topics/:id`，API 已就绪）。
 - ~~**同 topic 被 reuse 两次**~~ → **已修复**：`parseClusterResponse` 加 `usedTopicIDs` 占用检测，同一 `matched_topic_id` 只能被第一个 claim 它的组占用，后续重复 claim 降级为 nil（开新组）。单测 `TestParseClusterResponse_DuplicateTopicID_SecondClaimDegrades` 覆盖；真实 LLM 复验：修复后 9 个组每个 reused topic 唯一（上轮验证中 topic 10 被两组双重 claim 的现象消失）。
+
+## 12. 人工确认门禁与话题总览回归修复（2026-06-21）
+
+### 12.1 根因与修复
+
+| 现象 | 根因 | 修复 |
+|---|---|---|
+| 单日报直接出现持久泳道 | candidate 被前端当正式泳道，且第 3 天自动 active | candidate 只进入“待确认 / 未分类”；连续命中达到阈值后由用户确认，后端再次校验阈值 |
+| “多天出现”可被非连续命中绕过 | candidate miss 未持久化清零 | candidate 中断时写回 `consecutive_hits=0` |
+| 时间线 emerging 被改为 continuing | 状态推导混入 identity 边 | `DeriveSectionStatuses` 只使用 similarity 边 |
+| hover 只亮前后一级 | 2D/3D 都只检查直接邻边 | 共享 `fullComponentHighlight`，高亮当前可见关系的完整连通分量 |
+| 7/14 天筛选看起来相同 | watcher 监听 ref 对象；SQL 7 天窗口含 8 天且锚定 CURRENT_DATE | 监听 `days.value`；以板块最新日报为终点精确包含 N 天 |
+| 标签重叠、缩放跑位 | 列/行间距不足；日期头脱离缩放画布；容器尺寸与 transform 叠加 | 扩大布局节距、文字描边；日期头并入 SVG；外层占位、内层 SVG 缩放并保持视口中心 |
+
+### 12.2 验证结果
+
+| 检查 | 结果 |
+|---|---|
+| 后端 `golangci-lint run ./internal/topicgraph/...` | 0 issues |
+| 后端 repository `go vet` / `go test -count=1` / build | PASS（含 testcontainer 门禁与精确 7 天窗口） |
+| 前端 lint / typecheck | 0 error / PASS |
+| 前端单测 | 19 files / 117 tests PASS |
+| 前端 production build | BUILD complete |
+| 浏览器视觉检查 | 工具组已靠右，标签间距与画布缩放结构正常；后续重连被本地地址安全策略终止，未绕过 |

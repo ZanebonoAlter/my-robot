@@ -17,7 +17,7 @@
 - `daily_report_sections` 新增归属字段：`persistent_topic_id` / `topic_match_distance` / `topic_match_confidence`（anchor_hit / auto_new / unmatched）。
 - `ClusterTags` 改造：prompt 注入该 board 现有 PersistentTopic 列表，LLM 输出每个 group 的 `matched_topic_id`（解决根因 A）。
 - 新增 `AssignSectionsToTopics`：section 强制归属到 1 个 PersistentTopic，双重确认（embedding ≤ match_threshold 且 LLM 当轮标记一致才 anchor_hit，否则开新 candidate）。
-- 新增 `UpdateTopicLifecycle`：candidate 连续命中 ≥ upgrade_threshold（3 天）自动转 active；active 超过 decay_window（30 天）无命中自动转 archived（解决"越积越多"）。
+- 新增 `UpdateTopicLifecycle`：candidate 连续命中 ≥ upgrade_threshold（3 天）后获得人工确认资格，但不自动转 active；active 超过 decay_window（30 天）无命中自动转 archived（解决噪声直接进入持久泳道与"越积越多"）。
 - 关系叠加：`daily_report_section_relations` 新增 `relation_type`（identity/similarity）。同 `persistent_topic_id` 的相邻天 section 写身份边（不受 0.28 penalty 限制），匈牙利相似度边保留作补充（解决根因 B）。**匈牙利算法本身不动**，只在它下游叠加身份边。
 - 新增 API `getTopicLifeline(topicId)`：按 `persistent_topic_id` 聚合该话题下全部 section，绕过 embedding 连通性。
 - 现有 `getBoardSectionTimeline` / `getSectionLifecycle` 响应增加 `persistent_topic` 嵌套字段和 `relation_type` 字段（向后兼容）。
@@ -29,6 +29,8 @@
 - 侦探墙生命周期：**新增"话题生命线"模式（默认）**，调用 `getTopicLifeline`；保留现有"section 图"模式作为可切换项。
 - 日报 section 列表：按 topic 分栏渲染（关心的话题 / 突发的新话题 / 未分类）。
 - topic 管理 API（合并/重命名/归档）放侦探墙详情面板入口。
+- 话题总览只为 active topic 建持久泳道；达到多天门禁的 candidate 由话题管理面板人工确认。
+- 时间线状态与连线只使用匈牙利 similarity 关系；hover 高亮当前视图的完整连通链。
 
 ### 算法与真实数据验证（重点）
 

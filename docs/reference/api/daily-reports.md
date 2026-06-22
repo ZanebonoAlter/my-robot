@@ -37,6 +37,8 @@ WebSocket 进度消息：
 
 查询板块日报 section 时间线，供 2D 线索浏览和 3D 侦探墙复用。
 
+`days` 以该板块最新 completed 日报为终点，精确包含最近 N 个自然日（允许 1-90，默认 30）。section 的 `status` 只由 `relation_type=similarity` 的匈牙利关系推导，identity 关系不参与状态计算。
+
 Response `data`：
 
 ```json
@@ -50,11 +52,21 @@ Response `data`：
       "status": "continuing",
       "article_count": 5,
       "thread_count": 2,
-      "image_url": "https://..."
+      "image_url": "https://...",
+      "persistent_topic_id": 9,
+      "topic_match_confidence": "anchor_hit",
+      "persistent_topic": {
+        "id": 9,
+        "label": "美伊谈判",
+        "status": "candidate",
+        "color": "#60a5fa",
+        "consecutive_hits": 3,
+        "can_activate": true
+      }
     }
   ],
   "relations": [
-    { "from_id": 100, "to_id": 101, "distance": 0.23 }
+    { "from_id": 100, "to_id": 101, "distance": 0.23, "relation_type": "similarity" }
   ]
 }
 ```
@@ -64,6 +76,18 @@ Response `data`：
 ## GET `/daily-reports/sections/:id/lifecycle`
 
 查询一个 section 所在连通分量的完整生命周期。响应结构与 `section-timeline` 相同，同样可能包含可选 `image_url`。
+
+## GET `/daily-reports/topics/:id/lifeline`
+
+按 `persistent_topic_id` 查询一个持久话题的全部 section 与内部关系，不受时间窗限制。
+
+## PATCH `/daily-reports/topics/:id`
+
+更新话题标题或状态。candidate 只有在 `consecutive_hits >= persistent_topic_upgrade_threshold` 后才允许人工更新为 active；未达门禁返回 400。active 才进入独立持久话题泳道。
+
+```json
+{ "status": "active" }
+```
 
 终态总会广播：
 

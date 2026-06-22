@@ -739,6 +739,23 @@ HNSW 索引：`idx_topic_tag_embeddings_embedding USING hnsw (embedding vector_c
 
 ---
 
+## 日报持久话题
+
+#### board_persistent_topics
+
+| 字段名 | 类型 | 用途 |
+|---|---|---|
+| `semantic_board_id` | BIGINT | 所属语义板块 |
+| `label` / `description` | TEXT | 持久叙事标题与描述 |
+| `embedding` | vector | 归属匹配与历史回刷聚类 |
+| `status` | VARCHAR | `candidate` / `active` / `archived`；candidate 需满足连续天数并人工确认 |
+| `first_seen_date` / `last_seen_date` | DATE | 首次与最近命中日期 |
+| `hit_count` / `consecutive_hits` | BIGINT | 总命中数与连续命中天数 |
+
+`daily_report_sections` 通过 `persistent_topic_id`、`topic_match_distance`、`topic_match_confidence` 记录归属。`daily_report_section_relations.relation_type` 区分 `similarity`（匈牙利时间线）与 `identity`（持久话题连续性），唯一约束为 `(from_section_id, to_section_id, relation_type)`。
+
+---
+
 ## 字段用途说明
 
 ### 三个内容字段的区别

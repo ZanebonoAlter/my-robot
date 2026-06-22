@@ -1,11 +1,23 @@
 import { describe, it, expect } from 'vitest'
 import {
   bfsHighlight,
+  fullComponentHighlight,
   COMPONENT_THRESHOLD,
   MAX_HOPS,
   SMALL_GRAPH_NODE_LIMIT,
   type GraphHighlightEdge,
 } from './graphBfsHighlight'
+
+describe('fullComponentHighlight', () => {
+  it('returns the entire connected chain without hop or density limits', () => {
+    const edges: GraphHighlightEdge<number>[] = Array.from({ length: 12 }, (_, i) => ({
+      source: i,
+      target: i + 1,
+    }))
+
+    expect(fullComponentHighlight(0, edges)).toEqual(new Set(Array.from({ length: 13 }, (_, i) => i)))
+  })
+})
 
 describe('bfsHighlight', () => {
   describe('small graph (<=8 nodes)', () => {

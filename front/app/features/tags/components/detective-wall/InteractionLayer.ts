@@ -17,6 +17,7 @@ import type {
 import type { TopicWallScene } from './TopicWallScene'
 import type { DirectorCamera } from './DirectorCamera'
 import { bfsLifeline, edgeKey, topicLifelineNodes } from './utils'
+import { fullComponentHighlight } from '~/features/topic-graph/utils/graphBfsHighlight'
 
 const CLICK_MAX_MOVE_PX = 5
 /**
@@ -159,7 +160,7 @@ export class InteractionLayer {
         this.clearHover()
         this.state.hoveredId = card.data.id
         card.elevate()
-        this.highlightNeighborStrings(card)
+        this.highlightConnectedStrings(card)
         this.callbacks.onCardHover(card)
       }
     } else if (prevHovered !== null) {
@@ -182,9 +183,14 @@ export class InteractionLayer {
     }
   }
 
-  private highlightNeighborStrings(card: PinCard): void {
-    for (const str of this.scene.redStrings.strings) {
-      if (str.fromId === card.data.id || str.toId === card.data.id) {
+  private highlightConnectedStrings(card: PinCard): void {
+    const visibleStrings = this.scene.redStrings.strings.filter(str => str.line.visible)
+    const component = fullComponentHighlight(
+      card.data.id,
+      visibleStrings.map(str => ({ source: str.fromId, target: str.toId })),
+    )
+    for (const str of visibleStrings) {
+      if (component.has(str.fromId) && component.has(str.toId)) {
         str.highlight()
       }
     }

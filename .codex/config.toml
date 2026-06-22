@@ -1,6 +1,11 @@
+sandbox_mode = "workspace-write"
+approval_policy = "never"
 [mcp_servers.codegraph]
 command = "codegraph"
 args = [
     "serve",
     "--mcp",
 ]
+
+[sandbox_workspace_write]
+network_access = true

@@ -193,7 +193,7 @@
 ### 已确认未做（不阻塞）
 - **split 前端入口**：后端 API 就绪，前端无选择器（tasks §9.6 只要合并/重命名/归档）。需做"拆分"按钮 → 勾选 section → 调 splitTopic。
 - **§8.5 调参脚本**：以 verification-report §8 手动指引替代。
-- **reference 文档 D.2–D.5**：按 §12.4 里程碑收尾统一更新。
+- **reference 文档 D.2–D.5**：已于 2026-06-21 同步数据库字段、API、架构数据流与配置说明。
 - **V.12 全量门禁**：pre-push 动作，本轮跑影响包；push 前补全量。
 
 ### tasks.md §9 描述与实际实现的偏差（重要）
@@ -224,3 +224,14 @@ tasks.md §9.4/9.6 勾选时描述的是**早期版本**（"3D 详情面板入�
 1. ✅ 目录按 OpenSpec 规范放置（归位到 openspec/changes/）
 2. ✅ 进度更新到 task（tasks.md 回填）
 3. ✅ 前端交互入口 + 相关 API（管理 API + 话题总览页入口 + 双视图）
+
+---
+
+## 8. 2026-06-21 回归修复补充
+
+- candidate 连续命中达到阈值后仍保持 candidate，只有管理面板人工确认才转 active；未达阈值的 PATCH active 被后端拒绝。
+- candidate 中断命中会持久化清零，确保门禁是“连续多天”而非累计多天。
+- 时间线状态只使用 similarity 边；identity 仅服务话题泳道连续性。
+- 2D/3D hover 改为完整连通分量；7/14/30/60 天窗口精确生效。
+- 2D 工具组整体靠右，节点节距/文字描边、日期标尺与缩放容器已重构。
+- 验证：后端 lint/vet/repository test/build 全绿；前端 lint 0 error、typecheck、19 files / 117 tests、build 全绿。

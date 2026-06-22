@@ -136,6 +136,54 @@ func (r *TopicGraphRepository) ListAllTopicsByBoard(boardID uint) ([]BoardPersis
 	return topics, nil
 }
 
+// ListTopicsByBoardAll returns every persistent topic on a board, including
+// archived ones and topics that no section currently references (orphans).
+// Unlike ListAllTopicsByBoard, this is for the management UI which must show
+// everything so anomalous/orphan topics can be archived or hard-deleted.
+func (r *TopicGraphRepository) ListTopicsByBoardAll(boardID uint) ([]BoardPersistentTopic, error) {
+	var topics []BoardPersistentTopic
+	err := r.db.Where("semantic_board_id = ?", boardID).
+		Order("status = 'archived', hit_count DESC, id ASC").Find(&topics).Error
+	if err != nil {
+		return nil, fmt.Errorf("list all topics (incl. archived): %w", err)
+	}
+	return topics, nil
+}
+
+// DeleteTopic hard-deletes a persistent topic. Sections that referenced it are
+// unlinked (persistent_topic_id set to NULL) rather than deleted — the section
+// timeline still renders them as standalone nodes. Board relations are rebuilt
+// so stale identity/similarity edges disappear. This is irreversible; archive
+// (UpdateTopic status=archived) is the reversible soft path.
+func (r *TopicGraphRepository) DeleteTopic(topicID uint) error {
+	var topic BoardPersistentTopic
+	if err := r.db.First(&topic, topicID).Error; err != nil {
+		return fmt.Errorf("load topic %d: %w", topicID, err)
+	}
+	boardID := topic.SemanticBoardID
+	return r.db.Transaction(func(tx *gorm.DB) error {
+		// Unlink sections; they keep their content but lose the topic assignment.
+		if err := tx.Model(&DailyReportSection{}).
+			Where("persistent_topic_id = ?", topicID).
+			Updates(map[string]interface{}{
+				"persistent_topic_id":    nil,
+				"topic_match_distance":   nil,
+				"topic_match_confidence": nil,
+			}).Error; err != nil {
+			return fmt.Errorf("unlink sections: %w", err)
+		}
+		// Hard delete the topic row.
+		if err := tx.Where("id = ?", topicID).Delete(&BoardPersistentTopic{}).Error; err != nil {
+			return fmt.Errorf("delete topic %d: %w", topicID, err)
+		}
+		// Rebuild relations so edges referencing the deleted topic are dropped.
+		if err := RebuildBoardRelations(tx, boardID); err != nil {
+			return fmt.Errorf("rebuild relations: %w", err)
+		}
+		return nil
+	})
+}
+
 // CreateTopic inserts a new persistent topic row and returns it with the ID set.
 func (r *TopicGraphRepository) CreateTopic(tx *gorm.DB, topic *BoardPersistentTopic) error {
 	if tx == nil {

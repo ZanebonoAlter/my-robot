@@ -6,6 +6,7 @@ interface Props {
   closeOnOverlay?: boolean
   closeOnEscape?: boolean
   showClose?: boolean
+  zIndex?: number
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -13,6 +14,7 @@ const props = withDefaults(defineProps<Props>(), {
   closeOnOverlay: true,
   closeOnEscape: true,
   showClose: true,
+  zIndex: 1000,
 })
 
 const emit = defineEmits<{
@@ -47,7 +49,7 @@ onUnmounted(() => {
 <template>
   <Teleport to="body">
     <Transition name="dialog">
-      <div v-if="modelValue" class="app-dialog-overlay" @click.self="onOverlayClick">
+      <div v-if="modelValue" class="app-dialog-overlay" :style="{ zIndex }" @click.self="onOverlayClick">
         <div class="app-dialog" :style="{ maxWidth: width }">
           <div v-if="title || $slots.header" class="app-dialog__header">
             <slot name="header">
@@ -71,7 +73,6 @@ onUnmounted(() => {
 .app-dialog-overlay {
   position: fixed;
   inset: 0;
-  z-index: 1000;
   display: flex;
   align-items: center;
   justify-content: center;

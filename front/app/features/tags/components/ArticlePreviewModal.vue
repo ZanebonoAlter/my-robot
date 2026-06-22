@@ -9,7 +9,6 @@ const props = defineProps<{
   previewArticles: Article[]
   loadingPreviewArticle: boolean
 }>()
-
 const emit = defineEmits<{
   close: []
   navigate: [article: Article]
@@ -24,7 +23,7 @@ const show = computed({
 </script>
 
 <template>
-  <AppDialog v-model="show" width="90vw" :close-on-overlay="true" :close-on-escape="true">
+  <AppDialog v-model="show" width="90vw" :close-on-overlay="true" :close-on-escape="true" :z-index="9100">
     <template #header>
       <p class="preview-header-text">
         {{ loadingPreviewArticle ? '正在准备文章预览...' : '文章预览' }}

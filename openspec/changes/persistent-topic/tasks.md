@@ -105,6 +105,20 @@
 - [x] 9.9 修复时间线语义隔离：section 状态只使用 similarity 边推导，identity 不再把 emerging 污染为 continuing
 - [x] 9.10 修复交互与布局：2D/3D hover 高亮完整连通分量；时间筛选精确包含最新 N 天；筛选/视图/侦探墙/管理右对齐；标签间距与缩放画布同步重构
 
+## 10. 话题管理 UI 重构 + CORS 修复 + 硬删除（2026-06-22）
+
+> 用户报告：话题管理交互原始（全原生 `window.alert/prompt/confirm`）、没用项目组件库；异常产生的话题无法归档/删除。排查发现两个真根因。
+
+- [x] 10.1 **修复 CORS 漏 PATCH（根因 1）**：`middleware/cors.go:26` 硬编码 `Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS` 缺 `PATCH`，而 `updateTopic`（重命名/归档/启用）全走 PATCH → 浏览器 preflight 100% 拦死，表现为“归档/删除按钮点了没反应”。
+  - 修复：`cors.go` 改为消费 `cfg.CORS.Methods` 配置（此前是死配置）；`config.go` 默认值补 `PATCH`。
+- [x] 10.2 **后端新增全量列表接口（根因 2 part 1）**：`GET /api/semantic-boards/:id/topics` 返回该 board **全部**话题（含 archived + 孤儿 + 零 section 的异常话题）+ 每话题 section 计数 + 颜色 + `can_activate`。此前前端从 7/14 天时间线窗口反向聚合话题列表，导致窗口外 / 孤儿话题不可见不可管。
+  - `repository.ListTopicsByBoardAll`（含 archived，与现有 `ListAllTopicsByBoard` 区分）+ `handler.listBoardTopics`（聚合 section 计数 + 阈值计算 can_activate）。
+- [x] 10.3 **后端新增硬删除接口（根因 2 part 2）**：`DELETE /api/daily-reports/topics/:id`。事务内：section 解绑（`persistent_topic_id` 置 NULL，section 内容保留——时间线模块仍可独立展示纯 section 关联）→ 删 topic 行 → `RebuildBoardRelations` 清理残留边。不可逆；归档是可逆路径（保留）。
+  - `repository.DeleteTopic` + `handler.deleteTopic` + 路由。
+- [x] 10.4 **前端新建统一管理组件 `TopicManageDialog.vue`**：基于项目组件库 `AppDialog`/`AppButton`/`AppInput`，含状态过滤（全部/活跃/候选/已归档）+ 搜索；每话题操作（确认启用/重命名/合并/归档/删除）全部走子 dialog，零 `window.*`。硬删除要求输入话题名二次确认。
+- [x] 10.5 **前端 API 封装**：`dailyReports.ts` 新增 `listBoardTopics` / `deleteTopic` + `BoardTopicListItem` 类型（含 `section_count`/`color`/`can_activate`）。
+- [x] 10.6 **接入两个组件，干掉 window.\***：`BoardThreadBrowser.vue` 删除原原生话题面板（6 个 window.* 函数 + 面板 div）改为挂 `<TopicManageDialog>`；`TopicDetectiveWall.client.vue` 详情面板保留“话题生命线”入口，rename/archive/merge 内联按钮改为“话题管理”按钮打开同一 dialog。`BoardThreadBrowser`/`DetectiveWall` 中原有 7 处 `window.alert/prompt/confirm` 全部消除。
+
 ## 测试 / Test
 
 > 只跑本次修改影响的包：`internal/topicgraph/...`。
@@ -120,6 +134,8 @@
 - [x] T.7 前端构建：`cmd.exe /C "cd /d D:\project\Syntopica\front && pnpm build"`
 - [x] T.8（2026-06-20 补）prompt + reuse bug 单测：`cd backend-go && go test ./internal/topicgraph/service/`（含新增 `TestParseClusterResponse_DuplicateTopicID_SecondClaimDegrades`，TDD 先红后绿）
 - [x] T.9（2026-06-20 补）真实 LLM 聚类质量诊断：`cd backend-go && go run ./cmd/verify-cluster-prompt`（运维工具，跳真实 ClusterTags 核查 topic 8 不再收纳不相关事件）
+- [x] T.10（2026-06-22 补）CORS + 话题管理后端回归：`cd backend-go && go test ./internal/topicgraph/repository -run "TestUpdateTopic|TestMergeTopics|TestSplitTopic|TestParseClusterResponse" -count=1`（repository 影响 CRUD 无回归）
+- [x] T.11（2026-06-22 补）日报详情附加话题摘要回归：`cd backend-go && go test ./internal/topicgraph/repository -run TestGetReportByID_AttachesTopicBriefs -count=1`（详情 section 返回 active topic brief，避免全部落入“突发的新话题”）
 
 ## 文档 / Docs
 
@@ -128,6 +144,8 @@
 - [x] D.3 更新 `docs/reference/api/`：getTopicLifeline、管理端点、section-timeline 扩展字段与精确时间窗
 - [x] D.4 更新 `docs/reference/architecture/`：PersistentTopic 归属、人工确认、双轨关系语义
 - [x] D.5 更新 `docs/reference/configuration.md`：4 个 persistent_topic_* 配置项说明
+- [x] D.6（2026-06-22 补）更新 `docs/reference/api/`：`GET /semantic-boards/:id/topics`（全量列表）、`DELETE /daily-reports/topics/:id`（硬删除）、CORS 现支持 PATCH（含 `cors.methods` 配置说明）。**留待里程碑收尾统一更新（§12.4）**
+- [x] D.7（2026-06-22 补）更新 `docs/reference/api/daily-reports.md`：`GET /daily-reports/:id` 的 section 响应包含轻量 `persistent_topic` 描述。
 
 ## 验证 / Verify
 
@@ -158,3 +176,11 @@
 - [x] V.19（2026-06-21 补）精确时间窗：`cd backend-go && go test ./internal/topicgraph/repository -run TestGetBoardSectionTimeline_DaysReturnsExactLatestWindow -count=1`
 - [x] V.20（2026-06-21 补）完整连通高亮：`cmd.exe /C "cd /d D:\project\Syntopica\front && pnpm exec vitest run app/features/topic-graph/utils/graphBfsHighlight.test.ts"`
 - [x] V.21（2026-06-21 补）前端完整门禁：`cmd.exe /C "cd /d D:\project\Syntopica\front && pnpm lint && pnpm exec nuxi typecheck && pnpm test:unit && pnpm build"`（lint 0 error；typecheck PASS；19 files / 117 tests PASS；build complete）
+- [x] V.22（2026-06-22 补）CORS preflight 允许 PATCH：`grep -n "Allow-Methods" backend-go/internal/platform/middleware/cors.go` → 返回的 header 含 `PATCH`；`grep -n "cors.methods" backend-go/internal/platform/config/config.go` 默认值含 `PATCH`。
+- [x] V.23（2026-06-22 补）话题管理零原生弹窗：`cd front && grep -rn "window\.(alert\|prompt\|confirm)" app/features/tags/components/BoardThreadBrowser.vue app/features/tags/components/TopicDetectiveWall.client.vue app/components/dialog/TopicManageDialog.vue` → 零命中（7 处原生弹窗全消除）。
+- [x] V.24（2026-06-22 补）后端新接口编译+lint：`cd backend-go && go build ./internal/topicgraph/... ./internal/platform/... && golangci-lint run ./internal/topicgraph/... ./internal/platform/middleware/... ./internal/platform/config/...` → BUILD_OK / 0 issues。
+- [x] V.25（2026-06-22 补）前端门禁（含新 dialog）：`cmd.exe /C "cd /d D:\project\Syntopica\front && pnpm lint && pnpm exec nuxi typecheck && pnpm test:unit && pnpm build"` → lint 0 error / typecheck PASS / 117 tests PASS / build complete。
+- [x] V.26（2026-06-22 补）日报详情仓储回归：`cd backend-go && go test ./internal/topicgraph/repository -count=1` → PASS（含 `TestGetReportByID_AttachesTopicBriefs`）。
+- [x] V.27（2026-06-22 补）日报详情仓储 lint：`cd backend-go && golangci-lint run ./internal/topicgraph/repository` → 0 issues。
+- [x] V.28（2026-06-22 补）日报详情仓储 vet：`cd backend-go && go vet ./internal/topicgraph/repository` → PASS。
+- [x] V.29（2026-06-22 补）日报详情仓储 build：`cd backend-go && go build ./internal/topicgraph/repository` → PASS。

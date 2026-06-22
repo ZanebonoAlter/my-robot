@@ -407,3 +407,16 @@ surgical 边界：不改相机坐标系/布局算法/交互/BFS/红线/全局迷
 - `docs/reference/architecture/data-flow.md`
 - `docs/reference/architecture/overview.md`
 - `front/AGENTS.md`
+
+## 日报全屏阅读层
+
+板块日报详情由 `BoardDailyReportTimeline.vue` 编排为全屏阅读层，采用“产品 masthead / 头条 / highlights / 左侧目录 / 右侧单列话题正文”的编辑排版。宽屏保留 sticky 目录，`<=1100px` 收为单列控制区，`<=720px` 使用窄屏工具栏并保证阅读层无横向溢出。
+
+日报子组件位于 `features/tags/components/daily-report/`：
+
+- `DailyReportMasthead.vue`：板块标题、日报头条与 highlights。
+- `DailyReportSidebar.vue`：目录、持续话题和历史日报切换。
+- `DailyReportTopicSection.vue`：active / candidate / unassigned 分区、单列话题、thread 与文章展开。
+- `DailyReportMiniLifeline.vue`：最近七个自然日的通栏泳道、identity 贝塞尔连线、当前日原位详情和侦探墙出口。
+
+`useDailyReportReader.ts` 是唯一数据编排边界：按 board 缓存日报列表与详情，按 topic id 缓存 lifeline，按 article id 去重标题请求；单篇失败只影响对应文章并允许重试。组件仅通过 `openArticle`、`openLifecycle`、`openDetective` 等事件把预览和旧入口交还父级，切换 board 时统一清理日期、展开态和缓存。

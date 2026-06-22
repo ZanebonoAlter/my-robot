@@ -293,3 +293,75 @@ board 1980 (47 section, 1081 pair): min=0.065  p50=0.299  max=0.482
 | 前端单测 | 19 files / 117 tests PASS |
 | 前端 production build | BUILD complete |
 | 浏览器视觉检查 | 工具组已靠右，标签间距与画布缩放结构正常；后续重连被本地地址安全策略终止，未绕过 |
+
+## 13. 话题管理 UI 重构 + CORS 修复 + 硬删除（2026-06-22）
+
+> 用户报告：话题管理交互原始（原生 `window.*` 弹窗）、没用项目组件库；异常产生的话题无法归档或删除。排查定位两个真根因并修复。
+
+### 13.1 根因与修复
+
+| 问题 | 根因 | 修复 |
+|---|---|---|
+| **归档/删除/重命名点了没反应** | `middleware/cors.go:26` 硬编码 `Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS` **缺 `PATCH`**，而 `updateTopic`（重命名/归档/启用）全走 PATCH → 浏览器 preflight 100% 拦死。用户实测报错：`Method PATCH is not allowed by Access-Control-Allow-Methods in preflight response`。同时 `config.go` 的 `cors.methods` 配置项此前是**死配置**，cors.go 从未消费它 | `cors.go` 改为消费 `cfg.CORS.Methods`；`config.go` 默认值补 `PATCH`（`GET, POST, PUT, PATCH, DELETE, OPTIONS`）|
+| **异常/孤儿话题不可见不可管** | 前端话题列表从 7/14 天时间线窗口反向聚合（`topics = computed(从 sections 聚合 persistent_topic)`），窗口外 / 零 section / 回刷 bug 产生的孤儿话题一律不在列表里 | 后端新增 `GET /api/semantic-boards/:id/topics` 返回该 board **全部**话题（含 archived + 孤儿）；前端 `TopicManageDialog` 改用此接口 |
+| **无法删除话题（只能归档）** | 后端只有软删除（archive），无硬删除 | 后端新增 `DELETE /api/daily-reports/topics/:id`：事务内解绑 section（保留内容）→ 删 topic → 重建关系 |
+| **交互原始、纯原生弹窗** | 7 处 `window.alert/prompt/confirm` 散在两个组件（`BoardThreadBrowser` × 6、`DetectiveWall` × 3），项目已有的 `AppDialog`/`AppButton`/`AppInput` 组件库未复用 | 新建统一 `TopicManageDialog.vue`（复用组件库），两组件接入；7 处原生弹窗全消除，硬删除加输入名二次确认 |
+
+### 13.2 代码变更
+
+| 层 | 文件 | 变更 |
+|---|---|---|
+| 后端·修 bug | `platform/middleware/cors.go` | allow-methods 从配置消费（`cfg.CORS.Methods`）；import `strings` |
+| 后端·修默认 | `platform/config/config.go` | `cors.methods` 默认值补 `PATCH` |
+| 后端·repo | `repository/daily_report_topic_repository.go` | `ListTopicsByBoardAll`（含 archived，与 `ListAllTopicsByBoard` 区分）；`DeleteTopic`（事务：解绑 section + 删 topic + `RebuildBoardRelations`）|
+| 后端·handler | `handler/daily_report_handler.go` | `listBoardTopics`（聚合 section 计数 + 阈值算 `can_activate` + 颜色）；`deleteTopic`；路由注册 GET/DELETE |
+| 前端·API | `api/dailyReports.ts` | `listBoardTopics` / `deleteTopic` + `BoardTopicListItem` 类型 |
+| 前端·新组件 | `components/dialog/TopicManageDialog.vue`（新）| 统一管理面板：状态过滤 + 搜索 + 全子 dialog 操作（确认启用/重命名/合并/归档/删除），零 `window.*` |
+| 前端·接入 | `BoardThreadBrowser.vue` | 删原生面板 + 6 个 window.* 函数，挂 `<TopicManageDialog>` |
+| 前端·接入 | `TopicDetectiveWall.client.vue` | 详情面板 rename/archive/merge 内联按钮 → “话题管理”入口；删 3 个 window.* 函数 + mergePicker |
+
+### 13.3 验证（本节）
+
+| 命令 | 结果 |
+|---|---|
+| `cd backend-go && go build ./internal/topicgraph/... ./internal/platform/middleware/ ./internal/platform/config/` | BUILD_OK |
+| `cd backend-go && golangci-lint run ./internal/topicgraph/... ./internal/platform/middleware/... ./internal/platform/config/...` | 0 issues |
+| `cd backend-go && go vet ./internal/topicgraph/... ./internal/platform/...` | VET_OK |
+| `cd backend-go && go test ./internal/topicgraph/repository -run "TestUpdateTopic\|TestMergeTopics\|TestSplitTopic\|TestParseClusterResponse" -count=1` | ok 18.300s（CRUD 无回归）|
+| `cd front && grep -rn "window\.(alert\|prompt\|confirm)" app/features/tags/components/BoardThreadBrowser.vue app/features/tags/components/TopicDetectiveWall.client.vue app/components/dialog/TopicManageDialog.vue` | 零命中（7 处原生弹窗全消除）|
+| `cmd.exe /C "cd /d D:\project\Syntopica\front && pnpm lint"` | 0 error（23 warnings 均为既有无关项）|
+| `cmd.exe /C "cd /d D:\project\Syntopica\front && pnpm exec nuxi typecheck"` | TYPECHECK_PASS |
+| `cmd.exe /C "cd /d D:\project\Syntopica\front && pnpm test:unit"` | 19 files / 117 tests PASS |
+| `cmd.exe /C "cd /d D:\project\Syntopica\front && pnpm build"` | BUILD_PASS |
+
+### 13.4 已知未做（不阻塞）
+
+- **split 前端入口**：后端 `POST /topics/:id/split` API 已就绪（§9.7），前端未做选择器。`TopicManageDialog` 暂不接入 split（需 section 级选择器，交互较重，超出本次“消除原生弹窗 + 可管异常话题”范围）。
+- **reference 文档**：D.6 按 §12.4 里程碑收尾统一更新。
+- **DeleteTopic 集成测试**：repo 层 `DeleteTopic` 未加 testcontainer 集成用例（现有 `MergeTopics`/`SplitTopic` 集成测试覆盖了同事务模式）；`go test -run` 纯逻辑 CRUD 无回归已验证。可后续补 `TestDeleteTopic_UnlinksSectionsAndRebuildsRelations`。
+
+## 14. 日报详情话题分区闭环（2026-06-22）
+
+### 14.1 根因与修复
+
+日报详情原先只预加载 section/thread 和 `persistent_topic_id`，没有附加轻量
+`persistent_topic` 描述。前端 `qualityZones` 依赖 `persistent_topic.status` 判断 active，
+因此所有已归属 section 都被误放进“突发的新话题”。
+
+`GetReportByID` 和 `ListReportsForAllBoards` 现统一调用
+`AttachTopicBriefsToReport`；`DailyReportSection.PersistentTopic` 为 transient 字段，不产生
+数据库迁移，也不加载 topic embedding。
+
+### 14.2 验证结果
+
+| 检查 | 结果 |
+|---|---|
+| `go test ./internal/topicgraph/repository -run TestGetReportByID_AttachesTopicBriefs -count=1` | PASS |
+| `go test ./internal/topicgraph/repository -count=1` | PASS（58.452s） |
+| `golangci-lint run ./internal/topicgraph/repository` | 0 issues |
+| `go vet ./internal/topicgraph/repository` | PASS |
+| `go build ./internal/topicgraph/repository` | PASS |
+| 新构建后端（临时端口 5001）请求 `GET /api/daily-reports/60` | 4/4 section 带 topic brief：3 active、1 candidate、0 missing |
+
+验证时原 5000 端口进程仍返回旧响应（4 个 section 均缺 topic brief），说明它尚未重启；
+部署或继续浏览器验收前须重启现有后端进程。

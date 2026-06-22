@@ -80,6 +80,41 @@ func TestListReports_FortyTwoDays(t *testing.T) {
 	require.Equal(t, now.AddDate(0, 0, -40).Format("2006-01-02"), items[2].PeriodDate)
 }
 
+func TestGetReportByID_AttachesTopicBriefs(t *testing.T) {
+	db := testutil.SetupTestDB(t)
+	repo := NewTopicGraphRepository(db)
+
+	boardID := seedTestBoard(t, db)
+	now := NormalizeReportDate(time.Now())
+	reportID := seedTestReport(t, db, boardID, now)
+	topic := BoardPersistentTopic{
+		SemanticBoardID: boardID,
+		Label:           "Tracked topic",
+		Embedding:       FloatsToPgVector([]float64{0}),
+		Status:          TopicStatusActive,
+		FirstSeenDate:   now,
+		LastSeenDate:    now,
+		HitCount:        3,
+		ConsecutiveHits: 3,
+	}
+	require.NoError(t, db.Create(&topic).Error)
+
+	sectionID := seedTestSection(t, db, reportID, "tracked section")
+	require.NoError(t, db.Model(&DailyReportSection{}).
+		Where("id = ?", sectionID).
+		Update("persistent_topic_id", topic.ID).Error)
+
+	report, err := repo.GetReportByID(reportID)
+	require.NoError(t, err)
+	require.Len(t, report.Sections, 1)
+	require.NotNil(t, report.Sections[0].PersistentTopicID)
+	require.Equal(t, topic.ID, *report.Sections[0].PersistentTopicID)
+	require.NotNil(t, report.Sections[0].PersistentTopic)
+	require.Equal(t, topic.ID, report.Sections[0].PersistentTopic.ID)
+	require.Equal(t, topic.Label, report.Sections[0].PersistentTopic.Label)
+	require.Equal(t, TopicStatusActive, report.Sections[0].PersistentTopic.Status)
+}
+
 func seedTestBoard(t *testing.T, db *gorm.DB) uint {
 	t.Helper()
 	board := models.SemanticLabel{

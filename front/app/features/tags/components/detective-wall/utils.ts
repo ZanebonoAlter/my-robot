@@ -180,6 +180,10 @@ export function layoutCards(
     const laneOrder = Array.from(new Set(sections.map(laneKey)))
     const laneIndex = new Map<string, number>(laneOrder.map((k, i) => [k, i]))
     const laneSpacing = rowHeight * 2.6 // 赛道间距，大于同天堆叠跨度
+    // 赛道围绕 Y=0 居中对称分布（顶部为正、底部为负），使整体中心保持在桌面以上。
+    // 否则多话题时赛道从 Y=0 单向往下排，centerY 会被拉到桌面（desk.y=-1.6）以下，
+    // 卡片连同灯靶/墙一起沉到桌子底下。
+    const laneBaseY = ((laneOrder.length - 1) / 2) * laneSpacing
 
     // 每 (lane,day) 的节点计数，用于同赛道同天居中偏移
     const subCount = new Map<string, number>()
@@ -200,7 +204,7 @@ export function layoutCards(
     for (const s of sorted) {
       const li = laneIndex.get(laneKey(s)) ?? 0
       const x = (dayIndex.get(s.period_date.slice(0, 10)) ?? 0) * colWidth
-      const laneY = -li * laneSpacing
+      const laneY = laneBaseY - li * laneSpacing
       const k = `${laneKey(s)}:${s.period_date.slice(0, 10)}`
       const total = subCount.get(k) ?? 1
       const idx = seen.get(k) ?? 0

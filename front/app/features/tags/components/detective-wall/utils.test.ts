@@ -27,7 +27,13 @@ function nodeMap(nodes: SectionTimelineNode[]) {
   return new Map(nodes.map(n => [n.id, n] as const))
 }
 function topicNode(id: number, date: string, topicId: number): SectionTimelineNode {
-  return { ...node(id, date), persistent_topic_id: topicId }
+  // layoutCards groups by s.persistent_topic (object), not persistent_topic_id,
+  // so the brief must be present for a node to land in a real lane.
+  return {
+    ...node(id, date),
+    persistent_topic_id: topicId,
+    persistent_topic: { id: topicId, label: `t${topicId}`, status: 'active', color: '#fff', consecutive_hits: 0, can_activate: false },
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -235,6 +241,34 @@ describe('layoutCards', () => {
     const b = layoutCards(sections)
     expect(a.get(1)!.position.z).toBe(b.get(1)!.position.z)
     expect(a.get(1)!.rotationZ).toBe(b.get(1)!.rotationZ)
+  })
+
+  it('centers lanes around Y=0 so multi-topic cards stay above the desk', () => {
+    // 3 topics × 2 days → 3 lanes. Without centering, lanes drop to Y=0,-5.72,-11.44
+    // and the card centroid sinks below the desk (desk.y=-1.6).
+    const sections = [
+      topicNode(1, '2026-01-01', 7),
+      topicNode(2, '2026-01-01', 9),
+      topicNode(3, '2026-01-01', 11),
+      topicNode(4, '2026-01-02', 7),
+      topicNode(5, '2026-01-02', 9),
+      topicNode(6, '2026-01-02', 11),
+    ]
+    const layout = layoutCards(sections, 'lanes')
+
+    const laneYs = [
+      layout.get(1)!.position.y,
+      layout.get(2)!.position.y,
+      layout.get(3)!.position.y,
+    ]
+    // Symmetric about 0: top lane = +spacing, middle = 0, bottom = -spacing.
+    const spacing = STYLE.layout.rowHeight * 2.6
+    expect(laneYs[0]).toBeCloseTo(spacing, 5)
+    expect(laneYs[1]).toBeCloseTo(0, 5)
+    expect(laneYs[2]).toBeCloseTo(-spacing, 5)
+    // Centroid of all lanes ≈ 0 → centerY stays near the desk top, not below it.
+    const centroid = laneYs.reduce((sum, y) => sum + y, 0) / laneYs.length
+    expect(Math.abs(centroid)).toBeLessThan(1e-6)
   })
 })
 

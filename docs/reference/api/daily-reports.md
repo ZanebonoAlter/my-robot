@@ -148,7 +148,33 @@ Response `data`：
     "status": "completed",
     "highlights": [],
     "dynamics": "...",
-    "sections": []
+    "sections": [
+      {
+        "id": 366,
+        "cluster_label": "...",
+        "persistent_topic_id": 5,
+        "persistent_topic": {
+          "id": 5,
+          "label": "...",
+          "status": "active",
+          "color": "#...",
+          "consecutive_hits": 3,
+          "can_activate": false
+        },
+        "threads": []
+      }
+    ]
   }
 }
 ```
+
+当 section 已归属持久话题时，详情响应会附带轻量 `persistent_topic` 描述，供前端按
+`active` / `candidate` 状态分区。历史未归属 section 不返回该字段。
+
+## 前端消费约定
+
+日报阅读层不新增 API：列表和详情分别消费 `GET /semantic-boards/:id/daily-reports` 与 `GET /daily-reports/:id`，并以 `persistent_topic.status` 建立 active / candidate / unassigned 质量分区。masthead 顶部使用板块标题，日报 `title` / `summary` 映射为头条；highlights 最多展示三项。
+
+active 话题展开时按 `persistent_topic.id` 懒加载 `GET /daily-reports/topics/:id/lifeline`。前端只截取当前日报向前七个自然日，同日多个 section 聚合为一个带数量角标的节点；连线只消费 `relation_type=identity`，`similarity` 不进入 mini 泳道。节点点击按 `report_id` 复用日报详情缓存，在时间线模块内原位展示当日 section/thread。
+
+thread 的 `related_article_ids` 由现有 `GET /articles/:id` 逐项解析标题并按 article id 去重缓存；单篇 404/失败局部显示重试，不阻塞同话题其他文章。

@@ -60,6 +60,7 @@ const {
 } = useTagsPage()
 
 const { isTagsFirstRun, startTagsTour } = useOnboarding()
+const selectedBoardLabel = computed(() => boards.value.find(board => board.id === selectedBoardId.value)?.label)
 
 onMounted(() => {
   if (isTagsFirstRun.value) {
@@ -129,7 +130,12 @@ onMounted(() => {
             @refresh="() => loadComposition(selectedBoardId!)"
           />
 
-          <BoardDailyReportTimeline v-if="contentTab === 'daily-reports'" :board-id="selectedBoardId" @open-article="openArticlePreview" />
+          <BoardDailyReportTimeline
+            v-if="contentTab === 'daily-reports'"
+            :board-id="selectedBoardId"
+            :board-title="selectedBoardLabel"
+            @open-article="openArticlePreview"
+          />
 
           <BoardTimelinePanel
             v-if="contentTab === 'articles'"

@@ -7,7 +7,7 @@ import { fullComponentHighlight } from '~/features/topic-graph/utils/graphBfsHig
 
 const props = defineProps<{ boardId: number }>()
 
-const { getBoardSectionTimeline, getDailyReportDetail, backfillPersistentTopics, updateTopic, mergeTopics } = useDailyReportsApi()
+const { getBoardSectionTimeline, getDailyReportDetail } = useDailyReportsApi()
 const { getArticle } = useArticlesApi()
 const { theme } = useTheme()
 
@@ -419,10 +419,8 @@ const emit = defineEmits<{
   openDetectiveWall: []
 }>()
 
-// --- Persistent topic management (§最小版：话题清单 + 回刷 + 重命名/归档/合并) ---
+// --- Persistent topic management (list drives the lanes view; ops live in TopicManageDialog) ---
 const showTopicPanel = ref(false)
-const backfilling = ref(false)
-const managing = ref(false)
 
 interface TopicRow {
   id: number
@@ -479,76 +477,6 @@ const topicStats = computed(() => {
 const topicStatusLabel: Record<string, string> = { candidate: '候选', active: '活跃', archived: '已归档' }
 const unassignedCount = computed(() => sections.value.filter(s => !s.persistent_topic_id).length)
 const nonActiveSectionCount = computed(() => sections.value.filter(s => s.persistent_topic?.status !== 'active').length)
-
-async function runBackfill() {
-  if (backfilling.value) return
-  // 有未归属 section 时强调语义；无未归属也允许（重新跑全量）。
-  const hint = unassignedCount.value > 0
-    ? `检测到 ${unassignedCount.value} 条未归属历史动态，将为它们重建话题。继续？`
-    : '将为本板块重新构建话题并重排关系。继续？'
-  if (!window.confirm(hint)) return
-  backfilling.value = true
-  try {
-    const res = await backfillPersistentTopics(props.boardId)
-    if (res.success) {
-      // 后台异步执行；给用户提示并几秒后刷新列表。
-      window.alert('已提交回刷，后台重建中，几秒后自动刷新。')
-      setTimeout(() => { loadData() }, 4000)
-    }
-  } finally {
-    backfilling.value = false
-  }
-}
-
-async function renameTopic(t: TopicRow) {
-  const label = window.prompt('重命名话题', t.label)
-  if (!label || label.trim() === '' || label.trim() === t.label) return
-  managing.value = true
-  try {
-    const res = await updateTopic(t.id, { label: label.trim() })
-    if (res.success) await loadData()
-  } finally { managing.value = false }
-}
-
-async function archiveTopic(t: TopicRow) {
-  if (!window.confirm(`归档话题「${t.label}」？归档后不再参与新归属。`)) return
-  managing.value = true
-  try {
-    const res = await updateTopic(t.id, { status: 'archived' })
-    if (res.success) await loadData()
-  } finally { managing.value = false }
-}
-
-async function confirmTopic(t: TopicRow) {
-  if (!t.canActivate || managing.value) return
-  if (!window.confirm(`确认将「${t.label}」启用为持久话题？`)) return
-  managing.value = true
-  try {
-    const res = await updateTopic(t.id, { status: 'active' })
-    if (res.success) await loadData()
-  } finally { managing.value = false }
-}
-
-async function mergeTopic(t: TopicRow) {
-  const candidates = topics.value.filter(o => o.id !== t.id && o.status !== 'archived')
-  if (candidates.length === 0) {
-    window.alert('没有其他可合并的话题')
-    return
-  }
-  // 用原生 prompt 让用户输入目标话题名；最小版不做复杂选择器。
-  const lines = candidates.map((c, i) => `${i + 1}. ${c.label}（${c.sectionCount}条）`).join('\n')
-  const input = window.prompt(`将「${t.label}」合并进哪个话题？输入序号：\n${lines}`)
-  if (!input) return
-  const idx = parseInt(input, 10) - 1
-  if (Number.isNaN(idx) || idx < 0 || idx >= candidates.length) return
-  const target = candidates[idx]!
-  if (!window.confirm(`确认将「${t.label}」合并进「${target.label}」？`)) return
-  managing.value = true
-  try {
-    const res = await mergeTopics(target.id, [t.id])
-    if (res.success) await loadData()
-  } finally { managing.value = false }
-}
 
 // --- Data loading ---
 
@@ -635,61 +563,12 @@ watch(viewMode, () => {
         <button
         class="btb-detective-btn"
         :class="{ 'btb-detective-btn--active': showTopicPanel }"
-        title="话题管理（回刷 / 重命名 / 归档 / 合并）"
+        title="话题管理（回刷 / 重命名 / 归档 / 删除 / 合并）"
         @click="showTopicPanel = !showTopicPanel"
       >
         <Icon icon="mdi:folder-cog-outline" width="16" />
         <span>话题管理</span>
         </button>
-      </div>
-    </div>
-
-    <!-- Topic management panel (§最小版) -->
-    <div v-if="showTopicPanel" class="btb-topics">
-      <div class="btb-topics-head">
-        <div class="btb-topics-stats">
-          <span><b>{{ topicStats.active }}</b> 活跃</span>
-          <span><b>{{ topicStats.candidate }}</b> 候选</span>
-          <span><b>{{ topicStats.archived }}</b> 已归档</span>
-          <span v-if="unassignedCount > 0" class="btb-topics-warn">{{ unassignedCount }} 条未归属</span>
-        </div>
-        <button class="btb-topics-backfill" :disabled="backfilling" @click="runBackfill">
-          <Icon icon="mdi:database-refresh-outline" width="14" />
-          <span>{{ backfilling ? '提交中…' : '回刷历史话题' }}</span>
-        </button>
-      </div>
-      <div v-if="topics.length === 0" class="btb-topics-empty">
-        本板块尚无持久话题。点「回刷历史话题」可从历史日报重建。
-      </div>
-      <div v-else class="btb-topics-list">
-        <div
-          v-for="t in topics"
-          :key="t.id"
-          class="btb-topic-row"
-          :class="{ 'btb-topic-row--archived': t.status === 'archived' }"
-        >
-          <span class="btb-topic-color" :style="{ background: t.color }" />
-          <div class="btb-topic-main">
-            <span class="btb-topic-label">{{ t.label }}</span>
-            <span class="btb-topic-meta">
-              {{ topicStatusLabel[t.status] || t.status }} · {{ t.sectionCount }} 条
-              <template v-if="t.status === 'candidate'"> · 连续 {{ t.consecutiveHits }} 天</template>
-              · {{ t.firstDate }}→{{ t.lastDate }}
-            </span>
-          </div>
-          <div class="btb-topic-ops" v-if="t.status !== 'archived'">
-            <button
-              v-if="t.status === 'candidate'"
-              class="btb-topic-op btb-topic-op--confirm"
-              :disabled="managing || !t.canActivate"
-              :title="t.canActivate ? '人工确认后进入持久话题泳道' : '需先满足连续多天出现条件'"
-              @click="confirmTopic(t)"
-            >确认启用</button>
-            <button class="btb-topic-op" :disabled="managing" @click="renameTopic(t)">重命名</button>
-            <button class="btb-topic-op" :disabled="managing" @click="mergeTopic(t)">合并</button>
-            <button class="btb-topic-op" :disabled="managing" @click="archiveTopic(t)">归档</button>
-          </div>
-        </div>
       </div>
     </div>
 
@@ -908,6 +787,13 @@ watch(viewMode, () => {
       </div>
     </Transition>
   </Teleport>
+
+  <!-- Unified topic management dialog (replaces native alert/prompt/confirm) -->
+  <TopicManageDialog
+    v-model="showTopicPanel"
+    :board-id="boardId"
+    @changed="loadData"
+  />
 </template>
 
 <style scoped>

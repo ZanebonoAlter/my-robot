@@ -12,6 +12,7 @@ import (
 	"github.com/google/uuid"
 
 	"syntopica-backend/internal/models"
+	"syntopica-backend/internal/platform/database"
 	"syntopica-backend/internal/platform/logging"
 	"syntopica-backend/internal/platform/ws"
 	"syntopica-backend/internal/topicgraph/repository"
@@ -32,6 +33,10 @@ func RegisterDailyReportRoutes(api *gin.RouterGroup) {
 	// GET /api/semantic-boards/:id/section-timeline
 	api.GET("/semantic-boards/:id/section-timeline", getBoardSectionTimeline)
 
+	// GET /api/semantic-boards/:id/topics — every topic on a board (incl. archived
+	// and orphans) with section counts, for the management UI.
+	api.GET("/semantic-boards/:id/topics", listBoardTopics)
+
 	// GET /api/daily-reports/sections/:id/lifecycle
 	api.GET("/daily-reports/sections/:id/lifecycle", getSectionLifecycle)
 
@@ -41,6 +46,9 @@ func RegisterDailyReportRoutes(api *gin.RouterGroup) {
 
 	// PATCH /api/daily-reports/topics/:id — manual rename / archive / reactivate.
 	api.PATCH("/daily-reports/topics/:id", updateTopic)
+	// DELETE /api/daily-reports/topics/:id — hard-delete (irreversible; clears
+	// the topic assignment on sections, sections themselves are kept).
+	api.DELETE("/daily-reports/topics/:id", deleteTopic)
 	// POST /api/daily-reports/topics/:id/merge — merge source topics into :id.
 	api.POST("/daily-reports/topics/:id/merge", mergeTopic)
 	// POST /api/daily-reports/topics/:id/split — carve sections into a new topic.
@@ -247,6 +255,62 @@ func getBoardSectionTimeline(c *gin.Context) {
 	}})
 }
 
+// listBoardTopics handles GET /api/semantic-boards/:id/topics.
+// Returns every persistent topic on the board (active, candidate, AND archived,
+// plus orphans that no section references) with a per-topic section_count for
+// the management UI. Unlike section-timeline, this is not windowed — it exists
+// precisely so anomalous topics produced by backfill bugs are visible and
+// manageable.
+func listBoardTopics(c *gin.Context) {
+	boardID, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "invalid board id"})
+		return
+	}
+	topics, err := repository.Repo.ListTopicsByBoardAll(uint(boardID))
+	if err != nil {
+		logging.Errorf("list board topics: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "failed to list topics"})
+		return
+	}
+	// Aggregate section counts per topic in one query (left-joined topics show 0).
+	type countRow struct {
+		PersistentTopicID uint
+		N                 int
+	}
+	var counts []countRow
+	if err := database.DB.Table("daily_report_sections").
+		Select("persistent_topic_id, count(*) AS n").
+		Where("persistent_topic_id IS NOT NULL").
+		Group("persistent_topic_id").
+		Scan(&counts).Error; err != nil {
+		logging.Errorf("list board topics: count sections: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "failed to count sections"})
+		return
+	}
+	countMap := make(map[uint]int, len(counts))
+	for _, cr := range counts {
+		countMap[cr.PersistentTopicID] = cr.N
+	}
+	upgradeThreshold := repository.LoadPersistentTopicConfig(database.DB).UpgradeThreshold
+	type topicListItem struct {
+		repository.BoardPersistentTopic
+		SectionCount int    `json:"section_count"`
+		Color        string `json:"color"`
+		CanActivate  bool   `json:"can_activate"`
+	}
+	items := make([]topicListItem, 0, len(topics))
+	for _, t := range topics {
+		items = append(items, topicListItem{
+			BoardPersistentTopic: t,
+			SectionCount:         countMap[t.ID],
+			Color:                repository.PersistentTopicColor(t.ID),
+			CanActivate:          t.Status == repository.TopicStatusCandidate && t.ConsecutiveHits >= upgradeThreshold,
+		})
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": gin.H{"topics": items}})
+}
+
 // getSectionLifecycle handles GET /api/daily-reports/sections/:id/lifecycle
 func getSectionLifecycle(c *gin.Context) {
 	sectionID, err := strconv.ParseUint(c.Param("id"), 10, 64)
@@ -386,6 +450,23 @@ func splitTopic(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"success": true, "data": topic})
+}
+
+// deleteTopic handles DELETE /api/daily-reports/topics/:id.
+// Hard-deletes the topic and unlinks its sections (sections keep their content,
+// only the topic assignment is cleared). This is irreversible; the reversible
+// path is PATCH with status=archived.
+func deleteTopic(c *gin.Context) {
+	topicID, err := parseTopicID(c)
+	if err != nil {
+		return
+	}
+	if err := repository.Repo.DeleteTopic(topicID); err != nil {
+		logging.Errorf("delete topic %d: %v", topicID, err)
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true})
 }
 
 // broadcastProgress sends a WebSocket progress message.

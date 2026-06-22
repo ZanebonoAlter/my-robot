@@ -42,6 +42,14 @@ export interface PersistentTopic {
   consecutive_hits: number
 }
 
+/** Topic list item from GET /semantic-boards/:id/topics — adds a section count
+ * and the stable colour, for the management UI. */
+export interface BoardTopicListItem extends PersistentTopic {
+  section_count: number
+  color: string
+  can_activate: boolean
+}
+
 export interface SectionTimelineNode {
   id: number
   report_id: number
@@ -154,6 +162,16 @@ export function useDailyReportsApi() {
     return apiClient.patch(`/daily-reports/topics/${topicId}`, params)
   }
 
+  /** Hard-delete a topic. Sections keep their content; only the topic assignment is cleared. Irreversible. */
+  async function deleteTopic(topicId: number): Promise<ApiResponse<null>> {
+    return apiClient.delete(`/daily-reports/topics/${topicId}`)
+  }
+
+  /** List EVERY persistent topic on a board (active + candidate + archived + orphans) with section counts. */
+  async function listBoardTopics(boardId: number): Promise<ApiResponse<{ topics: BoardTopicListItem[] }>> {
+    return apiClient.get(`/semantic-boards/${boardId}/topics`)
+  }
+
   /** Merge source topics into the target; sources are archived and their sections reassigned to the target. */
   async function mergeTopics(targetTopicId: number, sourceTopicIds: number[]): Promise<ApiResponse<PersistentTopic>> {
     return apiClient.post(`/daily-reports/topics/${targetTopicId}/merge`, { source_topic_ids: sourceTopicIds })
@@ -173,6 +191,8 @@ export function useDailyReportsApi() {
     getTopicLifeline,
     backfillPersistentTopics,
     updateTopic,
+    deleteTopic,
+    listBoardTopics,
     mergeTopics,
     splitTopic,
   }

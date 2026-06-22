@@ -23,13 +23,16 @@ import { latestDayX } from './detective-wall/utils'
 
 type WallSection = 'timeline' | 'lifeline' | 'lifecycle'
 
-const props = defineProps<{ boardId: number }>()
+const props = defineProps<{
+  boardId: number
+  initialTopicId?: number
+}>()
 const emit = defineEmits<{
   close: []
   openArticle: [articleId: number]
 }>()
 
-const { getBoardSectionTimeline, getDailyReportDetail, getSectionLifecycle, getTopicLifeline, updateTopic, mergeTopics } = useDailyReportsApi()
+const { getBoardSectionTimeline, getDailyReportDetail, getSectionLifecycle, getTopicLifeline } = useDailyReportsApi()
 const { getArticle } = useArticlesApi()
 
 const canvasRef = ref<HTMLCanvasElement | null>(null)
@@ -134,6 +137,9 @@ onMounted(async () => {
   window.addEventListener('keydown', onKeyDown)
 
   await loadBoardData()
+  if (props.initialTopicId != null) {
+    await enterTopicLifeline(props.initialTopicId)
+  }
 })
 
 function onKeyDown(e: KeyboardEvent) {
@@ -471,9 +477,11 @@ async function exitLifecycle(restoreNode: SectionTimelineNode | null = null) {
   }
 }
 
-// --- §9.4/9.6: persistent-topic lifeline + management (merge / rename / archive) ---
+// --- §9.4/9.6: persistent-topic lifeline + management ---
 
-const mergePickerOpen = ref(false)
+// Topic management lives in <TopicManageDialog>; this just toggles it open
+// from the detail panel.
+const showTopicManage = ref(false)
 
 // Topic status labels differ from section status (emerging/continuing…).
 const TOPIC_STATUS_LABELS: Record<string, string> = {
@@ -484,24 +492,6 @@ const TOPIC_STATUS_LABELS: Record<string, string> = {
 function topicStatusLabel(status: string): string {
   return TOPIC_STATUS_LABELS[status] ?? status
 }
-
-// All topics visible on the current board timeline (deduped by id). Feeds the
-// merge-target picker — no separate list-topics endpoint exists, so we derive
-// the set from the cached timeline sections.
-const boardTopics = computed(() => {
-  const map = new Map<number, { id: number; label: string; status: string; color: string }>()
-  for (const s of sections.value) {
-    const t = s.persistent_topic
-    if (t) map.set(t.id, { id: t.id, label: t.label, status: t.status, color: t.color })
-  }
-  return [...map.values()]
-})
-
-// Merge candidates exclude the focused topic itself and archived topics.
-const mergeCandidates = computed(() => {
-  const cur = focusedNode.value?.persistent_topic?.id
-  return boardTopics.value.filter(t => t.id !== cur && t.status !== 'archived')
-})
 
 // §9.4 Topic lifeline: fetch every section of one persistent topic (no day
 // limit) and enter lifecycle mode with it. Mirrors enterLifecycle but sources
@@ -529,66 +519,6 @@ async function enterTopicLifeline(topicId: number) {
     showDetailPanel.value = true
   } finally {
     lifecycleLoading.value = false
-  }
-}
-
-function toggleMergePicker() {
-  mergePickerOpen.value = !mergePickerOpen.value
-}
-
-// §9.6 Rename the focused topic. Patched in place (no full reload) so the
-// user keeps their focal context.
-async function renameCurrentTopic() {
-  const t = focusedNode.value?.persistent_topic
-  if (!t) return
-  const label = window.prompt('重命名话题', t.label)
-  if (!label || label.trim() === '' || label.trim() === t.label) return
-  const res = await updateTopic(t.id, { label: label.trim() })
-  if (res.success && res.data) {
-    const newLabel = res.data.label
-    const patch = (arr: SectionTimelineNode[]) => arr.map(s =>
-      s.persistent_topic?.id === t.id && s.persistent_topic
-        ? { ...s, persistent_topic: { ...s.persistent_topic, label: newLabel } }
-        : s,
-    )
-    sections.value = patch(sections.value)
-    lifelineNodes.value = patch(lifelineNodes.value)
-    if (focusedNode.value?.persistent_topic?.id === t.id) {
-      focusedNode.value = {
-        ...focusedNode.value,
-        persistent_topic: { ...focusedNode.value.persistent_topic!, label: newLabel },
-      }
-    }
-  }
-}
-
-// §9.6 Archive the focused topic. Reloads the board so the topic leaves the
-// active/candidate pool in the timeline.
-async function archiveCurrentTopic() {
-  const t = focusedNode.value?.persistent_topic
-  if (!t) return
-  if (!window.confirm(`归档话题「${t.label}」？归档后不再参与新归属。`)) return
-  const res = await updateTopic(t.id, { status: 'archived' })
-  if (res.success) {
-    mergePickerOpen.value = false
-    closePanel()
-    await loadBoardData()
-  }
-}
-
-// §9.6 Merge the focused topic into the chosen target. The target absorbs the
-// source's sections; the source is archived by the backend.
-async function mergeCurrentTopicInto(targetTopicId: number) {
-  const t = focusedNode.value?.persistent_topic
-  if (!t || t.id === targetTopicId) return
-  const target = boardTopics.value.find(b => b.id === targetTopicId)
-  if (!target) return
-  if (!window.confirm(`将「${t.label}」合并进「${target.label}」？`)) return
-  mergePickerOpen.value = false
-  const res = await mergeTopics(targetTopicId, [t.id])
-  if (res.success) {
-    closePanel()
-    await loadBoardData()
   }
 }
 </script>
@@ -718,31 +648,10 @@ async function mergeCurrentTopicInto(targetTopicId: number) {
               <Icon icon="mdi:sitemap-outline" width="13" />
               <span>{{ lifecycleLoading ? '加载中…' : '话题生命线' }}</span>
             </button>
-            <button class="tdw-topic-btn" @click="renameCurrentTopic">
-              <Icon icon="mdi:pencil-outline" width="13" />
-              <span>重命名</span>
+            <button class="tdw-topic-btn" @click="showTopicManage = true">
+              <Icon icon="mdi:folder-cog-outline" width="13" />
+              <span>话题管理</span>
             </button>
-            <button class="tdw-topic-btn" @click="archiveCurrentTopic">
-              <Icon icon="mdi:archive-outline" width="13" />
-              <span>归档</span>
-            </button>
-            <button class="tdw-topic-btn" @click="toggleMergePicker">
-              <Icon icon="mdi:merge" width="13" />
-              <span>合并</span>
-            </button>
-          </div>
-          <div v-if="mergePickerOpen" class="tdw-merge-picker">
-            <div class="tdw-merge-hint">选择目标话题（当前话题将合并进去）</div>
-            <button
-              v-for="cand in mergeCandidates"
-              :key="cand.id"
-              class="tdw-merge-candidate"
-              @click="mergeCurrentTopicInto(cand.id)"
-            >
-              <span class="tdw-topic-color" :style="{ background: cand.color }" />
-              <span>{{ cand.label }}</span>
-            </button>
-            <div v-if="mergeCandidates.length === 0" class="tdw-merge-empty">无其他可合并话题</div>
           </div>
         </div>
         <!-- Lifeline/lifecycle aggregate summary -->
@@ -861,6 +770,13 @@ async function mergeCurrentTopicInto(targetTopicId: number) {
     <!-- Loading / error states -->
     <div v-if="loading" class="tdw-loading">载入中…</div>
     <div v-else-if="error" class="tdw-error">加载失败，请重试</div>
+
+    <!-- Unified topic management dialog (replaces native alert/prompt/confirm) -->
+    <TopicManageDialog
+      v-model="showTopicManage"
+      :board-id="boardId"
+      @changed="loadBoardData"
+    />
   </div>
 </template>
 

@@ -19,6 +19,7 @@ cors:
     - "GET"
     - "POST"
     - "PUT"
+    - "PATCH"
     - "DELETE"
     - "OPTIONS"
   allow_headers:

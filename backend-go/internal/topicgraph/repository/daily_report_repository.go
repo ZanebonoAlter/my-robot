@@ -264,6 +264,10 @@ func (r *TopicGraphRepository) GetReportByID(id uint) (*BoardDailyReport, error)
 	if err != nil {
 		return nil, fmt.Errorf("report %d not found: %w", id, err)
 	}
+	// Attach persistent-topic briefs so the detail API exposes topic status
+	// (active/candidate) for UI classification. Without this the frontend's
+	// qualityZones treats every assigned section as "breaking".
+	AttachTopicBriefsToReport(r.db, &report)
 	return &report, nil
 }
 
@@ -328,7 +332,9 @@ func (r *TopicGraphRepository) ListReportsForAllBoards(days int) ([]BoardDailyRe
 	if err != nil {
 		return nil, fmt.Errorf("list reports: %w", err)
 	}
-
+	for i := range reports {
+		AttachTopicBriefsToReport(r.db, &reports[i])
+	}
 	return reports, nil
 }
 
@@ -588,6 +594,68 @@ func (r *TopicGraphRepository) GetSectionLifecycle(sectionID uint) (SectionTimel
 // attachTopicBriefs fills in PersistentTopicBrief (label/status/colour) on each
 // node by fetching the referenced topics in a single query. Colour is derived
 // deterministically from the topic id. No-op for nodes without a topic.
+// loadTopicBriefMap loads the minimal topic descriptor (label/status/colour)
+// for the given ids in one query. Used by both the section-timeline and the
+// daily-report detail APIs to avoid N+1 and to keep the JSON payload small
+// (no embedding vectors).
+func loadTopicBriefMap(db *gorm.DB, ids []uint) map[uint]PersistentTopicBrief {
+	if len(ids) == 0 {
+		return map[uint]PersistentTopicBrief{}
+	}
+	var topics []BoardPersistentTopic
+	if err := db.Where("id IN ?", ids).Find(&topics).Error; err != nil {
+		logging.Warnf("loadTopicBriefMap: load topics failed: %v", err)
+		return map[uint]PersistentTopicBrief{}
+	}
+	cfg := LoadPersistentTopicConfig(db)
+	briefByID := make(map[uint]PersistentTopicBrief, len(topics))
+	for _, t := range topics {
+		briefByID[t.ID] = PersistentTopicBrief{
+			ID: t.ID, Label: t.Label, Status: t.Status,
+			Color: PersistentTopicColor(t.ID), ConsecutiveHits: t.ConsecutiveHits,
+			CanActivate: t.Status == TopicStatusCandidate && t.ConsecutiveHits >= cfg.UpgradeThreshold,
+		}
+	}
+	return briefByID
+}
+
+// AttachTopicBriefsToReport fills the transient PersistentTopic brief on each
+// section of a daily report, so the report detail API exposes the same topic
+// status the section-timeline API does. Used by GetReportByID and the report
+// list handler.
+func AttachTopicBriefsToReport(db *gorm.DB, report *BoardDailyReport) {
+	if report == nil {
+		return
+	}
+	attachBriefsToSections(db, report.Sections)
+}
+
+// attachBriefsToSections fills the transient PersistentTopic brief in place.
+func attachBriefsToSections(db *gorm.DB, sections []DailyReportSection) {
+	topicIDs := make(map[uint]bool)
+	for i := range sections {
+		if sections[i].PersistentTopicID != nil {
+			topicIDs[*sections[i].PersistentTopicID] = true
+		}
+	}
+	if len(topicIDs) == 0 {
+		return
+	}
+	ids := make([]uint, 0, len(topicIDs))
+	for id := range topicIDs {
+		ids = append(ids, id)
+	}
+	briefByID := loadTopicBriefMap(db, ids)
+	for i := range sections {
+		if sections[i].PersistentTopicID == nil {
+			continue
+		}
+		if brief, ok := briefByID[*sections[i].PersistentTopicID]; ok {
+			sections[i].PersistentTopic = &brief
+		}
+	}
+}
+
 func attachTopicBriefs(db *gorm.DB, nodes []SectionTimelineNode) {
 	topicIDs := make(map[uint]bool)
 	for i := range nodes {
@@ -602,20 +670,7 @@ func attachTopicBriefs(db *gorm.DB, nodes []SectionTimelineNode) {
 	for id := range topicIDs {
 		ids = append(ids, id)
 	}
-	var topics []BoardPersistentTopic
-	if err := db.Where("id IN ?", ids).Find(&topics).Error; err != nil {
-		logging.Warnf("attachTopicBriefs: load topics failed: %v", err)
-		return
-	}
-	briefByID := make(map[uint]PersistentTopicBrief, len(topics))
-	cfg := LoadPersistentTopicConfig(db)
-	for _, t := range topics {
-		briefByID[t.ID] = PersistentTopicBrief{
-			ID: t.ID, Label: t.Label, Status: t.Status,
-			Color: PersistentTopicColor(t.ID), ConsecutiveHits: t.ConsecutiveHits,
-			CanActivate: t.Status == TopicStatusCandidate && t.ConsecutiveHits >= cfg.UpgradeThreshold,
-		}
-	}
+	briefByID := loadTopicBriefMap(db, ids)
 	for i := range nodes {
 		if nodes[i].PersistentTopicID == nil {
 			continue

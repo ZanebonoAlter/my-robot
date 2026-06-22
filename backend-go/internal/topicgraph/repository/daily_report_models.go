@@ -111,6 +111,11 @@ type DailyReportSection struct {
 	PersistentTopicID    *uint   `gorm:"index" json:"persistent_topic_id,omitempty"`
 	TopicMatchDistance   float64 `json:"topic_match_distance,omitempty"`
 	TopicMatchConfidence string  `gorm:"size:20" json:"topic_match_confidence,omitempty"`
+	// PersistentTopic carries the nested topic brief for the daily-report
+	// detail API, so the UI can classify sections by topic status (active vs
+	// candidate). Transient — loaded via AttachTopicBriefsToReport, never
+	// persisted. Mirrors SectionTimelineNode.PersistentTopic.
+	PersistentTopic *PersistentTopicBrief `gorm:"-" json:"persistent_topic,omitempty"`
 	// MatchedTopicID is the topic the LLM picked during ClusterTags; carried
 	// transiently (not persisted) for the dual-confirmation assignment step.
 	MatchedTopicID *uint     `gorm:"-" json:"-"`

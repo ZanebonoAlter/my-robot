@@ -1,0 +1,270 @@
+- generic [active] [ref=e1]:
+  - button "夜刊 / Dark" [ref=e3] [cursor=pointer]
+  - article [ref=e4]:
+    - generic [ref=e5]:
+      - generic [ref=e6]: 号外 · Extra Edition
+      - heading "中东地缘政治 与美伊关系" [level=1] [ref=e7]:
+        - text: 中东地缘政治
+        - text: 与美伊关系
+      - generic [ref=e8]: Syntopica 每日地缘观察
+      - generic [ref=e9]:
+        - generic [ref=e10]: 第 60 期 · Vol. I
+        - generic [ref=e11]: ·
+        - generic [ref=e12]: 2026.06.21 · 周日
+        - generic [ref=e13]: ·
+        - generic [ref=e14]: 19 篇
+        - generic [ref=e15]: 23 线索
+        - generic [ref=e16]: 5 话题
+      - separator [ref=e17]
+    - generic [ref=e18]:
+      - generic [ref=e19]: —日内瓦，6 月 21 日—
+      - heading "伊朗宣布关闭霍尔木兹海峡·通行量归零" [level=2] [ref=e20]
+      - paragraph [ref=e21]: 伊朗宣布关闭霍尔木兹海峡，导致通行量归零，引发全球航运危机。此举虽为谈判筹码，但已造成实质性封锁，局势极度紧张——与此同时，美伊代表团在瑞士的谈判仍聚焦核问题与黎以冲突，卡塔尔宣布成立专家组推进三方会谈。
+    - generic [ref=e22]:
+      - generic [ref=e23]:
+        - generic [ref=e24]: N°.01
+        - generic [ref=e25]: 伊朗宣布关闭霍尔木兹海峡致通行归零
+        - paragraph [ref=e26]: 伊朗宣布关闭霍尔木兹海峡，导致通行量归零，引发全球航运危机。此举虽为谈判筹码，但已造成实质性封锁。
+      - generic [ref=e27]:
+        - generic [ref=e28]: N°.02
+        - generic [ref=e29]: 美伊在瑞士启动谈判聚焦核与黎以局势
+        - paragraph [ref=e30]: 美伊代表团抵达瑞士开启谈判，聚焦核问题与黎以冲突。卡塔尔宣布成立专家组，三方会议推进，外交斡旋进入实质阶段。
+      - generic [ref=e31]:
+        - generic [ref=e32]: N°.03
+        - generic [ref=e33]: 美伊谈判聚焦以黎停火与资产解冻
+        - paragraph [ref=e34]: 谈判核心议题明确，包括以黎冲突结束及卡塔尔冻结资金解冻。伊朗强调备忘录执行，四方会谈推动进程。
+    - complementary [ref=e35]:
+      - generic [ref=e36]:
+        - generic [ref=e37]: 本期目录
+        - generic [ref=e38] [cursor=pointer]: ▸ 头条 · 霍尔木兹海峡封锁
+        - generic [ref=e39] [cursor=pointer]: 关心的话题 · 4
+        - generic [ref=e40] [cursor=pointer]: 突发的新话题 · 1
+        - generic [ref=e41] [cursor=pointer]: 其他动态 · 0
+      - generic [ref=e42]:
+        - generic [ref=e43]:
+          - text: 话题泳道
+          - generic [ref=e44]: 点击卡片可展开时间线
+        - generic [ref=e45] [cursor=pointer]:
+          - generic [ref=e47]: 霍尔木兹海峡封锁
+          - generic [ref=e48]: "5"
+        - generic [ref=e49] [cursor=pointer]:
+          - generic [ref=e51]: 美伊协议进程
+          - generic [ref=e52]: "10"
+        - generic [ref=e53] [cursor=pointer]:
+          - generic [ref=e55]: 中东地缘外溢
+          - generic [ref=e56]: "4"
+        - generic [ref=e57] [cursor=pointer]:
+          - generic [ref=e59]: 巴林国行合并
+          - generic [ref=e60]: "3"
+        - generic [ref=e61] [cursor=pointer]:
+          - generic [ref=e63]: 谈判核心议题
+          - generic [ref=e64]: 候选
+      - generic [ref=e65]:
+        - generic [ref=e66]: 历史日报
+        - generic [ref=e67] [cursor=pointer]:
+          - text: "6.21"
+          - generic [ref=e68]: 今日 · 6 条
+        - generic [ref=e69] [cursor=pointer]:
+          - text: "6.20"
+          - generic [ref=e70]: 10 条
+          - generic [ref=e71]: ▶
+        - generic [ref=e72] [cursor=pointer]:
+          - text: "6.19"
+          - generic [ref=e73]: 10 条
+          - generic [ref=e74]: ▶
+        - generic [ref=e75] [cursor=pointer]:
+          - text: "6.18"
+          - generic [ref=e76]: 8 条
+          - generic [ref=e77]: ▶
+        - generic [ref=e78] [cursor=pointer]:
+          - text: "6.17"
+          - generic [ref=e79]: 7 条
+          - generic [ref=e80]: ▶
+        - generic [ref=e81] [cursor=pointer]:
+          - text: "6.16"
+          - generic [ref=e82]: 5 条
+          - generic [ref=e83]: ▶
+    - generic [ref=e84]:
+      - generic [ref=e85]:
+        - generic [ref=e86]: 关心的话题
+        - generic [ref=e87]: — Following
+        - generic [ref=e88]: 追踪 4 个持久议题 · 点击展开时间线
+      - generic [ref=e89]:
+        - generic [ref=e90] [cursor=pointer]:
+          - generic [ref=e91]:
+            - generic [ref=e92]: N° 01
+            - generic [ref=e93]: 关心 · 持续追踪
+          - heading "霍尔木兹海峡封锁：从威胁到实际关闭" [level=3] [ref=e94]
+          - generic [ref=e95]:
+            - generic [ref=e96]: 话题色
+            - generic [ref=e98]: ·
+            - generic [ref=e99]: 5 篇 · 3 条线索
+            - generic [ref=e100]: ·
+            - generic [ref=e101]: 连续 5 天
+            - generic [ref=e102]: ·
+            - generic [ref=e103]:
+              - text: 查看历史时间线
+              - generic [ref=e104]: ▸
+        - generic [ref=e105]:
+          - generic [ref=e106]: 伊朗实际封锁霍尔木兹海峡致船舶通行量归零
+          - paragraph [ref=e107]: 6 月 20 日，伊朗军方宣布封锁霍尔木兹海峡，导致次日船舶通行量归零。伊斯兰革命卫队海军未发布通行许可，确认该战略水道处于实际封锁状态，引发全球航运震荡。
+        - generic [ref=e108]:
+          - generic [ref=e109]: 伊朗威胁因以色列军事行动永久封锁海峡
+          - paragraph [ref=e110]: 伊朗方面明确威胁，若以色列继续在黎巴嫩采取军事行动且未保障其领土完整，伊朗将不会重新开放霍尔木兹海峡。封锁状态与地区军事动态直接挂钩。
+        - generic [ref=e112]:
+          - generic [ref=e113]:
+            - generic [ref=e114]: 历史时间线 最近 7 天
+            - generic [ref=e115]: 5 个节点
+          - generic [ref=e116] [cursor=pointer]:
+            - generic [ref=e117]: 6.21 周日
+            - generic [ref=e120]:
+              - generic [ref=e121]: 伊朗实际封锁霍尔木兹海峡致船舶通行量归零，引发全球航运危机。
+              - generic [ref=e122]:
+                - text: 展开当天 3 条线索
+                - generic [ref=e123]: ▸
+          - generic [ref=e124] [cursor=pointer]:
+            - generic [ref=e125]: 6.20 周六
+            - generic [ref=e128]:
+              - generic [ref=e129]: 伊朗军方首度宣布关闭海峡，将封锁作为谈判筹码。
+              - generic [ref=e130]:
+                - text: 展开当天 2 条线索
+                - generic [ref=e131]: ▸
+          - generic [ref=e132]:
+            - generic [ref=e133]: 6.19 周五
+            - generic [ref=e137]: 本日无相关动态
+          - generic [ref=e138] [cursor=pointer]:
+            - generic [ref=e139]: 6.18 周四
+            - generic [ref=e142]:
+              - generic [ref=e143]: 伊朗威胁封锁海峡，美伊谈判陷入波折。
+              - generic [ref=e144]:
+                - text: 展开当天 1 条线索
+                - generic [ref=e145]: ▸
+          - generic [ref=e146] [cursor=pointer]:
+            - generic [ref=e147]: 6.17 周三
+            - generic [ref=e150]:
+              - generic [ref=e151]: 话题首次出现：伊朗重启海峡封锁威胁。
+              - generic [ref=e152]:
+                - text: 展开当天 1 条线索
+                - generic [ref=e153]: ▸
+          - generic [ref=e154]:
+            - generic [ref=e155]: 6.16 周二
+            - generic [ref=e159]: 话题尚未出现
+          - link "在侦探墙打开完整生命线 ↗" [ref=e161] [cursor=pointer]:
+            - /url: "#"
+      - generic [ref=e162]:
+        - generic [ref=e163] [cursor=pointer]:
+          - generic [ref=e164]:
+            - generic [ref=e165]: N° 02
+            - generic [ref=e166]: 关心 · 持续追踪
+          - heading "美伊协议签署进程：从官宣到否认的博弈" [level=3] [ref=e167]
+          - generic [ref=e168]:
+            - generic [ref=e169]: 话题色
+            - generic [ref=e171]: ·
+            - generic [ref=e172]: 连续 10 天 · 历史 40 条
+            - generic [ref=e173]: ·
+            - generic [ref=e174]:
+              - text: 查看历史时间线
+              - generic [ref=e175]: ▸
+        - generic [ref=e176]:
+          - generic [ref=e177]: 伊朗总统承诺谈判启动后将解冻卡塔尔冻结资金
+          - paragraph [ref=e178]: 6 月 21 日，伊朗总统佩泽希齐扬明确表示，随着伊美在瑞士启动谈判，此前冻结在卡塔尔的 60 亿美元伊朗资金将被释放并归还。
+        - generic [ref=e179]:
+          - generic [ref=e180]:
+            - generic [ref=e181]: 历史时间线 最近 7 天
+            - generic [ref=e182]: 加载中…
+          - generic [ref=e183]:
+            - generic [ref=e184]: —
+            - generic [ref=e188]: 点击后将通过 getTopicLifeline 异步加载
+          - link "在侦探墙打开完整生命线 ↗" [ref=e190] [cursor=pointer]:
+            - /url: "#"
+      - generic [ref=e191]:
+        - generic [ref=e192] [cursor=pointer]:
+          - generic [ref=e193]:
+            - generic [ref=e194]: N° 03
+            - generic [ref=e195]: 关心 · 持续追踪
+          - heading "中东地缘外溢：开罗会谈讨论多区域安全" [level=3] [ref=e196]
+          - generic [ref=e197]:
+            - generic [ref=e198]: 话题色
+            - generic [ref=e200]: ·
+            - generic [ref=e201]: 1 篇 · 连续 4 天
+            - generic [ref=e202]: ·
+            - generic [ref=e203]:
+              - text: 查看历史时间线
+              - generic [ref=e204]: ▸
+        - generic [ref=e205]:
+          - generic [ref=e206]: 开罗多边会谈聚焦黎以停火与地区安全架构
+          - paragraph [ref=e207]: 埃及主持的多区域安全会谈在开罗举行，议题涵盖黎以冲突降级、加沙人道通道及红海航运安全，多个阿拉伯国家与欧洲代表与会。
+        - generic [ref=e208]:
+          - generic [ref=e209]:
+            - generic [ref=e210]: 历史时间线 最近 7 天
+            - generic [ref=e211]: —
+          - generic [ref=e212]:
+            - generic [ref=e213]: —
+            - generic [ref=e217]: 异步加载
+          - link "在侦探墙打开完整生命线 ↗" [ref=e219] [cursor=pointer]:
+            - /url: "#"
+      - generic [ref=e220]:
+        - generic [ref=e221] [cursor=pointer]:
+          - generic [ref=e222]:
+            - generic [ref=e223]: N° 04
+            - generic [ref=e224]: 关心 · 持续追踪
+          - heading "巴林国家银行洽谈合并" [level=3] [ref=e225]
+          - generic [ref=e226]:
+            - generic [ref=e227]: 话题色
+            - generic [ref=e229]: ·
+            - generic [ref=e230]: 1 篇
+            - generic [ref=e231]: ·
+            - generic [ref=e232]:
+              - text: 查看历史时间线
+              - generic [ref=e233]: ▸
+        - generic [ref=e234]:
+          - generic [ref=e235]: 海湾金融整合：巴林国行合并谈判进入实质阶段
+          - paragraph [ref=e236]: 在地区局势紧张背景下，巴林国家银行推进与区域机构的合并谈判，被视为海湾金融体系应对地缘风险的整合信号。
+        - generic [ref=e237]:
+          - generic [ref=e238]:
+            - generic [ref=e239]: 历史时间线 最近 7 天
+            - generic [ref=e240]: —
+          - generic [ref=e241]:
+            - generic [ref=e242]: —
+            - generic [ref=e246]: 异步加载
+          - link "在侦探墙打开完整生命线 ↗" [ref=e248] [cursor=pointer]:
+            - /url: "#"
+      - generic [ref=e249]:
+        - generic [ref=e250]: 突发的新话题
+        - generic [ref=e251]: — Breaking
+        - generic [ref=e252]: 观察中 1 个候选议题
+      - generic [ref=e253]:
+        - generic [ref=e254] [cursor=pointer]:
+          - generic [ref=e255]:
+            - generic [ref=e256]: N° 05
+            - generic [ref=e257]: 候选 · 观察中
+          - heading "谈判核心议题：核问题、以黎局势与资产解冻" [level=3] [ref=e258]
+          - generic [ref=e259]:
+            - generic [ref=e260]: 话题色
+            - generic [ref=e262]: ·
+            - generic [ref=e263]: 12 篇 · 10 条线索 · 待确认
+            - generic [ref=e264]: ·
+            - generic [ref=e265]:
+              - text: 查看历史时间线
+              - generic [ref=e266]: ▸
+        - generic [ref=e267]:
+          - generic [ref=e268]: 谈判框架成型：核问题、黎以停火、卡塔尔资金三线并进
+          - paragraph [ref=e269]: 美伊瑞士谈判进入核心议题阶段，三条主线同步推进——核计划限制、黎以冲突降级机制、以及卡塔尔冻结的 60 亿美元资金解冻。
+        - generic [ref=e270]:
+          - generic [ref=e271]:
+            - generic [ref=e272]: 历史时间线 最近 7 天
+            - generic [ref=e273]: —
+          - generic [ref=e274]:
+            - generic [ref=e275]: —
+            - generic [ref=e279]: 异步加载
+          - link "在侦探墙打开完整生命线 ↗" [ref=e281] [cursor=pointer]:
+            - /url: "#"
+      - generic [ref=e282]:
+        - generic [ref=e283]: 其他动态
+        - generic [ref=e284]: — In Brief
+        - generic [ref=e285]: 未归属 0 条 · 今日全部已归类
+      - paragraph [ref=e287]: 本日全部 19 篇报道已归属至持久话题泳道 — 无未分类动态。
+    - generic [ref=e288]:
+      - generic [ref=e289]: Syntopica · 第 60 期 · 2026.06.21
+      - generic [ref=e290]: ❦
+      - generic [ref=e291]: 由持久话题引擎归档 · Generated 06:00 UTC

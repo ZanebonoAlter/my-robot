@@ -170,7 +170,7 @@ const navigateTo = useNuxtApp().$router ? (path: string) => useNuxtApp().$router
 
       <button class="sidebar-item" data-onboarding="nav-tags" @click="navigateTo('/tags')">
         <Icon icon="mdi:tag-multiple" width="20" height="20" class="text-[var(--color-text-secondary)]" />
-        <span v-if="!sidebarCollapsed" class="flex-1 text-left font-medium">标签管理</span>
+        <span v-if="!sidebarCollapsed" class="flex-1 text-left font-medium">叙事工坊</span>
       </button>
 
       <div v-if="!sidebarCollapsed" class="divider" />

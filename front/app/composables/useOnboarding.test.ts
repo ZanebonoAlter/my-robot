@@ -134,7 +134,7 @@ describe('useOnboarding', () => {
       const titles = (config?.steps ?? []).map(s => s.popover?.title)
       // welcome + nav-tags
       expect(titles).toContain('欢迎使用 Syntopica')
-      expect(titles).toContain('标签管理')
+      expect(titles).toContain('叙事工坊')
       // absent selectors still filtered
       expect(titles).not.toContain('主题图谱')
 
@@ -170,7 +170,7 @@ describe('useOnboarding', () => {
       const config = driverMock.mock.calls[0]?.[0] as Config | undefined
       // welcome (no element) survives; 4 tags selectors filtered (absent in DOM)
       expect(config?.steps).toHaveLength(1)
-      expect(config?.steps?.[0]?.popover?.title).toBe('语义板块管理')
+      expect(config?.steps?.[0]?.popover?.title).toBe('叙事工坊')
       expect(localStorage.getItem(TAGS_KEY)).toBeNull()
       ;(config?.onDestroyed as undefined | ((...args: unknown[]) => void))?.()
       expect(localStorage.getItem(TAGS_KEY)).toBe('true')

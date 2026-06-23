@@ -79,7 +79,7 @@ onMounted(() => {
             <Icon icon="mdi:arrow-left" width="16" />
           </NuxtLink>
           <Icon icon="mdi:view-grid" width="18" class="text-white/50" />
-          <h1 class="tags-page-title">语义板块管理</h1>
+          <h1 class="tags-page-title">叙事工坊</h1>
         </div>
         <div class="flex items-center gap-2">
           <button type="button" class="tags-guide-btn" title="语义板块引导" @click="startTagsTour">

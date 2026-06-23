@@ -6,7 +6,7 @@ import { computed, nextTick, ref } from 'vue'
 /**
  * useOnboarding — 分步引导（driver.js）。
  *
- * 支持多个 tour preset：首页（home）与标签管理页（tags）。
+ * 支持多个 tour preset：首页（home）与叙事工坊页（tags）。
  * 每个 tour 有独立的 localStorage 完成标记，各自首次访问自动启动。
  * 复用同一 driver.js 实例管理、prefers-reduced-motion 检测、缺失元素预检过滤。
  *
@@ -122,15 +122,15 @@ const HOME_STEPS: DriveStep[] = [
     },
   },
   { element: '[data-onboarding="sidebar-feeds"]', popover: { title: '订阅源与分类', description: '在这里添加和管理你的 RSS 源与分类，文章会自动抓取。' } },
-  { element: '[data-onboarding="nav-tags"]', popover: { title: '标签管理', description: '查看和管理 AI 为文章自动生成的标签与语义版块。' } },
+  { element: '[data-onboarding="nav-tags"]', popover: { title: '叙事工坊', description: '查看和管理 AI 为文章自动生成的标签与语义版块。' } },
   { element: '[data-onboarding="watched-tags"]', popover: { title: '关注标签', description: '关注感兴趣的标签，获取个性化文章推送。' } },
 ]
 
-/** 标签管理页引导步骤（见 design.md D8）。 */
+/** 叙事工坊页引导步骤（见 design.md D8）。 */
 const TAGS_STEPS: DriveStep[] = [
   {
     popover: {
-      title: '语义板块管理',
+      title: '叙事工坊',
       description: '把 AI 自动生成的标签组织成可阅读的板块。接下来介绍核心流转。',
       side: 'over',
     },
@@ -165,7 +165,7 @@ async function startTour(): Promise<void> {
   await runTour('home', HOME_STEPS)
 }
 
-/** 启动标签管理页引导教程。 */
+/** 启动叙事工坊页引导教程。 */
 async function startTagsTour(): Promise<void> {
   await runTour('tags', TAGS_STEPS)
 }
@@ -212,7 +212,7 @@ export function useOnboarding() {
     startTour,
     dismissTour,
     resetOnboarding,
-    // 标签管理 tour
+    // 叙事工坊 tour
     isTagsFirstRun: computed(() => {
       if (!isClient()) return false
       return isTourComplete('tags') === false

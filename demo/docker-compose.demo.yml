@@ -1,0 +1,64 @@
+# Public read-only demo stack.
+#
+# Launch a fully browsable, sanitized, read-only Syntopica instance:
+#   docker compose -f demo/docker-compose.demo.yml up -d --build
+#   open http://localhost:5000
+#
+# The postgres container does NOT mount ./data, so every `up` starts from a
+# clean database; the backend bootstraps the schema and the entrypoint imports
+# the sanitized seed (demo/seed/seed.sql) on first healthy boot.
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg18-trixie
+    container_name: syntopica-demo-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-syntopica}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      TZ: ${TZ:-Asia/Shanghai}
+      PGTZ: ${TZ:-Asia/Shanghai}
+    volumes:
+      # Enable the pgvector extension on first init. No data volume → fresh DB.
+      - ../docker/postgres/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-syntopica}
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    networks:
+      - syntopica-demo-net
+
+  syntopica-demo:
+    build:
+      # Context is the repo root (relative to this compose file), so Dockerfile.demo
+      # and the front/ + backend-go/ + demo/ COPY sources all resolve.
+      context: ..
+      dockerfile: Dockerfile.demo
+    container_name: syntopica-demo
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "${PORT:-5000}:5000"
+    environment:
+      # DATABASE_DSN overrides configs/config.yaml via applyEnvOverrides.
+      DATABASE_DSN: host=postgres user=${POSTGRES_USER:-postgres} password=${POSTGRES_PASSWORD:-postgres} dbname=${POSTGRES_DB:-syntopica} port=5432 sslmode=disable
+      SERVER_MODE: release
+      DEMO_READ_ONLY: "1"
+      # psql connection env for seed import in entrypoint.sh.
+      PGHOST: postgres
+      PGUSER: ${POSTGRES_USER:-postgres}
+      PGPASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      PGDATABASE: ${POSTGRES_DB:-syntopica}
+    networks:
+      - syntopica-demo-net
+
+networks:
+  syntopica-demo-net:
+    name: syntopica-demo-net

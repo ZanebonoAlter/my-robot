@@ -1,13 +1,15 @@
 <script setup lang="ts">
-import { ref, computed, watch } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue'
 import { Icon } from '@iconify/vue'
 import { useDailyReportsApi, type SectionTimelineNode, type SectionRelation, type DailyReportThread } from '~/api/dailyReports'
 import { useArticlesApi } from '~/api/articles'
+import { fullComponentHighlight } from '~/utils/graphHighlight'
 
 const props = defineProps<{ boardId: number }>()
 
 const { getBoardSectionTimeline, getDailyReportDetail } = useDailyReportsApi()
 const { getArticle } = useArticlesApi()
+const { theme } = useTheme()
 
 const days = ref(14)
 const loading = ref(false)
@@ -15,6 +17,8 @@ const sections = ref<SectionTimelineNode[]>([])
 const relations = ref<SectionRelation[]>([])
 const selectedNode = ref<SectionTimelineNode | null>(null)
 const hoveredId = ref<number | null>(null)
+// 视图模式：timeline=匈牙利相似度 DAG（默认）；lanes=按话题分泳道（identity 驱动）。
+const viewMode = ref<'timeline' | 'lanes'>('timeline')
 
 // --- Popup thread/article state ---
 const popupThreads = ref<DailyReportThread[]>([])
@@ -24,11 +28,14 @@ const threadArticles = ref<Map<number, { id: number, title: string }[]>>(new Map
 const threadArticlesLoading = ref(false)
 
 // --- Constants ---
-const COL_W = 120
-const ROW_H = 48
-const PAD = 28
+const COL_W = 148
+const ROW_H = 60
+const PAD = 32
 const NODE_R = 7
-const LABEL_MAX = 8
+const LABEL_MAX = 10
+const LANE_LABEL_MAX = 12   // 泳道标签截断阈值（比节点标签宽）
+// 泳道视图参数
+const LANE_LABEL_W = 160 // 左侧话题标签列宽（容结 LANE_LABEL_MAX 个字符，不再截断）
 
 // --- Status styling ---
 const statusColorMap: Record<string, string> = {
@@ -51,6 +58,70 @@ function statusFill(status: string): string {
   return statusColorMap[status] || '#9ca3af'
 }
 
+// --- Detective wall entry: only on large screens with WebGL support ---
+const viewportWidth = ref(typeof window !== 'undefined' ? window.innerWidth : 1280)
+const showDetectiveEntry = computed(() => {
+  if (viewportWidth.value < 768) return false
+  try {
+    const c = document.createElement('canvas')
+    return !!(c.getContext('webgl2') || c.getContext('webgl'))
+  } catch {
+    return false
+  }
+})
+// Named handler so it can be removed on unmount (avoid leaked listeners).
+function onViewportResize() { viewportWidth.value = window.innerWidth }
+onMounted(() => window.addEventListener('resize', onViewportResize))
+onUnmounted(() => window.removeEventListener('resize', onViewportResize))
+
+// --- SVG 缩放（滚轮）---
+// 用 CSS transform scale 包裹 SVG，不动其坐标，点节点/连线的命中不受影响。
+// 按鼠标位置缩放（缩放后鼠标下的点不动），缩放后容器溢出可滚动。
+const svgScrollRef = ref<HTMLDivElement | null>(null)
+const zoomScale = ref(1)
+const MIN_SCALE = 0.4
+const MAX_SCALE = 3
+const ZOOM_STEP = 0.2
+const zoomPercent = computed(() => Math.round(zoomScale.value * 100))
+
+async function setZoom(nextScale: number) {
+  const el = svgScrollRef.value
+  const oldScale = zoomScale.value
+  const centerX = el ? (el.scrollLeft + el.clientWidth / 2) / oldScale : 0
+  const centerY = el ? (el.scrollTop + el.clientHeight / 2) / oldScale : 0
+  zoomScale.value = nextScale
+  await nextTick()
+  if (el) {
+    el.scrollLeft = Math.max(0, centerX * nextScale - el.clientWidth / 2)
+    el.scrollTop = Math.max(0, centerY * nextScale - el.clientHeight / 2)
+  }
+}
+
+function zoomIn() {
+  void setZoom(Math.min(MAX_SCALE, +(zoomScale.value + ZOOM_STEP).toFixed(2)))
+}
+function zoomOut() {
+  void setZoom(Math.max(MIN_SCALE, +(zoomScale.value - ZOOM_STEP).toFixed(2)))
+}
+
+function resetZoom() {
+  void setZoom(1)
+}
+
+// Theme-aware SVG colors
+const svgGridColor = computed(() => theme.value === 'dark' ? 'rgba(255,255,255,0.04)' : 'rgba(26,26,26,0.06)')
+const svgEdgeColor = computed(() => theme.value === 'dark' ? 'rgba(255,255,255,' : 'rgba(26,26,26,')
+const svgNodeStroke = computed(() => theme.value === 'dark' ? 'rgba(255,255,255,0.15)' : 'rgba(26,26,26,0.15)')
+const svgHighlightColor = computed(() => theme.value === 'dark' ? 'rgba(255,255,255,0.65)' : 'rgba(26,26,26,0.65)')
+// 泳道相关主题色（本次新增）
+const svgLaneLabelColor = computed(() => theme.value === 'dark' ? 'rgba(226,232,240,0.88)' : 'rgba(26,26,26,0.85)')
+const svgLaneStripeColor = computed(() => theme.value === 'dark' ? 'rgba(255,255,255,0.025)' : 'rgba(26,26,26,0.03)')
+
+function getEdgeColor(distance: number, highlighted: boolean): string {
+  if (highlighted) return svgHighlightColor.value
+  return `${svgEdgeColor.value}${edgeOpacity(distance)})`
+}
+
 // --- Date helpers ---
 
 function formatDateShort(dateStr: string): string {
@@ -61,33 +132,33 @@ function formatDateShort(dateStr: string): string {
 function truncateLabel(label: string): string {
   return label.length > LABEL_MAX ? label.slice(0, LABEL_MAX) + '…' : label
 }
+// 泳道标签用更宽的截断阈值；hover 仍会通过 <title> 显示完整名称。
+function truncateLaneLabel(label: string): string {
+  return label.length > LANE_LABEL_MAX ? label.slice(0, LANE_LABEL_MAX) + '…' : label
+}
 
 // --- Hover highlight graph ---
 
-/** node id → set of directly connected node ids */
-const neighborsOf = computed(() => {
-  const map = new Map<number, Set<number>>()
-  for (const r of relations.value) {
-    let s = map.get(r.from_id)
-    if (!s) { s = new Set(); map.set(r.from_id, s) }
-    s.add(r.to_id)
-    s = map.get(r.to_id)
-    if (!s) { s = new Set(); map.set(r.to_id, s) }
-    s.add(r.from_id)
-  }
-  return map
+const visibleRelations = computed(() => relations.value.filter((r) => {
+  const isIdentity = r.relation_type === 'identity'
+  return viewMode.value === 'lanes' ? isIdentity : !isIdentity
+}))
+
+const highlightedNodeIds = computed(() => {
+  if (hoveredId.value === null) return new Set<number>()
+  return fullComponentHighlight(
+    hoveredId.value,
+    visibleRelations.value.map(r => ({ source: r.from_id, target: r.to_id })),
+  )
 })
 
 function isEdgeHighlighted(r: { fromId: number; toId: number }): boolean {
   if (hoveredId.value === null) return false
-  return r.fromId === hoveredId.value || r.toId === hoveredId.value
+  return highlightedNodeIds.value.has(r.fromId) && highlightedNodeIds.value.has(r.toId)
 }
 
 function isNodeHighlighted(nodeId: number): boolean {
-  if (hoveredId.value === null) return false
-  if (nodeId === hoveredId.value) return true
-  const nb = neighborsOf.value.get(hoveredId.value)
-  return nb ? nb.has(nodeId) : false
+  return hoveredId.value !== null && highlightedNodeIds.value.has(nodeId)
 }
 
 // --- Simple timeline layout ---
@@ -114,13 +185,88 @@ const maxRows = computed(() => {
   return max
 })
 
+// --- 泳道视图：按话题归类（topics/unassignedCount 来自下方话题管理块） ---
+interface LaneRow { key: string; label: string; color: string; status: string }
+const laneRows = computed<LaneRow[]>(() => {
+  const rows: LaneRow[] = topics.value.filter(t => t.status === 'active').map(t => ({
+    key: `topic-${t.id}`, label: t.label, color: t.color, status: t.status,
+  }))
+  if (nonActiveSectionCount.value > 0) {
+    rows.push({ key: 'unassigned', label: '待确认 / 未分类', color: '#64748b', status: 'none' })
+  }
+  return rows
+})
+const laneIndexByKey = computed(() => {
+  const m = new Map<string, number>()
+  laneRows.value.forEach((r, i) => m.set(r.key, i))
+  return m
+})
+const sectionById = computed(() => {
+  const m = new Map<number, SectionTimelineNode>()
+  for (const s of sections.value) m.set(s.id, s)
+  return m
+})
+function sectionLaneKey(s: SectionTimelineNode): string {
+  if (s.persistent_topic?.status === 'active') return `topic-${s.persistent_topic.id}`
+  return 'unassigned'
+}
+
 interface PositionedSection {
   data: SectionTimelineNode
   cx: number
   cy: number
 }
 
+// 泳道自适应高度：每条泳道高 = 基础行高 + 该泳道内单天最大节点数 × 节点间距。
+// 固定高度会导致同天多节点的泳道互相覆盖（节点+标签溢出），动态高度让每条
+// 泳道都够容结自己的内容，间隔充裕。
+const LANE_NODE_GAP = 24      // 同泳道同天多节点的纵向间距
+const LANE_BASE = 52         // 基础行高（单节点时的垂直空间）
+const laneLayout = computed(() => {
+  const lanes = laneRows.value
+  const laneH = new Array(lanes.length).fill(LANE_BASE)
+  const subMax = new Map<string, number>()
+  for (const s of sections.value) {
+    const date = s.period_date.slice(0, 10)
+    const li = laneIndexByKey.value.get(sectionLaneKey(s)) ?? 0
+    const k = `${li}:${date}`
+    const n = (subMax.get(k) ?? 0) + 1
+    subMax.set(k, n)
+    // 单节点只需 LANE_BASE；每多一个节点 +节点间距（含节点半径与标签余量）。
+    const need = LANE_BASE + (n - 1) * LANE_NODE_GAP
+    if (need > laneH[li]!) laneH[li] = need
+  }
+  const laneY: number[] = []
+  let acc = 0
+  for (const h of laneH) {
+    laneY.push(acc)
+    acc += h
+  }
+  return { laneH, laneY, subMax }
+})
+
 const positionedNodes = computed<PositionedSection[]>(() => {
+  if (viewMode.value === 'lanes') {
+    const layout = laneLayout.value
+    const seen = new Map<string, number>()
+    return sections.value.map(s => {
+      const date = s.period_date.slice(0, 10)
+      const col = dateIndex.value.get(date) ?? 0
+      const li = laneIndexByKey.value.get(sectionLaneKey(s)) ?? 0
+      const k = `${li}:${date}`
+      const total = layout.subMax.get(k) ?? 1
+      const idx = seen.get(k) ?? 0
+      seen.set(k, idx + 1)
+      const subOffset = (idx - (total - 1) / 2) * LANE_NODE_GAP
+      return {
+        data: s,
+        cx: col * COL_W + PAD + COL_W / 2 + LANE_LABEL_W,
+        // 与背景 rect 同基准（rect y = laneY[li] + PAD），节点 cy 也 + PAD。
+        cy: PAD + layout.laneY[li]! + layout.laneH[li]! / 2 + subOffset,
+      }
+    })
+  }
+  // timeline 模式：同天按出现顺序纵向堆叠。
   const rowCounter = new Map<string, number>()
   return sections.value.map(s => {
     const date = s.period_date.slice(0, 10)
@@ -149,6 +295,8 @@ interface EdgeLine {
   fromId: number
   toId: number
   distance: number
+  relationType: string  // 'identity'（同话题）| 'similarity'（匈牙利）
+  color?: string        // identity 边的话题色
 }
 
 /** Map distance to visual weight: strong (<0.15) → 2, medium (<0.25) → 1.2, weak → 0.6 */
@@ -166,23 +314,41 @@ function edgeOpacity(dist: number): number {
 }
 
 const edgePaths = computed<EdgeLine[]>(() => {
-  return relations.value.map((r, i) => {
-    const from = posById.value.get(r.from_id)
-    const to = posById.value.get(r.to_id)
-    if (!from || !to) return { key: `edge-${i}`, d: '', fromId: r.from_id, toId: r.to_id, distance: r.distance }
-    const midX = (from.cx + to.cx) / 2
-    return {
-      key: `edge-${i}`,
-      d: `M${from.cx},${from.cy} C${midX},${from.cy} ${midX},${to.cy} ${to.cx},${to.cy}`,
-      fromId: r.from_id,
-      toId: r.to_id,
-      distance: r.distance,
-    }
-  }).filter(e => e.d !== '')
+  return visibleRelations.value
+    .map((r, i) => {
+      const relType = r.relation_type ?? 'similarity'
+      const from = posById.value.get(r.from_id)
+      const to = posById.value.get(r.to_id)
+      if (!from || !to) return { key: `edge-${i}`, d: '', fromId: r.from_id, toId: r.to_id, distance: r.distance, relationType: relType }
+      const midX = (from.cx + to.cx) / 2
+      let color: string | undefined
+      if (relType === 'identity') {
+        const fromNode = sectionById.value.get(r.from_id)
+        color = fromNode?.persistent_topic?.color
+      }
+      return {
+        key: `edge-${i}`,
+        d: `M${from.cx},${from.cy} C${midX},${from.cy} ${midX},${to.cy} ${to.cx},${to.cy}`,
+        fromId: r.from_id,
+        toId: r.to_id,
+        distance: r.distance,
+        relationType: relType,
+        color,
+      }
+    }).filter(e => e.d !== '')
 })
 
-const svgWidth = computed(() => sortedDates.value.length * COL_W + PAD * 2)
-const svgHeight = computed(() => maxRows.value * ROW_H + PAD * 2)
+const svgWidth = computed(() => {
+  const base = sortedDates.value.length * COL_W + PAD * 2
+  return viewMode.value === 'lanes' ? base + LANE_LABEL_W : base
+})
+const svgHeight = computed(() => {
+  if (viewMode.value === 'lanes') {
+    const total = laneLayout.value.laneH.reduce((a, b) => a + b, 0)
+    return total + PAD * 2
+  }
+  return maxRows.value * ROW_H + PAD * 2
+})
 
 interface DateCol {
   date: string
@@ -194,7 +360,7 @@ const dateColumns = computed<DateCol[]>(() =>
   sortedDates.value.map((date, i) => ({
     date,
     label: formatDateShort(date),
-    x: i * COL_W + PAD + COL_W / 2,
+    x: i * COL_W + PAD + COL_W / 2 + (viewMode.value === 'lanes' ? LANE_LABEL_W : 0),
   })),
 )
 
@@ -250,7 +416,67 @@ async function toggleThreadArticles(thread: DailyReportThread) {
 
 const emit = defineEmits<{
   openArticle: [articleId: number]
+  openDetectiveWall: []
 }>()
+
+// --- Persistent topic management (list drives the lanes view; ops live in TopicManageDialog) ---
+const showTopicPanel = ref(false)
+
+interface TopicRow {
+  id: number
+  label: string
+  status: string
+  color: string
+  sectionCount: number
+  firstDate: string
+  lastDate: string
+  consecutiveHits: number
+  canActivate: boolean
+}
+
+// 话题清单由 section-timeline 的 persistent_topic 字段聚合，无需额外端点。
+const topics = computed<TopicRow[]>(() => {
+  const map = new Map<number, TopicRow>()
+  for (const s of sections.value) {
+    const t = s.persistent_topic
+    if (!t) continue
+    const row = map.get(t.id) ?? {
+      id: t.id, label: t.label, status: t.status, color: t.color,
+      sectionCount: 0, firstDate: s.period_date.slice(0, 10), lastDate: s.period_date.slice(0, 10),
+      consecutiveHits: t.consecutive_hits, canActivate: t.can_activate,
+    }
+    row.sectionCount++
+    const d = s.period_date.slice(0, 10)
+    if (d < row.firstDate) row.firstDate = d
+    if (d > row.lastDate) row.lastDate = d
+    // status 以最新一天的为准（timeline 已按时间排序）。
+    row.status = t.status
+    row.consecutiveHits = t.consecutive_hits
+    row.canActivate = t.can_activate
+    map.set(t.id, row)
+  }
+  return [...map.values()].sort((a, b) => {
+    // 归档沉底；其余按 section 数降序。
+    const aArchived = a.status === 'archived' ? 1 : 0
+    const bArchived = b.status === 'archived' ? 1 : 0
+    if (aArchived !== bArchived) return aArchived - bArchived
+    return b.sectionCount - a.sectionCount
+  })
+})
+
+const topicStats = computed(() => {
+  let active = 0, candidate = 0, archived = 0
+  for (const t of topics.value) {
+    if (t.status === 'active') active++
+    else if (t.status === 'candidate') candidate++
+    else if (t.status === 'archived') archived++
+  }
+  return { active, candidate, archived, total: topics.value.length }
+})
+
+const topicStatusLabel: Record<string, string> = { candidate: '候选', active: '活跃', archived: '已归档' }
+const unassignedCount = computed(() => sections.value.filter(s => !s.persistent_topic_id).length)
+const nonActiveSectionCount = computed(() => sections.value.filter(s => s.persistent_topic?.status !== 'active').length)
 
 // --- Data loading ---
 
@@ -272,10 +498,17 @@ async function loadData() {
 }
 
 watch(
-  () => [props.boardId, days],
+  () => [props.boardId, days.value],
   () => { loadData() },
   { immediate: true },
 )
+
+// 切换视图模式时清空选中/悬停，避免坐标体系变化后的错位高亮。
+watch(viewMode, () => {
+  selectedNode.value = null
+  hoveredId.value = null
+  popupThreads.value = []
+})
 </script>
 
 <template>
@@ -286,7 +519,8 @@ watch(
         <Icon icon="mdi:source-branch" width="15" class="text-white/50" />
         <span class="btb-controls-title">话题总览</span>
       </div>
-      <div class="btb-days-toggle">
+      <div class="btb-controls-actions">
+        <div class="btb-days-toggle">
         <button
           v-for="d in [7, 14, 30, 60]"
           :key="d"
@@ -295,6 +529,45 @@ watch(
           @click="days = d"
         >
           {{ d }}天
+        </button>
+        </div>
+        <div class="btb-view-toggle">
+        <button
+          class="btb-view-btn"
+          :class="{ active: viewMode === 'timeline' }"
+          title="匈牙利相似度关系（默认）"
+          @click="viewMode = 'timeline'"
+        >
+          <Icon icon="mdi:chart-timeline-variant" width="13" />
+          <span>时间线</span>
+        </button>
+        <button
+          class="btb-view-btn"
+          :class="{ active: viewMode === 'lanes' }"
+          title="按话题归类，同话题连续性实线连接"
+          @click="viewMode = 'lanes'"
+        >
+          <Icon icon="mdi:view-stream-outline" width="13" />
+          <span>话题泳道</span>
+        </button>
+        </div>
+        <button
+        v-if="showDetectiveEntry"
+        class="btb-detective-btn"
+        title="进入 3D 侦探墙"
+        @click="emit('openDetectiveWall')"
+      >
+        <Icon icon="mdi:magnify-scan" width="16" />
+        <span>侦探墙</span>
+        </button>
+        <button
+        class="btb-detective-btn"
+        :class="{ 'btb-detective-btn--active': showTopicPanel }"
+        title="话题管理（回刷 / 重命名 / 归档 / 删除 / 合并）"
+        @click="showTopicPanel = !showTopicPanel"
+      >
+        <Icon icon="mdi:folder-cog-outline" width="16" />
+        <span>话题管理</span>
         </button>
       </div>
     </div>
@@ -312,25 +585,31 @@ watch(
 
     <!-- Timeline -->
     <div v-else class="btb-chart">
-      <!-- Date header -->
-      <div class="btb-date-header" :style="{ width: svgWidth + 'px' }">
-        <span
-          v-for="col in dateColumns"
-          :key="col.date"
-          class="btb-date-label"
-          :style="{ left: col.x + 'px' }"
+      <!-- SVG canvas: outer spacer owns scaled dimensions; SVG alone is transformed. -->
+      <div ref="svgScrollRef" class="btb-svg-scroll">
+        <div
+          class="btb-svg-zoom"
+          :style="{
+            width: Math.round(svgWidth * zoomScale) + 'px',
+            height: Math.round(svgHeight * zoomScale) + 'px',
+          }"
         >
-          {{ col.label }}
-        </span>
-      </div>
-
-      <!-- SVG canvas -->
-      <div class="btb-svg-scroll">
         <svg
           :width="svgWidth"
           :height="svgHeight"
           class="btb-svg"
+          :style="{ transform: `scale(${zoomScale})` }"
         >
+          <!-- Date labels live inside the same pan/zoom coordinate system. -->
+          <text
+            v-for="col in dateColumns"
+            :key="'date-' + col.date"
+            :x="col.x"
+            :y="12"
+            text-anchor="middle"
+            class="btb-date-label"
+          >{{ col.label }}</text>
+
           <!-- Grid lines -->
           <line
             v-for="col in dateColumns"
@@ -339,9 +618,34 @@ watch(
             :y1="0"
             :x2="col.x"
             :y2="svgHeight"
-            stroke="rgba(255,255,255,0.04)"
+            :stroke="svgGridColor"
             stroke-width="1"
           />
+
+          <!-- Lane backgrounds + labels (lanes mode only) -->
+          <template v-if="viewMode === 'lanes'">
+            <g v-for="(lane, li) in laneRows" :key="'lane-' + lane.key">
+              <rect
+                :x="0"
+                :y="(laneLayout.laneY[li] ?? 0) + PAD"
+                :width="svgWidth"
+                :height="laneLayout.laneH[li] ?? LANE_BASE"
+                :fill="li % 2 === 0 ? svgLaneStripeColor : 'transparent'"
+              />
+              <circle
+                :cx="14"
+                :cy="(laneLayout.laneY[li] ?? 0) + PAD + (laneLayout.laneH[li] ?? LANE_BASE) / 2"
+                :r="5"
+                :fill="lane.color"
+              />
+              <text
+                :x="24"
+                :y="(laneLayout.laneY[li] ?? 0) + PAD + (laneLayout.laneH[li] ?? LANE_BASE) / 2 + 4"
+                class="btb-lane-label"
+                :fill="svgLaneLabelColor"
+              >{{ truncateLaneLabel(lane.label) }}<title>{{ lane.label }}</title></text>
+            </g>
+          </template>
 
           <!-- Edges -->
           <path
@@ -349,10 +653,12 @@ watch(
             :key="edge.key"
             :d="edge.d"
             fill="none"
-            :stroke="isEdgeHighlighted(edge) ? 'rgba(255,255,255,0.65)' : `rgba(255,255,255,${edgeOpacity(edge.distance)})`"
-            :stroke-width="isEdgeHighlighted(edge) ? 2.5 : edgeWeight(edge.distance)"
+            :stroke="viewMode === 'lanes' && edge.relationType === 'identity' ? (edge.color || '#60a5fa') : getEdgeColor(edge.distance, isEdgeHighlighted(edge))"
+            :stroke-width="viewMode === 'lanes' && edge.relationType === 'identity' ? 2 : (isEdgeHighlighted(edge) ? 2.5 : edgeWeight(edge.distance))"
+            :stroke-dasharray="viewMode === 'lanes' && edge.relationType !== 'identity' ? '4 3' : undefined"
+            :opacity="viewMode === 'lanes' && edge.relationType === 'identity' ? (isEdgeHighlighted(edge) ? 0.95 : 0.55) : (viewMode === 'lanes' ? 0.5 : 1)"
           >
-            <title>距离: {{ edge.distance.toFixed(3) }}</title>
+            <title>{{ edge.relationType === 'identity' ? '同话题延续' : '相似度' }} · 距离: {{ edge.distance.toFixed(3) }}</title>
           </path>
 
           <!-- Nodes -->
@@ -370,13 +676,14 @@ watch(
             @mouseenter="hoveredId = pn.data.id"
             @mouseleave="hoveredId = null"
           >
+            <title>{{ pn.data.cluster_label }}（{{ pn.data.period_date.slice(0, 10) }}）{{ pn.data.persistent_topic ? '\n话题：' + pn.data.persistent_topic.label : '' }}{{ pn.data.article_count ? '\n' + pn.data.article_count + ' 篇 · ' + pn.data.thread_count + ' 线索' : '' }}</title>
             <circle
               :cx="pn.cx"
               :cy="pn.cy"
               :r="selectedNode?.id === pn.data.id ? NODE_R + 2 : NODE_R"
               :fill="statusFill(pn.data.status)"
               :stroke-dasharray="pn.data.status === 'ending' ? '3 2' : undefined"
-              stroke="rgba(255,255,255,0.15)"
+              :stroke="svgNodeStroke"
               :stroke-width="selectedNode?.id === pn.data.id ? 2 : 1"
             />
             <text
@@ -390,6 +697,17 @@ watch(
             </text>
           </g>
         </svg>
+        </div>
+      </div>
+      <!-- 缩放控制条 -->
+      <div class="btb-zoom-bar">
+        <button class="btb-zoom-btn" :disabled="zoomScale <= MIN_SCALE" title="缩小" @click="zoomOut">
+          <Icon icon="mdi:minus" width="14" />
+        </button>
+        <button class="btb-zoom-label" :disabled="zoomScale === 1" title="重置为 100%" @click="resetZoom">{{ zoomPercent }}%</button>
+        <button class="btb-zoom-btn" :disabled="zoomScale >= MAX_SCALE" title="放大" @click="zoomIn">
+          <Icon icon="mdi:plus" width="14" />
+        </button>
       </div>
     </div>
   </div>
@@ -469,6 +787,13 @@ watch(
       </div>
     </Transition>
   </Teleport>
+
+  <!-- Unified topic management dialog (replaces native alert/prompt/confirm) -->
+  <TopicManageDialog
+    v-model="showTopicPanel"
+    :board-id="boardId"
+    @changed="loadData"
+  />
 </template>
 
 <style scoped>
@@ -479,16 +804,25 @@ watch(
   margin-top: 1rem;
   padding: 1rem;
   border-radius: 12px;
-  border: 1px solid rgba(255, 255, 255, 0.06);
-  background: rgba(255, 255, 255, 0.025);
+  border: 1px solid var(--color-border-subtle);
+  background: var(--color-bg-hover);
 }
 
 /* Controls */
 .btb-controls {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-start;
   gap: 0.5rem;
+}
+
+.btb-controls-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-left: auto;
 }
 
 .btb-controls-left {
@@ -500,7 +834,7 @@ watch(
 .btb-controls-title {
   font-size: 0.78rem;
   font-weight: 600;
-  color: rgba(255, 255, 255, 0.7);
+  color: var(--color-text-secondary);
 }
 
 .btb-days-toggle {
@@ -511,23 +845,206 @@ watch(
 .btb-days-btn {
   padding: 0.2rem 0.55rem;
   font-size: 0.65rem;
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  border: 1px solid var(--color-border-medium);
   border-radius: 4px;
   background: transparent;
-  color: rgba(255, 255, 255, 0.35);
+  color: var(--color-text-muted);
   cursor: pointer;
   transition: all 0.12s ease;
 }
 
 .btb-days-btn:hover {
-  color: rgba(255, 255, 255, 0.6);
-  border-color: rgba(255, 255, 255, 0.15);
+  color: var(--color-text-secondary);
+  border-color: var(--color-border-strong);
 }
 
 .btb-days-btn.active {
-  background: rgba(255, 255, 255, 0.1);
-  color: rgba(255, 255, 255, 0.85);
-  border-color: rgba(255, 255, 255, 0.2);
+  background: var(--color-bg-hover);
+  color: var(--color-text-primary);
+  border-color: var(--color-border-strong);
+}
+
+/* Detective wall entry button */
+.btb-detective-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.25rem 0.6rem;
+  font-size: 0.65rem;
+  border: 1px solid #DC2626;
+  border-radius: 4px;
+  background: rgba(220, 38, 38, 0.1);
+  color: #DC2626;
+  cursor: pointer;
+  transition: all 0.12s ease;
+}
+
+.btb-detective-btn:hover {
+  background: #DC2626;
+  color: #fff;
+}
+
+/* §话题管理最小版 */
+.btb-detective-btn--active {
+  background: rgba(96, 165, 250, 0.18);
+  border-color: #60a5fa;
+  color: #93c5fd;
+}
+.btb-topics {
+  margin: 0 0 0.75rem;
+  padding: 0.75rem;
+  border: 1px solid rgba(96, 165, 250, 0.22);
+  border-radius: 8px;
+  background: rgba(15, 23, 42, 0.45);
+}
+.btb-topics-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 0.6rem;
+  flex-wrap: wrap;
+}
+.btb-topics-stats {
+  display: flex;
+  gap: 0.85rem;
+  font-size: 0.72rem;
+  color: rgba(226, 232, 240, 0.7);
+}
+.btb-topics-stats b {
+  color: #e2e8f0;
+  font-weight: 600;
+}
+.btb-topics-warn {
+  color: #fbbf24;
+}
+.btb-topics-backfill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.3rem 0.7rem;
+  font-size: 0.7rem;
+  border: 1px solid #60a5fa;
+  border-radius: 4px;
+  background: rgba(96, 165, 250, 0.12);
+  color: #93c5fd;
+  cursor: pointer;
+  transition: all 0.12s ease;
+}
+.btb-topics-backfill:hover:not(:disabled) {
+  background: rgba(96, 165, 250, 0.28);
+}
+.btb-topics-backfill:disabled {
+  opacity: 0.55;
+  cursor: wait;
+}
+.btb-topics-empty {
+  padding: 1rem 0.5rem;
+  font-size: 0.72rem;
+  text-align: center;
+  color: rgba(226, 232, 240, 0.45);
+}
+.btb-topics-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  max-height: 320px;
+  overflow-y: auto;
+}
+.btb-topic-row {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  padding: 0.45rem 0.55rem;
+  border-radius: 6px;
+  background: rgba(30, 41, 59, 0.5);
+}
+.btb-topic-row--archived {
+  opacity: 0.5;
+}
+.btb-topic-color {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.btb-topic-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.btb-topic-label {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: #e2e8f0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.btb-topic-meta {
+  font-size: 0.65rem;
+  color: rgba(148, 163, 184, 0.8);
+}
+.btb-topic-ops {
+  display: flex;
+  gap: 0.25rem;
+  flex-shrink: 0;
+}
+.btb-topic-op {
+  padding: 0.2rem 0.45rem;
+  font-size: 0.65rem;
+  border: 1px solid rgba(148, 163, 184, 0.3);
+  border-radius: 4px;
+  background: transparent;
+  color: rgba(203, 213, 225, 0.85);
+  cursor: pointer;
+  transition: all 0.12s ease;
+}
+.btb-topic-op:hover:not(:disabled) {
+  border-color: #60a5fa;
+  color: #93c5fd;
+}
+.btb-topic-op:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.btb-topic-op--confirm:not(:disabled) {
+  border-color: rgba(52, 211, 153, 0.6);
+  color: #6ee7b7;
+}
+
+/* §视图切换 + 泳道 */
+.btb-view-toggle {
+  display: inline-flex;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid rgba(148, 163, 184, 0.25);
+  border-radius: 5px;
+  background: rgba(15, 23, 42, 0.4);
+}
+.btb-view-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.2rem 0.5rem;
+  font-size: 0.65rem;
+  color: rgba(203, 213, 225, 0.65);
+  background: transparent;
+  border: none;
+  border-radius: 3px;
+  cursor: pointer;
+  transition: all 0.12s ease;
+}
+.btb-view-btn:hover { color: #e2e8f0; }
+.btb-view-btn.active {
+  background: rgba(96, 165, 250, 0.18);
+  color: #93c5fd;
+}
+.btb-lane-label {
+  font-size: 10px;
+  font-weight: 600;
 }
 
 /* Loading */
@@ -540,7 +1057,7 @@ watch(
 .btb-skeleton {
   height: 36px;
   border-radius: 6px;
-  background: rgba(255, 255, 255, 0.03);
+  background: var(--color-bg-hover);
   animation: btbPulse 1.5s ease-in-out infinite;
 }
 
@@ -556,7 +1073,7 @@ watch(
   align-items: center;
   gap: 0.4rem;
   padding: 2.5rem 0;
-  color: rgba(255, 255, 255, 0.3);
+  color: var(--color-text-muted);
   font-size: 0.8rem;
 }
 
@@ -564,40 +1081,106 @@ watch(
 .btb-chart {
   display: flex;
   flex-direction: column;
-}
-
-/* Date header */
-.btb-date-header {
   position: relative;
-  height: 1.4rem;
-  margin-bottom: 0.15rem;
-  flex-shrink: 0;
 }
 
 .btb-date-label {
-  position: absolute;
-  transform: translateX(-50%);
   font-size: 0.6rem;
-  color: rgba(255, 255, 255, 0.3);
-  white-space: nowrap;
+  fill: var(--color-text-muted);
+  pointer-events: none;
 }
 
-/* SVG scroll container */
+/* SVG scroll container（缩放后两向可滚动） */
 .btb-svg-scroll {
-  overflow-x: auto;
-  overflow-y: hidden;
+  overflow: auto;
+  position: relative;
+  max-height: min(68vh, 720px);
+}
+
+.btb-svg-zoom {
+  position: relative;
 }
 
 .btb-svg {
   display: block;
+  transform-origin: 0 0;
+}
+
+/* 缩放控制条（右下角浮动，主题适配） */
+.btb-zoom-bar {
+  position: absolute;
+  bottom: 0.4rem;
+  right: 0.5rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px;
+  background: var(--color-bg-overlay);
+  border: 1px solid var(--color-border-medium);
+  border-radius: 5px;
+  z-index: 2;
+}
+.btb-zoom-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  color: var(--color-text-secondary);
+  background: transparent;
+  border: none;
+  border-radius: 3px;
+  cursor: pointer;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+.btb-zoom-btn:hover:not(:disabled) {
+  background: var(--color-bg-hover);
+  color: var(--color-text-primary);
+}
+.btb-zoom-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+.btb-zoom-label {
+  min-width: 42px;
+  padding: 0 0.3rem;
+  font-size: 0.65rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-text-secondary);
+  background: transparent;
+  border: none;
+  border-radius: 3px;
+  cursor: pointer;
+}
+.btb-zoom-label:hover:not(:disabled) {
+  color: var(--color-text-primary);
+}
+.btb-zoom-label:disabled {
+  cursor: default;
+  color: var(--color-text-muted);
 }
 
 /* Node label */
 .btb-node-label {
-  font-size: 9px;
+  font-size: 10px;
+  font-weight: 500;
   pointer-events: none;
-  opacity: 0.7;
+  opacity: 0.82;
+  paint-order: stroke;
+  stroke: var(--color-bg-hover);
+  stroke-width: 3px;
+  stroke-linejoin: round;
   transition: opacity 0.12s ease;
+}
+
+@media (max-width: 900px) {
+  .btb-controls {
+    align-items: flex-start;
+  }
+  .btb-controls-actions {
+    gap: 0.35rem;
+  }
 }
 
 /* DAG nodes */
@@ -664,12 +1247,12 @@ watch(
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(0, 0, 0, 0.4);
+  background: var(--color-bg-overlay);
 }
 
 .btb-popup {
-  background: #1e1e2e;
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-border-medium);
   border-radius: 10px;
   padding: 1rem 1.2rem;
   max-width: 420px;
@@ -704,19 +1287,19 @@ watch(
   border: none;
   border-radius: 4px;
   background: transparent;
-  color: rgba(255, 255, 255, 0.4);
+  color: var(--color-text-muted);
   cursor: pointer;
   transition: color 0.12s ease;
 }
 
 .btb-popup-close:hover {
-  color: rgba(255, 255, 255, 0.8);
+  color: var(--color-text-secondary);
 }
 
 .btb-popup-title {
   font-size: 0.9rem;
   font-weight: 600;
-  color: rgba(255, 255, 255, 0.85);
+  color: var(--color-text-primary);
   line-height: 1.4;
   margin-bottom: 0.3rem;
 }
@@ -726,20 +1309,20 @@ watch(
   align-items: center;
   gap: 0.5rem;
   font-size: 0.65rem;
-  color: rgba(255, 255, 255, 0.3);
+  color: var(--color-text-muted);
 }
 
 /* Threads section */
 .btb-threads {
   margin-top: 0.7rem;
-  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  border-top: 1px solid var(--color-border-subtle);
   padding-top: 0.6rem;
 }
 
 .btb-threads-loading,
 .btb-threads-empty {
   font-size: 0.7rem;
-  color: rgba(255, 255, 255, 0.25);
+  color: var(--color-text-muted);
   text-align: center;
   padding: 0.5rem 0;
 }
@@ -747,7 +1330,7 @@ watch(
 .btb-thread-skeleton {
   height: 28px;
   border-radius: 4px;
-  background: rgba(255, 255, 255, 0.03);
+  background: var(--color-bg-hover);
   margin-bottom: 0.3rem;
   animation: btbPulse 1.5s ease-in-out infinite;
 }
@@ -755,13 +1338,13 @@ watch(
 .btb-thread {
   margin-bottom: 0.35rem;
   border-radius: 6px;
-  border: 1px solid rgba(255, 255, 255, 0.06);
-  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid var(--color-border-subtle);
+  background: var(--color-bg-hover);
   overflow: hidden;
 }
 
 .btb-thread--expanded {
-  border-color: rgba(255, 255, 255, 0.1);
+  border-color: var(--color-border-medium);
 }
 
 .btb-thread-header {
@@ -774,11 +1357,11 @@ watch(
 }
 
 .btb-thread-header:hover {
-  background: rgba(255, 255, 255, 0.04);
+  background: var(--color-bg-hover);
 }
 
 .btb-thread-arrow {
-  color: rgba(255, 255, 255, 0.25);
+  color: var(--color-text-muted);
   transition: transform 0.15s ease;
   flex-shrink: 0;
 }
@@ -790,7 +1373,7 @@ watch(
 .btb-thread-title {
   flex: 1;
   font-size: 0.72rem;
-  color: rgba(255, 255, 255, 0.7);
+  color: var(--color-text-secondary);
   line-height: 1.3;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -799,26 +1382,26 @@ watch(
 
 .btb-thread-count {
   font-size: 0.6rem;
-  color: rgba(255, 255, 255, 0.2);
+  color: var(--color-text-muted);
   flex-shrink: 0;
 }
 
 .btb-thread-summary {
   font-size: 0.65rem;
-  color: rgba(255, 255, 255, 0.35);
+  color: var(--color-text-muted);
   line-height: 1.4;
   padding: 0 0.5rem 0.3rem 1.4rem;
 }
 
 /* Articles */
 .btb-articles {
-  border-top: 1px solid rgba(255, 255, 255, 0.04);
+  border-top: 1px solid var(--color-border-subtle);
   padding: 0.3rem 0.5rem 0.4rem;
 }
 
 .btb-articles-loading {
   font-size: 0.65rem;
-  color: rgba(255, 255, 255, 0.25);
+  color: var(--color-text-muted);
   padding: 0.2rem 0;
 }
 
@@ -833,39 +1416,39 @@ watch(
 }
 
 .btb-article:hover {
-  background: rgba(255, 255, 255, 0.05);
+  background: var(--color-bg-hover);
 }
 
 .btb-article:hover .btb-article-title {
-  color: rgba(255, 255, 255, 0.9);
+  color: var(--color-text-primary);
 }
 
 .btb-article-icon {
-  color: rgba(255, 255, 255, 0.2);
+  color: var(--color-text-muted);
   flex-shrink: 0;
 }
 
 .btb-article-title {
   flex: 1;
   font-size: 0.65rem;
-  color: rgba(255, 255, 255, 0.5);
+  color: var(--color-text-muted);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .btb-article:hover .btb-article-title {
-  color: rgba(255, 255, 255, 0.9);
+  color: var(--color-text-primary);
 }
 
 .btb-article-external {
-  color: rgba(255, 255, 255, 0.15);
+  color: var(--color-text-muted);
   flex-shrink: 0;
 }
 
 .btb-articles-more {
   font-size: 0.6rem;
-  color: rgba(255, 255, 255, 0.2);
+  color: var(--color-text-muted);
   padding: 0.15rem 0.3rem;
 }
 

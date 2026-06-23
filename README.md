@@ -1,422 +1,445 @@
-<p align="center"><img src="front/public/favicon.png" width="360" alt="icon"></p>
+<p align="center">
+  <img src="front/public/favicon.png" width="300" alt="Syntopica">
+</p>
 
-# Syntopica
+<h1 align="center">Syntopica</h1>
 
-*Where feeds become topics*
+<p align="center">
+  <strong>把分散的信息，整理成可以持续追踪的主题脉络。</strong>
+</p>
 
-Syntopica 是一个 AI-powered RSS 阅读器。  
-但它的目标不是让你更快刷完文章列表，而是把持续涌入的信息流整理成可以长期追踪的语义主题。
+<p align="center">
+  本地优先 · 自选信息源 · 语义板块 · 每日叙事 · 话题演进
+</p>
 
-如果你订阅了大量 RSS 源，每天都会面对几百篇新闻、博客、公告和文章。  
-普通 RSS 阅读器会把它们按时间排成列表，而 Syntopica 会尝试回答另一个问题：
+Syntopica 是一个面向个人研究与深度阅读的开源信息工作台。
 
-> 我关心的这些主题，今天到底发生了什么？
+它从 RSS、RSSHub 和网页等自选信息源持续采集内容，补全正文，生成摘要与语义标签；再把分散的文章归入用户维护的语义板块，形成板块日报、叙事线索、跨日话题演进和主题图谱。
 
-例如：
+Syntopica 想回答的不是“今天又有多少篇新文章”，而是：
 
-- 「AI Agent」今天有哪些新进展？
-- 「金价」上涨背后有哪些连续信号？
-- 「中东局势」哪些事件是昨天的延续？
-- 「某个产品发布会」后续反应是否还在发酵？
-- 哪些文章只是噪音，哪些值得进一步阅读？
+> 我长期关注的领域今天发生了什么？
+>
+> 哪些内容其实属于同一个事件？
+>
+> 一个话题是刚刚出现、持续发展，还是正在分化与结束？
 
-Syntopica 希望把 RSS 从“文章时间流”变成“长期主题流”。
+<p align="center">
+  <img src="img/1.3.3/topic-split.png" width="100%" alt="Syntopica 阅读工作台">
+</p>
 
-![主界面截图](img/1.3.2-narrative/topic-lifeline.png)
+## 为什么做 Syntopica
 
----
+信息工具已经很多，但几个问题仍然没有自然消失。
 
-## 为什么做 Syntopica？
+### 收集容易，形成认识很难
 
-很多 RSS 用户的问题不是信息太少，而是信息没有被组织。
+RSS 阅读器能把不同网站收进一个列表，热点聚合器能告诉你大家正在讨论什么，搜索引擎和 RAG 能回答一次查询。但对于长期关注一个领域的人，真正耗费精力的是后续工作：
 
-你可能订阅了：
+- 同一个事件被不同来源反复报道；
+- 同一主题每天换一批关键词和表达方式；
+- 单篇摘要看完即散，很难与昨天的进展连接；
+- 未读数字不断增长，但注意力并没有因此变得更有方向；
+- 每次搜索都要重新组织问题，长期关注缺少稳定的容器。
 
-- 新闻媒体
-- 技术博客
-- 产品更新
-- 行业资讯
-- GitHub / Release / Blog Feed
-- RSSHub 生成的各种信息源
+### 单篇 AI 摘要仍然是碎片
 
-结果是：每天打开阅读器，看到的是一长串按时间排列的文章。
+让 AI 总结一篇文章并不难。难的是把几十篇文章放在一起，判断哪些内容相关、为什么相关、哪些值得形成一个长期板块，并在第二天继续沿着昨天的线索整理。
 
-这些文章里有些属于你长期关注的议题，但它们通常被打散在不同来源、不同时间、不同标题之中。
+因此，Syntopica 没有把聊天框作为核心界面，而是选择了一个更慢、更可维护的对象：**语义板块**。
 
-普通 RSS 阅读器擅长回答：
+板块由用户定义边界，AI 负责持续整理，匹配结果保留解释，重要结论可以回到原文复核。
 
-> 今天来了哪些新文章？
+## 一次完整的用户旅程
 
-但长期关注一个议题时，你真正需要的是：
+假设你长期关注 AI Agent、模型基础设施和开发工具。
 
-> 这个主题今天发生了什么？  
-> 它和前几天有什么关系？  
-> 有哪些新信号？  
-> 哪些内容值得继续看？
+### 1. 先订阅你信任的信息源
 
-Syntopica 就是为这个问题设计的。
+你可以添加、分类和刷新 RSS Feed，也可以通过 OPML 批量导入。对于只提供摘要的 Feed，可选用 Firecrawl 补全网页正文。
 
----
+这里的数据边界由用户决定。Syntopica 不追求默认覆盖整个公开网络，而是优先整理你主动选择、愿意长期保留的信息源。
 
-## 核心想法
+<p align="center">
+  <img src="img/1.3.3/feed-setting.png" width="100%" alt="feed设置">
+</p>
 
-Syntopica 不把 RSS 只当作“文章列表”，而是把每篇文章理解为某些长期主题的一部分。
+### 2. 系统把文章加工成可组织的信息
 
-它会通过 AI 和语义标签，把文章归入你关心的板块，然后每天为每个板块生成叙事简报。
+文章进入系统后，会依次经历正文补全、AI 内容整理、语义标签提取和 Embedding。每一步都有独立状态，失败任务可以在队列中观察和重试。
+
+阅读页面仍然保留原始来源、原文入口、收藏、已读状态、预览与 iframe 模式。AI 内容是辅助层，不替代原文。
+<p align="center">
+  <img src="img/1.3.3/overview.png" width="100%" alt="冷启动板块升级建议">
+</p>
+
+### 3. 冷启动：从已有内容中发现值得追踪的板块
+
+刚开始使用时，用户往往知道自己“关注 AI”，却不一定已经想好应该建立哪些长期板块。
+
+“升级建议”会从高频辅助标签中收集候选项，结合聚类、相似板块和近期共现事件，让模型判断一组标签是否足以形成独立主题。系统可以建议创建或跳过，用户也可以把建议改为创建，或并入已有板块。
+
+它不是自动替用户决定信息架构，而是把一堆散落标签整理成可审阅的候选方案。
+
+<p align="center">
+  <img src="img/product-video-v2/04-upgrade-suggestions.jpg" width="100%" alt="冷启动板块升级建议">
+</p>
+
+如果你已经知道自己要追踪什么，也可以直接创建板块。输入名称和描述后，系统会推荐相关标签；确认后执行历史回填，过去的文章也会重新归位。
+
+### 4. 文章进入板块，但匹配不是黑盒
+
+语义板块不是一个关键词收藏夹。
+
+系统会综合精确标签命中、命中率、最高语义相似度和加权规则，将文章归入板块。用户可以按质量或时间查看文章，也可以按构成标签、来源和日期筛选结果。
+
+<p align="center">
+  <img src="img/product-video-v2/02-board-articles.jpg" width="100%" alt="语义板块中的文章归类">
+</p>
+
+点击文章上的匹配标签，可以看到它为什么进入当前板块：直接命中了哪个辅助标签、相似度是多少、逐对匹配结果如何，以及最终命中了哪条规则。
+
+<p align="center">
+  <img src="img/product-video-v2/03-match-detail.jpg" width="100%" alt="文章与语义板块的匹配解释">
+</p>
+
+这也是 Syntopica 的一个重要取舍：AI 可以帮助组织内容，但用户应当能够看到组织依据，并调整标签和阈值，而不是只能接受一个不可解释的推荐结果。
+
+### 5. 日报把文章列表变成当天的叙事
+
+当一天积累了足够内容，Syntopica 会为板块生成日报。
+
+日报先去重和筛选标签，再聚类成事件分组，生成今日重点和叙事线索，并按匹配质量区分核心事件、相关事件和其他动态。每条线索保留关联文章，可以继续展开阅读。
+
+<p align="center">
+  <img src="img/1.3.3/daily-report.png" width="100%" alt="语义板块日报详情">
+</p>
+
+<p align="center">
+  <img src="img/1.3.3/daily-2.png" width="100%" alt="语义板块日报详情">
+</p>
+
+这不是把若干单篇摘要拼在一起，而是尝试回答：“这个板块今天主要发生了哪些事，它们分别由哪些文章支撑？”
+
+### 6. 话题总览连接不同日期
+
+单日总结解决了“今天发生什么”，但长期研究还需要知道一个话题如何变化。
+
+话题总览把连续多天的叙事分组排列在时间轴上，并根据语义关系连接相邻节点。节点状态区分新兴、持续、分化、合并和结束。点击节点后，可以查看当天的叙事摘要和关联文章。
+
+<p align="center">
+  <img src="img/1.3.3/topic-relation.png" width="100%" alt="跨日话题演进时间线">
+</p>
+
+<p align="center">
+  <img src="img/1.3.3/topic-split.png" width="100%" alt="话题时间线节点详情">
+</p>
+
+## Syntopica 的产品闭环
 
 ```text
-RSS Feeds
-   ↓
-Articles
-   ↓
-AI semantic tags / embedding
-   ↓
-Topic sections
-   ↓
-Daily narrative brief
+自选信息源
+    |
+    v
+订阅刷新与正文补全
+    |
+    v
+AI 整理、标签提取、Embedding
+    |
+    +----------------------+
+    |                      |
+    v                      v
+辅助标签池             单篇文章阅读
+    |
+    v
+冷启动升级建议 / 手动创建板块
+    |
+    v
+语义匹配与历史文章回填
+    |
+    +----------------------+
+    |                      |
+    v                      v
+板块文章与匹配解释       板块日报
+                           |
+                           v
+                  跨日话题演进与主题图谱
 ```
 
-你不再需要从几百篇文章里手动拼线索。
-Syntopica 会把信息沉淀成可以持续追踪的 topics。
+## 与相邻产品的侧重点
 
+Syntopica、传统 RSS 阅读器、热点聚合工具和搜索产品解决的是相邻问题，不是简单的替代关系。
 
-## 一个典型使用场景
+| 产品形态 | 更擅长的任务 | 主要组织单位 |
+|---|---|---|
+| 传统 RSS 阅读器 | 集中订阅、管理未读、按时间阅读 | Feed 与文章 |
+| 热点榜单与舆情工具 | 发现正在流行的内容、监控关键词、及时提醒 | 平台热榜与关键词 |
+| 搜索 / RAG | 围绕一个明确问题检索和生成回答 | 查询与回答 |
+| **Syntopica** | 对自选信息源做长期语义组织，追踪主题如何变化 | 语义板块、日报与叙事线索 |
 
-把 RSS 订阅文章自动归类到几个「长期话题板块」里，每个板块每天生成一份叙事简报——就像雇了个编辑，每天帮你盯几个赛道。
+### 与 TrendRadar 的区别
 
-> **举例**：你关注金价，新建一个「金价」板块。系统不是靠关键词硬匹配"金价"两个字，而是通过 AI 提取的小标签（黄金、美联储、贵金属、汇率…）在**语义层面**筛选相关文章，每天自动生成一份叙事报告——这个板块今天发生了什么。
+[TrendRadar](https://github.com/sansan0/TrendRadar) 更擅长聚合多平台热点与 RSS，进行关键词筛选、AI 分析和多渠道推送。它适合回答：“现在有哪些热点值得立即关注？”
 
-![板块总览](img/1.3-feather/board_overview.png)
+Syntopica 更偏向个人研究工作台：用户先选择信任的信息源，再维护自己的语义板块，查看文章为什么被归类，并通过日报和跨日时间线理解主题演进。它更想回答：“我长期关注的方向最近发生了什么变化？”
 
-### 1. 手动建板块，即刻生效
+两者可以服务同一个用户的不同阶段：前者偏发现和提醒，后者偏整理、阅读、复核与沉淀。
 
-知道自己想要什么？直接创建板块，填个名字（比如「中东局势」），系统会根据名称+描述**自动推荐最相关的标签**给你勾选。确认后触发回填，历史文章马上归位。
+## 适合谁
 
-![手动创建板块](img/1.3-feather/personal_board.png)
-![选择构成标签](img/1.3-feather/custom_board_choose.png)
+Syntopica 更适合：
 
-### 2. 板块升级建议 — AI 帮你"长出新板块"
+- 长期跟踪技术、行业、政策、学术或竞争动态的个人研究者；
+- 已经积累较多 RSS 订阅，但不想只靠未读列表管理注意力的人；
+- 需要把多来源报道整理为事件线索的开发者、分析者和内容创作者；
+- 希望数据保存在本地，并自行选择本地模型或兼容 API 的用户；
+- 愿意维护信息源、标签和板块边界，逐步建立个人信息系统的人。
 
-不知道手动加什么？点一下「✨ 升级建议」，大模型会分析你订阅的新闻里哪些话题频繁出现，自动聚类后给出板块创建建议——就像系统在跟你说"你最近看了很多 AI 的内容，要不要建个 AI 板块？"
+它目前不太适合：
 
-建议分三种：🟢 创建新板块 / 🔵 合并到已有板块 / ⚪ 跳过（太碎片化不值得）。你挑着确认，不满意的直接跳过。
+- 只需要开箱即用热榜和手机推送的轻量用户；
+- 需要全网分钟级监测、告警和完整舆情覆盖的业务；
+- 需要多人协作、权限、租户和企业审计的团队；
+- 不希望维护数据库、抓取服务或 AI 模型配置的用户；
+- 把 AI 输出直接作为事实结论、而不回看原文的高风险场景。
 
-![板块升级建议](img/1.3.2-narrative/llm-upgrade.png)
+## 当前边界与不足
 
-### 3. 智能标签推荐 — 板块不够丰满？
+Syntopica 仍在持续迭代。下面这些不是隐藏条件：
 
-感觉板块内容少、不相关？打开构成标签面板，LLM 按相似度推荐更多相关小标签，你自己勾选哪些要加进来，板块覆盖范围随手调。
+- **单用户、无认证。** 默认用于本机或可信内网，不应直接暴露到公网。
+- **部署成本高于普通阅读器。** PostgreSQL + pgvector 是核心依赖；全文抓取、本地模型和队列会增加资源消耗。
+- **冷启动需要内容积累。** 没有足够的文章、标签和 Embedding 时，升级建议与板块日报不会立刻产生高质量结果。
+- **AI 管线存在等待时间。** 正文补全、摘要、打标、Embedding、升级建议和日报生成都可能耗时。
+- **结果依赖输入和模型。** RSS 完整度、正文抓取质量、模型指令遵循能力与阈值配置都会影响最终结果。
+- **语义组织仍可能犯错。** 匹配解释能帮助发现问题，但不能保证所有文章归类和叙事关系都正确。
+- **图谱是观察工具，不是事实数据库。** 重要判断需要回到关联文章和原始来源验证。
+- **当前更偏 Web 工作台。** 多渠道推送、移动端体验和团队协作不是现阶段专精方向。
 
-![管理构成标签](img/1.3.1-bugfix/tag_may_like.png)
-![板块详情](img/1.3.1-bugfix/article_match_detail.png)
+## 功能全景
 
-### 4. 每日叙事简报
+### 订阅与阅读
 
-每个板块每天自动生成一份叙事报告。不是冷冰冰的摘要堆砌，而是连贯的叙述——"这个板块今天发生了什么，有什么趋势"。
+- Feed 添加、编辑、删除、手动刷新和全量刷新；
+- 分类名称、图标与颜色管理；
+- OPML 导入与导出；
+- 自动刷新间隔和单 Feed 保留策略；
+- 三栏阅读布局、收藏、已读标记和日期筛选；
+- 正文预览、原网页 iframe、全屏、上一篇与下一篇。
 
-![每日简报](img/1.3.2-narrative/daily-report.png)
+### 内容增强
 
-### 🤔 它和普通 RSS、搜索引擎、RAG 有什么不同？
+- Firecrawl 网页正文抓取；
+- RSS 原始内容、抓取正文与 AI 整理稿切换；
+- 单篇摘要与语义标签生成；
+- 文章重新抓取、重新总结和重新打标；
+- 标签关注与按关注标签筛选文章。
 
-| 工具         | 你得到什么           | 局限             |
-| ---------- | --------------- | -------------- |
-| 普通 RSS 阅读器 | 按时间排列的文章列表      | 信息仍然是散的，需要自己归纳 |
-| 搜索引擎       | 某一刻的搜索结果        | 需要主动搜索，缺少长期积累  |
-| RAG 知识库    | 对历史内容提问         | 每次都需要你提出问题     |
-| 热点监控工具     | 当前流行的热点         | 不一定匹配你的长期关注主题  |
-| Syntopica  | 长期语义板块 + 每日叙事简报 | 更适合持续追踪个人关注议题  |
+### 语义板块
 
-Syntopica 更像是一个个人议题编辑器。
-它每天帮你把订阅源里的内容按长期主题整理好。
+- 手动创建板块与智能推荐构成标签；
+- 从辅助标签池生成冷启动升级建议；
+- 创建、跳过、改为创建或合并到已有板块；
+- 历史文章匹配回填；
+- 构成标签和辅助标签维护；
+- 匹配参数、方向不符降级和来源/日期筛选；
+- 文章匹配分数、逐对相似度与命中规则解释。
 
-## ✨ 更多功能
+### 日报与话题演进
 
-### 主题图谱
-- **图谱可视化**：日/周双视图，事件/人物/关键词三类节点与关联边，支持权重计算与时间窗口切换
-![主题图谱](img/image-topic.png)
-- **特别关注标签**：按标签类型（事件/人物/关键词）支持特别关注，后续可直接筛选仅包含该标签的文章
-![category](img/1.3-feather/article_preview.png)
+- 每个板块按日生成叙事报告；
+- 今日重点、事件聚类、叙事线索和关联文章；
+- 核心事件、相关事件与其他动态分层；
+- 7/14/30/60 天话题总览；
+- 新兴、持续、分化、合并与结束状态；
 
+### AI 与运行管理
 
-![主题图谱文章](img/image-topic-article.png)
+- 多 AI Provider 管理；
+- 按文章总结、正文补全、主题提取和 Embedding 等能力配置路由；
+- 主模型、备用模型、优先级和失败降级；
+- Embedding 模型与语义匹配阈值；
+- 标签、Embedding 等任务队列监控；
+- Feed 刷新、正文补全、日报等定时任务；
+- Firecrawl 地址、Key、抓取模式、超时和内容限制；
 
-### 📰 订阅管理
-
-虽然 Syntopica 的重点是主题组织，但它仍然保留了 RSS 阅读器的基础体验：
-
-你可以像使用普通 RSS 阅读器一样添加订阅源，也可以通过 OPML 导入已有订阅。
-
-Syntopica 不替你决定信息来源。
-你仍然掌控自己的 feeds
-
-- Feed 管理：添加、编辑、删除、手动刷新、全量刷新
-- 分类管理：自定义名称、图标、颜色
-- OPML 导入导出
-- 可配置自动刷新间隔
-- FeedBro 风格三栏布局
-- 收藏、已读标记、全屏阅读
-- 预览模式与 iframe 模式切换
-- 上一篇/下一篇快速导航
-
-你可以把它当作普通 RSS 阅读器使用，也可以逐步启用 AI 主题能力。
-
-![订阅管理界面](img/image-feed.png)
-![文章阅读界面](img/image-article.png)
-
-### 🤖 智能增强
-- Firecrawl 全文抓取，补全 RSS 摘要内容
-- AI 内容整理，生成结构化正文
-- 内容源切换：原始内容 / Firecrawl 全文 / AI 整理稿
-
-![内容增强状态面板](img/image-improve.png)
-
-### ⚙️ 全局配置
-- **AI Provider 路由**：多模型管理，按能力（总结/正文补全/主题提取/嵌入）分配不同 Provider，支持主备与拖拽排序
-![router](img/image-router.png)
-- **Firecrawl 服务**：配置 API 地址、Key、抓取模式、超时与内容长度限制
-![fircrawl](img/image-firecrawl.png)
-- **调度器监控**：查看 AI 总结、Feed 刷新等定时任务状态，支持手动触发与间隔调整
-![fircrawl](img/image-scheduler.png)
-- **队列管理**：实时监控标签打标队列、Embedding 队列的任务状态与失败重试
-![queue](img/image-queue.png)
-- **Feed 级设置**：单独配置每个订阅源的刷新间隔、最大保留文章数、AI 摘要开关
-![queue](img/image-feed-global.png)
-
-### 📊 阅读偏好
-- 自动追踪阅读行为（打开、关闭、滚动、收藏）
-- 偏好分数计算，优化排序
-- 阅读统计展示
-![queue](img/image-prefrence.png)
-
-## 🛠 技术栈
-
-### Frontend
-- Nuxt
-- Vue
-- TypeScript
-- Pinia
-- Tailwind CSS
-
-### Backend
-- Go
-- Gin
-- GORM
-
-### Storage
-- PostgreSQL
-
-### AI
-- OpenAI-compatible API
-- LLM
-- Embedding Model
-
-### Optional Services
-- RSSHub
-- Firecrawl
-
-## 🚀 快速开始
+## 快速开始
 
 ### 前置条件
 
-- [Docker](https://www.docker.com/) + Docker Compose
+- Docker 与 Docker Compose；
+- 本地开发需要 Go、Node.js、Corepack 和 `pnpm`；
+- 可选：OpenAI 兼容 API、Ollama 或 llama.cpp；
+- 可选：Firecrawl，用于网页正文抓取；
+- 可选：RSSHub，用于扩展可订阅来源。
 
-### 一键部署（推荐）
+### 初始化脚本
 
-使用 `init.sh` 脚本自动完成环境初始化、容器启动和 AI 服务配置：
+初始化脚本会引导完成基础服务、AI Provider 和可选 Firecrawl 配置。
 
-```bash
-- bash init.sh  （linux用这个）
-- init.ps1   （windows用这个）
+Windows：
+
+```powershell
+.\init.ps1
 ```
 
-脚本会引导完成以下步骤：
-
-1. **基础服务** — 检查 Docker，收集端口/密码配置，启动 PostgreSQL + Syntopica 容器
-2. **AI 服务**（可选）— 配置 AI 连接信息（安装和模型下载参见下方「AI 模型配置指南」）：
-   - **Ollama** — 连接本地 Ollama 实例
-   - **llama.cpp** — 连接本地 llama.cpp 服务
-   - **远程 API** — 使用 OpenAI 兼容的云端 API（如 OpenAI、DeepSeek）
-   - **跳过** — 之后通过 Web UI 手动配置
-3. **Firecrawl**（可选）— 全文抓取服务：
-   - **自部署** — 通过 `docker-compose.firecrawl.yml` 启动本地 Firecrawl 实例
-   - **云 API** — 使用 Firecrawl 云服务
-   - **跳过** — RSS 摘要模式，不抓取全文
-
-### 手动构建与部署
-
-**1. 交叉编译后端二进制（Linux amd64）**
+Linux：
 
 ```bash
-cd backend-go
-$env:CGO_ENABLED="0"; $env:GOOS="linux"; $env:GOARCH="amd64"; go build -o syntopica ./cmd/server
+bash init.sh
 ```
 
-**2. 构建 Docker 镜像并推送**
+启动后访问 `http://localhost:5000`。
+
+### Docker Compose
 
 ```bash
-docker build -t zanebonoalter/syntopica:latest .
-docker push zanebonoalter/syntopica:latest
-```
-
-> 镜像构建时会自动编译前端（`pnpm generate`），最终镜像为单容器：Go 后端同时 serve API 和前端静态文件，端口 5000。
-
-**3. 启动服务**
-
-```bash
-# 启动核心服务（PostgreSQL + Syntopica）
+# PostgreSQL + Syntopica
 docker compose up -d
 
-# 可选：启动 Firecrawl 全文抓取服务
+# 可选：Firecrawl 全文抓取
 docker compose -f docker-compose.firecrawl.yml up -d
-# 可选：启动 RssHub 服务 获取rss源
+
+# 可选：RSSHub + Redis + Browserless
 docker compose -f docker-compose.rsshub.yml up -d
 ```
 
-- 访问地址：`http://localhost:5000`
-- PostgreSQL 数据持久化在 `./data/` 目录
-- 自定义端口/密码：在 `.env` 中配置 `BACKEND_PORT`、`POSTGRES_PASSWORD` 等
+PostgreSQL 数据默认持久化在 `./data/`。端口和数据库密码可通过 `.env` 调整。
 
 ### 本地开发
 
-```bash
-# 1. 启动 PostgreSQL（需要 Docker，仅启动数据库）
+```powershell
+# 1. 启动 PostgreSQL + pgvector
 docker compose -f docker-compose.pg.yml up -d
 
-# 2. 前端
-cd front && pnpm install && pnpm dev    # http://localhost:3000
+# 2. 启动 Go 后端
+cd backend-go
+go run cmd/server/main.go
 
-# 3. 后端（需先启动 PostgreSQL）
-cd backend-go && go mod tidy && go run cmd/server/main.go  # http://localhost:5000
+# 3. 新终端启动 Nuxt 前端
+cd front
+pnpm install
+pnpm dev
 ```
 
-### 配套服务
+- 前端开发地址：`http://localhost:3000`
+- 后端 API：`http://localhost:5000/api`
+- WebSocket：`ws://localhost:5000/ws`
 
-以下服务均为可选，无需在本地开发阶段提前启动，所有配置均可通过 Web UI 完成。
+## AI 模型配置
 
-| 服务 | 本地开发选项 |
-|------|-------------|
-| **Firecrawl**（全文抓取） | 不启动 → RSS 摘要模式（够用）；或 `docker compose -f docker-compose.firecrawl.yml up -d` 自部署；或配置云 API |
-| **LLM**（AI 增强） | 推荐 [llama.cpp](https://github.com/ggml-org/llama.cpp) 本地推理（OpenAI 兼容 API）；或 Ollama；或远程 API（OpenAI / DeepSeek 等）；或不配先用，Web UI 里配 |
-| **RSSHub**（RSS 源代理） | 可选，`docker compose -f docker-compose.rsshub.yml up -d`，默认 `http://localhost:1200`。在 Feed 添加页面填入 RSSHub 实例地址即可使用 |
+模型、API Key、Embedding、能力路由和备用 Provider 都可以在 Web UI 中配置，不需要写入前端配置文件。
 
-启动后端后访问 `http://localhost:5000` → 设置 → AI Provider 中配置 LLM 端点。例如 llama.cpp 默认地址为 `http://localhost:8080/v1`，选好模型即可使用。
+### 可选方案
 
-## 🧠 AI 模型配置指南
+| 方案 | 适合场景 | 说明 |
+|---|---|---|
+| OpenAI Compatible API | 希望快速使用云模型 | 可连接 OpenAI、DeepSeek 等兼容接口 |
+| llama.cpp | 本地部署、希望更强控制力 | OpenAI 兼容接口，文本与 Embedding 可分开部署 |
+| Ollama | 本地模型快速试用 | 配置简单，但部分模型的结构化 JSON 遵循能力可能影响效果 |
+| 暂不配置 | 先体验基础阅读 | AI 增强、语义板块和日报能力会受限 |
 
-`init.sh` / `init.ps1` 仅配置 AI 连接信息（IP、端口、模型名），不下载二进制或模型文件。安装和模型下载请参考以下指南。
+### Ollama 示例
 
-### Ollama
-
-1. 安装：[ollama.com](https://ollama.com)
-2. 拉取模型：
-   ```bash
-   ollama pull qwen3:8b           # 文本模型
-   ollama pull nomic-embed-text   # 嵌入模型
-   ```
-3. 启动服务：`ollama serve`
-4. 因为ollama对json的支持不是强制的，可能导致效果一般，所以不太建议用ollama
-
-### llama.cpp
-
-1. 下载预编译二进制：[GitHub Releases](https://github.com/ggml-org/llama.cpp/releases)
-   - Windows + NVIDIA GPU：`llama-*-bin-win-cuda-*.zip`
-   - Windows CPU：`llama-*-bin-win-*.zip`
-   - macOS：`llama-*-bin-macos-*.zip`
-   - Linux：`llama-*-bin-linux-*.zip`
-2. 下载模型文件（见下方推荐表），来源：[ModelScope](https://modelscope.cn) / [HuggingFace](https://huggingface.co)
-3. 启动文本服务：
-   ```bash
-   ./llama-server -m model/Qwen3.5-9B-UD-Q6_K_XL.gguf -c 49152 -ngl 999 --cache-type-k q8_0 --cache-type-v q8_0 --flash-attn on --port 8080 --host 0.0.0.0 --jinja --reasoning-format deepseek --chat-template-kwargs '{\"enable_thinking\":false}' -np 2 > $null 2>&1
-   ```
-4. 启动嵌入服务（新终端）：
-   ```bash
-   ./llama-server -m model/Qwen3-Embedding-4B-Q6_K.gguf -c 8192 --embeddings --host 0.0.0.0 --pooling mean --port 8081 -ngl 0 > $null 2>&1
-   ```
-   > `-ngl 99` 表示全部层卸载到 GPU，无 GPU 时去掉此参数。
-
-### VRAM 推荐模型表
-
-| GPU VRAM | 推荐文本模型 | 推荐嵌入模型 |
-|----------|-------------|-------------|
-| 无 GPU | Qwen3-4B-Q4 (2.5GB) CPU | Qwen3-Emb-0.6B (0.4GB) |
-| 4 GB | Qwen3-4B-Q4 (2.5GB) | Qwen3-Emb-0.6B (0.4GB) |
-| 6 GB | Qwen3-8B-Q4 (4.9GB) | Qwen3-Emb-0.6B (0.4GB) |
-| **8 GB** | **Qwen3-8B-Q4_K_M (4.9GB) ★** | **Qwen3-Emb-4B (3.2GB)** |
-| **12 GB** | **Qwen3.5-9B-Q6 (8.0GB) ★** | **Qwen3-Emb-4B (3.2GB)** |
-| 16 GB | Qwen3-14B-Q4 (9.0GB) | Qwen3-Emb-4B (3.2GB) |
-| 24 GB+ | Qwen3-32B-Q4 (18GB) | Qwen3-Emb-4B (3.2GB) |
-
-> 实际占用受 KV cache 和 context length 影响，以上为模型文件大小。
-
-### Docker 网络说明
-
-当 Syntopica 后端运行在 Docker 容器内时，AI 服务运行在宿主机上。后端需要通过**宿主机 IP**（而非 `localhost`）访问 AI 服务。`init.sh` 会自动检测本机 IP 并作为默认值。
-
-手动配置时请使用宿主机局域网 IP（如 `192.168.x.x`）：
-- Ollama：`http://192.168.1.100:11434/v1`
-- llama.cpp 文本：`http://192.168.1.100:8080/v1`
-- llama.cpp 嵌入：`http://192.168.1.100:8081/v1`
-
-## 📂 项目结构
-
+```bash
+ollama pull qwen3:8b
+ollama pull nomic-embed-text
+ollama serve
 ```
+
+### llama.cpp 示例
+
+从 [llama.cpp Releases](https://github.com/ggml-org/llama.cpp/releases) 下载对应平台的预编译版本，并准备 GGUF 模型。
+
+文本服务：
+
+```bash
+./llama-server \
+  -m model/Qwen3.5-9B-UD-Q6_K_XL.gguf \
+  -c 49152 -ngl 999 \
+  --cache-type-k q8_0 --cache-type-v q8_0 \
+  --flash-attn on --port 8080 --host 0.0.0.0 \
+  --jinja --reasoning-format deepseek \
+  --chat-template-kwargs '{"enable_thinking":false}' \
+  -np 2
+```
+
+Embedding 服务：
+
+```bash
+./llama-server \
+  -m model/Qwen3-Embedding-4B-Q6_K.gguf \
+  -c 8192 --embeddings --pooling mean \
+  --host 0.0.0.0 --port 8081
+```
+
+如果 Syntopica 运行在 Docker 内，而模型服务运行在宿主机，请使用 `host.docker.internal`，例如：
+
+```text
+http://host.docker.internal:8080/v1
+http://host.docker.internal:8081/v1
+```
+
+### 显存参考
+
+实际占用还会受到 KV Cache、上下文长度、量化方式和并发数影响。
+
+| GPU 显存 | 文本模型参考 | Embedding 模型参考 |
+|---|---|---|
+| 无 GPU / 4 GB | Qwen3 4B 量化 | Qwen3 Embedding 0.6B |
+| 6-8 GB | Qwen3 8B 量化 | Qwen3 Embedding 0.6B / 4B |
+| 12 GB | Qwen3.5 9B 量化 | Qwen3 Embedding 4B |
+| 16 GB | Qwen3 14B 量化 | Qwen3 Embedding 4B |
+| 24 GB+ | Qwen3 32B 量化 | Qwen3 Embedding 4B |
+
+## 技术架构
+
+- **Frontend:** Nuxt 4、Vue 3、TypeScript、Pinia、Tailwind CSS v4
+- **Backend:** Go、Gin、GORM
+- **Storage:** PostgreSQL、pgvector
+- **Optional services:** Redis、Firecrawl、RSSHub、Browserless
+- **Realtime:** WebSocket
+- **AI integration:** OpenAI Compatible、Ollama、llama.cpp、按能力路由和主备降级
+
+```text
 Syntopica/
-├── front/                              # Nuxt 4 前端（Vue 3 + TypeScript + Pinia）
-├── backend-go/                         # Go + Gin 后端（GORM + PostgreSQL）
-├── docs/                               # 项目文档
-├── tests/                              # Python 集成测试
+├── front/                              # Nuxt 4 前端
+├── backend-go/                         # Go + Gin 后端
+├── docs/reference/                     # 当前架构、API、数据库和开发文档
+├── docs/v1.x/                          # 版本设计与里程碑记录
+├── docs/experience/                    # 产品体验与演示材料
+├── tests/workflow/                     # 工作流集成测试
+├── tests/firecrawl/                    # Firecrawl 集成测试
 ├── docker/                             # Docker 构建配置
-├── img/                                # 截图和图片资源
-├── data/                               # PostgreSQL 数据持久化（运行时生成）
-├── init.sh                             # 一键部署初始化脚本
-├── docker-compose.yml                  # Docker Compose（PostgreSQL + 前后端）
-├── docker-compose.pg.yml               # Docker Compose（仅 PostgreSQL，本地开发用）
-├── docker-compose.firecrawl.yml        # Docker Compose（Firecrawl 全文抓取，可选）
-└── docker-compose.rsshub.yml           # Docker Compose（RSSHub + Redis + Browserless，可选）
+├── img/                                # README 与演示图片
+├── docker-compose.yml                  # 完整部署
+├── docker-compose.pg.yml               # 本地开发 PostgreSQL
+├── docker-compose.firecrawl.yml        # 可选 Firecrawl
+└── docker-compose.rsshub.yml           # 可选 RSSHub
 ```
 
-## Roadmap
+## 文档
 
-### 当前重点
-优化语义板块匹配效果
-改进每日简报质量
-完善板块生命周期
-降低 AI 配置门槛
-优化本地部署体验
+- [架构总览](docs/reference/architecture/overview.md)
+- [后端架构](docs/reference/architecture/backend.md)
+- [前端架构](docs/reference/architecture/frontend.md)
+- [运行时与调度器](docs/reference/architecture/runtime.md)
+- [数据流](docs/reference/architecture/data-flow.md)
+- [API 索引](docs/reference/api/_index.md)
+- [语义板块 API](docs/reference/api/semantic-boards.md)
+- [日报 API](docs/reference/api/daily-reports.md)
+- [主题图谱 API](docs/reference/api/topic-graph.md)
+- [数据库文档](docs/reference/database/_index.md)
+- [配置说明](docs/reference/configuration.md)
+- [开发指南](docs/reference/development.md)
+- [测试指南](docs/reference/testing.md)
+- [部署指南](docs/reference/deployment.md)
 
-### 后续可能方向
-更强的主题演化分析
-更清晰的板块合并 / 拆分流程
-更好的跨天叙事追踪
-更多 RSSHub / 全文抓取适配
-更完善的图谱视图
-移动端体验优化
+## 贡献
 
-## 适合谁使用？
+欢迎通过 Issue 描述真实使用场景、信息源兼容问题、错误归类或可复现缺陷。
 
-### Syntopica 适合这些用户：
-
-- 每天阅读大量 RSS 的人
-- 长期关注某些行业、公司、技术或市场的人
-- 不想被信息流淹没，但又不想放弃信息密度的人
-- 希望用 AI 辅助整理信息，而不是只做单篇摘要的人
-- 想搭建个人信息雷达的人
-
-### 它不太适合：
-
-- 只想偶尔看几篇新闻的人
-- 不需要长期主题追踪的人
-- 完全不想配置 AI 服务的人
-- 只需要极简 RSS 客户端的人
-
-## 🤝 项目状态
-
-Syntopica 仍在持续开发中。
-
-当前更偏个人使用和实验性产品阶段。
-部分能力仍在调整，包括语义匹配、板块推荐、简报生成和本地模型适配。
-
-如果你对 RSS、个人信息管理、AI 内容组织、主题追踪感兴趣，欢迎试用、反馈或参与改进。
+提交代码前请阅读根目录以及 `front/`、`backend-go/` 下的 `AGENTS.md`，并保持改动范围聚焦。
 
 ## License
 

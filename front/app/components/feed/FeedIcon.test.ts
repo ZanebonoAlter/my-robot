@@ -1,0 +1,64 @@
+import { describe, expect, it } from 'vitest'
+import { mount } from '@vue/test-utils'
+import FeedIcon from './FeedIcon.vue'
+
+// FeedIcon's load-bearing behavior is graceful degradation: when an icon URL
+// fails to load (common for favicons behind the GFW or stale aggregator URLs),
+// it must fall back to the Iconify placeholder (rendered as <svg>) rather than
+// leaving a blank gap (the old display:none behavior).
+//
+// Note: @iconify/vue renders <Icon> as an inline <svg>, not as text containing
+// the icon name. So we assert on the <svg>/<img> element presence instead.
+describe('FeedIcon', () => {
+  it('renders an <img> when icon is an http URL', () => {
+    const wrapper = mount(FeedIcon, {
+      props: { icon: 'https://example.com/favicon.ico' },
+    })
+    expect(wrapper.find('img').exists()).toBe(true)
+    expect(wrapper.find('img').attributes('src')).toBe('https://example.com/favicon.ico')
+  })
+
+  it('falls back to the Iconify placeholder (svg) when the image fails to load', async () => {
+    const wrapper = mount(FeedIcon, {
+      props: { icon: 'https://example.com/favicon.ico' },
+    })
+    // Initially renders the <img>
+    expect(wrapper.find('img').exists()).toBe(true)
+
+    // Simulate image load failure
+    await wrapper.find('img').trigger('error')
+
+    // <img> is replaced by the Iconify <svg> placeholder (no blank gap)
+    expect(wrapper.find('img').exists()).toBe(false)
+    expect(wrapper.find('svg').exists()).toBe(true)
+  })
+
+  it('recovers when the icon prop changes after a failure', async () => {
+    const wrapper = mount(FeedIcon, {
+      props: { icon: 'https://example.com/broken.ico' },
+    })
+    await wrapper.find('img').trigger('error')
+    expect(wrapper.find('img').exists()).toBe(false)
+
+    // A new valid URL should render the <img> again (failure flag reset)
+    await wrapper.setProps({ icon: 'https://example.com/good.ico' })
+    expect(wrapper.find('img').exists()).toBe(true)
+    expect(wrapper.find('img').attributes('src')).toBe('https://example.com/good.ico')
+  })
+
+  it('renders the Iconify placeholder (svg) directly when icon is empty', () => {
+    const wrapper = mount(FeedIcon, {
+      props: { icon: '' },
+    })
+    expect(wrapper.find('img').exists()).toBe(false)
+    expect(wrapper.find('svg').exists()).toBe(true)
+  })
+
+  it('renders an iconify id as svg when icon is not a URL', () => {
+    const wrapper = mount(FeedIcon, {
+      props: { icon: 'mdi:github' },
+    })
+    expect(wrapper.find('img').exists()).toBe(false)
+    expect(wrapper.find('svg').exists()).toBe(true)
+  })
+})

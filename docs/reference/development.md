@@ -8,7 +8,7 @@
 
 ### 前置条件
 
-- Go 1.22+
+- Go 1.25+
 - Node.js + pnpm
 - Docker（用于运行 PostgreSQL）
 - PostgreSQL with pgvector（通过 Docker 启动）
@@ -114,23 +114,14 @@ pnpm test:unit -- app/utils/articleContentSource.test.ts -t "prefers firecrawl"
 运行单个包的测试：
 
 ```bash
-go test ./internal/domain/feeds -v
+go test ./internal/reader/service -v
 ```
 
 运行单个测试：
 
 ```bash
-go test ./internal/domain/feeds -run TestBuildArticleFromEntryTracksOnlyRunnableStates -v
+go test ./internal/reader/service -run TestBuildArticleFromEntryTracksOnlyRunnableStates -v
 ```
-
-### 辅助工具命令
-
-| 命令 | 目录 | 说明 |
-|------|------|------|
-| `go run cmd/migrate-digest/main.go` | `backend-go/` | Digest 数据迁移 |
-| `go run cmd/test-digest/main.go` | `backend-go/` | Digest 测试入口 |
-| `go run cmd/migrate-tags/main.go` | `backend-go/` | 标签数据迁移 |
-| `go run cmd/migrate-db/main.go` | `backend-go/` | SQLite → PostgreSQL 数据迁移 |
 
 ### Python 集成测试（在 `tests/workflow/` 目录执行）
 
@@ -216,10 +207,12 @@ python test_firecrawl_integration.py
 
 ### 前端样式约定
 
-- 保持 editorial / magazine 主题风格
-- 不回退到蓝紫色 SaaS 视觉
+- 保持 editorial / magazine 主题风格，不回退到蓝紫色 SaaS 视觉
+- 使用三层 Token 架构：Primitive (`--raw-*`) → Semantic (`--color-*`) → Component (`--dialog-*` 等)
+- 通过 `data-theme="editorial|dark"` 切换主题，使用 `useTheme()` composable 管理状态
+- 组件只引用 Layer 2 语义 token，不直接使用原始色值
+- 统一组件：对话框使用 `AppDialog`，按钮使用 `AppButton`，开关使用 `AppToggle`，输入框使用 `AppInput`
 - 复用 `app/assets/css/main.css` 里的主题变量
-- 对话框、卡片、状态标签优先沿用现有语义类
 - 图标使用 Iconify
 
 ### 后端目录约定
@@ -228,13 +221,15 @@ python test_firecrawl_integration.py
 |------|------|
 | `cmd/server/` | 应用入口 |
 | `internal/app/` | HTTP 路由、中间件、运行时装配 |
-| `internal/domain/` | 业务域逻辑（feeds, articles, summaries, digest, contentprocessing, categories, topicanalysis, topicextraction, topicgraph, topictypes, aiadmin, preferences 等） |
-| `internal/domain/models/` | GORM 数据模型 |
-| `internal/jobs/` | 后台调度任务 |
-| `internal/platform/` | 共享基础设施（config, database, ws, ai, airouter, aisettings, middleware, tracing, opennotebook） |
+| `internal/admin/` | 管理后台（handler, service, scheduler, repository, wire） |
+| `internal/reader/` | 订阅与文章域 |
+| `internal/tagmanagement/` | 标签系统域 |
+| `internal/topicgraph/` | 主题图谱域 |
+| `internal/models/` | 共享 GORM 模型 |
+| `internal/platform/` | 共享基础设施（config, database, ws, airouter, aisettings, middleware, tracing, jsonutil, testutil） |
 | `configs/` | 配置文件 |
 
-业务逻辑放在 `internal/domain/*`，HTTP 路由注册在 `internal/app/router.go`，不在 handler 中写复杂业务。
+业务逻辑按业务域（`internal/reader/`、`internal/tagmanagement/`、`internal/topicgraph/`、`internal/admin/`）组织，HTTP 路由注册在 `internal/app/router.go`，不在 handler 中写复杂业务。
 
 ## 测试
 
@@ -253,7 +248,7 @@ python test_firecrawl_integration.py
 - **测试文件命名**：`*_test.go`，与被测文件同目录
 - **偏好 table-driven 测试**
 - **运行全部测试**：`go test ./...`
-- **运行单个包**：`go test ./internal/domain/feeds -v`
+- **运行单个包**：`go test ./internal/reader/service -v`
 
 ### 集成测试
 
@@ -280,7 +275,7 @@ pnpm test:unit                 # 单元测试
 golangci-lint run ./...        # 综合静态分析
 go vet ./...                   # Go 官方静态检查
 go build ./...                 # 编译检查
-go test ./internal/domain/feeds -v   # 针对范围的单元测试
+go test ./internal/reader/service -v   # 针对范围的单元测试
 go test ./...                  # 全量测试
 ```
 

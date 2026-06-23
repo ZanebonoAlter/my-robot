@@ -1,20 +1,7 @@
 schema: spec-driven
 
-# Project context (optional)
-# This is shown to AI when creating artifacts.
-# Add your tech stack, conventions, style guides, domain knowledge, etc.
-# Example:
-#   context: |
-#     Tech stack: TypeScript, React, Node.js
-#     We use conventional commits
-#     Domain: e-commerce platform
-
-# Per-artifact rules (optional)
-# Add custom rules for specific artifacts.
-# Example:
-#   rules:
-#     proposal:
-#       - Keep proposals under 500 words
-#       - Always include a "Non-goals" section
-#     tasks:
-#       - Break tasks into chunks of max 2 hours
+context: |
+  项目：Syntopica（Nuxt 4 前端 + Go/Gin 后端，单用户，PostgreSQL+pgvector）。
+  tasks.md 必须遵循 docs/reference/开发执行规范.md §11 归档门禁：
+  以「测试 / 文档 / 验证」三固定尾节收尾，验证节每条必须是「可执行命令 + 期望结果」。
+  纯文档 change 豁免代码测试，但必须附 grep 一致性校验。

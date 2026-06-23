@@ -5,7 +5,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
-	"syntopica-backend/internal/domain/models"
+	"syntopica-backend/internal/models"
 )
 
 type fakeProviderClient struct {
@@ -36,7 +36,7 @@ func TestRouterFallsBackOnRetryableProviderError(t *testing.T) {
 	p2 := models.AIProvider{Name: "backup", ProviderType: ProviderTypeOpenAICompatible, BaseURL: "https://b.example/v1", APIKey: "b", Model: "m2", Enabled: true}
 	require.NoError(t, db.Create(&p1).Error)
 	require.NoError(t, db.Create(&p2).Error)
-	route := models.AIRoute{Name: DefaultRouteName, Capability: string(CapabilityArticleCompletion), Enabled: true, Strategy: "ordered_failover"}
+	route := models.AIRoute{Name: DefaultRouteName, Capability: string(CapabilitySummary), Enabled: true, Strategy: "ordered_failover"}
 	require.NoError(t, db.Create(&route).Error)
 	require.NoError(t, db.Create(&models.AIRouteProvider{RouteID: route.ID, ProviderID: p1.ID, Priority: 1, Enabled: true}).Error)
 	require.NoError(t, db.Create(&models.AIRouteProvider{RouteID: route.ID, ProviderID: p2.ID, Priority: 2, Enabled: true}).Error)
@@ -50,7 +50,7 @@ func TestRouterFallsBackOnRetryableProviderError(t *testing.T) {
 		"backup":  {content: "ok from backup"},
 	}})
 
-	result, err := router.Chat(context.Background(), ChatRequest{Capability: CapabilityArticleCompletion, Messages: []Message{{Role: "user", Content: "hi"}}})
+	result, err := router.Chat(context.Background(), ChatRequest{Capability: CapabilitySummary, Messages: []Message{{Role: "user", Content: "hi"}}})
 	require.NoError(t, err)
 	require.NotNil(t, result)
 	require.Equal(t, "ok from backup", result.Content)
@@ -66,7 +66,7 @@ func TestRouterFallsBackOnTerminalError(t *testing.T) {
 	p2 := models.AIProvider{Name: "backup", ProviderType: ProviderTypeOpenAICompatible, BaseURL: "https://b.example/v1", APIKey: "b", Model: "m2", Enabled: true}
 	require.NoError(t, db.Create(&p1).Error)
 	require.NoError(t, db.Create(&p2).Error)
-	route := models.AIRoute{Name: DefaultRouteName, Capability: string(CapabilityArticleCompletion), Enabled: true, Strategy: "ordered_failover"}
+	route := models.AIRoute{Name: DefaultRouteName, Capability: string(CapabilitySummary), Enabled: true, Strategy: "ordered_failover"}
 	require.NoError(t, db.Create(&route).Error)
 	require.NoError(t, db.Create(&models.AIRouteProvider{RouteID: route.ID, ProviderID: p1.ID, Priority: 1, Enabled: true}).Error)
 	require.NoError(t, db.Create(&models.AIRouteProvider{RouteID: route.ID, ProviderID: p2.ID, Priority: 2, Enabled: true}).Error)
@@ -80,7 +80,7 @@ func TestRouterFallsBackOnTerminalError(t *testing.T) {
 		"backup":           {content: "ok from backup"},
 	}})
 
-	result, err := router.Chat(context.Background(), ChatRequest{Capability: CapabilityArticleCompletion, Messages: []Message{{Role: "user", Content: "hi"}}})
+	result, err := router.Chat(context.Background(), ChatRequest{Capability: CapabilitySummary, Messages: []Message{{Role: "user", Content: "hi"}}})
 	require.NoError(t, err)
 	require.NotNil(t, result)
 	require.Equal(t, "ok from backup", result.Content)

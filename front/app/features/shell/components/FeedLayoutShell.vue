@@ -1,21 +1,25 @@
 <script setup lang="ts">
 import { Icon } from '@iconify/vue'
+import { useRouter } from 'vue-router'
 import LayoutAppHeader from '~/features/shell/components/AppHeaderShell.vue'
 import LayoutAppSidebar from '~/features/shell/components/AppSidebarShell.vue'
 import LayoutArticleListPanel from '~/features/shell/components/ArticleListPanelShell.vue'
 import { useArticlesApi } from '~/api/articles'
-import ArticleContent from '~/features/articles/components/ArticleContentView.vue'
-import { normalizeArticle, type ArticlePayload } from '../../articles/utils/normalizeArticle'
-import { useGlobalAutoRefresh } from '~/features/feeds/composables/useAutoRefresh'
-import { useArticlePagination } from '~/features/articles/composables/useArticlePagination'
+import { ArticleContentView as ArticleContent } from '~/features/articles/public'
+import { normalizeArticle, type ArticlePayload } from '~/api/normalizers/article'
+import { useGlobalAutoRefresh } from '~/features/feeds/public'
+import { useArticlePagination } from '~/features/articles/public'
+import { useOnboarding } from '~/composables/useOnboarding'
+import FeedEmptyGuide from '~/features/feeds/components/FeedEmptyGuide.vue'
 import { SIDEBAR_DEFAULT_WIDTH, MAX_POLLING_TIME, REFRESH_POLLING_INTERVAL } from '~/utils/constants'
 import type { WatchedTag } from '~/api/watchedTags'
-import type { Article } from '~/types/article'
-import type { ArticleFilters } from '~/types/article'
+import type { Article, ArticleFilters } from '~/types/article'
+import type { ApiResponse } from '~/types'
 
 const apiStore = useApiStore()
 const feedsStore = useFeedsStore()
 const articlesApi = useArticlesApi()
+const articlesStore = useArticlesStore()
 
 const {
   state: paginationState,
@@ -34,6 +38,13 @@ const loading = computed(() => paginationState.loading)
 
 useGlobalAutoRefresh()
 
+const { isFirstRun, startTour } = useOnboarding()
+
+// Feed 空状态引导：无订阅源且无分类时显示
+const hasAnyFeedsOrCategories = computed(
+  () => feedsStore.feeds.length > 0 || feedsStore.categories.length > 0,
+)
+
 const sidebarCollapsed = ref(false)
 const sidebarWidth = ref(SIDEBAR_DEFAULT_WIDTH)
 const selectedCategory = ref<string | null>(null)
@@ -43,7 +54,8 @@ const selectedArticle = ref<Article | null>(null)
 const showAddFeedDialog = ref(false)
 const showAddCategoryDialog = ref(false)
 const showImportDialog = ref(false)
-const showGlobalSettings = ref(false)
+
+const router = useRouter()
 
 const editCategoryId = ref<string | null>(null)
 const editFeedId = ref<string | null>(null)
@@ -65,9 +77,9 @@ const editingFeed = computed(() =>
 )
 
 async function fetchGlobalUnreadCount() {
-  const response = await apiStore.fetchArticlesStats()
+  const response = await articlesStore.fetchArticlesStats()
   if (response.success && response.data) {
-    globalUnreadCount.value = (response.data as any).unread || 0
+    globalUnreadCount.value = response.data.unread || 0
   }
 }
 
@@ -81,9 +93,9 @@ async function loadWatchedTags() {
 }
 
 async function fetchFeeds() {
-  if (selectedCategory.value === 'uncategorized') {
+  if (selectedCategory.value === CAT_UNCATEGORIZED) {
     await apiStore.fetchFeeds({ uncategorized: true, per_page: 10000 })
-  } else if (selectedCategory.value && selectedCategory.value !== 'favorites') {
+  } else if (selectedCategory.value && selectedCategory.value !== CAT_FAVORITES) {
     await apiStore.fetchFeeds({ category_id: parseInt(selectedCategory.value), per_page: 10000 })
   } else {
     await apiStore.fetchFeeds({ per_page: 10000 })
@@ -92,7 +104,7 @@ async function fetchFeeds() {
 
 function buildArticleFilters() {
 	const filters: ArticleFilters = {}
-  if (selectedCategory.value === 'watched-tags') {
+  if (selectedCategory.value === CAT_WATCHED_TAGS) {
     if (selectedWatchedTagId.value) {
       filters.watched_tag_ids = selectedWatchedTagId.value
       filters.sort_by = 'date'
@@ -102,11 +114,11 @@ function buildArticleFilters() {
     }
   } else if (selectedFeed.value) {
     filters.feed_id = parseInt(selectedFeed.value)
-  } else if (selectedCategory.value === 'uncategorized') {
+  } else if (selectedCategory.value === CAT_UNCATEGORIZED) {
     filters.uncategorized = true
-  } else if (selectedCategory.value === 'favorites') {
+  } else if (selectedCategory.value === CAT_FAVORITES) {
     filters.favorite = true
-  } else if (selectedCategory.value && selectedCategory.value !== 'favorites') {
+  } else if (selectedCategory.value && selectedCategory.value !== CAT_FAVORITES) {
     filters.category_id = parseInt(selectedCategory.value)
   }
   if (startDate.value) {
@@ -123,43 +135,50 @@ async function loadArticles() {
 }
 
 onMounted(async () => {
-  // Wave 1: no dependencies between these two
-  await Promise.allSettled([
-    fetchFeeds(),
-    loadWatchedTags(),
-  ])
-  // Wave 2: may depend on feeds list
+  // 并行加载所有初始数据 — feeds 已由 app.vue 通过 apiStore.initialize() 提前加载
   await Promise.allSettled([
     loadArticles(),
+    loadWatchedTags(),
     fetchGlobalUnreadCount(),
   ])
+
+  // 首次访问自动启动新手引导（侧边栏等锚点此时已在 DOM 中）
+  if (isFirstRun.value) {
+    void startTour()
+  }
 })
 
 onUnmounted(() => {
   stopPollingRefreshStatus()
 })
 
-async function hydrateSelectedArticle(article: any) {
+async function hydrateSelectedArticle(article: Article) {
   selectedArticle.value = article
 
   try {
     const response = await articlesApi.getArticle(Number(article.id))
     if (response.success && response.data && selectedArticle.value?.id === article.id) {
-      selectedArticle.value = normalizeArticle(response.data as unknown as ArticlePayload)
+      const hydrated = normalizeArticle(response.data as unknown as ArticlePayload)
+      // 保留乐观更新（hydrate 期间可能已调用 markAsRead）
+      selectedArticle.value = {
+        ...hydrated,
+        read: selectedArticle.value.read || hydrated.read,
+      }
     }
   } catch (error) {
     console.error('Failed to load article detail:', error)
   }
 }
 
-function handleArticleClick(article: any) {
+async function handleArticleClick(article: Article) {
   void hydrateSelectedArticle(article)
   if (!article.read) {
     updateArticle(article.id, { read: true })
     if (selectedArticle.value) {
       selectedArticle.value = { ...selectedArticle.value, read: true }
     }
-    apiStore.markAsRead(article.id)
+    // 直接调 API 标记已读（store.markAsRead 搜的是空数组）
+    await articlesApi.updateArticle(Number(article.id), { read: true })
   }
 }
 
@@ -187,7 +206,7 @@ async function handleArticleFavorite(articleId: string) {
   }
 }
 
-function handleArticleUpdate(articleId: string, updates: Partial<any>) {
+function handleArticleUpdate(articleId: string, updates: Partial<Article>) {
   updateArticle(articleId, updates)
 }
 
@@ -248,7 +267,7 @@ async function handleFeedClick(feedId: string) {
 }
 
 async function handleFavoritesClick() {
-  selectedCategory.value = 'favorites'
+  selectedCategory.value = CAT_FAVORITES
   selectedFeed.value = null
   selectedWatchedTagId.value = null
   startDate.value = ''
@@ -268,15 +287,8 @@ async function handleAllArticlesClick() {
   await loadArticles()
 }
 
-function handleTopicGraphClick() {
-  selectedCategory.value = 'topic-graph'
-  selectedFeed.value = null
-  selectedWatchedTagId.value = null
-  navigateTo('/topics')
-}
-
 async function handleWatchedTagsClick() {
-  selectedCategory.value = 'watched-tags'
+  selectedCategory.value = CAT_WATCHED_TAGS
   selectedFeed.value = null
   selectedWatchedTagId.value = null
   startDate.value = ''
@@ -306,34 +318,7 @@ async function pollRefreshStatus() {
       return
     }
 
-    const response = await apiStore.fetchFeeds({ per_page: 10000 })
-
-    if (response.success && response.data) {
-      const data = response.data as any
-      const items = data.items || data
-      apiStore.allFeeds = items.map((feed: any) => ({
-        id: String(feed.id),
-        title: feed.title,
-        description: feed.description || '',
-        url: feed.url,
-        category: feed.category_id ? String(feed.category_id) : '',
-        icon: feed.icon || undefined,
-        color: feed.color || '#6b7280',
-        lastUpdated: feed.last_updated || new Date().toISOString(),
-        articleCount: feed.article_count || 0,
-        unreadCount: feed.unread_count || 0,
-        maxArticles: feed.max_articles || 100,
-        refreshInterval: feed.refresh_interval || 60,
-        refreshStatus: feed.refresh_status || 'idle',
-        refreshError: feed.refresh_error,
-        lastRefreshAt: feed.last_refresh_at,
-        aiSummaryEnabled: feed.ai_summary_enabled !== undefined ? feed.ai_summary_enabled : true,
-        articleSummaryEnabled: feed.article_summary_enabled,
-        completionOnRefresh: feed.completion_on_refresh,
-        maxCompletionRetries: feed.max_completion_retries,
-        firecrawlEnabled: feed.firecrawl_enabled,
-      }))
-    }
+    await apiStore.fetchFeeds({ per_page: 10000 })
 
     const monitoredFeeds = selectedFeed.value
       ? feedsStore.feeds.filter(f => f.id === selectedFeed.value)
@@ -398,20 +383,20 @@ async function handleRefresh() {
 }
 
 async function handleMarkAllRead() {
-  let response: any
+  let response: ApiResponse<unknown> | undefined
   if (selectedFeed.value) {
-    response = await apiStore.markAllAsRead({ feedId: selectedFeed.value })
+    response = await articlesStore.markAllAsRead({ feedId: selectedFeed.value })
   } else if (selectedCategory.value) {
-    if (selectedCategory.value === 'uncategorized') {
-      response = await apiStore.markAllAsRead({ uncategorized: true })
+    if (selectedCategory.value === CAT_UNCATEGORIZED) {
+      response = await articlesStore.markAllAsRead({ uncategorized: true })
     } else {
       const categoryId = parseInt(selectedCategory.value)
       if (categoryId > 0) {
-        response = await apiStore.markAllAsRead({ categoryId })
+        response = await articlesStore.markAllAsRead({ categoryId })
       }
     }
   } else {
-    response = await apiStore.markAllAsRead()
+    response = await articlesStore.markAllAsRead()
   }
   if (response && !response.success) {
     refreshMessage.value = response.error || '标记已读失败'
@@ -477,7 +462,7 @@ import '~/components/FeedLayout.css'
       @add-category="showAddCategoryDialog = true"
       @import-opml="showImportDialog = true"
       @export-opml="handleExportOpml"
-      @settings="showGlobalSettings = true"
+      @settings="router.push('/settings')"
       @close-refresh-message="showRefreshMessage = false"
     />
 
@@ -496,7 +481,6 @@ import '~/components/FeedLayout.css'
         @category-click="handleCategoryClick"
         @feed-click="handleFeedClick"
         @favorites-click="handleFavoritesClick"
-        @topic-graph-click="handleTopicGraphClick"
         @all-articles-click="handleAllArticlesClick"
         @edit-category="handleEditCategory"
         @edit-feed="handleEditFeed"
@@ -525,7 +509,12 @@ import '~/components/FeedLayout.css'
 
 <!-- 文章内容 -->
       <div class="content-panel">
+        <FeedEmptyGuide
+          v-if="!hasAnyFeedsOrCategories"
+          @add="showAddFeedDialog = true"
+        />
         <ArticleContent
+          v-else
           :article="selectedArticle"
           :articles="articles"
           @favorite="handleArticleFavorite"
@@ -536,21 +525,21 @@ import '~/components/FeedLayout.css'
     </div>
 
     <!-- 添加订阅源对话框 -->
-    <DialogAddFeedDialog
+    <AddFeedDialog
       v-if="showAddFeedDialog"
       @close="showAddFeedDialog = false"
       @added="() => {}"
     />
 
     <!-- 添加分类对话框 -->
-    <DialogAddCategoryDialog
+    <AddCategoryDialog
       v-if="showAddCategoryDialog"
       @close="showAddCategoryDialog = false"
       @added="() => {}"
     />
 
     <!-- 编辑分类对话框 -->
-    <DialogEditCategoryDialog
+    <EditCategoryDialog
       v-if="editCategoryId && editingCategory"
       :category="editingCategory"
       @close="editCategoryId = null"
@@ -558,7 +547,7 @@ import '~/components/FeedLayout.css'
     />
 
     <!-- 编辑订阅源对话框 -->
-    <DialogEditFeedDialog
+    <EditFeedDialog
       v-if="editFeedId && editingFeed"
       :feed="editingFeed"
       @close="editFeedId = null"
@@ -567,14 +556,11 @@ import '~/components/FeedLayout.css'
     />
 
     <!-- 导入 OPML 对话框 -->
-    <DialogImportOpmlDialog
+    <ImportOpmlDialog
       v-if="showImportDialog"
       @close="showImportDialog = false"
       @imported="() => {}"
     />
-
-    <!-- 全局设置对话框 -->
-    <DialogGlobalSettingsDialog :show="showGlobalSettings" @update:show="showGlobalSettings = $event" />
   </div>
 </template>
 

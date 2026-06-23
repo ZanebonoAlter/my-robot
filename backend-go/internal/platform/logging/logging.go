@@ -79,9 +79,6 @@ func Close() {
 	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug})))
 }
 
-func ConfigureStdlib() {
-}
-
 func SetWriters(info io.Writer, err io.Writer) {
 	handlers := []slog.Handler{
 		slog.NewTextHandler(info, &slog.HandlerOptions{Level: slog.LevelDebug}),
@@ -114,10 +111,6 @@ func Warnln(args ...any) {
 
 func Errorf(format string, args ...any) {
 	slog.Error(fmt.Sprintf(format, args...))
-}
-
-func Errorln(args ...any) {
-	slog.Error(fmt.Sprint(args...))
 }
 
 func Fatalf(format string, args ...any) {

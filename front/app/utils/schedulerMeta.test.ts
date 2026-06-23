@@ -9,6 +9,7 @@ import {
   getSchedulerStatusLabel,
   isContentCompletionScheduler,
   isHotScheduler,
+  mapStatusToChinese,
   shouldShowContentCompletionPanel,
 } from './schedulerMeta'
 
@@ -50,7 +51,7 @@ describe('schedulerMeta', () => {
       database_state: {
         status: 'running',
       } as SchedulerTask,
-    })).toBe('idle')
+    })).toBe('空闲')
   })
 
   it('falls back to stale processing article when no live current article exists', () => {
@@ -64,5 +65,40 @@ describe('schedulerMeta', () => {
         title: '遗留 pending 文章',
       },
     })?.title).toBe('遗留 pending 文章')
+  })
+
+  it('maps newly added scheduler names to Chinese display names', () => {
+    expect(getSchedulerDisplayName('preference_update')).toBe('阅读偏好更新')
+    expect(getSchedulerDisplayName('tag_quality_score')).toBe('标签质量评分')
+    expect(getSchedulerDisplayName('log_cleanup')).toBe('日志清理')
+    expect(getSchedulerDisplayName('daily_report')).toBe('每日报告')
+    expect(getSchedulerDisplayName('blocked_article_recovery')).toBe('阻塞文章恢复')
+  })
+
+  it('maps scheduler status values to Chinese', () => {
+    expect(mapStatusToChinese('idle')).toBe('空闲')
+    expect(mapStatusToChinese('running')).toBe('执行中')
+    expect(mapStatusToChinese('error')).toBe('失败')
+    expect(mapStatusToChinese('triggered')).toBe('已触发')
+    expect(mapStatusToChinese('stopped')).toBe('已停用')
+    expect(mapStatusToChinese('disabled')).toBe('已停用')
+    expect(mapStatusToChinese('failed')).toBe('失败')
+    expect(mapStatusToChinese('unknown')).toBe('unknown')
+  })
+
+  it('returns Chinese status label for non-content-completion schedulers', () => {
+    expect(getSchedulerStatusLabel({
+      name: 'auto_refresh',
+      status: 'idle',
+      is_executing: false,
+      database_state: undefined as any,
+    })).toBe('空闲')
+
+    expect(getSchedulerStatusLabel({
+      name: 'auto_refresh',
+      status: 'running',
+      is_executing: true,
+      database_state: { status: 'running' } as any,
+    })).toBe('执行中')
   })
 })

@@ -2,6 +2,7 @@ package airouter
 
 import (
 	"fmt"
+	"math"
 )
 
 // EmbeddingRequest represents a request to generate embeddings
@@ -38,21 +39,5 @@ func CosineSimilarity(a, b []float64) (float64, error) {
 		return 0, nil
 	}
 
-	return dotProduct / (sqrt(normA) * sqrt(normB)), nil
-}
-
-// Borrowed from math package for efficiency
-func sqrt(x float64) float64 {
-	if x <= 0 {
-		return 0
-	}
-	// Newton's method for sqrt
-	z := x
-	for i := 0; i < 100; i++ {
-		z -= (z*z - x) / (2 * z)
-		if z*z-x < 1e-10 && -(z*z-x) < 1e-10 {
-			break
-		}
-	}
-	return z
+	return dotProduct / (math.Sqrt(normA) * math.Sqrt(normB)), nil
 }

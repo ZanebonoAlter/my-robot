@@ -83,6 +83,15 @@ export interface SchedulerLastRunSummary {
 	llm_calls_total?: number
 	llm_budget_total?: number
 	timed_out?: boolean
+	// Fields from scheduler job results
+	last_ai_call_logs_deleted?: number
+	last_otel_spans_deleted?: number
+	affected_count?: number
+	recovered_count?: number
+	updated_count?: number
+	report_count?: number
+	completed?: number
+	total?: number
 }
 
 export interface SchedulerTriggerResult {

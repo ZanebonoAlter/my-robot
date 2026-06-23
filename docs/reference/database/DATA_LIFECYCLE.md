@@ -131,7 +131,7 @@ DATA_LIFECYCLE.md  = "数据怎么变的"（哪些表被写入、状态字段怎
 └─────────────────────────────────────────────────────────────────────────┘
                               ↓
 ┌─ Tag 合并（源 DELETE）───────────────────────────────────────────────────┐
-│  AutoTagMerge 调度器 (3600s)                                             │
+│  手动触发或 tag_quality_score 调度器定期重算                              │
 │                                                                          │
 │  pgvector 余弦相似度 > 0.97 的标签对:                                    │
 │  → 迁移 article_topic_tags (source → target)                             │
@@ -229,7 +229,7 @@ DATA_LIFECYCLE.md  = "数据怎么变的"（哪些表被写入、状态字段怎
 
 ```
 ┌─ 输入收集 ───────────────────────────────────────────────────────────────┐
-│  NarrativeSummary 调度器 (86400s)                                        │
+│  daily_report 调度器 (86400s)                                            │
 │                                                                          │
 │  SELECT article_topic_tags + articles WHERE pub_date within window      │
 │  → 标签-文章关联                                                         │
@@ -272,7 +272,7 @@ DATA_LIFECYCLE.md  = "数据怎么变的"（哪些表被写入、状态字段怎
 │  narrative_summaries.status: emerging / continuing / splitting /        │
 │                              merging / ending                            │
 │                                                                          │
-│  INSERT INTO ai_call_logs (capability='narrative_summary', ...)         │
+│  INSERT INTO ai_call_logs (capability='daily_report', ...)         │
 └─────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -305,7 +305,7 @@ DATA_LIFECYCLE.md  = "数据怎么变的"（哪些表被写入、状态字段怎
 
 1. 需要 active SemanticBoard（`semantic_labels.label_type='board'`）且当日有匹配 event tags 才会生成 NarrativeBoard
 2. 冷启动无 SemanticBoard 或无匹配 event tags 时生成 0 个 NarrativeBoard，不报错
-3. `NarrativeSummaryScheduler` 调度器需启用（86400s 间隔）
+3. `daily_report` 调度器需启用（86400s 间隔）
 4. NarrativeBoard 是每日/scope 实例，长期语义资产是 SemanticBoard
 5. Board 叙事上下文来自 SemanticBoard 的 label 和 description
 

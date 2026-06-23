@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"syntopica-backend/internal/domain/models"
+	"syntopica-backend/internal/models"
 	// "syntopica-backend/internal/platform/logging"
 )
 
@@ -102,9 +102,7 @@ func (c *openAICompatibleClient) Chat(ctx context.Context, provider models.AIPro
 		"temperature": temperature,
 		"max_tokens":  maxTokens,
 	}
-	if !provider.EnableThinking {
-		payload["reasoning_effort"] = "none"
-	}
+
 	if provider.ProviderType == ProviderTypeOllama {
 		if req.JSONMode && req.JSONSchema != nil {
 			payload["format"] = req.JSONSchema
@@ -196,7 +194,9 @@ func (c *openAICompatibleClient) Chat(ctx context.Context, provider models.AIPro
 	}
 
 	content := strings.TrimSpace(parsed.Choices[0].Message.Content)
-	content = stripThinkTags(content)
+	if provider.EnableThinking {
+		content = stripThinkTags(content)
+	}
 
 	return content, nil
 }

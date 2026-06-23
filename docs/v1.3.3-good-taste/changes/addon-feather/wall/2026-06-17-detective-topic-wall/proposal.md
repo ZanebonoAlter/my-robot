@@ -1,0 +1,64 @@
+## Why
+
+标签管理页的话题总览（`BoardThreadBrowser`）当前是 2D SVG 时间线 DAG，信息密度高但缺乏叙事感。用户面对大量节点时难以聚焦于单条线索的演化。Syntopica 的核心价值不是"一网打尽"，而是"抽丝剥茧"——用户需要从今天的热点出发，沿着因果红线追踪一个话题的来龙去脉。
+
+3D 侦探照片墙将话题总览升级为沉浸式信息调查体验：卡片钉在软木墙上，红线连接相关话题，迷雾遮蔽时间窗口之外的信息，相机默认聚焦今天。交互模型从"看所有话题"转变为"追一根线索到底"。
+
+## What Changes
+
+- **新建 `TopicDetectiveWall` 全屏 3D 可视化**：Three.js 场景，卡片钉在墙上 + 红线连接 + 迷雾系统 + 导演相机，从 `BoardThreadBrowser` 旁的"进入侦探墙"按钮进入
+- **卡片系统**：话题节点以旧纸卡片形态呈现（BoxGeometry + 纸纹理），顶部红色图钉，微倾斜角度，状态色条
+- **红线连接**：风格化直线（不做物理悬垂），`CatmullRomCurve3` → `Line2`，发光材质，选中时脉动动画
+- **迷雾系统**：`FogExp2` 遮蔽时间窗口外的区域，切换时间范围时迷雾推进/后退（GSAP 动画）
+- **导演相机**：GSAP Timeline 驱动的运镜系统，默认聚焦今天，支持总览/聚焦/飞越三种镜头
+- **相机拖拽（OrbitControls）**：鼠标拖拽平移相机 + 滚轮缩放（禁旋转，保持 2.5D 轴测视角）。封装为 `WallCameraControls`，与 DirectorCamera 的 GSAP 运镜协调——运镜期间禁用 orbit、每帧同步 target
+- **板块切换转场**：红色 wipe 扫过 → 档案封面浮现（打字机字体、CONFIDENTIAL 盖章）→ 相机飞入新板块（当前无 BoardSelector 入口，`ChapterTransition.ts` 类保留待用，watch/DOM 已移除）
+- **话题聚焦模式（BFS 生命线）**：点击卡片后 BFS 沿 relations 扩展，严格受日期窗口约束，只点亮窗口内节点，非相关卡片退入背景。动画按 BFS depth（跳数）stagger 点亮，从焦点向外扩散
+- **完整生命周期视图**：点击"查看完整生命周期"调用 `getSectionLifecycle(id)`（不限天数），迷雾消失，只渲染该话题的完整演化线
+- **2D 详情面板叠加**：详情面板用普通 Vue overlay（`position: fixed` 屏幕固定位置，motion-v 过渡）叠加在 3D 场景上，呈现案件档案风格（案件编号、线索链、文章列表）；卡片悬停 tooltip 才用 CSS2DRenderer（跟随 3D 卡片坐标）
+- **后处理管线**：FilmGrain + Vignette + Bloom（红线发光），使用 `pmndrs/postprocessing`
+- **GSAP 动画驱动**：所有 3D 动画（相机、卡片入场、红线绘制、转场）由 GSAP Timeline 编排。GSAP 由本 change 自行引入（项目内无前置 change 提供该依赖）；2D overlay 的 Vue 组件过渡继续用已安装的 `motion-v`，二者分工不重叠。
+
+## Capabilities
+
+### New Capabilities
+- `detective-wall-scene`: Three.js 3D 侦探照片墙场景，含卡片、红线、迷雾、光照、后处理管线
+- `detective-wall-camera`: 导演相机系统，GSAP 驱动的运镜（聚焦今天、板块飞越、话题追踪）+ OrbitControls 拖拽平移/缩放（WallCameraControls，禁旋转）+ 板块切换的档案封面转场
+- `detective-wall-interaction`: 交互层——点击卡片触发 BFS 生命线展开（日期窗口约束）、Raycaster 悬停/点击、2D 面板叠加、时间范围切换
+
+### Modified Capabilities
+
+- `topic-overview`（现有 `BoardThreadBrowser` 2D 总览）：新增"进入侦探墙"入口按钮，不替换现有功能
+
+## Impact
+
+- **新增文件**：
+  - `features/tags/components/TopicDetectiveWall.client.vue`（全屏 3D 容器 + Vue 状态管理）
+  - `features/tags/components/detective-wall/`（Three.js 场景子模块）
+    - `TopicWallScene.ts`（场景管理、渲染循环、光照引用保存、frameCallbacks）
+    - `CardGroup.ts`（卡片+图钉创建、布局、CSS2D tooltip）
+    - `RedString.ts`（红线连接创建、drawProgress 动画）
+    - `FogSystem.ts`（迷雾密度管理、时间窗口联动）
+    - `DirectorCamera.ts`（相机运镜、Shot 类型定义、orbit 同步 hooks）
+    - `WallCameraControls.ts`（OrbitControls 封装，pan+zoom，与 DirectorCamera 协调）
+    - `WallPostProcessing.ts`（后处理管线 setup）
+    - `InteractionLayer.ts`（Raycaster、hover/click、BFS、lifecycle 编排、tooltip 转发）
+    - `lighting.ts`（Ambient+Spot+跟随光+选中光，返回引用供每帧更新）
+    - `ChapterTransition.ts`（板块切换转场、档案封面；当前无入口，类保留待用）
+  - `features/tags/components/detective-wall/shaders/`（自定义 shader：卡片纸纹理、迷雾、红线脉动）
+- **修改文件**：
+  - `features/tags/components/BoardThreadBrowser.vue`：添加"进入侦探墙"按钮
+  - `features/tags/components/TagsPage.vue`：集成全屏 3D 视图的显示/隐藏逻辑
+- **依赖变更**：
+  - `gsap`：需新增安装，本 change 自行引入（无前置 change 提供该依赖）。专用于 3D 动画编排（相机运镜、卡片 stagger、红线 drawProgress、BFS 逐节点点亮、章节转场 Timeline）。
+  - `motion-v`：已安装，复用。专用于 2D overlay 的 Vue 组件过渡（BoardSelector、DaysRange、DetailPanel 的 enter/leave）。
+  - `pmndrs/postprocessing`：需新增安装
+  - `three`：已安装，直接使用
+  - `Line2` / `LineMaterial`（Three.js examples）：用于粗红线
+- **无后端影响**：复用现有 API（`getBoardSectionTimeline`、`getSectionLifecycle`、`getDailyReportDetail`）
+- **无 API 变更**：不涉及数据层
+- **性能考量**：
+  - 默认 7 天窗口，卡片数量可控（单板块通常 < 30 个节点）
+  - 迷雾自动 cull 远处对象
+  - WebGL fallback：需要检测 WebGL 支持，不支持时保持 2D 总览
+  - 移动端：不提供 3D 入口，保持 2D 总览

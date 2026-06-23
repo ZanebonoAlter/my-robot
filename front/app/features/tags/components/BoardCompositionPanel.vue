@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref } from 'vue'
+import { useNotify } from '~/composables/useNotify'
 import { Icon } from '@iconify/vue'
 import { useSemanticBoardsApi, type AuxiliaryLabelItem } from '~/api/semanticBoards'
 import AuxiliaryLabelPicker from './AuxiliaryLabelPicker.vue'
@@ -15,6 +16,7 @@ const emit = defineEmits<{
   refresh: []
 }>()
 
+const { success: notifySuccess } = useNotify()
 const api = useSemanticBoardsApi()
 const showPicker = ref(false)
 const pendingIds = ref<number[]>([])
@@ -41,6 +43,7 @@ async function handleConfirmAdd() {
     }
     showPicker.value = false
     pendingIds.value = []
+    notifySuccess('已添加构成标签')
     notice.value = '已添加构成标签。历史标签归属不会自动回填，可手动触发 board 回填。'
     emit('refresh')
   } finally {
@@ -122,8 +125,8 @@ async function handleConfirmAdd() {
   gap: 0.6rem;
   padding: 1rem;
   border-radius: 12px;
-  border: 1px solid rgba(255, 255, 255, 0.06);
-  background: rgba(255, 255, 255, 0.025);
+  border: 1px solid var(--color-border-subtle);
+  background: var(--color-bg-hover);
 }
 
 .bcp-header {
@@ -135,15 +138,15 @@ async function handleConfirmAdd() {
 .bcp-title {
   font-size: 0.78rem;
   font-weight: 600;
-  color: rgba(255, 255, 255, 0.7);
+  color: var(--color-text-secondary);
 }
 
 .bcp-count {
   font-size: 0.65rem;
-  color: rgba(255, 255, 255, 0.3);
+  color: var(--color-text-muted);
   padding: 0.05rem 0.4rem;
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.06);
+  background: var(--color-bg-hover);
 }
 
 .bcp-spacer {
@@ -156,18 +159,17 @@ async function handleConfirmAdd() {
   gap: 0.25rem;
   padding: 0.2rem 0.5rem;
   border-radius: 6px;
-  border: 1px solid rgba(99, 179, 237, 0.2);
-  background: rgba(99, 179, 237, 0.06);
-  color: rgba(147, 197, 253, 0.7);
+  border: 1px solid var(--color-border-medium);
+  background: var(--color-bg-sunken);
+  color: var(--color-text-primary);
   font-size: 0.68rem;
   cursor: pointer;
   transition: all 0.12s ease;
 }
 
 .bcp-add-btn:hover {
-  background: rgba(99, 179, 237, 0.12);
-  border-color: rgba(99, 179, 237, 0.35);
-  color: rgba(147, 197, 253, 0.9);
+  background: var(--color-bg-hover);
+  border-color: var(--color-border-strong);
 }
 
 .bcp-notice {
@@ -176,9 +178,9 @@ async function handleConfirmAdd() {
   gap: 0.35rem;
   padding: 0.45rem 0.6rem;
   border-radius: 8px;
-  border: 1px solid rgba(99, 179, 237, 0.16);
-  background: rgba(99, 179, 237, 0.06);
-  color: rgba(191, 219, 254, 0.78);
+  border: 1px solid var(--color-secondary);
+  background: var(--color-secondary);
+  color: var(--color-text-inverted);
   font-size: 0.68rem;
   line-height: 1.5;
 }
@@ -186,8 +188,8 @@ async function handleConfirmAdd() {
 .bcp-picker {
   padding: 0.75rem;
   border-radius: 8px;
-  border: 1px solid rgba(255, 255, 255, 0.05);
-  background: rgba(0, 0, 0, 0.15);
+  border: 1px solid var(--color-border-subtle);
+  background: var(--color-input-bg);
 }
 
 .bcp-confirm {
@@ -202,17 +204,17 @@ async function handleConfirmAdd() {
   gap: 0.3rem;
   padding: 0.35rem 0.8rem;
   border-radius: 8px;
-  border: 1px solid rgba(240, 138, 75, 0.35);
-  background: rgba(240, 138, 75, 0.1);
-  color: rgba(255, 220, 200, 0.85);
+  border: 1px solid var(--color-accent);
+  background: var(--color-accent-subtle);
+  color: var(--color-accent);
   font-size: 0.72rem;
   cursor: pointer;
   transition: all 0.12s ease;
 }
 
 .bcp-confirm-btn:hover:not(:disabled) {
-  background: rgba(240, 138, 75, 0.18);
-  border-color: rgba(240, 138, 75, 0.5);
+  background: var(--color-accent-subtle);
+  border-color: var(--color-accent-hover);
 }
 
 .bcp-confirm-btn:disabled {
@@ -230,7 +232,7 @@ async function handleConfirmAdd() {
   width: 60px;
   height: 26px;
   border-radius: 8px;
-  background: rgba(255, 255, 255, 0.03);
+  background: var(--color-bg-hover);
   animation: bcpPulse 1.5s ease-in-out infinite;
 }
 
@@ -244,7 +246,7 @@ async function handleConfirmAdd() {
   align-items: center;
   gap: 0.4rem;
   padding: 1rem 0;
-  color: rgba(255, 255, 255, 0.25);
+  color: var(--color-text-muted);
   font-size: 0.75rem;
 }
 
@@ -252,16 +254,16 @@ async function handleConfirmAdd() {
   font-size: 0.68rem;
   padding: 0.15rem 0.4rem;
   border-radius: 6px;
-  border: 1px solid rgba(99, 179, 237, 0.2);
+  border: 1px solid var(--color-secondary);
   background: none;
-  color: rgba(147, 197, 253, 0.6);
+  color: var(--color-secondary);
   cursor: pointer;
   transition: all 0.1s;
 }
 
 .bcp-empty-add:hover {
-  background: rgba(99, 179, 237, 0.08);
-  color: rgba(147, 197, 253, 0.9);
+  background: var(--color-secondary);
+  color: var(--color-text-inverted);
 }
 
 .bcp-chips {
@@ -276,15 +278,15 @@ async function handleConfirmAdd() {
   gap: 0.3rem;
   padding: 0.25rem 0.5rem;
   border-radius: 8px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--color-border-medium);
+  background: var(--color-bg-hover);
   font-size: 0.72rem;
-  color: rgba(255, 255, 255, 0.75);
+  color: var(--color-text-secondary);
   transition: all 0.12s ease;
 }
 
 .bcp-chip:hover {
-  background: rgba(255, 255, 255, 0.08);
+  background: var(--color-bg-hover);
 }
 
 .bcp-chip--disabled {
@@ -294,10 +296,10 @@ async function handleConfirmAdd() {
 
 .bcp-chip-ref {
   font-size: 0.6rem;
-  color: rgba(255, 255, 255, 0.35);
+  color: var(--color-text-muted);
   padding: 0 0.25rem;
   border-radius: 4px;
-  background: rgba(255, 255, 255, 0.06);
+  background: var(--color-bg-hover);
 }
 
 .bcp-chip-remove {
@@ -309,7 +311,7 @@ async function handleConfirmAdd() {
   border: none;
   border-radius: 4px;
   background: none;
-  color: rgba(255, 255, 255, 0.2);
+  color: var(--color-text-muted);
   cursor: pointer;
   opacity: 0;
   transition: all 0.12s ease;

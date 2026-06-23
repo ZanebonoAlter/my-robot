@@ -4,9 +4,22 @@ import (
 	"fmt"
 
 	"gorm.io/gorm"
-	"syntopica-backend/internal/domain/models"
+	"syntopica-backend/internal/models"
 	"syntopica-backend/internal/platform/logging"
 )
+
+// tableExists reports whether a table exists in the public schema. Migrations
+// that target optional/domain-registered tables (e.g. the daily_report_* tables
+// registered by internal/topicgraph) use it to no-op when the table is absent,
+// rather than failing on CREATE INDEX / ALTER TABLE. This keeps migrations
+// safe on deployments that don't register those domain models.
+func tableExists(db *gorm.DB, table string) bool {
+	var exists bool
+	if err := db.Raw(`SELECT to_regclass(?) IS NOT NULL`, "public."+table).Row().Scan(&exists); err != nil {
+		return false
+	}
+	return exists
+}
 
 // postgresMigrations returns versioned migrations for operations that GORM AutoMigrate
 // cannot handle: extensions, custom indexes, triggers, data migrations, column/table drops.
@@ -328,6 +341,13 @@ func postgresMigrations() []Migration {
 			Version:     "20260526_0001",
 			Description: "Add indexes for board_daily_reports.",
 			Up: func(db *gorm.DB) error {
+				// The daily_report_* tables are registered by internal/topicgraph;
+				// deployments that don't import it (incl. the test harness) won't
+				// have them. Skip rather than fail on CREATE INDEX over a missing
+				// table.
+				if !tableExists(db, "board_daily_reports") || !tableExists(db, "daily_report_sections") {
+					return nil
+				}
 				indexes := []string{
 					"CREATE INDEX IF NOT EXISTS idx_board_daily_reports_semantic_board_id ON board_daily_reports(semantic_board_id)",
 					"CREATE INDEX IF NOT EXISTS idx_daily_report_sections_report_id ON daily_report_sections(report_id)",
@@ -346,14 +366,26 @@ func postgresMigrations() []Migration {
 			Version:     "20260529_0001",
 			Description: "Add indexes for daily_report_threads.",
 			Up: func(db *gorm.DB) error {
+				if !tableExists(db, "daily_report_threads") {
+					return nil
+				}
 				indexes := []string{
 					"CREATE INDEX IF NOT EXISTS idx_daily_report_threads_report_id ON daily_report_threads(report_id)",
 					"CREATE INDEX IF NOT EXISTS idx_daily_report_threads_section_id ON daily_report_threads(section_id)",
-					"CREATE INDEX IF NOT EXISTS idx_daily_report_threads_prev_thread_id ON daily_report_threads(prev_thread_id) WHERE prev_thread_id IS NOT NULL",
 				}
 				for _, s := range indexes {
 					if err := db.Exec(s).Error; err != nil {
 						return fmt.Errorf("daily_report_threads index: %w", err)
+					}
+				}
+				// prev_thread_id index — only if column exists (dropped in later migration)
+				var colExists bool
+				if err := db.Raw(`SELECT EXISTS (
+					SELECT 1 FROM information_schema.columns
+					WHERE table_name = 'daily_report_threads' AND column_name = 'prev_thread_id'
+				)`).Scan(&colExists).Error; err == nil && colExists {
+					if err := db.Exec("CREATE INDEX IF NOT EXISTS idx_daily_report_threads_prev_thread_id ON daily_report_threads(prev_thread_id) WHERE prev_thread_id IS NOT NULL").Error; err != nil {
+						return fmt.Errorf("daily_report_threads prev_thread_id index: %w", err)
 					}
 				}
 				return nil
@@ -504,6 +536,11 @@ func postgresMigrations() []Migration {
 			Version:     "20260603_0001",
 			Description: "Add unique constraint to section_relations, migrate prev_section_id, drop status/prev_thread_id columns.",
 			Up: func(db *gorm.DB) error {
+				// daily_report_* tables are optional (registered by internal/topicgraph);
+				// skip the whole block if the core table is absent.
+				if !tableExists(db, "daily_report_section_relations") {
+					return nil
+				}
 
 				// 1. Add unique constraint (table created by AutoMigrate)
 				if err := db.Exec(`
@@ -519,16 +556,22 @@ func postgresMigrations() []Migration {
 					return fmt.Errorf("add unique constraint: %w", err)
 				}
 
-				// 2. Migrate existing prev_section_id data into relations
-				if err := db.Exec(`
-					INSERT INTO daily_report_section_relations (from_section_id, to_section_id, distance, created_at)
-					SELECT ps.id, s.id, 0.0, NOW()
-					FROM daily_report_sections s
-					JOIN daily_report_sections ps ON ps.id = s.prev_section_id
-					WHERE s.prev_section_id IS NOT NULL
-					ON CONFLICT (from_section_id, to_section_id) DO NOTHING
-				`).Error; err != nil {
-					logging.Warnf("migration: migrate prev_section_id data: %v", err)
+				// 2. Migrate existing prev_section_id data into relations (if column exists)
+				var prevColExists bool
+				if err := db.Raw(`SELECT EXISTS (
+					SELECT 1 FROM information_schema.columns
+					WHERE table_name = 'daily_report_sections' AND column_name = 'prev_section_id'
+				)`).Scan(&prevColExists).Error; err == nil && prevColExists {
+					if err := db.Exec(`
+						INSERT INTO daily_report_section_relations (from_section_id, to_section_id, distance, created_at)
+						SELECT ps.id, s.id, 0.0, NOW()
+						FROM daily_report_sections s
+						JOIN daily_report_sections ps ON ps.id = s.prev_section_id
+						WHERE s.prev_section_id IS NOT NULL
+						ON CONFLICT (from_section_id, to_section_id) DO NOTHING
+					`).Error; err != nil {
+						logging.Warnf("migration: migrate prev_section_id data: %v", err)
+					}
 				}
 
 				// 3. Drop prev_section_id column
@@ -558,13 +601,219 @@ func postgresMigrations() []Migration {
 			},
 		},
 
+		// ── Clean up dead embedding config keys ──────────────────────────
+		{
+			Version:     "20260614_0001",
+			Description: "Remove dead embedding_config and ai_settings rows that are no longer consumed by any runtime code.",
+			Up: func(db *gorm.DB) error {
+				deadEmbeddingKeys := []string{
+					"high_similarity_threshold",
+					"low_similarity_threshold",
+					"embedding_dimension",
+					"embedding_model",
+				}
+				if err := db.Exec("DELETE FROM embedding_config WHERE key IN (?, ?, ?, ?)",
+					deadEmbeddingKeys[0], deadEmbeddingKeys[1], deadEmbeddingKeys[2], deadEmbeddingKeys[3]).Error; err != nil {
+					return fmt.Errorf("delete dead embedding_config keys: %w", err)
+				}
+				if err := db.Exec("DELETE FROM ai_settings WHERE key = ?", "narrative_board_embedding_threshold").Error; err != nil {
+					return fmt.Errorf("delete dead ai_settings key: %w", err)
+				}
+				return nil
+			},
+		},
+
 		// ── Section embedding column ────────────────────────────────────
 		{
 			Version:     "20260601_0002",
 			Description: "Add embedding vector column to daily_report_sections (dimension set at runtime).",
 			Up: func(db *gorm.DB) error {
+				if !tableExists(db, "daily_report_sections") {
+					return nil
+				}
 				if err := db.Exec(`ALTER TABLE daily_report_sections ADD COLUMN IF NOT EXISTS embedding vector`).Error; err != nil {
 					return fmt.Errorf("add daily_report_sections.embedding column: %w", err)
+				}
+				return nil
+			},
+		},
+
+		// ── Seed daily_report_time default ───────────────────────────────
+		{
+			Version:     "20260614_0002",
+			Description: "Seed daily_report_time default value into ai_settings.",
+			Up: func(db *gorm.DB) error {
+				var existing models.AISettings
+				if err := db.Where("key = ?", "daily_report_time").First(&existing).Error; err == nil {
+					return nil // already exists
+				}
+				return db.Create(&models.AISettings{
+					Key:         "daily_report_time",
+					Value:       "21:00",
+					Description: "日报生成时刻（HH:MM）",
+				}).Error
+			},
+		},
+
+		// ── Feed icon_source backfill ───────────────────────────────────
+		// AutoMigrate adds feeds.icon_source with default 'fallback', but
+		// existing rows carry legacy icon values with mixed semantics. This
+		// one-shot data migration classifies them by their icon value: URLs
+		// -> auto, placeholder strings -> fallback, other iconify ids ->
+		// custom (conservatively preserved as user-owned).
+		//
+		// Idempotency: versioned migrations run exactly once (tracked in
+		// schema_migrations), so unconditional classification is safe here.
+		// Rows created after this migration set icon_source correctly at write
+		// time and are never touched by this block again.
+		{
+			Version:     "20260617_0001",
+			Description: "Backfill feeds.icon_source from legacy icon values and normalize placeholders.",
+			Up: func(db *gorm.DB) error {
+				if !tableExists(db, "feeds") {
+					return nil
+				}
+				// Classify every legacy row by its current icon value.
+				if err := db.Exec(`
+					UPDATE feeds SET icon_source = CASE
+						WHEN icon IS NULL OR icon = '' OR icon = 'rss' OR icon = 'mdi:rss' THEN 'fallback'
+						WHEN icon LIKE 'http://%' OR icon LIKE 'https://%' THEN 'auto'
+						ELSE 'custom'
+					END
+					WHERE icon_source IS DISTINCT FROM (
+						CASE
+							WHEN icon IS NULL OR icon = '' OR icon = 'rss' OR icon = 'mdi:rss' THEN 'fallback'
+							WHEN icon LIKE 'http://%' OR icon LIKE 'https://%' THEN 'auto'
+							ELSE 'custom'
+						END
+					)
+				`).Error; err != nil {
+					return fmt.Errorf("backfill feeds.icon_source: %w", err)
+				}
+				// Normalize placeholder icon values for fallback rows (rss/"" -> mdi:rss)
+				if err := db.Exec(`
+				UPDATE feeds SET icon = 'mdi:rss'
+				WHERE icon_source = 'fallback' AND icon IN ('', 'rss')
+			`).Error; err != nil {
+					return fmt.Errorf("normalize feeds.icon placeholders: %w", err)
+				}
+				return nil
+			},
+		},
+
+		// ── Persistent topic layer ───────────────────────────────────────
+		// board_persistent_topics is created by AutoMigrate (registered by
+		// internal/topicgraph). This migration adds the domain-specific constraints
+		// AutoMigrate cannot express: the status CHECK, the (board, status) lookup
+		// index, and the relation_type column on section relations with its default
+		// backfill. The embedding HNSW index is created at startup by
+		// ensurePersistentTopicEmbeddingDimension (dimension-dependent, ≤2000 only),
+		// so it is NOT created here.
+		{
+			Version:     "20260619_0001",
+			Description: "Add persistent topic constraints and section relation_type column.",
+			Up: func(db *gorm.DB) error {
+				if tableExists(db, "board_persistent_topics") {
+					if err := db.Exec(`
+					DO $$ BEGIN
+						IF NOT EXISTS (
+							SELECT 1 FROM information_schema.table_constraints
+							WHERE constraint_name = 'chk_board_persistent_topics_status'
+							  AND table_name = 'board_persistent_topics'
+						) THEN
+							ALTER TABLE board_persistent_topics
+								ADD CONSTRAINT chk_board_persistent_topics_status
+								CHECK (status IN ('candidate', 'active', 'archived'));
+						END IF;
+					END $$
+				`).Error; err != nil {
+						return fmt.Errorf("add board_persistent_topics status CHECK: %w", err)
+					}
+					if err := db.Exec(`CREATE INDEX IF NOT EXISTS idx_persistent_topics_board_status
+					ON board_persistent_topics(semantic_board_id, status)`).Error; err != nil {
+						return fmt.Errorf("add board_persistent_topics (board, status) index: %w", err)
+					}
+				}
+
+				if tableExists(db, "daily_report_section_relations") {
+					// Add relation_type column (AutoMigrate adds it on fresh DBs; this
+					// ALTER covers DBs that had the table before the model gained the
+					// column, and backfills legacy rows to 'similarity').
+					var typeColExists bool
+					if err := db.Raw(`SELECT EXISTS (
+					SELECT 1 FROM information_schema.columns
+					WHERE table_name = 'daily_report_section_relations' AND column_name = 'relation_type'
+				)`).Scan(&typeColExists).Error; err == nil && !typeColExists {
+						if err := db.Exec(`ALTER TABLE daily_report_section_relations
+						ADD COLUMN relation_type VARCHAR(20) NOT NULL DEFAULT 'similarity'`).Error; err != nil {
+							return fmt.Errorf("add daily_report_section_relations.relation_type: %w", err)
+						}
+					}
+					if err := db.Exec(`CREATE INDEX IF NOT EXISTS idx_section_relations_type
+					ON daily_report_section_relations(relation_type)`).Error; err != nil {
+						return fmt.Errorf("add section_relations relation_type index: %w", err)
+					}
+				}
+				return nil
+			},
+		},
+
+		// ── Seed persistent topic config keys ───────────────────────────
+		{
+			Version:     "20260619_0002",
+			Description: "Seed persistent topic lifecycle config into ai_settings.",
+			Up: func(db *gorm.DB) error {
+				defaults := []struct {
+					Key, Value, Description string
+				}{
+					{"persistent_topic_match_threshold", "0.30", "Section-to-topic assignment embedding distance ceiling (dual confirmation)"},
+					{"persistent_topic_upgrade_threshold", "3", "Consecutive hit days for a candidate topic to auto-promote to active"},
+					{"persistent_topic_decay_window", "30", "Days an active topic can go without a hit before auto-archiving"},
+					{"persistent_topic_cluster_threshold", "0.28", "Complete-link clustering distance for backfilling topics from historical sections (0.28 calibrated on real data: 0.30 chained to 1 topic, 0.25 fragmented)"},
+				}
+				for _, d := range defaults {
+					var existing models.AISettings
+					if err := db.Where("key = ?", d.Key).First(&existing).Error; err != nil {
+						if err := db.Create(&models.AISettings{
+							Key:         d.Key,
+							Value:       d.Value,
+							Description: d.Description,
+						}).Error; err != nil {
+							logging.Warnf("Warning: failed to seed ai_settings key %s: %v", d.Key, err)
+						}
+					}
+				}
+				return nil
+			},
+		},
+
+		// ── Widen section_relations unique constraint to (from, to, type) ───
+		// Lets an identity edge (same persistent topic) and a similarity edge
+		// (Hungarian match) on the same section pair coexist as two rows.
+		// Before this, identity silently overwrote a strong Hungarian match,
+		// dropping the edge from the similarity-only timeline view. No data
+		// migration is needed: the old (from, to) constraint already forbade
+		// duplicates per pair, so widening to (from, to, relation_type) cannot
+		// introduce a violation — every existing (from, to, type) is already
+		// unique. Relation rows are rebuilt by RebuildBoardRelations.
+		{
+			Version:     "20260620_0001",
+			Description: "Widen section_relations unique constraint to (from_section_id, to_section_id, relation_type) so identity and similarity edges coexist.",
+			Up: func(db *gorm.DB) error {
+				if !tableExists(db, "daily_report_section_relations") {
+					return nil
+				}
+				if err := db.Exec(`
+					ALTER TABLE daily_report_section_relations
+					DROP CONSTRAINT IF EXISTS uq_section_relations_pair
+				`).Error; err != nil {
+					return fmt.Errorf("drop old section_relations pair constraint: %w", err)
+				}
+				if err := db.Exec(`
+					ALTER TABLE daily_report_section_relations
+					ADD CONSTRAINT uq_section_relations_pair UNIQUE (from_section_id, to_section_id, relation_type)
+				`).Error; err != nil {
+					return fmt.Errorf("add widened section_relations pair constraint: %w", err)
 				}
 				return nil
 			},

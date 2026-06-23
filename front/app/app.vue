@@ -1,5 +1,8 @@
-﻿<script setup lang="ts">
+<script setup lang="ts">
 import { Icon } from '@iconify/vue'
+
+// 初始化主题系统
+useTheme()
 
 const apiStore = useApiStore()
 const loading = ref(true)
@@ -20,21 +23,24 @@ onMounted(async () => {
 <template>
   <div v-if="loading" class="h-screen flex items-center justify-center">
     <div class="text-center">
-      <Icon icon="mdi:loading" width="48" height="48" class="animate-spin text-ink-600 mx-auto mb-4" />
-      <p class="text-ink-medium">正在加载...</p>
+      <Icon icon="mdi:loading" width="48" height="48" class="animate-spin mx-auto mb-4" style="color: var(--color-text-secondary)" />
+      <p style="color: var(--color-text-secondary)">正在加载...</p>
     </div>
   </div>
 
   <div v-else-if="error" class="h-screen flex items-center justify-center">
     <div class="text-center max-w-md">
       <Icon icon="mdi:alert-circle" width="48" height="48" class="text-[var(--color-error)] mx-auto mb-4" />
-      <h2 class="text-xl font-bold text-ink-dark mb-2">加载失败</h2>
-      <p class="text-ink-medium mb-4">{{ error }}</p>
-      <button class="btn-primary" @click="$router.go(0)">
+      <h2 class="text-xl font-bold mb-2" style="color: var(--color-text-primary)">加载失败</h2>
+      <p class="mb-4" style="color: var(--color-text-secondary)">{{ error }}</p>
+      <AppButton variant="primary" @click="$router.go(0)">
         重新加载
-      </button>
+      </AppButton>
     </div>
   </div>
 
   <NuxtPage v-else />
+
+  <!-- 全局 Toast 通知 -->
+  <NotifyContainer />
 </template>

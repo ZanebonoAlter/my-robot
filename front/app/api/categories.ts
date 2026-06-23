@@ -1,4 +1,5 @@
 import { apiClient } from './client'
+import { camelizeKeys, mapApiResponse } from '~/utils/api-helpers'
 import type { ApiResponse, CreateCategoryData, UpdateCategoryData, Category } from '~/types'
 
 interface CategoryPayload {
@@ -11,15 +12,14 @@ interface CategoryPayload {
   feed_count: number
 }
 
-export function normalizeCategory(cat: CategoryPayload): Category {
+function normalizeCategory(cat: CategoryPayload): Category {
+  const c = camelizeKeys<Category>(cat)
   return {
+    ...c,
     id: String(cat.id),
-    name: cat.name || '',
-    slug: cat.slug || (cat.name || '').toLowerCase().replace(/\s+/g, '-'),
-    icon: cat.icon || 'mdi:folder',
-    color: cat.color || '#6b7280',
-    description: cat.description || '',
-    feedCount: cat.feed_count || 0,
+    slug: c.slug || cat.name.toLowerCase().replace(/\s+/g, '-'),
+    icon: c.icon || 'mdi:folder',
+    color: c.color || '#6b7280',
   }
 }
 
@@ -32,23 +32,23 @@ export function useCategoriesApi() {
         data: response.data.map(normalizeCategory),
       }
     }
-    return response as unknown as ApiResponse<Category[]>
+    return { ...response, data: [] as Category[] }
   }
 
   async function createCategory(data: CreateCategoryData): Promise<ApiResponse<Category>> {
     const response = await apiClient.post<CategoryPayload>('/categories', data)
     if (response.success && response.data) {
-      return { ...response, data: normalizeCategory(response.data) }
+      return mapApiResponse(response, normalizeCategory(response.data))
     }
-    return response as unknown as ApiResponse<Category>
+    return { success: false, error: response.error }
   }
 
   async function updateCategory(id: number, data: UpdateCategoryData): Promise<ApiResponse<Category>> {
     const response = await apiClient.put<CategoryPayload>(`/categories/${id}`, data)
     if (response.success && response.data) {
-      return { ...response, data: normalizeCategory(response.data) }
+      return mapApiResponse(response, normalizeCategory(response.data))
     }
-    return response as unknown as ApiResponse<Category>
+    return { success: false, error: response.error }
   }
 
   async function deleteCategory(id: number): Promise<ApiResponse<void>> {

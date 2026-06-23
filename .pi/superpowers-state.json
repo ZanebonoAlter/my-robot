@@ -27,10 +27,11 @@
     }
   },
   "tdd": {
-    "phase": "refactor",
+    "phase": "red-pending",
     "testFiles": [
       "D:/project/my-robot/backend-go/internal/domain/models/semantic_label_test.go",
-      "D:/project/my-robot/backend-go/internal/platform/database/db_test.go"
+      "D:/project/my-robot/backend-go/internal/platform/database/db_test.go",
+      "front/app/features/topic-graph/components/TagHierarchy.test.ts"
     ],
     "sourceFiles": [
       "D:/project/my-robot/backend-go/internal/domain/models/semantic_label.go",
@@ -40,9 +41,20 @@
       "D:\\project\\my-robot\\backend-go\\internal\\domain\\tagging\\auxiliary_label_service.go",
       "D:\\project\\my-robot\\backend-go\\cmd\\server\\main.go",
       "D:/project/my-robot/backend-go/internal/domain/tagging/semantic_board_handler.go",
-      "D:/project/my-robot/backend-go/internal/domain/feed/handler.go"
+      "D:/project/my-robot/backend-go/internal/domain/feed/handler.go",
+      "front/app/composables/useEventStream.ts",
+      "front/app/stores/feeds.ts",
+      "front/app/stores/articles.ts",
+      "front/app/stores/api.ts",
+      "front/app/features/feeds/public.ts",
+      "front/app/features/preferences/public.ts",
+      "front/app/features/articles/public.ts",
+      "front/app/composables/useGlobalSettings.ts",
+      "front/app/features/articles/composables/useArticleContentView.ts",
+      "front/app/api/tagMergePreview.ts",
+      "front/app/types/feed.ts"
     ],
-    "redVerificationPending": false
+    "redVerificationPending": true
   },
   "debug": {
     "active": false,

@@ -129,3 +129,60 @@ MatchTopicTag 在加载 tagAuxiliaries 和 boardAuxiliaries 之外，额外加�
 #### Scenario: 指定 board 回填
 - **WHEN** 用户修改 board #100 的 board_composition 后触发 mode="board" 回填
 - **THEN** 系统 SHALL 重新计算可能匹配到 board #100 的 tag 归属
+
+### Requirement: Embedding 配置入口唯一性
+系统 SHALL NOT 提供独立的 embedding 阈值、维度或模型的全局配置入口。Tag 与 SemanticBoard 匹配参数的唯一用户可调入口 SHALL 为 `semantic_board_match_*` 系列配置（通过标签管理-匹配规则对话框维护）。embedding 的 model、provider、dimension SHALL 由 AI 路由（capability-routes）决定，不接受用户在设置页直接覆盖。
+
+#### Scenario: 设置页不含 embedding 配置栏
+- **WHEN** 用户打开设置页查看可用配置分区
+- **THEN** 系统 SHALL NOT 展示名为 "Embedding" 或包含相似度阈值/维度/模型字段的配置分区
+
+#### Scenario: 旧 embedding 配置 API 不可用
+- **WHEN** 客户端请求 `GET /embedding/config` 或 `PUT /embedding/config`
+- **THEN** 系统 SHALL 返回 404（路由未注册）
+
+#### Scenario: 板块匹配阈值滑块不存在
+- **WHEN** 用户在设置页查找 "板块匹配阈值" 滑块
+- **THEN** 系统 SHALL NOT 提供该控件；调整匹配行为 SHALL 通过 `semantic_board_match_*` 参数进行
+
+#### Scenario: 唯一可调入口仍生效
+- **WHEN** 用户在标签管理-匹配规则对话框将 `semantic_board_match_sim_threshold` 从 0.6 调整为 0.72
+- **THEN** 后续 tag-board 匹配 SHALL 使用新阈值（验证配置入口收敛后唯一入口的功能完整性）
+
+### Requirement: MatchTopicTag 使用缓存数据
+
+`MatchTopicTag` SHALL 从 board match cache 获取 board auxiliaries、board embeddings 和 AI config，而非每次调用都查询数据库。缓存未命中时由缓存层负责加载。
+
+#### Scenario: Cached board data used in match
+
+- **WHEN** `MatchTopicTag` 被调用且 board auxiliaries 缓存有效
+- **THEN** 系统 SHALL 使用缓存的 board auxiliaries 和 board embeddings 进行匹配，不执行 `loadBoardAuxiliaries` 或 `loadBoardEmbeddings` 的 DB 查询
+
+#### Scenario: Cache transparent on miss
+
+- **WHEN** `MatchTopicTag` 被调用且缓存为空（首次调用或失效后）
+- **THEN** 缓存层 SHALL 自动从 DB 加载数据、缓存并返回，`MatchTopicTag` 逻辑无需感知缓存存在
+
+### Requirement: Backfill 批处理并行
+
+`processJob` SHALL 使用 `errgroup.Group` 并行处理 topic tags，并发数由 `semantic_board_backfill_concurrency`（默认 4）控制。单个 tag 失败 SHALL NOT 取消整个 job。
+
+#### Scenario: Parallel processing with default concurrency
+
+- **WHEN** backfill job 包含 100 个 tags，`semantic_board_backfill_concurrency=4`
+- **THEN** 系统 SHALL 最多同时处理 4 个 tag，前一个完成即开始下一个
+
+#### Scenario: Individual failure does not cancel job
+
+- **WHEN** tag #123 匹配失败（如 embedding 缺失），但其他 tags 正常
+- **THEN** 系统 SHALL 记录 tag #123 的失败，继续处理剩余 tags
+
+#### Scenario: Concurrency configurable via ai_settings
+
+- **WHEN** 用户将 `semantic_board_backfill_concurrency` 从 4 改为 8
+- **THEN** 下一个 backfill job SHALL 以最多 8 个并发处理 tags
+
+#### Scenario: All tags processed despite failures
+
+- **WHEN** backfill job 包含 50 个 tags，其中 3 个失败
+- **THEN** 系统 SHALL 处理全部 50 个 tags，最终报告 Processed=47, Failed=3，状态为 completed

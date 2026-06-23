@@ -21,8 +21,5 @@ export function useSchedulerApi() {
       return triggerSchedulerRequest(name, params)
     },
 
-    async resetSchedulerStats(name: string) {
-      return apiClient.post<{ message: string }>(`/schedulers/${name}/reset-stats`)
-    },
   }
 }

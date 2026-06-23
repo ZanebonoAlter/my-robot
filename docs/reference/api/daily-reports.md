@@ -33,6 +33,62 @@ WebSocket 进度消息：
 }
 ```
 
+## GET `/semantic-boards/:id/section-timeline?days=30`
+
+查询板块日报 section 时间线，供 2D 线索浏览和 3D 侦探墙复用。
+
+`days` 以该板块最新 completed 日报为终点，精确包含最近 N 个自然日（允许 1-90，默认 30）。section 的 `status` 只由 `relation_type=similarity` 的匈牙利关系推导，identity 关系不参与状态计算。
+
+Response `data`：
+
+```json
+{
+  "sections": [
+    {
+      "id": 101,
+      "report_id": 12,
+      "period_date": "2026-05-26T12:00:00Z",
+      "cluster_label": "...",
+      "status": "continuing",
+      "article_count": 5,
+      "thread_count": 2,
+      "image_url": "https://...",
+      "persistent_topic_id": 9,
+      "topic_match_confidence": "anchor_hit",
+      "persistent_topic": {
+        "id": 9,
+        "label": "美伊谈判",
+        "status": "candidate",
+        "color": "#60a5fa",
+        "consecutive_hits": 3,
+        "can_activate": true
+      }
+    }
+  ],
+  "relations": [
+    { "from_id": 100, "to_id": 101, "distance": 0.23, "relation_type": "similarity" }
+  ]
+}
+```
+
+`image_url` 始终回传；无可用图片时为空字符串。后端优先从该 section 的线程关联文章中选择第一张非空图片，找不到时再从该 section 的 cluster tags 当天文章里选择第一张非空图片。
+
+## GET `/daily-reports/sections/:id/lifecycle`
+
+查询一个 section 所在连通分量的完整生命周期。响应结构与 `section-timeline` 相同，同样可能包含可选 `image_url`。
+
+## GET `/daily-reports/topics/:id/lifeline`
+
+按 `persistent_topic_id` 查询一个持久话题的全部 section 与内部关系，不受时间窗限制。
+
+## PATCH `/daily-reports/topics/:id`
+
+更新话题标题或状态。candidate 只有在 `consecutive_hits >= persistent_topic_upgrade_threshold` 后才允许人工更新为 active；未达门禁返回 400。active 才进入独立持久话题泳道。
+
+```json
+{ "status": "active" }
+```
+
 终态总会广播：
 
 ```json
@@ -50,6 +106,9 @@ WebSocket 进度消息：
 ## GET `/semantic-boards/:id/daily-reports?days=7`
 
 查询板块日报列表。
+
+**参数：**
+- `days`：查询最近 N 天的日报。默认值为 7（当 `days` 未提供或 `days <= 0` 时）。对于任意正数 `days`，系统将按实际请求天数查询，不再静默截断到 30 天。
 
 Response `data`：
 
@@ -89,7 +148,33 @@ Response `data`：
     "status": "completed",
     "highlights": [],
     "dynamics": "...",
-    "sections": []
+    "sections": [
+      {
+        "id": 366,
+        "cluster_label": "...",
+        "persistent_topic_id": 5,
+        "persistent_topic": {
+          "id": 5,
+          "label": "...",
+          "status": "active",
+          "color": "#...",
+          "consecutive_hits": 3,
+          "can_activate": false
+        },
+        "threads": []
+      }
+    ]
   }
 }
 ```
+
+当 section 已归属持久话题时，详情响应会附带轻量 `persistent_topic` 描述，供前端按
+`active` / `candidate` 状态分区。历史未归属 section 不返回该字段。
+
+## 前端消费约定
+
+日报阅读层不新增 API：列表和详情分别消费 `GET /semantic-boards/:id/daily-reports` 与 `GET /daily-reports/:id`，并以 `persistent_topic.status` 建立 active / candidate / unassigned 质量分区。masthead 顶部使用板块标题，日报 `title` / `summary` 映射为头条；highlights 最多展示三项。
+
+active 话题展开时按 `persistent_topic.id` 懒加载 `GET /daily-reports/topics/:id/lifeline`。前端只截取当前日报向前七个自然日，同日多个 section 聚合为一个带数量角标的节点；连线只消费 `relation_type=identity`，`similarity` 不进入 mini 泳道。节点点击按 `report_id` 复用日报详情缓存，在时间线模块内原位展示当日 section/thread。
+
+thread 的 `related_article_ids` 由现有 `GET /articles/:id` 逐项解析标题并按 article id 去重缓存；单篇 404/失败局部显示重试，不阻塞同话题其他文章。

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { Icon } from '@iconify/vue'
 import { useVirtualList } from '@vueuse/core'
-import ArticleCard from '~/features/articles/components/ArticleCardView.vue'
+import { ArticleCardView as ArticleCard } from '~/features/articles/public'
 import type { Article } from '~/types'
 
 interface Props {
@@ -201,17 +201,17 @@ import '~/components/layout/ArticleListPanel.css'
     <div v-if="currentFeed" class="mx-4 mt-4">
       <button
         v-if="!feedStatusExpanded"
-        class="flex items-center gap-2 rounded-full border border-ink-200 bg-white/75 px-3 py-1.5 shadow-subtle transition-colors hover:bg-white"
+        class="flex items-center gap-2 rounded-full border border-[var(--color-border-subtle)] bg-[var(--color-bg-hover)] px-3 py-1.5 shadow-[var(--shadow-subtle)] transition-colors hover:bg-[var(--color-bg-active)]"
         @click="feedStatusExpanded = true"
       >
-        <Icon icon="mdi:information-slab-circle" width="18" height="18" class="text-ink-400" />
+        <Icon icon="mdi:information-slab-circle" width="18" height="18" style="color: var(--color-text-muted)" />
       </button>
-      <div v-else class="rounded-2xl border border-ink-200 bg-white/75 p-3 shadow-subtle">
+      <div v-else class="rounded-2xl border border-[var(--color-border-subtle)] bg-[var(--color-bg-hover)] p-3 shadow-[var(--shadow-subtle)]">
         <div class="flex flex-wrap items-center gap-2">
           <button @click="feedStatusExpanded = false">
-            <Icon icon="mdi:chevron-up" width="16" height="16" class="text-ink-400" />
+            <Icon icon="mdi:chevron-up" width="16" height="16" style="color: var(--color-text-muted)" />
           </button>
-          <span class="mr-1 text-sm font-semibold text-ink-black">订阅源状态</span>
+          <span class="mr-1 text-sm font-semibold" style="color: var(--color-text-primary)">订阅源状态</span>
           <div v-for="item in feedStatusItems" :key="item.label" class="inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-semibold" :class="statusToneClasses(item.tone)">
             <Icon :icon="item.icon" width="14" height="14" :class="{ 'animate-spin': item.spinning }" />
             <span>{{ item.label }}</span>
@@ -253,16 +253,16 @@ import '~/components/layout/ArticleListPanel.css'
       </div>
 
       <div class="panel-actions">
-        <button class="btn-secondary-sm" @click="clearDateFilter">清除筛选</button>
-        <button class="btn-primary-sm" @click="applyCustomDateFilter">应用筛选</button>
+        <AppButton variant="secondary" size="sm" @click="clearDateFilter">清除筛选</AppButton>
+        <AppButton variant="primary" size="sm" @click="applyCustomDateFilter">应用筛选</AppButton>
       </div>
     </div>
 
     <div ref="listContainerRef" class="panel-content">
       <div v-if="props.loading && props.articles.length === 0" class="loading-state">
         <div class="text-center">
-          <Icon icon="mdi:loading" width="32" height="32" class="animate-spin text-blue-600 mx-auto mb-2" />
-          <p class="text-sm text-gray-500">加载中...</p>
+          <Icon icon="mdi:loading" width="32" height="32" class="animate-spin mx-auto mb-2" style="color: var(--color-accent)" />
+          <p class="text-sm" style="color: var(--color-text-secondary)">加载中...</p>
         </div>
       </div>
 
@@ -282,20 +282,20 @@ import '~/components/layout/ArticleListPanel.css'
         </div>
 
         <div v-if="props.loading" class="loading-more">
-          <Icon icon="mdi:loading" width="20" height="20" class="animate-spin text-blue-600" />
-          <span class="text-sm text-gray-500">加载更多...</span>
+          <Icon icon="mdi:loading" width="20" height="20" class="animate-spin" style="color: var(--color-accent)" />
+          <span class="text-sm" style="color: var(--color-text-secondary)">加载更多...</span>
         </div>
 
         <div v-else-if="!props.hasMore && props.articles.length > 0" class="no-more">
-          <span class="text-xs text-gray-400">已加载全部文章</span>
+          <span class="text-xs" style="color: var(--color-text-muted)">已加载全部文章</span>
         </div>
       </div>
 
       <div v-else class="empty-state">
         <div class="text-center">
-          <Icon icon="mdi:file-document-outline" width="48" height="48" class="text-gray-300 mx-auto mb-2" />
-          <h3 class="mb-1 text-base font-semibold text-gray-700">暂无文章</h3>
-          <p class="text-sm text-gray-500">
+          <Icon icon="mdi:file-document-outline" width="48" height="48" class="mx-auto mb-2" style="color: var(--color-text-muted)" />
+          <h3 class="mb-1 text-base font-semibold" style="color: var(--color-text-secondary)">暂无文章</h3>
+          <p class="text-sm" style="color: var(--color-text-muted)">
             {{ localStartDate || localEndDate ? '当前筛选条件下没有文章，请调整日期范围。' : '添加一些 RSS 订阅源开始阅读吧。' }}
           </p>
         </div>

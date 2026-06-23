@@ -1,9 +1,7 @@
-import type { Category, RssFeed, Article, BulkUpdateArticlesData, PaginatedData } from '~/types'
+import type { Category, RssFeed, PaginatedData } from '~/types'
 import { useCategoriesApi } from '~/api/categories'
 import { useFeedsApi } from '~/api/feeds'
-import { useArticlesApi } from '~/api/articles'
 import { useOpmlApi } from '~/api/opml'
-import { normalizeArticle, type ArticlePayload } from '~/features/articles/utils/normalizeArticle'
 
 interface FeedPayload {
   id: number
@@ -53,6 +51,12 @@ export const useApiStore = defineStore('api', () => {
     return response
   }
 
+  function apiErrNotify(response: { success: boolean; error?: string }, fallback: string) {
+    if (!response.success) {
+      useNotify().error(response.error || fallback)
+    }
+  }
+
   async function createCategory(data: {
     name: string
     icon?: string
@@ -66,6 +70,8 @@ export const useApiStore = defineStore('api', () => {
 
     if (response.success) {
       await fetchCategories()
+    } else {
+      apiErrNotify(response, "创建分类失败")
     }
 
     return response
@@ -87,6 +93,8 @@ export const useApiStore = defineStore('api', () => {
 
     if (response.success) {
       await fetchCategories()
+    } else {
+      apiErrNotify(response, "更新分类失败")
     }
 
     return response
@@ -100,6 +108,8 @@ export const useApiStore = defineStore('api', () => {
 
     if (response.success) {
       await fetchCategories()
+    } else {
+      apiErrNotify(response, "删除分类失败")
     }
 
     return response
@@ -107,7 +117,6 @@ export const useApiStore = defineStore('api', () => {
 
   // Feeds
   const feeds = ref<RssFeed[]>([])
-  const allFeeds = ref<RssFeed[]>([]) // Cache all feeds for sidebar display
 
   async function fetchFeeds(params: { page?: number; per_page?: number; category_id?: number; uncategorized?: boolean } = {}) {
     loading.value = true
@@ -145,12 +154,6 @@ export const useApiStore = defineStore('api', () => {
       }))
 
       feeds.value = mappedFeeds
-
-      // If fetching without filters (except per_page), cache all feeds
-      const hasFilters = params.category_id !== undefined || params.uncategorized === true
-      if (!hasFilters) {
-        allFeeds.value = mappedFeeds
-      }
     } else {
       error.value = response.error || 'Failed to fetch feeds'
     }
@@ -174,7 +177,6 @@ export const useApiStore = defineStore('api', () => {
 
     if (response.success) {
       await fetchFeeds({ per_page: 10000 })
-      await fetchArticles({ per_page: 10000 })
     }
 
     return response
@@ -188,7 +190,6 @@ export const useApiStore = defineStore('api', () => {
 
     if (response.success) {
       await fetchFeeds({ per_page: 10000 })
-      await fetchArticles({ per_page: 10000 })
     }
 
     return response
@@ -220,7 +221,6 @@ export const useApiStore = defineStore('api', () => {
 
     if (response.success) {
       await fetchFeeds({ per_page: 10000 })
-      await fetchArticles({ per_page: 10000 })
     }
 
     return response
@@ -231,6 +231,7 @@ export const useApiStore = defineStore('api', () => {
     const feedsApi = useFeedsApi()
     const response = await feedsApi.refreshFeed(Number(id))
     loading.value = false
+    if (!response.success) apiErrNotify(response, "刷新订阅源失败")
     return response
   }
 
@@ -239,163 +240,11 @@ export const useApiStore = defineStore('api', () => {
     const feedsApi = useFeedsApi()
     const response = await feedsApi.refreshAllFeeds()
     loading.value = false
+    if (!response.success) apiErrNotify(response, "刷新所有订阅源失败")
     return response
   }
 
-  // Articles
-  const articles = ref<Article[]>([])
-  const totalArticles = ref(0)
 
-  function syncFeedUnreadCount(feedId: string, updateCount: (current: number) => number) {
-    const seen = new Set<RssFeed>()
-
-    for (const collection of [feeds.value, allFeeds.value]) {
-      const feed = collection.find(item => item.id === feedId)
-      if (!feed || seen.has(feed)) {
-        continue
-      }
-
-      feed.unreadCount = updateCount(feed.unreadCount ?? 0)
-      seen.add(feed)
-    }
-  }
-
-  function clearFeedUnreadCounts(matchFeed: (feed: RssFeed) => boolean) {
-    const seen = new Set<RssFeed>()
-
-    for (const collection of [feeds.value, allFeeds.value]) {
-      for (const feed of collection) {
-        if (!matchFeed(feed) || seen.has(feed)) {
-          continue
-        }
-
-        feed.unreadCount = 0
-        seen.add(feed)
-      }
-    }
-  }
-
-  async function fetchArticles(filters: {
-    page?: number
-    per_page?: number
-    feed_id?: number
-    category_id?: number
-    uncategorized?: boolean
-    read?: boolean
-    favorite?: boolean
-    search?: string
-    start_date?: string
-    end_date?: string
-  } = {}) {
-    loading.value = true
-    error.value = null
-
-    // Set a high default per_page to get all articles
-    const params = { per_page: 10000, ...filters }
-
-    const articlesApi = useArticlesApi()
-    const response = await articlesApi.getArticles(params)
-
-    if (response.success && response.data) {
-      const data = response.data as unknown as PaginatedData<ArticlePayload>
-      const items = data.items || (response.data as unknown as ArticlePayload[])
-
-      articles.value = items.map((article: ArticlePayload) => normalizeArticle(article))
-
-      totalArticles.value = data.pagination?.total || items.length
-    } else {
-      error.value = response.error || 'Failed to fetch articles'
-    }
-
-    loading.value = false
-    return response
-  }
-
-  async function updateArticle(
-    id: string,
-    data: { read?: boolean; favorite?: boolean }
-  ) {
-    const articlesApi = useArticlesApi()
-    const article = articles.value.find((a) => a.id === id)
-    const previousRead = article?.read
-    const wasFavorite = article?.favorite
-
-    const response = await articlesApi.updateArticle(Number(id), data)
-
-    if (response.success) {
-      if (article) {
-        Object.assign(article, data)
-      }
-
-      if (article && data.read !== undefined && previousRead !== undefined && previousRead !== data.read) {
-        syncFeedUnreadCount(article.feedId, current => (data.read ? Math.max(0, current - 1) : current + 1))
-      }
-
-      if (data.favorite !== undefined && wasFavorite !== undefined && article) {
-        article.favorite = data.favorite
-      }
-    }
-
-    return response
-  }
-
-  async function toggleFavorite(id: string) {
-    const article = articles.value.find((a) => a.id === id)
-    if (article) {
-      return updateArticle(id, { favorite: !article.favorite })
-    }
-    return { success: false, error: 'Article not found' }
-  }
-
-  async function markAsRead(id: string) {
-    return updateArticle(id, { read: true })
-  }
-
-  async function markAllAsRead(options?: { feedId?: string; categoryId?: number; uncategorized?: boolean }) {
-    const data: BulkUpdateArticlesData = { read: true }
-    if (options?.feedId) {
-      data.feed_id = Number(options.feedId)
-    } else if (options?.categoryId) {
-      data.category_id = options.categoryId
-    } else if (options?.uncategorized) {
-      data.uncategorized = true
-    }
-
-    const articlesApi = useArticlesApi()
-    const response = await articlesApi.bulkUpdateArticles(data)
-
-    if (response.success) {
-      articles.value.forEach((a) => {
-        if (!options) {
-          a.read = true
-        } else if (options.feedId && a.feedId === options.feedId) {
-          a.read = true
-        } else if (options.categoryId) {
-          const feed = feeds.value.find(f => f.id === a.feedId)
-          if (feed && Number(feed.category) === options.categoryId) {
-            a.read = true
-          }
-        } else if (options.uncategorized) {
-          const feed = feeds.value.find(f => f.id === a.feedId)
-          if (feed && !feed.category) {
-            a.read = true
-          }
-        }
-      })
-
-      if (!options) {
-        clearFeedUnreadCounts(() => true)
-      } else if (options.feedId) {
-        clearFeedUnreadCounts(feed => feed.id === options.feedId)
-      } else if (options.categoryId) {
-        clearFeedUnreadCounts(feed => Number(feed.category) === options.categoryId)
-      } else if (options.uncategorized) {
-        clearFeedUnreadCounts(feed => !feed.category)
-      }
-    }
-
-    return response
-  }
 
   // OPML
   async function importOpml(file: File) {
@@ -407,6 +256,8 @@ export const useApiStore = defineStore('api', () => {
     if (response.success) {
       await fetchFeeds({ per_page: 10000 })
       await fetchCategories()
+    } else {
+      apiErrNotify(response, "导入 OPML 失败")
     }
 
     return response
@@ -416,19 +267,11 @@ export const useApiStore = defineStore('api', () => {
     const opmlApi = useOpmlApi()
     return opmlApi.exportOpml()
   }
-
-  async function fetchArticlesStats() {
-    const articlesApi = useArticlesApi()
-    const response = await articlesApi.getArticlesStats()
-    return response
-  }
-
-  // Initialize
+  // Initialize — 只负责基础数据，articlesStore 由具体消费者自行初始化
   async function initialize() {
     await Promise.all([
       fetchCategories(),
       fetchFeeds({ per_page: 10000 }),
-      fetchArticles({ per_page: 10000 }),
     ])
   }
 
@@ -437,9 +280,7 @@ export const useApiStore = defineStore('api', () => {
     error,
     categories,
     feeds,
-    allFeeds,
-    articles,
-    totalArticles,
+
     fetchCategories,
     createCategory,
     updateCategory,
@@ -450,16 +291,10 @@ export const useApiStore = defineStore('api', () => {
     deleteFeed,
     refreshFeed,
     refreshAllFeeds,
-    fetchArticles,
-    updateArticle,
-    toggleFavorite,
-    markAsRead,
-    markAllAsRead,
+
     importOpml,
     exportOpml,
-    fetchArticlesStats,
     initialize,
   }
 })
-
 

@@ -1,4 +1,5 @@
 import { getApiBaseUrl } from '~/utils/api'
+import { buildQueryString } from '~/utils/api-helpers'
 import type { ApiResponse } from '~/types'
 
 let currentTraceId: string | null = null
@@ -93,6 +94,14 @@ class ApiClient {
     })
   }
 
+  async patch<T>(endpoint: string, data?: unknown, options?: RequestInit): Promise<ApiResponse<T>> {
+    return this.request<T>(endpoint, {
+      ...options,
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    })
+  }
+
   async delete<T>(endpoint: string, options?: RequestInit): Promise<ApiResponse<T>> {
     return this.request<T>(endpoint, { ...options, method: 'DELETE' })
   }
@@ -145,16 +154,21 @@ class ApiClient {
     return response.blob()
   }
 
+  /**
+   * Build query string from params object.
+   * Returns empty string if no params, or string starting with `?`.
+   * Callers should NOT manually prepend `?`.
+   */
+  /**
+   * Build query string from params object.
+   * Delegates to buildQueryString for single implementation.
+   */
   buildQueryParams(params: unknown): string {
-    const searchParams = new URLSearchParams()
     if (params && typeof params === 'object') {
-      Object.entries(params as Record<string, unknown>).forEach(([key, value]) => {
-      if (value !== undefined && value !== null) {
-        searchParams.append(key, String(value))
-      }
-    })
+      const qs = buildQueryString(params as Record<string, unknown>)
+      return qs.startsWith('?') ? qs.slice(1) : qs
     }
-    return searchParams.toString()
+    return ''
   }
 }
 

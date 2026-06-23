@@ -60,7 +60,6 @@ Syntopica 全部文档入口。
 | [userguide/reading.md](userguide/reading.md) | 阅读功能（布局、文章阅读、阅读偏好） |
 | [userguide/feeds-and-categories.md](userguide/feeds-and-categories.md) | 订阅源与分类管理 |
 | [userguide/ai-features.md](userguide/ai-features.md) | AI 总结与 Provider 管理 |
-| [userguide/topic-graph.md](userguide/topic-graph.md) | Topic Graph 主题图谱 |
 | [userguide/tags.md](userguide/tags.md) | 文章标签 |
 | [userguide/narrative.md](userguide/narrative.md) | 叙事面板 |
 
@@ -72,9 +71,12 @@ Syntopica 全部文档入口。
 |------|------|------|
 | [v1.1-bugfixes/](v1.1-bugfixes/) | 业务漏洞修复 | 已完成 |
 | [v1.2-tag-intelligence/](v1.2-tag-intelligence/) | 标签智能处理 | 已完成 |
-| [v1.3-narrative-overhaul/](v1.3-narrative-overhaul/) | 叙事大修 | 进行中 |
+| [v1.3-narrative-overhaul/](v1.3-narrative-overhaul/) | 叙事大修 | 已完成 |
+| [v1.3.1-board-bug-fix/](v1.3.1-board-bug-fix/) | 版块 bug 修复 | 已完成 |
+| [v1.3.2-board-section/](v1.3.2-board-section/) | 版块分区 | 已完成 |
+| [v1.3.3-good-taste/](v1.3.3-good-taste/) | 架构深化与一致性 | 进行中 |
 
-每个里程碑包含：`SUMMARY.md` + `design/` + `user-guide/` + `changes/` + `debug/`
+每个里程碑根目录含 `SUMMARY.md`（变更清单 + 完成标准），`changes/` 存放从 openspec archive 归类来的 change。完整目录约定见 `reference/开发执行规范.md` §12 文档流转。
 
 ---
 
@@ -89,6 +91,7 @@ Syntopica 全部文档入口。
 
 ## 文档维护规则
 
-- `reference/` 为唯一权威源，反映当前系统真实状态，随里程碑完成而更新
-- 新里程碑在 `docs/` 下创建 `v{version}-{name}/` 目录
-- 里程碑内按 `design/`、`user-guide/`、`changes/`、`debug/` 四类分组
+- `reference/` 为唯一权威源，反映当前系统真实状态
+- SDD 文档三段式流转（archive → 里程碑 → reference）见 `reference/开发执行规范.md` §12
+- 归档门禁（验证节命令实测零失败）见 `reference/开发执行规范.md` §11
+- 新里程碑在 `docs/` 下创建 `v{version}-{name}/` 目录，含 `SUMMARY.md` + `changes/`

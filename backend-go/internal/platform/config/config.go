@@ -72,7 +72,7 @@ func LoadConfig(configPath string) error {
 	viper.SetDefault("database.postgres.conn_max_lifetime_minutes", 60)
 	viper.SetDefault("database.postgres.conn_max_idle_time_minutes", 10)
 	viper.SetDefault("cors.origins", []string{"http://localhost:3000", "http://localhost:3000"})
-	viper.SetDefault("cors.methods", []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"})
+	viper.SetDefault("cors.methods", []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"})
 	viper.SetDefault("cors.allow_headers", []string{"Content-Type", "Authorization"})
 
 	viper.SetDefault("log.level", "debug")

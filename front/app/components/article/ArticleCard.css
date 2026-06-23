@@ -13,7 +13,7 @@
 
 .article-card.selected {
   background: rgba(59, 107, 135, 0.12) !important;
-  border-left: 3px solid var(--color-ink-500);
+  border-left: 3px solid var(--color-accent);
   box-shadow: 0 2px 12px rgba(59, 107, 135, 0.2);
 }
 
@@ -21,7 +21,7 @@
   aspect-ratio: 16 / 9;
   width: 100%;
   overflow: hidden;
-  background-color: var(--color-paper-warm);
+  background-color: var(--color-bg-sunken);
 }
 
 .article-card .image-container img {
@@ -48,16 +48,16 @@
   padding: 0.5rem;
   border-radius: 0.5rem;
   transition: all 0.2s ease;
-  color: var(--color-ink-light);
+  color: var(--color-text-muted);
 }
 
 .article-card .favorite-btn:hover {
   background-color: rgba(212, 136, 60, 0.12);
-  color: var(--color-accent-amber);
+  color: var(--raw-amber-500);
 }
 
 .article-card .favorite-btn.active {
-  color: var(--color-accent-amber);
+  color: var(--raw-amber-500);
 }
 
 .article-card .meta-tags {
@@ -66,7 +66,7 @@
   align-items: center;
   gap: 0.5rem;
   font-size: 0.75rem;
-  color: var(--color-ink-light);
+  color: var(--color-text-muted);
 }
 
 .article-card .category-tag {
@@ -76,5 +76,5 @@
 }
 
 .article-card .read-badge {
-  color: var(--color-ink-muted);
+  color: var(--color-text-muted);
 }

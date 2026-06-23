@@ -6,7 +6,7 @@ import (
 
 	"gorm.io/gorm"
 
-	"syntopica-backend/internal/domain/models"
+	"syntopica-backend/internal/models"
 )
 
 type Migration struct {
@@ -141,9 +141,4 @@ func loadAppliedMigrationVersions(db *gorm.DB) (map[string]bool, error) {
 	}
 
 	return applied, nil
-}
-
-// Deprecated: use RunAutoMigrate instead.
-func autoMigrateModels(db *gorm.DB) error {
-	return RunAutoMigrate(db)
 }

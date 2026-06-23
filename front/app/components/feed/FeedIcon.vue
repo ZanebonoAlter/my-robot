@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { ref } from 'vue'
 import { Icon } from '@iconify/vue'
 
 const props = defineProps<{
@@ -9,67 +10,37 @@ const props = defineProps<{
   articleLink?: string
 }>()
 
-const articlesStore = useArticlesStore()
+// favicon retrieval is owned by the backend icon state machine. The component's
+// only job here is graceful degradation: render the icon value as-is, and when
+// an image URL fails to load, fall back to the mdi:rss placeholder rather than
+// leaving a blank gap (the old display:none behavior).
+const imgFailed = ref(false)
 
-// Get favicon from article link as fallback
-const fallbackIcon = computed(() => {
-  if (props.icon) return null
-
-  // If article link is provided directly, use it
-  if (props.articleLink) {
-    return getFaviconFromUrl(props.articleLink)
-  }
-
-  // Otherwise, try to get from first article of the feed
-  if (props.feedId) {
-    const feedArticles = articlesStore.articles.filter(a => a.feedId === props.feedId)
-    const firstArticle = feedArticles[0]
-    if (firstArticle?.link) {
-      return getFaviconFromUrl(firstArticle.link)
-    }
-  }
-
-  return null
-})
-
-const isUrl = computed(() => {
-  const iconToCheck = fallbackIcon.value || props.icon
-  return iconToCheck && (iconToCheck.startsWith('http://') || iconToCheck.startsWith('https://'))
-})
-
-const displayIcon = computed(() => {
-  return fallbackIcon.value || props.icon
-})
+const isUrl = computed(() =>
+  Boolean(props.icon && (props.icon.startsWith('http://') || props.icon.startsWith('https://'))),
+)
 
 const iconSize = computed(() => props.size || 20)
 
-// Extract domain and build favicon URL
-function getFaviconFromUrl(url: string): string | null {
-  try {
-    const urlObj = new URL(url)
-    const protocol = urlObj.protocol
-    const hostname = urlObj.hostname
-    // Try to get favicon from the site's root
-    return `${protocol}//${hostname}/favicon.ico`
-  } catch {
-    return null
-  }
-}
+// Reset the failure flag when the icon prop changes (e.g. feed switched).
+watch(() => props.icon, () => {
+  imgFailed.value = false
+})
 </script>
 
 <template>
   <img
-    v-if="isUrl"
-    :src="displayIcon"
+    v-if="isUrl && !imgFailed"
+    :src="icon"
     :width="iconSize"
     :height="iconSize"
     class="object-contain"
     :style="{ color }"
-    @error="(e) => { (e.target as HTMLImageElement).style.display = 'none' }"
+    @error="imgFailed = true"
   >
   <Icon
     v-else
-    :icon="displayIcon || 'mdi:rss'"
+    :icon="icon || 'mdi:rss'"
     :width="iconSize"
     :height="iconSize"
     :style="{ color }"

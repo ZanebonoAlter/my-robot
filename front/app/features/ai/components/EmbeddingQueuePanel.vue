@@ -69,13 +69,13 @@ async function retryFailed() {
   }
 }
 
-function getStatusColor(s: string) {
+function getStatusStyle(s: string) {
   switch (s) {
-    case 'pending': return 'bg-yellow-100 text-yellow-800'
-    case 'processing': return 'bg-blue-100 text-blue-800'
-    case 'completed': return 'bg-green-100 text-green-800'
-    case 'failed': return 'bg-red-100 text-red-800'
-    default: return 'bg-gray-100 text-gray-800'
+    case 'pending': return { background: 'var(--color-warning-bg, rgba(196, 136, 60, 0.1))', color: 'var(--color-warning)' }
+    case 'processing': return { background: 'var(--color-link-subtle)', color: 'var(--color-link)' }
+    case 'completed': return { background: 'var(--color-success-bg, rgba(61, 138, 74, 0.1))', color: 'var(--color-success)' }
+    case 'failed': return { background: 'var(--color-error-bg, rgba(196, 47, 60, 0.1))', color: 'var(--color-error)' }
+    default: return { background: 'var(--color-bg-sunken)', color: 'var(--color-text-muted)' }
   }
 }
 
@@ -131,25 +131,19 @@ onUnmounted(() => {
 <template>
   <div class="space-y-4">
     <div class="flex items-center justify-between gap-4">
-      <div class="flex items-center gap-3">
-        <div class="w-10 h-10 rounded-lg bg-gradient-to-br from-purple-500 to-purple-700 flex items-center justify-center">
-          <Icon icon="mdi:playlist-check" width="20" height="20" class="text-white" />
-        </div>
-        <div>
-          <h3 class="font-semibold text-gray-900">Embedding 队列</h3>
-          <p class="text-xs text-gray-500">实时追踪embedding生成进度</p>
-        </div>
-      </div>
+      <AppSectionHeader title="Embedding 队列" description="实时追踪embedding生成进度" icon-name="mdi:playlist-check" />
       <div class="flex items-center gap-2">
         <button
-          class="px-3 py-1.5 text-sm text-gray-600 hover:text-gray-900 transition-colors"
+          class="px-3 py-1.5 text-sm transition-colors"
+          style="color: var(--color-text-secondary)"
           @click="refreshAll"
         >
           <Icon icon="mdi:refresh" width="16" height="16" />
         </button>
         <button
           v-if="status.failed > 0"
-          class="px-4 py-2 text-sm font-medium text-white bg-orange-600 rounded-lg hover:bg-orange-700 transition-colors disabled:opacity-50"
+          class="px-4 py-2 text-sm font-medium text-white rounded-lg transition-colors disabled:opacity-50"
+          style="background: var(--color-accent)"
           :disabled="retrying"
           @click="retryFailed"
         >
@@ -160,33 +154,34 @@ onUnmounted(() => {
 
     <!-- Status Cards -->
     <div class="grid grid-cols-4 gap-3">
-      <div class="rounded-lg border border-gray-200 p-3 bg-yellow-50">
-        <div class="text-2xl font-bold text-yellow-700">{{ status.pending }}</div>
-        <div class="text-xs text-yellow-600">待处理</div>
+      <div class="rounded-lg p-3" style="background: var(--color-bg-sunken); border: 1px solid var(--color-border-subtle)">
+        <div class="text-2xl font-bold" style="color: var(--color-warning)">{{ status.pending }}</div>
+        <div class="text-xs" style="color: var(--color-text-muted)">待处理</div>
       </div>
-      <div class="rounded-lg border border-gray-200 p-3 bg-blue-50">
-        <div class="text-2xl font-bold text-blue-700">{{ status.processing }}</div>
-        <div class="text-xs text-blue-600">处理中</div>
+      <div class="rounded-lg p-3" style="background: var(--color-bg-sunken); border: 1px solid var(--color-border-subtle)">
+        <div class="text-2xl font-bold" style="color: var(--color-link)">{{ status.processing }}</div>
+        <div class="text-xs" style="color: var(--color-text-muted)">处理中</div>
       </div>
-      <div class="rounded-lg border border-gray-200 p-3 bg-green-50">
-        <div class="text-2xl font-bold text-green-700">{{ status.completed }}</div>
-        <div class="text-xs text-green-600">已完成</div>
+      <div class="rounded-lg p-3" style="background: var(--color-bg-sunken); border: 1px solid var(--color-border-subtle)">
+        <div class="text-2xl font-bold" style="color: var(--color-success)">{{ status.completed }}</div>
+        <div class="text-xs" style="color: var(--color-text-muted)">已完成</div>
       </div>
-      <div class="rounded-lg border border-gray-200 p-3 bg-red-50">
-        <div class="text-2xl font-bold text-red-700">{{ status.failed }}</div>
-        <div class="text-xs text-red-600">失败</div>
+      <div class="rounded-lg p-3" style="background: var(--color-bg-sunken); border: 1px solid var(--color-border-subtle)">
+        <div class="text-2xl font-bold" style="color: var(--color-error)">{{ status.failed }}</div>
+        <div class="text-xs" style="color: var(--color-text-muted)">失败</div>
       </div>
     </div>
 
     <!-- Progress Bar -->
     <div v-if="status.total > 0" class="space-y-1">
-      <div class="flex justify-between text-xs text-gray-500">
+      <div class="flex justify-between text-xs" style="color: var(--color-text-muted)">
         <span>总体进度</span>
         <span>{{ progressPercent }}% ({{ status.completed }}/{{ status.total }})</span>
       </div>
-      <div class="h-2 bg-gray-200 rounded-full overflow-hidden">
+      <div class="h-2 rounded-full overflow-hidden" style="background: var(--color-border-medium)">
         <div
-          class="h-full bg-gradient-to-r from-purple-500 to-purple-600 transition-all duration-300"
+          class="h-full transition-all duration-300"
+          style="background: var(--color-accent)"
           :style="{ width: `${progressPercent}%` }"
         />
       </div>
@@ -194,12 +189,12 @@ onUnmounted(() => {
 
     <!-- Filter -->
     <div class="flex items-center gap-2">
-      <span class="text-sm text-gray-500">筛选:</span>
+      <span class="text-sm" style="color: var(--color-text-muted)">筛选:</span>
       <button
         v-for="s in ['', 'pending', 'processing', 'completed', 'failed']"
         :key="s"
         class="px-3 py-1 text-xs rounded-full transition-colors"
-        :class="statusFilter === s ? 'bg-purple-600 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'"
+        :style="statusFilter === s ? 'background: var(--color-accent); color: var(--color-text-inverted)' : 'background: var(--color-bg-sunken); color: var(--color-text-secondary)'"
         @click="changeFilter(s)"
       >
         {{ s === '' ? '全部' : getStatusLabel(s) }}
@@ -208,45 +203,45 @@ onUnmounted(() => {
 
     <!-- Tasks Table -->
     <div v-if="loading" class="py-8 flex justify-center">
-      <Icon icon="mdi:loading" width="28" height="28" class="animate-spin text-purple-600" />
+      <Icon icon="mdi:loading" width="28" height="28" class="animate-spin" style="color: var(--color-accent)" />
     </div>
 
-    <div v-else-if="error" class="rounded-lg bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700">
+    <div v-else-if="error" class="rounded-lg px-4 py-3 text-sm" style="background: var(--color-error-bg, rgba(196, 47, 60, 0.1)); border: 1px solid var(--color-error-border, rgba(196, 47, 60, 0.25)); color: var(--color-error)">
       {{ error }}
     </div>
 
-    <div v-else-if="tasks.length === 0" class="py-8 text-center text-gray-500">
+    <div v-else-if="tasks.length === 0" class="py-8 text-center" style="color: var(--color-text-muted)">
       暂无任务
     </div>
 
     <div v-else class="overflow-x-auto">
       <table class="w-full text-sm">
         <thead>
-          <tr class="border-b border-gray-200">
-            <th class="text-left py-2 px-3 font-medium text-gray-600">标签</th>
-            <th class="text-left py-2 px-3 font-medium text-gray-600">状态</th>
-            <th class="text-left py-2 px-3 font-medium text-gray-600">创建时间</th>
-            <th class="text-left py-2 px-3 font-medium text-gray-600">完成时间</th>
-            <th class="text-left py-2 px-3 font-medium text-gray-600">错误信息</th>
+          <tr style="border-bottom: 1px solid var(--color-border-subtle)">
+            <th class="text-left py-2 px-3 font-medium" style="color: var(--color-text-secondary)">标签</th>
+            <th class="text-left py-2 px-3 font-medium" style="color: var(--color-text-secondary)">状态</th>
+            <th class="text-left py-2 px-3 font-medium" style="color: var(--color-text-secondary)">创建时间</th>
+            <th class="text-left py-2 px-3 font-medium" style="color: var(--color-text-secondary)">完成时间</th>
+            <th class="text-left py-2 px-3 font-medium" style="color: var(--color-text-secondary)">错误信息</th>
           </tr>
         </thead>
         <tbody>
-          <tr v-for="task in tasks" :key="task.id" class="border-b border-gray-100 hover:bg-gray-50">
+          <tr v-for="task in tasks" :key="task.id" class="hover:bg-[var(--color-bg-hover)]" style="border-bottom: 1px solid var(--color-border-subtle)">
             <td class="py-2 px-3">
               <span v-if="task.tag">{{ task.tag.label }}</span>
-              <span v-else class="text-gray-400">Tag #{{ task.tag_id }}</span>
+              <span v-else style="color: var(--color-text-muted)">Tag #{{ task.tag_id }}</span>
             </td>
             <td class="py-2 px-3">
               <span
                 class="px-2 py-0.5 text-xs rounded-full"
-                :class="getStatusColor(task.status)"
+                :style="getStatusStyle(task.status)"
               >
                 {{ getStatusLabel(task.status) }}
               </span>
             </td>
-            <td class="py-2 px-3 text-gray-500">{{ formatDate(task.created_at) }}</td>
-            <td class="py-2 px-3 text-gray-500">{{ formatDate(task.completed_at) }}</td>
-            <td class="py-2 px-3 text-red-600 text-xs max-w-xs truncate">
+            <td class="py-2 px-3" style="color: var(--color-text-secondary)">{{ formatDate(task.created_at) }}</td>
+            <td class="py-2 px-3" style="color: var(--color-text-secondary)">{{ formatDate(task.completed_at) }}</td>
+            <td class="py-2 px-3 text-xs max-w-xs truncate" style="color: var(--color-error)">
               {{ task.error_message || '-' }}
             </td>
           </tr>
@@ -256,12 +251,12 @@ onUnmounted(() => {
 
     <!-- Pagination -->
     <div v-if="totalPages > 1" class="flex items-center justify-between">
-      <div class="text-sm text-gray-500">
+      <div class="text-sm" style="color: var(--color-text-muted)">
         共 {{ totalTasks }} 条任务
       </div>
       <div class="flex items-center gap-1">
         <button
-          class="px-3 py-1 text-sm rounded hover:bg-gray-100 disabled:opacity-50"
+          class="px-3 py-1 text-sm rounded hover:bg-[var(--color-bg-hover)] disabled:opacity-50"
           :disabled="currentPage <= 1"
           @click="changePage(currentPage - 1)"
         >
@@ -271,7 +266,7 @@ onUnmounted(() => {
           {{ currentPage }} / {{ totalPages }}
         </span>
         <button
-          class="px-3 py-1 text-sm rounded hover:bg-gray-100 disabled:opacity-50"
+          class="px-3 py-1 text-sm rounded hover:bg-[var(--color-bg-hover)] disabled:opacity-50"
           :disabled="currentPage >= totalPages"
           @click="changePage(currentPage + 1)"
         >

@@ -184,6 +184,16 @@ docker exec syntopica-postgres pg_dump -U postgres syntopica > backup.sql
 cat backup.sql | docker exec -i syntopica-postgres psql -U postgres syntopica
 ```
 
+## 公开只读 Demo
+
+公开演示环境使用独立的 demo compose 文件和脱敏 seed 数据启动，不复用生产数据卷：
+
+```bash
+docker compose -f demo/docker-compose.demo.yml up -d --build
+```
+
+该模式会构建前后端自包含镜像，导入 `demo/seed/seed.sql`，并通过 `DEMO_READ_ONLY=1` 禁止写入、后台任务和 WebSocket。详细启动、刷新 seed 与安全注意事项见 [demo/README.md](../../demo/README.md)。
+
 ## 回滚步骤
 
 没有 CI/CD 流水线，回滚为手动操作：

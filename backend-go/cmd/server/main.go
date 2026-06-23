@@ -7,14 +7,16 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"go.opentelemetry.io/contrib/instrumentation/github.com/gin-gonic/gin/otelgin"
+	"syntopica-backend/internal/admin"
 	appbootstrap "syntopica-backend/internal/app"
-	taggingdomain "syntopica-backend/internal/domain/tagging"
-	"syntopica-backend/internal/platform/airouter"
 	"syntopica-backend/internal/platform/config"
 	"syntopica-backend/internal/platform/database"
 	"syntopica-backend/internal/platform/logging"
 	"syntopica-backend/internal/platform/middleware"
 	"syntopica-backend/internal/platform/tracing"
+	"syntopica-backend/internal/reader"
+	taggingdomain "syntopica-backend/internal/tagmanagement"
+	"syntopica-backend/internal/topicgraph"
 )
 
 func main() {
@@ -41,9 +43,11 @@ func main() {
 		logging.Fatalf("Failed to initialize database: %v", err)
 	}
 
-	if err := airouter.EnsureLegacySummaryConfigMigrated(); err != nil {
-		logging.Warnf("Failed to migrate legacy AI summary config: %v", err)
-	}
+	// Initialize feature repositories
+	admin.InitRepository(database.DB)
+	reader.InitRepository(database.DB)
+	taggingdomain.InitRepository(database.DB)
+	topicgraph.InitRepository(database.DB)
 
 	// Ensure semantic_labels.embedding vector dimension matches the embedder model.
 	// Runs once at startup on the global DB (not inside any transaction) to avoid DDL lock contention.
@@ -76,8 +80,13 @@ func main() {
 
 	appbootstrap.SetupStaticFiles(r)
 	appbootstrap.SetupRoutes(r)
-	runtime := appbootstrap.StartRuntime()
-	appbootstrap.SetupGracefulShutdown(runtime)
+	// In public read-only demo mode (DEMO_READ_ONLY=1) we skip all background
+	// schedulers (RSS refresh, LLM daily reports, firecrawl crawling, etc.) so
+	// they cannot mutate the sanitized snapshot or burn non-existent AI credits.
+	if os.Getenv("DEMO_READ_ONLY") != "1" {
+		runtime := appbootstrap.StartRuntime()
+		appbootstrap.SetupGracefulShutdown(runtime)
+	}
 
 	addr := fmt.Sprintf(":%s", config.AppConfig.Server.Port)
 	logging.Infof("Server starting on %s", addr)

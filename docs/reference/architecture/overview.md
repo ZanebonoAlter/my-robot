@@ -3,7 +3,7 @@
 
 ## 系统概述
 
-Syntopica 是一个个人部署的 RSS 阅读器，采用前后端分离的单体架构。Go 后端（Gin + GORM + PostgreSQL + pgvector）负责 RSS 订阅拉取、文章持久化、AI 内容增强（Firecrawl 全文抓取、AI 整理稿生成）、主题图谱分析、叙事摘要生成和阅读偏好追踪。Nuxt 4 前端（Vue 3 + Pinia + Tailwind CSS v4）以 FeedBro 风格三栏布局呈现订阅、文章和正文，同时提供主题图谱页面。前后端通过 REST API 和 WebSocket 通信，系统面向单用户部署，不含认证体系。
+Syntopica 是一个个人部署的 RSS 阅读器，采用前后端分离的单体架构。Go 后端（Gin + GORM + PostgreSQL + pgvector）负责 RSS 订阅拉取、文章持久化、AI 内容增强（Firecrawl 全文抓取、AI 整理稿生成）、叙事摘要生成和阅读偏好追踪。Nuxt 4 前端（Vue 3 + Pinia + Tailwind CSS v4）以 FeedBro 风格三栏布局呈现订阅、文章和正文。前后端通过 REST API 和 WebSocket 通信，系统面向单用户部署，不含认证体系。
 
 > **注意：SQLite 版本已归档到 `sqlite` 独立分支，主分支不再维护 SQLite 支持。如需使用 SQLite 版本请切换到 `sqlite` 分支。**
 
@@ -16,7 +16,7 @@ Syntopica 是一个个人部署的 RSS 阅读器，采用前后端分离的单�
 | AI | OpenAI 兼容 API（通过 airouter 多 provider 路由） | 摘要、内容补全、主题分析 |
 | 全文抓取 | Firecrawl | RSS 摘要补全为完整正文 |
 | 实时通信 | Gorilla WebSocket | AI 摘要队列进度推送 |
-| 定时任务 | robfig/cron | feed 刷新、摘要生成、偏好更新、digest 输出 |
+| 定时任务 | internal/admin/scheduler（自研调度器工厂 + Interval） | feed 刷新、摘要生成、偏好更新、digest 输出 |
 | 可观测性 | OpenTelemetry + GORM Span Exporter（存入 PostgreSQL） | 链路追踪落库 + 查询 API |
 | 配置 | Viper + `configs/config.yaml` | 运行时配置加载 |
 | 部署 | Docker Compose | 前后端 + PostgreSQL 三容器，pgdata 持久化卷 |
@@ -45,26 +45,23 @@ graph TD
 
 ### 1. 订阅与文章（基础数据面）
 
-Feed 管理（`backend-go/internal/domain/feed/`）和文章管理（`backend-go/internal/domain/article/`）构成系统的基础数据层。Feed 刷新拉取 RSS 源、去重入库文章，后续所有增强能力（Firecrawl、内容补全、摘要、主题分析）都建立在文章记录之上。Feed 配置项（`firecrawl_enabled`、`article_summary_enabled`、`refresh_interval`）决定文章入库后的初始状态流转。
+Feed 管理（`backend-go/internal/reader/`）和文章管理构成系统的基础数据层。Feed 刷新拉取 RSS 源、去重入库文章，后续所有增强能力（Firecrawl、内容补全、摘要、主题分析）都建立在文章记录之上。Feed 配置项（`firecrawl_enabled`、`article_summary_enabled`、`refresh_interval`）决定文章入库后的初始状态流转。
 
 ### 2. AI 与内容增强
 
 两层叠加架构：
 
 - **AI Router**（`backend-go/internal/platform/airouter/`）：管理多 AI provider 和 capability route，支持 failover
-- **内容处理**（`backend-go/internal/domain/content/`）：Firecrawl 全文抓取、AI 内容补全生成整理稿
+- **内容处理**（`backend-go/internal/reader/service/`）：Firecrawl 全文抓取、AI 内容补全生成整理稿
 
 ### 3. 主题图谱
 
-拆分为 `tagging/` 包及其子包，形成从标签提取到图谱展示的完整链路：
+拆分为 `tagmanagement/` 和 `topicgraph/` 域，形成从标签提取到叙事摘要的完整链路：
 
-- `tagging`（根包）：共享类型和窗口工具、`StartAllWorkers`/`StopAllWorkers` 统一入口
-- `tagging/extraction`：从摘要/文章提取 Tag
-- `tagging/analysis`：主题分析任务与结果、embedding 向量化、Tag 合并（源 DELETE）、Node 管理、Sector 生成、层级清理 (7 Phase)
-- `tagging/watched`：关注标签管理
-- `topicgraph`：图谱节点边、详情、相关文章查询
+- `tagmanagement`（标签系统域）：标签提取、co-tag 扩展、元数据标注、辅助标签管理、语义板匹配与概念、标签合并、关注标签
+- `topicgraph`（主题图谱域）：每日报告生成
 
-此外，`tagging/analysis` 还承担了以下高级能力：
+此外，`tagmanagement` 还承担了以下高级能力：
 - Tag embedding 向量化与自动合并（源 DELETE，不再使用 status='merged'）
 - Event 标签多行 embedding（semantic title + event_keyword 关键词行）
 - SemanticBoard 匹配与升级建议
@@ -73,20 +70,16 @@ Feed 管理（`backend-go/internal/domain/feed/`）和文章管理（`backend-go
 - rebuild_jobs 重建任务（模板变更触发批量重放）
 - 7 Phase 层级清理（僵尸 Tag → 低质量 → 空 Node → 同 Level 去重 → Template 校验 → Sector 健康 → 聚类信号）
 
-`tagging/watched` 负责：
+`tagmanagement/service/watched` 负责：
 - 关注标签（watched tags）管理
 
 ### 4. 叙事摘要
 
-叙事摘要子系统（`backend-go/internal/domain/narrative/`），基于活跃主题标签生成每日叙事摘要。由 `NarrativeSummaryScheduler` 定时触发，支持按日期查询、历史版本回溯。前端通过 `/api/narratives` 接口读取。
+叙事摘要子系统（`backend-go/internal/topicgraph/`），基于活跃主题标签生成每日叙事摘要。由 `daily_report` 调度器定时触发，支持按日期查询、历史版本回溯。前端通过 `/api/narratives` 接口读取。
 
-### 4. 阅读偏好
+### 5. 阅读偏好
 
-行为追踪与偏好分析（`backend-go/internal/domain/preferences/`），前端批量上报阅读事件，后端计算偏好分数并更新排序权重。
-
-### 5. 叙事摘要
-
-叙事摘要子系统（`backend-go/internal/domain/narrative/`），基于活跃主题标签生成每日叙事摘要。由 `NarrativeSummaryScheduler` 定时触发，支持按日期查询、历史版本回溯。前端通过 `/api/narratives` 接口读取。
+行为追踪与偏好分析（`backend-go/internal/admin/`），前端批量上报阅读事件，后端计算偏好分数并更新排序权重。
 
 ### 6. 链路追踪
 
@@ -131,7 +124,7 @@ my-robot/
 │   │   ├── assets/css/       # 全局主题与样式
 │   │   ├── components/       # 通用可复用组件（ai, article, category, common, dialog, feed, layout）
 │   │   ├── composables/      # 跨 feature 通用能力（useAI, useRssParser）
-│   │   ├── features/         # 业务实现主体（shell, articles, feeds, preferences, topic-graph, ai）
+│   │   ├── features/         # 业务实现主体（shell, articles, feeds, preferences, ai）
 │   │   ├── pages/            # Nuxt 路由入口（index, topics）
 │   │   ├── plugins/          # Nuxt 插件（dayjs）
 │   │   ├── stores/           # Pinia store（api, feeds, articles, preferences, aiAnalysis）
@@ -143,13 +136,16 @@ my-robot/
 │   ├── nuxt.config.ts        # Nuxt 配置
 │   └── package.json
 ├── backend-go/               # Go + Gin 后端
-│   ├── cmd/                  # 启动入口（server, migrate-tags, migrate-db, migrate-embedding-queue, test-embedding）
+│   ├── cmd/                  # 启动入口（server）
 │   ├── configs/              # 配置文件（config.yaml）
 │   └── internal/
-│       ├── app/              # 应用装配（router.go, runtime.go, runtimeinfo/）
-│       ├── domain/           # 业务域（feed, article, category, content, preferences, aiadmin, models, tagging/analysis/extraction/watched, topicgraph, narrative）
-│       ├── jobs/             # 调度外壳（8 类定时任务 + handler）
-│       └── platform/         # 共享基础设施（config, database, logging, middleware, ws, ai, airouter, aisettings, opennotebook, tracing）
+│       ├── app/              # 应用装配（router.go, runtime.go）
+│       ├── models/           # 共享 GORM 模型
+│       ├── admin/            # 管理后台域（AI、调度器、偏好）
+│       ├── reader/           # 订阅与文章域
+│       ├── tagmanagement/    # 标签系统域
+│       ├── topicgraph/       # 主题图谱域
+│       └── platform/         # 共享基础设施（config, database, logging, middleware, ws, airouter, aisettings, tracing, jsonutil, testutil）
 ├── docs/                     # 项目文档
 │   ├── architecture/         # 架构文档（本文档及子模块架构）
 │   ├── api/                  # API 文档（按领域拆分，见 api/_index.md）
@@ -177,7 +173,7 @@ my-robot/
 - **状态位驱动的内容增强**：文章入库时按 feed 配置设置 `firecrawl_status` 和 `summary_status`，后续调度器按状态位流转处理
 - **Feature-based 前端组织**：业务逻辑按 feature 目录组织（`features/*`），不再堆积在通用 `components/` 目录
 - **snake_case → camelCase 边界映射**：后端 snake_case 在 API/store 边界统一转 camelCase，组件层不处理字段映射
-- **统一调度器管理**：8 类后台任务通过统一 runtime 启动，统一 `/api/schedulers/*` API 查询状态和手动触发
+- **统一调度器管理**：9 类后台任务通过统一 runtime 启动，统一 `/api/schedulers/*` API 查询状态和手动触发
 - **多 provider AI 路由**：airouter 管理 provider 和 capability route，支持 failover，而非单 provider 调用
 
 ## 后台调度器一览
@@ -185,14 +181,14 @@ my-robot/
 | 调度器 | 间隔 | 职责 |
 |--------|------|------|
 | AutoRefresh | 60 秒 | 扫描到点 feed 并触发 RSS 刷新 |
-| Firecrawl | 轮询 | 抓取待处理文章完整正文 |
+| Firecrawl | 300 秒 | 抓取待处理文章完整正文 |
 | ContentCompletion | 60 秒 | 基于 Firecrawl 正文生成 AI 整理稿 |
 | PreferenceUpdate | 1800 秒 | 更新阅读偏好分数 |
 | BlockedArticleRecovery | 3600 秒 | 恢复因 Firecrawl 配置变更等原因阻塞的文章 |
-| AutoTagMerge | 3600 秒 | 基于 embedding 相似度自动合并相似 Tag（源 DELETE） |
+| DailyReport | 86400 秒 | 基于活跃主题标签生成每日叙事摘要 |
 | TagQualityScore | 3600 秒 | 重算 topic_tags.quality_score |
-| TagHierarchyCleanup | 3600 秒 | 7 Phase 层级清理（僵尸→低质量→空 Node→去重→Template→Sector→聚类） |
-| NarrativeSummary | 86400 秒 | 基于活跃主题标签生成每日叙事摘要 |
+| LogCleanup | 86400 秒 | 清理过期日志 |
+| AuxLabelCleanup | 3600 秒 | 清理辅助标签 |
 
 ## API 面概览
 
@@ -210,8 +206,6 @@ my-robot/
 | `/api/schedulers` | 统一调度器状态查询和手动触发 |
 | `/api/reading-behavior` | 阅读行为上报 |
 | `/api/user-preferences` | 偏好查询与更新 |
-| `/api/topic-graph` | 主题图谱、分析、相关文章 |
-| `/api/topic-graph/analysis` | 主题分析、embedding 配置、标签管理 |
 | `/api/embedding` | Embedding 配置与队列管理 |
 | `/api/topic-tags` | 关注标签、标签合并预览 |
 | `/api/narratives` | 叙事摘要查询与历史 |
@@ -240,5 +234,4 @@ my-robot/
 - [数据生命周期](../database/DATA_LIFECYCLE.md)：6 条数据链路的状态字段流转
 - [开发指南](../development.md)：构建、测试、验证命令
 - [内容增强](../content-processing.md)：Firecrawl + AI 内容补全流程
-- [主题图谱](../api/topic-graph.md)：图谱构建与分析
 - [API 文档](../api/_index.md)：按领域拆分的 REST API 参考

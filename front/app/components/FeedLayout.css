@@ -3,25 +3,7 @@
   flex-direction: column;
   height: 100vh;
   overflow: hidden;
-  background: linear-gradient(
-    125deg,
-    #faf7f2 0%,
-    #f5f0e6 25%,
-    #faf7f2 50%,
-    #f0e8dc 75%,
-    #faf7f2 100%
-  );
-  background-size: 400% 400%;
-  animation: paper-drift 30s ease infinite;
-}
-
-@keyframes paper-drift {
-  0%, 100% {
-    background-position: 0% 50%;
-  }
-  50% {
-    background-position: 100% 50%;
-  }
+  background: var(--color-bg-base);
 }
 
 .main-content {
@@ -33,9 +15,9 @@
 .content-panel {
   flex: 1;
   overflow-y: auto;
-  background: rgba(255, 255, 255, 0.5);
+  background: var(--color-bg-elevated);
   backdrop-filter: blur(8px);
   margin: 0.5rem 0.5rem 0.5rem 0;
   border-radius: 0.75rem;
-  border: 1px solid rgba(26, 26, 26, 0.06);
+  border: 1px solid var(--color-border-subtle);
 }

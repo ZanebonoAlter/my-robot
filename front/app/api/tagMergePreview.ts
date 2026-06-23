@@ -1,6 +1,6 @@
 import { apiClient } from './client'
 import { getApiOrigin } from '~/utils/api'
-import type { ApiResponse } from '~/types'
+import { mapApiResponse } from '~/utils/api-helpers'
 import type { MergeWithCustomNameRequest, MergeWithCustomNameResult, ScanProgress, EvaluateProgress, MergeGroupResponse } from '~/types/tagMerge'
 
 interface RawMergeResult {
@@ -22,14 +22,13 @@ function mapMergeResult(r: RawMergeResult): MergeWithCustomNameResult {
 export function useTagMergePreviewApi() {
   return {
     async loadMergeGroups(params?: { limit?: number; categoryId?: string; feedId?: string }) {
-      const queryParams = apiClient.buildQueryParams({
+      const endpoint = '/topic-tags/merge-preview'
+      const qs = apiClient.buildQueryParams({
         limit: params?.limit ? String(params.limit) : undefined,
         category_id: params?.categoryId ?? undefined,
         feed_id: params?.feedId ?? undefined,
       })
-      const endpoint = queryParams ? `/topic-tags/merge-preview?${queryParams}` : '/topic-tags/merge-preview'
-      const response = await apiClient.get<MergeGroupResponse>(endpoint)
-      return response as ApiResponse<MergeGroupResponse>
+      return apiClient.get<MergeGroupResponse>(`${endpoint}${qs}`)
     },
 
     async mergeTagsWithCustomName(request: MergeWithCustomNameRequest) {
@@ -39,9 +38,9 @@ export function useTagMergePreviewApi() {
         new_name: request.newName,
       })
       if (response.success && response.data) {
-        return { ...response, data: mapMergeResult(response.data) } as unknown as ApiResponse<MergeWithCustomNameResult>
+        return mapApiResponse(response, mapMergeResult(response.data))
       }
-      return response as unknown as ApiResponse<MergeWithCustomNameResult>
+      return { success: false, error: response.error }
     },
 
     async triggerFullScan() {

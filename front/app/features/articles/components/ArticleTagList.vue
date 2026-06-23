@@ -115,7 +115,7 @@ function handleWatchClick(tag: ArticleTag) {
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.72);
   padding: 0.25rem 0.72rem;
-  color: var(--color-ink-medium);
+  color: var(--color-text-secondary);
   font-size: 0.76rem;
   font-weight: 700;
   line-height: 1;
@@ -139,7 +139,7 @@ function handleWatchClick(tag: ArticleTag) {
 .article-tag--highlighted {
   border-color: rgba(193, 47, 47, 0.38);
   background: rgba(193, 47, 47, 0.12);
-  color: var(--color-print-red-700);
+  color: var(--raw-red-700);
   box-shadow: inset 0 0 0 1px rgba(193, 47, 47, 0.08);
 }
 
@@ -170,6 +170,6 @@ function handleWatchClick(tag: ArticleTag) {
 
 .article-tag--more {
   background: rgba(18, 24, 30, 0.06);
-  color: var(--color-ink-light);
+  color: var(--color-text-muted);
 }
 </style>

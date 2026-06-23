@@ -238,19 +238,32 @@ auto_summary scheduler
 ### 每日叙事生成
 
 ```text
-NarrativeSummaryScheduler 触发
-  → GenerateAndSave(date)
-    → CollectSemanticBoardNarrativeInputs
+daily_report scheduler 触发
+  → job_daily_report.go 执行
+    → daily_report.CollectBoardIDsForDate(date)
       → 读取 active SemanticBoard (label_type='board', status='active')
       → 按 date + scope + semantic_board_id 收集 event tags (from topic_tag_board_labels)
     → 对每个有事件的 SemanticBoard:
-      → INSERT INTO narrative_boards (semantic_board_id, event_tag_ids, ...)
-      → prev_board_ids 按 semantic_board_id + scope + 前一日匹配
-    → GenerateAndSaveGlobal (全局 scope)
+      → daily_report.GenerateDailyReport(ctx, boardID, date)
+      → daily_report.SaveReport(report, sections, threadBatches)
     → runFallbackAssociations (关联前日叙事)
     → DeriveBoardConnections (派生 Board 连接)
     → runFeedbackFromTodayNarratives (反馈标签)
     → cleanEmptyBoards (清理空 Board)
+```
+
+### PersistentTopic 日报归属与展示
+
+```text
+日报 section 保存
+  → 双重确认归属已有 topic；不一致时创建 candidate
+  → consecutive_hits 达阈值：仅获得人工确认资格，仍保持 candidate
+  → 话题管理 PATCH active：后端复核阈值后启用
+  → 只有 active topic 进入独立持久泳道
+
+关系双轨：
+  similarity（匈牙利）→ 时间线连线 + emerging/continuing/split/merge/ending 状态
+  identity（同 persistent_topic）→ 话题泳道连续性，不参与时间线状态
 ```
 
 ### SemanticBoard 管理

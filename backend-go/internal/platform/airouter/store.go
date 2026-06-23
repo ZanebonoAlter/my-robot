@@ -10,15 +10,16 @@ import (
 	"go.opentelemetry.io/otel/trace"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
-	"syntopica-backend/internal/domain/models"
+	"syntopica-backend/internal/models"
 	"syntopica-backend/internal/platform/database"
 )
 
 type Capability string
 
 const (
-	CapabilityArticleCompletion  Capability = "article_completion"
+	CapabilitySummary            Capability = "summary"
 	CapabilityTopicTagging       Capability = "topic_tagging"
+	CapabilityDigestPolish       Capability = "digest_polish"
 	CapabilityOpenNotebook       Capability = "open_notebook"
 	CapabilityEmbedding          Capability = "embedding"
 	DefaultRouteName             string     = "default"
@@ -26,12 +27,6 @@ const (
 	ProviderTypeOpenAICompatible string     = "openai_compatible"
 	ProviderTypeOllama           string     = "ollama"
 )
-
-var defaultCapabilities = []Capability{
-	CapabilityArticleCompletion,
-	CapabilityTopicTagging,
-	CapabilityEmbedding,
-}
 
 var (
 	ErrRouteNotFound    = errors.New("ai route not found")
@@ -112,9 +107,6 @@ func (s *Store) UpsertProvider(provider *models.AIProvider) error {
 	if provider.ProviderType == "" {
 		provider.ProviderType = ProviderTypeOpenAICompatible
 	}
-	if provider.ProviderType != ProviderTypeOllama && provider.APIKey == "" {
-		return fmt.Errorf("api_key is required for provider type %s", provider.ProviderType)
-	}
 	if provider.TimeoutSeconds <= 0 {
 		provider.TimeoutSeconds = 120
 	}
@@ -177,60 +169,6 @@ func (s *Store) ResolvePrimaryProvider(capability Capability) (*models.AIProvide
 	}
 	provider := providers[0]
 	return &provider, route, nil
-}
-
-func (s *Store) EnsureLegacyProviderAndRoutes(baseURL, apiKey, model string) (*models.AIProvider, error) {
-	provider := &models.AIProvider{
-		Name:           DefaultProviderName,
-		ProviderType:   ProviderTypeOpenAICompatible,
-		BaseURL:        strings.TrimRight(strings.TrimSpace(baseURL), "/"),
-		APIKey:         strings.TrimSpace(apiKey),
-		Model:          strings.TrimSpace(model),
-		Enabled:        true,
-		TimeoutSeconds: 120,
-	}
-	if err := s.UpsertProvider(provider); err != nil {
-		return nil, err
-	}
-
-	for _, capability := range defaultCapabilities {
-		if err := s.ensureDefaultRoute(capability, provider.ID); err != nil {
-			return nil, err
-		}
-	}
-
-	return provider, nil
-}
-
-func (s *Store) ensureDefaultRoute(capability Capability, providerID uint) error {
-	var route models.AIRoute
-	err := s.db.Where("capability = ? AND name = ?", string(capability), DefaultRouteName).First(&route).Error
-	if err != nil {
-		if !errors.Is(err, gorm.ErrRecordNotFound) {
-			return err
-		}
-		route = models.AIRoute{
-			Capability:  string(capability),
-			Name:        DefaultRouteName,
-			Enabled:     true,
-			Strategy:    "ordered_failover",
-			Description: fmt.Sprintf("Default route for %s", capability),
-		}
-		if err := s.db.Create(&route).Error; err != nil {
-			return err
-		}
-	}
-
-	link := models.AIRouteProvider{RouteID: route.ID, ProviderID: providerID, Priority: 1, Enabled: true}
-	var existing models.AIRouteProvider
-	err = s.db.Where("route_id = ? AND provider_id = ?", route.ID, providerID).First(&existing).Error
-	if err != nil {
-		if !errors.Is(err, gorm.ErrRecordNotFound) {
-			return err
-		}
-		return s.db.Create(&link).Error
-	}
-	return s.db.Model(&existing).Update("enabled", true).Error
 }
 
 func (s *Store) LogCall(ctx context.Context, logEntry *models.AICallLog) {

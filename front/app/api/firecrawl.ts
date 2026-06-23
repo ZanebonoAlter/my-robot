@@ -27,12 +27,6 @@ export function useFirecrawlApi() {
     return apiClient.post(`/firecrawl/article/${id}`)
   }
 
-  async function enableFeedFirecrawl(id: number, enabled: boolean): Promise<ApiResponse<{
-    firecrawl_enabled: boolean
-  }>> {
-    return apiClient.post(`/firecrawl/feed/${id}/enable`, { enabled })
-  }
-
   async function getStatus(): Promise<ApiResponse<FirecrawlStatus>> {
     return apiClient.get('/firecrawl/status')
   }
@@ -43,7 +37,6 @@ export function useFirecrawlApi() {
 
   return {
     crawlArticle,
-    enableFeedFirecrawl,
     getStatus,
     saveSettings,
   }

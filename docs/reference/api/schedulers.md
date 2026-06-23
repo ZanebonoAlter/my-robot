@@ -18,17 +18,11 @@
 | `preference_update` | - | 更新阅读偏好 |
 | `content_completion` | `ai_summary` | 文章内容补全 |
 | `firecrawl` | - | Firecrawl 全文抓取 |
-| `digest` | - | Digest 日报/周报 |
+| `daily_report` | - | 生成每日叙事摘要 |
 | `tag_quality_score` | - | 重算标签质量分数 |
-| `narrative_summary` | - | 生成每日叙事摘要 |
-| `tag_hierarchy_cleanup` | - | 按三阶段策略清理 tag 体系 |
-
-`tag_hierarchy_cleanup` 的 `last_run_summary` 现在主要看这几个字段：
-- `zombie_deactivated`: 这一轮停用了多少长期没用的标签
-- `flat_merges_applied`: 合并了多少明显重复的标签
-- `orphaned_relations`: 删掉了多少失效的层级关系
-- `multi_parent_fixed`: 修好了多少“一个标签挂了多个父标签”的问题
-- `empty_abstracts`: 已废弃
+| `log_cleanup` | - | 清理过期的 AI 调用日志和追踪数据 |
+| `aux_label_cleanup` | - | 清理无活跃标签引用的辅助标签 |
+| `blocked_article_recovery` | - | 恢复被阻塞的文章 |
 
 ### GET /api/schedulers/status
 

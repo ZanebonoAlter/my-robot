@@ -2,22 +2,14 @@ package app
 
 import (
 	"github.com/gin-gonic/gin"
-	aiadmindomain "syntopica-backend/internal/domain/aiadmin"
-	articledomain "syntopica-backend/internal/domain/article"
-	categorydomain "syntopica-backend/internal/domain/category"
-	contentdomain "syntopica-backend/internal/domain/content"
-	feeddomain "syntopica-backend/internal/domain/feed"
-	dailyreportdomain "syntopica-backend/internal/domain/daily_report"
-	narrativedomain "syntopica-backend/internal/domain/narrative"
-	preferencesdomain "syntopica-backend/internal/domain/preferences"
-	topicanalysisdomain "syntopica-backend/internal/domain/tagging"
-	tagginganalysis "syntopica-backend/internal/domain/tagging/analysis"
-	taggingwatched "syntopica-backend/internal/domain/tagging/watched"
-	topicgraphdomain "syntopica-backend/internal/domain/topicgraph"
-	"syntopica-backend/internal/jobs"
+	"syntopica-backend/internal/admin"
 	"syntopica-backend/internal/platform/database"
+	"syntopica-backend/internal/platform/middleware"
 	"syntopica-backend/internal/platform/tracing"
 	"syntopica-backend/internal/platform/ws"
+	"syntopica-backend/internal/reader"
+	tagmanagement "syntopica-backend/internal/tagmanagement"
+	"syntopica-backend/internal/topicgraph"
 )
 
 func SetupRoutes(r *gin.Engine) {
@@ -28,120 +20,24 @@ func SetupRoutes(r *gin.Engine) {
 		})
 	})
 
-	r.GET("/api/tasks/status", jobs.GetTasksStatus)
+	r.GET("/api/tasks/status", admin.GetTasksStatus)
 
-	r.GET("/ws", ws.HandleWebSocket)
+	// In public read-only demo mode, the WebSocket endpoint is unused (the
+	// frontend degrades silently) and background schedulers are disabled, so we
+	// skip registering it to avoid an unused connection surface.
+	if !middleware.IsDemoReadOnly() {
+		r.GET("/ws", ws.HandleWebSocket)
+	}
 
 	api := r.Group("/api")
+	// Enforce read-only access when DEMO_READ_ONLY=1; no-op in production.
+	api.Use(middleware.ReadOnly())
 	{
-		categories := api.Group("/categories")
-		{
-			categories.GET("", categorydomain.GetCategories)
-			categories.POST("", categorydomain.CreateCategory)
-			categories.PUT("/:category_id", categorydomain.UpdateCategory)
-			categories.DELETE("/:category_id", categorydomain.DeleteCategory)
-		}
+		reader.RegisterRoutes(api)
+		topicgraph.RegisterRoutes(api)
+		admin.RegisterRoutes(api)
 
-		feeds := api.Group("/feeds")
-		{
-			feeds.GET("", feeddomain.GetFeeds)
-			feeds.GET("/:feed_id", feeddomain.GetFeed)
-			feeds.POST("", feeddomain.CreateFeed)
-			feeds.PUT("/:feed_id", feeddomain.UpdateFeed)
-			feeds.DELETE("/:feed_id", feeddomain.DeleteFeed)
-			feeds.POST("/:feed_id/refresh", feeddomain.RefreshFeed)
-			feeds.POST("/fetch", feeddomain.FetchFeed)
-			feeds.POST("/refresh-all", feeddomain.RefreshAllFeeds)
-		}
-
-		articles := api.Group("/articles")
-		{
-			articles.GET("/stats", articledomain.GetArticlesStats)
-			articles.GET("", articledomain.GetArticles)
-			articles.GET("/:article_id", articledomain.GetArticle)
-			articles.POST("/:article_id/tags", articledomain.RetagArticleHandler)
-			articles.PUT("/:article_id", articledomain.UpdateArticle)
-			articles.PUT("/bulk-update", articledomain.BulkUpdateArticles)
-		}
-
-		ai := api.Group("/ai")
-		{
-			ai.GET("/providers", aiadmindomain.ListProviders)
-			ai.POST("/providers", aiadmindomain.UpsertProvider)
-			ai.PUT("/providers/:provider_id", aiadmindomain.UpdateProvider)
-			ai.DELETE("/providers/:provider_id", aiadmindomain.DeleteProvider)
-			ai.GET("/routes", aiadmindomain.ListRoutes)
-			ai.PUT("/routes/:capability", aiadmindomain.UpdateRoute)
-			ai.GET("/settings", aiadmindomain.GetSettings)
-			ai.POST("/settings", aiadmindomain.SaveSettings)
-		}
-
-		opml := api.Group("")
-		{
-			opml.POST("/import-opml", feeddomain.ImportOPML)
-			opml.GET("/export-opml", feeddomain.ExportOPML)
-		}
-
-		schedulers := api.Group("/schedulers")
-		{
-			schedulers.GET("/status", jobs.GetSchedulersStatus)
-			schedulers.GET("/:name/status", jobs.GetSchedulerStatus)
-			schedulers.POST("/:name/trigger", jobs.TriggerScheduler)
-			schedulers.POST("/:name/reset", jobs.ResetSchedulerStats)
-			schedulers.PUT("/:name/interval", jobs.UpdateSchedulerInterval)
-		}
-
-		readingBehavior := api.Group("/reading-behavior")
-		{
-			readingBehavior.POST("/track", preferencesdomain.TrackReadingBehavior)
-			readingBehavior.POST("/track-batch", preferencesdomain.BatchTrackReadingBehavior)
-			readingBehavior.GET("/stats", preferencesdomain.GetReadingStats)
-		}
-
-		preferences := api.Group("/user-preferences")
-		{
-			preferences.GET("", preferencesdomain.GetUserPreferences)
-			preferences.POST("/update", preferencesdomain.TriggerPreferenceUpdate)
-		}
-
-		contentCompletion := api.Group("/content-completion")
-		{
-			contentCompletion.POST("/articles/:article_id/complete", contentdomain.CompleteArticleContent)
-			contentCompletion.POST("/feeds/:feed_id/complete-all", contentdomain.CompleteFeedArticles)
-			contentCompletion.GET("/articles/:article_id/status", contentdomain.GetCompletionStatus)
-			contentCompletion.GET("/overview", contentdomain.GetCompletionOverview)
-		}
-
-		firecrawl := api.Group("/firecrawl")
-		{
-			firecrawl.POST("/article/:id", contentdomain.CrawlArticle)
-			firecrawl.POST("/feed/:id/enable", contentdomain.EnableFeedFirecrawl)
-			firecrawl.GET("/status", contentdomain.GetFirecrawlStatus)
-			firecrawl.POST("/settings", contentdomain.SaveFirecrawlSettings)
-		}
-
-		topicGraph := api.Group("/topic-graph")
-		{
-			topicGraph.GET("/:type", topicgraphdomain.GetTopicGraph)
-			topicGraph.GET("/topic/:slug", topicgraphdomain.GetTopicDetail)
-			topicGraph.GET("/by-category", topicgraphdomain.GetTopicsByCategory)
-			topicGraph.GET("/tag/:slug/digests", topicgraphdomain.GetDigestsByArticleTagHandler)
-			topicGraph.GET("/tag/:slug/pending-articles", topicgraphdomain.GetPendingArticlesByTagHandler)
-			topicGraph.GET("/topic/:slug/articles", topicgraphdomain.GetTopicArticles)
-		}
-		tagginganalysis.RegisterAnalysisRoutes(topicGraph, tagginganalysis.GetAnalysisService(database.DB))
-		topicanalysisdomain.RegisterEmbeddingConfigRoutes(api)
-		topicanalysisdomain.RegisterEmbeddingQueueRoutes(api)
-		topicanalysisdomain.RegisterMergeReembeddingQueueRoutes(api)
-		topicanalysisdomain.RegisterTagQueueRoutes(api)
-		topicanalysisdomain.RegisterTagManagementRoutes(api)
-		taggingwatched.RegisterWatchedTagsRoutes(api)
-		topicanalysisdomain.RegisterTagMergePreviewRoutes(api)
-		topicanalysisdomain.RegisterSemanticBoardRoutes(api)
-
-		narrativedomain.RegisterNarrativeRoutes(api)
-
-		dailyreportdomain.RegisterDailyReportRoutes(api)
+		tagmanagement.RegisterRoutes(api)
 
 		traceHandler := tracing.NewTraceHandler(database.DB)
 		traces := api.Group("/traces")

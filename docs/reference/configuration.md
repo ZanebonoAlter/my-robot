@@ -15,18 +15,6 @@ Syntopica 使用分层配置系统：后端 YAML 配置文件、覆盖文件值�
 | `DATABASE_DRIVER` | 否 | `"postgres"` | 数据库驱动，主分支仅支持 `"postgres"` |
 | `DATABASE_DSN` | 否 | `"host=127.0.0.1 user=postgres password=postgres dbname=syntopica port=5432 sslmode=disable TimeZone=Asia/Shanghai"` | PostgreSQL 连接字符串 |
 | `CORS_ORIGINS` | 否 | `"http://localhost:3000,http://localhost:3000"` | 逗号分隔的允许 CORS 来源列表 |
-| `REDIS_URL` | 否 | *(空)* | Topic 分析任务队列的 Redis URL。设置后使用 Redis 作为持久后端；否则回退到内存队列 |
-
-### Topic Analysis 调优
-
-以下环境变量控制 AI 话题分析模块，在 `internal/domain/topicanalysis/ai_analysis.go` 中通过 `parseEnvInt` / `parseEnvFloat` 读取。
-
-| 变量 | 必填 | 默认值 | 说明 |
-|---|---|---|---|
-| `TOPIC_ANALYSIS_MAX_TOKENS` | 否 | `2000` | 话题分析 AI 调用最大 token 数 |
-| `TOPIC_ANALYSIS_TEMPERATURE` | 否 | `0.2` | 话题分析 AI 调用温度 |
-| `TOPIC_ANALYSIS_TIMEOUT_SECONDS` | 否 | `90` | 话题分析 AI 调用超时（秒） |
-| `TOPIC_ANALYSIS_RETRY_COUNT` | 否 | `3` | 话题分析 AI 调用最大重试次数 |
 
 ### 前端（Nuxt）
 
@@ -120,10 +108,6 @@ database:
 | CORS headers | `Content-Type, Authorization` | `viper.SetDefault` in `config.go` |
 | Tracing enabled | `true` | `tracing.DefaultConfig()` |
 | Tracing retention | `7` days | `tracing.DefaultConfig()` |
-| Topic analysis max tokens | `2000` | `ai_analysis.go` `parseEnvInt` |
-| Topic analysis temperature | `0.2` | `ai_analysis.go` `parseEnvFloat` |
-| Topic analysis timeout | `90` s | `ai_analysis.go` `parseEnvInt` |
-| Topic analysis retries | `3` | `ai_analysis.go` `parseEnvInt` |
 
 ### 前端默认值
 
@@ -174,5 +158,12 @@ AI 相关配置不存储在文件或环境变量中 — 通过 Web UI 管理并�
 | `auto_summary_config` | 自动摘要调度器设置（时间范围、模型参数） |
 | `firecrawl_config` | Firecrawl 集成设置（启用、API URL、API key、模式、超时、最大内容长度） |
 | `open_notebook_config` | Open Notebook digest 导出设置（启用、base URL、API key、model、目标笔记本、prompt 模式、自动发送日报/周报） |
+| `daily_report_time` | 日报生成时刻（HH:MM 格式，默认 `21:00`） |
+| `persistent_topic_match_threshold` | 新 section 锚定已有话题的余弦距离阈值（默认 `0.30`） |
+| `persistent_topic_upgrade_threshold` | candidate 允许人工确认所需的连续命中天数（默认 `3`；不会自动转 active） |
+| `persistent_topic_decay_window` | active 话题无命中后自动归档的天数（默认 `30`） |
+| `persistent_topic_cluster_threshold` | 历史回刷 complete-link 聚类阈值（默认 `0.28`） |
 
 这些设置通过 `aisettings.LoadSummaryConfig()`、`aisettings.LoadFirecrawlConfig()` 等函数加载，在前端设置页面中配置。
+
+文章手动总结会在每次请求时重新读取 AI Provider 配置：优先使用 `summary` capability 的启用路由；未配置该路由时，回退到任一启用且具有 Base URL 和 Model 的 Provider。因此服务启动后新增 Provider 无需重启。API Key 对本地 Ollama、llama.cpp 或无需鉴权的 OpenAI-compatible 服务是可选项。

@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"gorm.io/gorm"
+	"syntopica-backend/internal/models"
 	"syntopica-backend/internal/platform/config"
 	"syntopica-backend/internal/platform/logging"
 )
@@ -15,12 +16,11 @@ var openPostgres = connectPostgres
 var runDatabaseMigrations = RunMigrations
 
 func InitDB(cfg *config.Config) error {
-	cstZone := time.FixedZone("CST", 8*3600)
 	gormCfg := &gorm.Config{
-		Logger:                                NewSlowLogger(200 * time.Millisecond),
+		Logger:                                   NewSlowLogger(200 * time.Millisecond),
 		DisableForeignKeyConstraintWhenMigrating: true,
 		NowFunc: func() time.Time {
-			return time.Now().In(cstZone)
+			return time.Now().In(models.ShanghaiTZ)
 		},
 	}
 
@@ -45,20 +45,4 @@ func InitDB(cfg *config.Config) error {
 
 	logging.Infof("Database initialized successfully")
 	return nil
-}
-
-// Deprecated: auto-migration now runs automatically in InitDB.
-func Migrate() error {
-	if DB == nil {
-		return fmt.Errorf("database not initialized")
-	}
-	return RunAutoMigrate(DB)
-}
-
-// Deprecated: use InitDB which handles both auto-migration and versioned migrations.
-func EnsureTables() error {
-	if DB == nil {
-		return fmt.Errorf("database not initialized")
-	}
-	return RunMigrations(DB)
 }

@@ -14,18 +14,18 @@ import (
 	"syntopica-backend/internal/platform/logging"
 )
 
-type SQLiteSpanExporter struct {
-	db *gorm.DB
+type DatabaseSpanExporter struct {
+	db  *gorm.DB
 	cfg Config
 	mu  sync.Mutex
 }
 
-func NewSQLiteSpanExporter(db *gorm.DB, cfg Config) (*SQLiteSpanExporter, error) {
+func NewDatabaseSpanExporter(db *gorm.DB, cfg Config) (*DatabaseSpanExporter, error) {
 	if err := EnsureTracingTable(db); err != nil {
 		return nil, fmt.Errorf("failed to ensure tracing table: %w", err)
 	}
 
-	exporter := &SQLiteSpanExporter{
+	exporter := &DatabaseSpanExporter{
 		db:  db,
 		cfg: cfg,
 	}
@@ -33,7 +33,7 @@ func NewSQLiteSpanExporter(db *gorm.DB, cfg Config) (*SQLiteSpanExporter, error)
 	return exporter, nil
 }
 
-func (e *SQLiteSpanExporter) ExportSpans(ctx context.Context, spans []sdktrace.ReadOnlySpan) error {
+func (e *DatabaseSpanExporter) ExportSpans(ctx context.Context, spans []sdktrace.ReadOnlySpan) error {
 	if len(spans) == 0 {
 		return nil
 	}
@@ -47,11 +47,11 @@ func (e *SQLiteSpanExporter) ExportSpans(ctx context.Context, spans []sdktrace.R
 	return e.batchInsert(records)
 }
 
-func (e *SQLiteSpanExporter) Shutdown(ctx context.Context) error {
+func (e *DatabaseSpanExporter) Shutdown(ctx context.Context) error {
 	return nil
 }
 
-func (e *SQLiteSpanExporter) convertSpan(sp sdktrace.ReadOnlySpan) OtelSpan {
+func (e *DatabaseSpanExporter) convertSpan(sp sdktrace.ReadOnlySpan) OtelSpan {
 	sc := sp.SpanContext()
 	psc := sp.Parent()
 	res := sp.Resource()
@@ -101,7 +101,7 @@ func (e *SQLiteSpanExporter) convertSpan(sp sdktrace.ReadOnlySpan) OtelSpan {
 	}
 }
 
-func (e *SQLiteSpanExporter) batchInsert(records []OtelSpan) error {
+func (e *DatabaseSpanExporter) batchInsert(records []OtelSpan) error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 

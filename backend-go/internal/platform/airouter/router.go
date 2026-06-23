@@ -11,7 +11,7 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/baggage"
 	otelCodes "go.opentelemetry.io/otel/codes"
-	"syntopica-backend/internal/domain/models"
+	"syntopica-backend/internal/models"
 	"syntopica-backend/internal/platform/database"
 	"syntopica-backend/internal/platform/tracing"
 )
@@ -19,10 +19,10 @@ import (
 const maxResponseSnippet = 10000
 
 var defaultConcurrency = map[Capability]int{
-	CapabilityArticleCompletion: 2,
-	CapabilityTopicTagging:      3,
-	CapabilityOpenNotebook:      2,
-	CapabilityEmbedding:         5,
+	CapabilityTopicTagging: 3,
+	CapabilityDigestPolish:  2,
+	CapabilityOpenNotebook:  2,
+	CapabilityEmbedding:    5,
 }
 
 func truncateSnippet(s string) string {

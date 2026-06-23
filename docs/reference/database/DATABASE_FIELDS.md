@@ -26,7 +26,7 @@
 | `topic_tag_embeddings` | 主题标签向量 | `models.TopicTagEmbedding` |
 | `topic_tag_analyses` | 主题分析快照 | `models.TopicTagAnalysis` |
 | `topic_analysis_cursors` | 主题分析游标 | `models.TopicAnalysisCursor` |
-| `topic_analysis_jobs` | 主题分析任务队列 | `topicanalysis.topicAnalysisJobRecord` |
+| `topic_analysis_jobs` | 主题分析任务队列（已废弃，无 migrator 注册） | `topicanalysis.topicAnalysisJobRecord`（已废弃） |
 | `article_topic_tags` | 文章-主题关联 | `models.ArticleTopicTag` |
 | `embedding_config` | 向量配置 | `models.EmbeddingConfig` |
 | `embedding_queues` | 向量生成队列 | `models.EmbeddingQueue` |
@@ -123,7 +123,8 @@
 | `description` | TEXT | 描述 |
 | `url` | VARCHAR(500) UNIQUE NOT NULL | RSS URL |
 | `category_id` | INTEGER | 所属分类 ID |
-| `icon` | VARCHAR(1000) DEFAULT 'rss' | 图标 |
+| `icon` | VARCHAR(1000) DEFAULT 'rss' | 图标值（iconify id 或图片 URL） |
+| `icon_source` | VARCHAR(20) DEFAULT 'fallback' | 图标来源状态机：`auto`（系统抓取，可刷新）/ `custom`（用户设定，不可覆盖）/ `fallback`（兜底 `mdi:rss`） |
 | `color` | VARCHAR(20) DEFAULT '#8b5cf6' | 颜色 |
 | `last_updated` | TIMESTAMP | 最后更新时间 |
 | `created_at` | TIMESTAMP | 创建时间 |
@@ -209,7 +210,7 @@
 | `name` | VARCHAR(100) UNIQUE NOT NULL | 供应商名称 |
 | `provider_type` | VARCHAR(50) DEFAULT 'openai_compatible' | 供应商类型 |
 | `base_url` | VARCHAR(500) NOT NULL | API 地址 |
-| `api_key` | TEXT NOT NULL | API 密钥 |
+| `api_key` | TEXT | API 密钥（可空，本地无认证服务留空） |
 | `model` | VARCHAR(100) NOT NULL | 模型名称 |
 | `enabled` | BOOLEAN DEFAULT true | 是否启用 |
 | `timeout_seconds` | INTEGER DEFAULT 120 | 超时时间 |
@@ -429,6 +430,8 @@ HNSW 索引：`idx_topic_tag_embeddings_embedding USING hnsw (embedding vector_c
 | `updated_at` | TIMESTAMP | 更新时间 |
 
 唯一约束：`(article_id, topic_tag_id)`
+
+标签任务写入关联前会在短事务内以 `FOR KEY SHARE` 锁定对应文章。若 Feed 清理已删除该文章，则跳过关联写入并正常完成任务，避免产生预期内的外键错误日志。
 
 ---
 
@@ -707,7 +710,7 @@ HNSW 索引：`idx_topic_tag_embeddings_embedding USING hnsw (embedding vector_c
 
 这三张表对应旧版 Feed 级 AI 批量摘要功能。字段说明见 §6.5 "AI 摘要关联表"。
 
-**状态**：当前无 Go 代码引用（`ai_summaries` 等模型已不存在于 `internal/domain/models/`），数据库中可能存有旧数据。`articles.feed_summary_id` 仍然指向 `ai_summaries.id`。
+**状态**：当前无 Go 代码引用（`ai_summaries` 等模型已不存在于 `internal/models/`），数据库中可能存有旧数据。`articles.feed_summary_id` 仍然指向 `ai_summaries.id`。
 
 #### digest_configs（Digest 推送配置）
 
@@ -733,6 +736,23 @@ HNSW 索引：`idx_topic_tag_embeddings_embedding USING hnsw (embedding vector_c
 | `updated_at` | TIMESTAMP | 更新时间 |
 
 **状态**：当前无 Go 代码引用，数据库中 0 行数据，标记为预留功能。
+
+---
+
+## 日报持久话题
+
+#### board_persistent_topics
+
+| 字段名 | 类型 | 用途 |
+|---|---|---|
+| `semantic_board_id` | BIGINT | 所属语义板块 |
+| `label` / `description` | TEXT | 持久叙事标题与描述 |
+| `embedding` | vector | 归属匹配与历史回刷聚类 |
+| `status` | VARCHAR | `candidate` / `active` / `archived`；candidate 需满足连续天数并人工确认 |
+| `first_seen_date` / `last_seen_date` | DATE | 首次与最近命中日期 |
+| `hit_count` / `consecutive_hits` | BIGINT | 总命中数与连续命中天数 |
+
+`daily_report_sections` 通过 `persistent_topic_id`、`topic_match_distance`、`topic_match_confidence` 记录归属。`daily_report_section_relations.relation_type` 区分 `similarity`（匈牙利时间线）与 `identity`（持久话题连续性），唯一约束为 `(from_section_id, to_section_id, relation_type)`。
 
 ---
 
@@ -859,6 +879,6 @@ HNSW 索引：`idx_topic_tag_embeddings_embedding USING hnsw (embedding vector_c
 - [全局实体关系图](ER_DIAGRAM.md) — 35 张表的 FK 关系图（ASCII + Mermaid）和约束矩阵
 - [数据生命周期](DATA_LIFECYCLE.md) — 6 条数据链路的状态字段流转说明
 - [数据流](../reference/architecture/data-flow.md) — 代码执行流、API 调用链、前端 store 交互
-- [数据库运维说明](../operations/database.md) — 数据库运维说明
+- [数据库运维说明](../../operations/database-operations.md) — 数据库运维说明
 - [PostgreSQL 迁移手册](../operations/postgres-migration.md) — PostgreSQL 迁移手册
 - [AGENTS.md](../../AGENTS.md) — 项目开发指南

@@ -1,5 +1,6 @@
 import { apiClient } from './client'
 import type { ApiResponse } from '~/types'
+import { createQueueApi, type QueueApi } from './createQueueApi'
 
 export interface TagQueueStatus {
   pending: number
@@ -31,25 +32,20 @@ export interface TagQueueTasksResponse {
   total: number
 }
 
+const queue: QueueApi<TagQueueTask> = createQueueApi<TagQueueTask>('tag-queue')
+
 export function useTagQueueApi() {
   return {
     getStatus(): Promise<ApiResponse<TagQueueStatus>> {
-      return apiClient.get<TagQueueStatus>('/tag-queue/status')
+      return queue.getStatus() as Promise<ApiResponse<TagQueueStatus>>
     },
 
     getTasks(params?: { status?: string; limit?: number; offset?: number }): Promise<ApiResponse<TagQueueTasksResponse>> {
-      const query = new URLSearchParams()
-      if (params?.status) query.append('status', params.status)
-      if (params?.limit) query.append('limit', String(params.limit))
-      if (params?.offset) query.append('offset', String(params.offset))
-
-      const qs = query.toString()
-      const endpoint = qs ? `/tag-queue/tasks?${qs}` : '/tag-queue/tasks'
-      return apiClient.get<TagQueueTasksResponse>(endpoint)
+      return queue.getTasks(params) as Promise<ApiResponse<TagQueueTasksResponse>>
     },
 
     retryFailed(): Promise<ApiResponse<{ message: string }>> {
-      return apiClient.post<{ message: string }>('/tag-queue/retry')
+      return queue.retryFailed()
     },
 
     retagToday(): Promise<ApiResponse<{ message: string; data: { total: number; enqueued: number } }>> {

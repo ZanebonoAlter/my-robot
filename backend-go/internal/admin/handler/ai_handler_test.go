@@ -1,0 +1,109 @@
+package handler
+
+import (
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+
+	"github.com/gin-gonic/gin"
+	"github.com/glebarez/sqlite"
+	"github.com/stretchr/testify/require"
+	"gorm.io/gorm"
+	"syntopica-backend/internal/admin/repository"
+	"syntopica-backend/internal/models"
+	"syntopica-backend/internal/platform/database"
+)
+
+func setupAIAdminTestDB(t *testing.T) *gorm.DB {
+	t.Helper()
+	db, err := gorm.Open(sqlite.Open(fmt.Sprintf("file:%s?mode=memory&cache=shared", t.Name())), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&models.AIProvider{}, &models.AIRoute{}, &models.AIRouteProvider{}))
+	database.DB = db
+	repository.InitRepository(database.DB)
+	return db
+}
+
+func TestDeleteProviderBlocksLinkedProvider(t *testing.T) {
+	db := setupAIAdminTestDB(t)
+	provider := models.AIProvider{Name: "linked", ProviderType: "openai_compatible", BaseURL: "https://api.example.com/v1", APIKey: "token", Model: "gpt", Enabled: true, TimeoutSeconds: 120}
+	require.NoError(t, db.Create(&provider).Error)
+	route := models.AIRoute{Name: "default", Capability: "summary", Enabled: true, Strategy: "ordered_failover"}
+	require.NoError(t, db.Create(&route).Error)
+	require.NoError(t, db.Create(&models.AIRouteProvider{RouteID: route.ID, ProviderID: provider.ID, Priority: 1, Enabled: true}).Error)
+
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Params = gin.Params{{Key: "provider_id", Value: fmt.Sprintf("%d", provider.ID)}}
+
+	DeleteProvider(ctx)
+	require.Equal(t, http.StatusConflict, recorder.Code)
+	var body map[string]any
+	require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &body))
+	require.Contains(t, body["error"], "still used")
+}
+
+func TestDeleteProviderRemovesUnusedProvider(t *testing.T) {
+	db := setupAIAdminTestDB(t)
+	provider := models.AIProvider{Name: "unused", ProviderType: "openai_compatible", BaseURL: "https://api.example.com/v1", APIKey: "token", Model: "gpt", Enabled: true, TimeoutSeconds: 120}
+	require.NoError(t, db.Create(&provider).Error)
+
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Params = gin.Params{{Key: "provider_id", Value: fmt.Sprintf("%d", provider.ID)}}
+
+	DeleteProvider(ctx)
+	require.Equal(t, http.StatusOK, recorder.Code)
+
+	var count int64
+	require.NoError(t, db.Model(&models.AIProvider{}).Where("id = ?", provider.ID).Count(&count).Error)
+	require.EqualValues(t, 0, count)
+}
+
+func TestUpdateProviderClearAPIKey(t *testing.T) {
+	db := setupAIAdminTestDB(t)
+	provider := models.AIProvider{Name: "cloud", ProviderType: "openai_compatible", BaseURL: "https://api.example.com/v1", APIKey: "secret-key", Model: "gpt-4o", Enabled: true, TimeoutSeconds: 120}
+	require.NoError(t, db.Create(&provider).Error)
+
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Params = gin.Params{{Key: "provider_id", Value: fmt.Sprintf("%d", provider.ID)}}
+	ctx.Request = httptest.NewRequest(http.MethodPut, "/", nil)
+	body := fmt.Sprintf(`{"name":"cloud","base_url":"https://api.example.com/v1","model":"gpt-4o","clear_api_key":true}`)
+	ctx.Request.Body = io.NopCloser(strings.NewReader(body))
+
+	UpdateProvider(ctx)
+	require.Equal(t, http.StatusOK, recorder.Code)
+
+	var loaded models.AIProvider
+	require.NoError(t, db.First(&loaded, provider.ID).Error)
+	require.Equal(t, "", loaded.APIKey)
+}
+
+func TestUpdateProviderKeepExistingKeyWhenNoClear(t *testing.T) {
+	db := setupAIAdminTestDB(t)
+	provider := models.AIProvider{Name: "cloud", ProviderType: "openai_compatible", BaseURL: "https://api.example.com/v1", APIKey: "secret-key", Model: "gpt-4o", Enabled: true, TimeoutSeconds: 120}
+	require.NoError(t, db.Create(&provider).Error)
+
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Params = gin.Params{{Key: "provider_id", Value: fmt.Sprintf("%d", provider.ID)}}
+	ctx.Request = httptest.NewRequest(http.MethodPut, "/", nil)
+	body := fmt.Sprintf(`{"name":"cloud","base_url":"https://api.example.com/v1","model":"gpt-4o","clear_api_key":false}`)
+	ctx.Request.Body = io.NopCloser(strings.NewReader(body))
+
+	UpdateProvider(ctx)
+	require.Equal(t, http.StatusOK, recorder.Code)
+
+	var loaded models.AIProvider
+	require.NoError(t, db.First(&loaded, provider.ID).Error)
+	require.Equal(t, "secret-key", loaded.APIKey)
+}

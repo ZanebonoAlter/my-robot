@@ -1,5 +1,5 @@
-import { apiClient } from './client'
 import type { ApiResponse } from '~/types'
+import { createQueueApi, type QueueApi } from './createQueueApi'
 
 export interface EmbeddingQueueStatus {
   pending: number
@@ -31,25 +31,20 @@ export interface EmbeddingQueueTasksResponse {
   total: number
 }
 
+const queue: QueueApi<EmbeddingQueueTask> = createQueueApi<EmbeddingQueueTask>('embedding/queue')
+
 export function useEmbeddingQueueApi() {
   return {
     getStatus(): Promise<ApiResponse<EmbeddingQueueStatus>> {
-      return apiClient.get<EmbeddingQueueStatus>('/embedding/queue/status')
+      return queue.getStatus() as Promise<ApiResponse<EmbeddingQueueStatus>>
     },
 
     getTasks(params?: { status?: string; limit?: number; offset?: number }): Promise<ApiResponse<EmbeddingQueueTasksResponse>> {
-      const query = new URLSearchParams()
-      if (params?.status) query.append('status', params.status)
-      if (params?.limit) query.append('limit', String(params.limit))
-      if (params?.offset) query.append('offset', String(params.offset))
-
-      const qs = query.toString()
-      const endpoint = qs ? `/embedding/queue/tasks?${qs}` : '/embedding/queue/tasks'
-      return apiClient.get<EmbeddingQueueTasksResponse>(endpoint)
+      return queue.getTasks(params) as Promise<ApiResponse<EmbeddingQueueTasksResponse>>
     },
 
     retryFailed(): Promise<ApiResponse<{ message: string }>> {
-      return apiClient.post<{ message: string }>('/embedding/queue/retry')
+      return queue.retryFailed()
     },
   }
 }

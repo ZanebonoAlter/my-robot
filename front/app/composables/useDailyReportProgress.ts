@@ -1,5 +1,12 @@
-import { ref, onMounted, onUnmounted } from 'vue'
-import { getApiOrigin } from '~/utils/api'
+/**
+ * 日报进度管理器 — 基于 useEventStream
+ *
+ * 现有消费者（NarrativeGenerateDialog.vue）的 API 完全兼容：
+ *   progress (Map), done, jobId, totalSaved, totalBoards, reset()
+ */
+
+import { useEventStream } from '~/composables/useEventStream'
+import { EVENT_TYPES } from '~/utils/eventTypes'
 
 export interface BoardProgress {
   board_id: number
@@ -10,74 +17,51 @@ export interface BoardProgress {
 }
 
 export function useDailyReportProgress() {
-  const ws = ref<WebSocket | null>(null)
+  const stream = useEventStream()
   const progress = ref<Map<number, BoardProgress>>(new Map())
   const done = ref(false)
   const jobId = ref<string | null>(null)
   const totalSaved = ref(0)
   const totalBoards = ref(0)
 
-  function connect() {
-    if (ws.value?.readyState === WebSocket.OPEN) return
-    if (ws.value?.readyState === WebSocket.CONNECTING) return
-
-    const wsBase = getApiOrigin().replace(/^http/, 'ws')
-    const url = `${wsBase}/ws`
-
-    ws.value = new WebSocket(url)
-
-    ws.value.onmessage = (event) => {
-      try {
-        const msg = JSON.parse(event.data)
-
-        if (msg.type === 'daily_report_progress') {
-          if (!jobId.value) jobId.value = msg.job_id
-          const rawStatus = msg.status === 'processing' ? 'generating' : msg.status
-          const status: BoardProgress['status'] = ['waiting', 'generating', 'completed', 'failed'].includes(rawStatus) ? rawStatus : 'generating'
-          const boardId = Number(msg.board_id ?? 0)
-          const progressText = msg.progress ?? ''
-          const bp: BoardProgress = {
-            board_id: boardId,
-            board_name: msg.board_name ?? `#${boardId}`,
-            status,
-            saved: msg.saved ?? 0,
-            progress: progressText,
-          }
-          progress.value.set(boardId, bp)
-          if (status === 'completed' && progressText === '1/1') {
-            done.value = true
-            totalSaved.value = bp.saved
-            totalBoards.value = 1
-          }
-          // Trigger reactivity
-          progress.value = new Map(progress.value)
-        }
-
-        if (msg.type === 'daily_report_done') {
-          done.value = true
-          totalSaved.value = msg.total_saved ?? 0
-          totalBoards.value = msg.total_boards ?? 0
-        }
-      } catch {
-        // ignore non-JSON or unrelated messages
-      }
+  // 订阅 daily_report_progress
+  const unsubProgress = stream.on<Record<string, unknown>>(EVENT_TYPES.DAILY_REPORT_PROGRESS, (msg) => {
+    if (!jobId.value) jobId.value = (msg.job_id as string) ?? null
+    const rawStatus = (msg.status as string) === 'processing' ? 'generating' : (msg.status as string)
+    const status: BoardProgress['status'] = ['waiting', 'generating', 'completed', 'failed'].includes(rawStatus)
+      ? rawStatus as BoardProgress['status']
+      : 'generating'
+    const boardId = Number(msg.board_id ?? 0)
+    const progressText = (msg.progress as string) ?? ''
+    const bp: BoardProgress = {
+      board_id: boardId,
+      board_name: (msg.board_name as string) ?? `#${boardId}`,
+      status,
+      saved: (msg.saved as number) ?? 0,
+      progress: progressText,
     }
-
-    ws.value.onclose = () => {
-      ws.value = null
+    progress.value.set(boardId, bp)
+    if (status === 'completed' && progressText === '1/1') {
+      done.value = true
+      totalSaved.value = bp.saved
+      totalBoards.value = 1
     }
+    // Trigger reactivity
+    progress.value = new Map(progress.value)
+  })
 
-    ws.value.onerror = () => {
-      ws.value = null
-    }
-  }
+  // 订阅 daily_report_done
+  const unsubDone = stream.on<Record<string, unknown>>(EVENT_TYPES.DAILY_REPORT_DONE, (msg) => {
+    done.value = true
+    totalSaved.value = (msg.total_saved as number) ?? 0
+    totalBoards.value = (msg.total_boards as number) ?? 0
+  })
 
-  function disconnect() {
-    if (ws.value) {
-      ws.value.close(1000, 'Manual disconnect')
-      ws.value = null
-    }
-  }
+  // 组件卸载时取消订阅
+  onUnmounted(() => {
+    unsubProgress()
+    unsubDone()
+  })
 
   function reset() {
     progress.value = new Map()
@@ -86,9 +70,6 @@ export function useDailyReportProgress() {
     totalSaved.value = 0
     totalBoards.value = 0
   }
-
-  onMounted(() => connect())
-  onUnmounted(() => disconnect())
 
   return {
     progress,

@@ -3,6 +3,7 @@ import { ref, computed, watch } from 'vue'
 import { Icon } from '@iconify/vue'
 import { useDailyReportsApi, type SectionLifecycleNode, type SectionRelation, type DailyReportThread } from '~/api/dailyReports'
 import { useArticlesApi } from '~/api/articles'
+import { bfsHighlight, type GraphHighlightEdge } from '~/utils/graphHighlight'
 
 const props = defineProps<{
   sectionId: number
@@ -16,6 +17,7 @@ const emit = defineEmits<{
 
 const { getSectionLifecycle, getDailyReportDetail } = useDailyReportsApi()
 const { getArticle } = useArticlesApi()
+const { theme } = useTheme()
 
 const sections = ref<SectionLifecycleNode[]>([])
 const relations = ref<SectionRelation[]>([])
@@ -44,6 +46,23 @@ const statusColorMap: Record<string, string> = {
   split: '#ea580c',
   merge: '#9333ea',
   ending: '#9ca3af',
+}
+
+// Theme-aware SVG colors
+const svgGridColor = computed(() => theme.value === 'dark' ? 'rgba(255,255,255,0.04)' : 'rgba(80,60,30,0.06)')
+const svgEdgeColorBase = computed(() => theme.value === 'dark' ? 'rgba(255,255,255,' : 'rgba(80,60,30,')
+const svgNodeStroke = computed(() => theme.value === 'dark' ? 'rgba(255,255,255,0.15)' : 'rgba(80,60,30,0.15)')
+const svgNodeStrokeEnding = computed(() => theme.value === 'dark' ? 'rgba(120,120,120,0.25)' : 'rgba(120,120,120,0.25)')
+const svgNodeFill = computed(() => theme.value === 'dark' ? 'rgba(255,255,255,0.55)' : 'rgba(255,255,255,0.55)')
+const svgNodeFillSelected = computed(() => theme.value === 'dark' ? 'rgba(240,138,75,0.08)' : 'rgba(80,60,20,0.08)')
+const svgTextPrimary = computed(() => theme.value === 'dark' ? 'rgba(255,255,255,0.9)' : 'rgba(40,30,10,0.85)')
+const svgTextSecondary = computed(() => theme.value === 'dark' ? 'rgba(255,255,255,0.4)' : 'rgba(80,60,30,0.4)')
+const svgIconBg = computed(() => theme.value === 'dark' ? 'rgba(255,255,255,0.04)' : 'rgba(80,60,30,0.06)')
+const svgIconStroke = computed(() => theme.value === 'dark' ? 'rgba(255,255,255,0.3)' : 'rgba(80,60,30,0.3)')
+
+function getEdgeColor(distance: number, highlighted: boolean): string {
+  if (highlighted) return `${svgEdgeColorBase.value}0.5)`
+  return `${svgEdgeColorBase.value}${edgeOpacity(distance)})`
 }
 
 const statusLabel: Record<string, string> = {
@@ -168,32 +187,28 @@ const currentSection = computed(() =>
   sections.value.find(s => s.id === props.sectionId),
 )
 
-// --- Hover highlight ---
+// --- Hover highlight (BFS-based) ---
 const hoveredId = ref<number | null>(null)
 
-const neighborsOf = computed(() => {
-  const map = new Map<number, Set<number>>()
-  for (const r of relations.value) {
-    let s = map.get(r.from_id)
-    if (!s) { s = new Set(); map.set(r.from_id, s) }
-    s.add(r.to_id)
-    s = map.get(r.to_id)
-    if (!s) { s = new Set(); map.set(r.to_id, s) }
-    s.add(r.from_id)
-  }
-  return map
+// Map relations to numeric edges for bfsHighlight
+const graphEdges = computed<GraphHighlightEdge<number>[]>(() =>
+  relations.value.map(r => ({ source: r.from_id, target: r.to_id }))
+)
+
+// Cached BFS highlight result for hovered node
+const highlightedSet = computed<Set<number>>(() => {
+  if (hoveredId.value === null) return new Set()
+  return bfsHighlight(hoveredId.value, graphEdges.value, sections.value.length)
 })
 
 function isEdgeHighlighted(r: { fromId: number; toId: number }): boolean {
   if (hoveredId.value === null) return false
-  return r.fromId === hoveredId.value || r.toId === hoveredId.value
+  return highlightedSet.value.has(r.fromId) && highlightedSet.value.has(r.toId)
 }
 
 function isNodeHighlighted(nodeId: number): boolean {
   if (hoveredId.value === null) return false
-  if (nodeId === hoveredId.value) return true
-  const nb = neighborsOf.value.get(hoveredId.value)
-  return nb ? nb.has(nodeId) : false
+  return highlightedSet.value.has(nodeId)
 }
 
 // --- Thread/article loading ---
@@ -326,16 +341,17 @@ function navigateToNode(node: SectionLifecycleNode) {
             :y1="0"
             :x2="ci * COL_W + PAD + NODE_W / 2"
             :y2="svgHeight"
-            stroke="rgba(80,60,30,0.06)"
+            :stroke="svgGridColor"
           />
 
           <!-- Edges -->
           <path
             v-for="edge in edgePaths"
             :key="edge.key"
+            :data-testid="`slp-edge-${edge.fromId}-${edge.toId}`"
             :d="edge.d"
             fill="none"
-            :stroke="isEdgeHighlighted(edge) ? 'rgba(80,60,30,0.5)' : `rgba(80,60,30,${edgeOpacity(edge.distance)})`"
+            :stroke="getEdgeColor(edge.distance, isEdgeHighlighted(edge))"
             :stroke-width="isEdgeHighlighted(edge) ? 2.5 : edgeWeight(edge.distance)"
           >
             <title>距离: {{ edge.distance.toFixed(3) }}</title>
@@ -345,6 +361,7 @@ function navigateToNode(node: SectionLifecycleNode) {
           <g
             v-for="pn in positionedNodes"
             :key="'n-' + pn.data.id"
+            :data-testid="`slp-node-${pn.data.id}`"
             class="slp-node"
             :class="{
               'slp-node--current': pn.data.id === sectionId,
@@ -362,24 +379,24 @@ function navigateToNode(node: SectionLifecycleNode) {
               :width="NODE_W"
               :height="NODE_H"
               rx="6"
-              :fill="pn.data.id === sectionId ? 'rgba(80,60,20,0.08)' : 'rgba(255,255,255,0.55)'"
-              :stroke="pn.data.status === 'ending' ? 'rgba(120,120,120,0.25)' : 'rgba(80,60,30,0.15)'"
+              :fill="pn.data.id === sectionId ? svgNodeFillSelected : svgNodeFill"
+              :stroke="pn.data.status === 'ending' ? svgNodeStrokeEnding : svgNodeStroke"
               :stroke-dasharray="pn.data.status === 'ending' ? '4,3' : 'none'"
               stroke-width="1"
             />
             <!-- Navigate button -->
             <g class="slp-nav-btn" @click.stop="navigateToNode(pn.data)">
-              <rect :x="NODE_W - 18" y="3" width="14" height="14" rx="3" fill="rgba(80,60,30,0.06)" />
-              <path d="M${NODE_W - 14},7 L${NODE_W - 8},10 L${NODE_W - 14},13" stroke="rgba(80,60,30,0.3)" stroke-width="1" fill="none" />
+              <rect :x="NODE_W - 18" y="3" width="14" height="14" rx="3" :fill="svgIconBg" />
+              <path d="M${NODE_W - 14},7 L${NODE_W - 8},10 L${NODE_W - 14},13" :stroke="svgIconStroke" stroke-width="1" fill="none" />
             </g>
             <!-- Status dot -->
             <circle cx="12" :cy="NODE_H / 2" r="4" :fill="statusColorMap[pn.data.status] || '#9ca3af'" />
             <!-- Label -->
-            <text x="22" y="18" fill="rgba(40,30,10,0.85)" font-size="11" font-weight="500" font-family="system-ui,sans-serif">
+            <text x="22" y="18" :fill="svgTextPrimary" font-size="11" font-weight="500" font-family="system-ui,sans-serif">
               {{ truncateLabel(pn.data.cluster_label) }}
             </text>
             <!-- Meta -->
-            <text x="22" y="34" fill="rgba(80,60,30,0.4)" font-size="9" font-family="system-ui,sans-serif">
+            <text x="22" y="34" :fill="svgTextSecondary" font-size="9" font-family="system-ui,sans-serif">
               {{ formatDate(pn.data.period_date) }} · {{ pn.data.article_count }}篇 · {{ pn.data.thread_count }}条线索
             </text>
             <!-- Status badge -->

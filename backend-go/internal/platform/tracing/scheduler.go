@@ -26,7 +26,3 @@ func TraceSchedulerTick(schedulerName, trigger string, fn func(ctx context.Conte
 
 	fn(ctx)
 }
-
-func TraceAsyncOp(parentCtx context.Context, opName string, fn func(ctx context.Context)) {
-	GoWithTrace(parentCtx, "async."+opName, fn)
-}

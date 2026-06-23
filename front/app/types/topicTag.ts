@@ -17,11 +17,3 @@ export interface TagHierarchyResponse {
   nodes: TagHierarchyNode[]
   total: number
 }
-
-export interface UpdateAbstractNameRequest {
-  newName: string
-}
-
-export interface DetachChildRequest {
-  childId: number
-}

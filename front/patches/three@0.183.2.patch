@@ -1,0 +1,19 @@
+diff --git a/build/three.module.d.ts b/build/three.module.d.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..98684498a34e15bd30f3c79b1229ec62a3c9e37b
+--- /dev/null
++++ b/build/three.module.d.ts
+@@ -0,0 +1 @@
++export * from '@types/three'
+diff --git a/package.json b/package.json
+index f412266a053fc706558660d660ef84371295ea2c..47fd05eb2194cf89cee5154b19c401ce89f69833 100644
+--- a/package.json
++++ b/package.json
+@@ -7,6 +7,7 @@
+   "module": "./build/three.module.js",
+   "exports": {
+     ".": {
++      "types": "./build/three.module.d.ts",
+       "import": "./build/three.module.js",
+       "require": "./build/three.cjs"
+     },

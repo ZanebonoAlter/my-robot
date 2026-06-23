@@ -1,4 +1,5 @@
 import { apiClient } from './client'
+import { mapApiResponse } from '~/utils/api-helpers'
 import type { ApiResponse } from '~/types'
 import type { TagHierarchyNode, TagHierarchyResponse } from '~/types/topicTag'
 
@@ -52,15 +53,12 @@ export function useAbstractTagApi() {
       const query = params.toString() ? `?${params.toString()}` : ''
       const response = await apiClient.get<RawHierarchyResponse>(`/topic-tags/hierarchy${query}`)
       if (response.success && response.data) {
-        return {
-          ...response,
-          data: {
-            nodes: (response.data.nodes ?? []).map(mapNode),
-            total: response.data.total,
-          },
-        } as ApiResponse<TagHierarchyResponse>
+        return mapApiResponse(response, {
+          nodes: (response.data.nodes ?? []).map(mapNode),
+          total: response.data.total,
+        })
       }
-      return response as unknown as ApiResponse<TagHierarchyResponse>
+      return { success: false, error: response.error }
     },
 
     async updateAbstractName(tagId: number, newName: string): Promise<ApiResponse<{ id: number; newName: string }>> {

@@ -29,8 +29,13 @@ front/node_modules/
 .code-review-graph/
 # Log files
 logs/
+/artifacts/product-video/tts/
 .codegraph/.gitignore
 # Added by code-review-graph
 .code-review-graph/
 # Log files
 logs/
+data.7z
+demo/seed/seed.sql
+backups/
+/.*

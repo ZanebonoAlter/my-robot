@@ -7,10 +7,6 @@ import type {
 } from '~/types'
 
 export function useReadingBehaviorApi() {
-  async function trackBehavior(event: ReadingBehaviorEvent): Promise<ApiResponse<void>> {
-    return apiClient.post<void>('/reading-behavior/track', event)
-  }
-
   async function trackBehaviorBatch(events: ReadingBehaviorEvent[]): Promise<ApiResponse<void>> {
     return apiClient.post<void>('/reading-behavior/track-batch', { events })
   }
@@ -29,7 +25,6 @@ export function useReadingBehaviorApi() {
   }
 
   return {
-    trackBehavior,
     trackBehaviorBatch,
     getReadingStats,
     getUserPreferences,

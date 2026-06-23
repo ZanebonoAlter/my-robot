@@ -6,26 +6,17 @@ import (
 	"syscall"
 	"time"
 
-	"syntopica-backend/internal/app/runtimeinfo"
-	"syntopica-backend/internal/domain/content"
-	"syntopica-backend/internal/domain/models"
-	"syntopica-backend/internal/domain/tagging"
-	"syntopica-backend/internal/jobs"
+	"syntopica-backend/internal/admin"
+	"syntopica-backend/internal/admin/scheduler"
+	"syntopica-backend/internal/models"
 	"syntopica-backend/internal/platform/database"
 	"syntopica-backend/internal/platform/logging"
+	content "syntopica-backend/internal/reader"
+	tagging "syntopica-backend/internal/tagmanagement"
 )
 
 type Runtime struct {
-	AutoRefresh            *jobs.AutoRefreshScheduler
-	PreferenceUpdate       *jobs.PreferenceUpdateScheduler
-	ContentCompletion      *jobs.ContentCompletionScheduler
-	Firecrawl              *jobs.FirecrawlScheduler
-	BlockedArticleRecovery *jobs.BlockedArticleRecoveryScheduler
-	TagQualityScore        *jobs.TagQualityScoreScheduler
-	NarrativeSummary       *jobs.NarrativeSummaryScheduler
-	DailyReport            *jobs.DailyReportScheduler
-	LogCleanup             *jobs.LogCleanupScheduler
-	AuxLabelCleanup        *jobs.AuxLabelCleanupScheduler
+	Registry *admin.SchedulerRegistry
 }
 
 func resetStaleStates() {
@@ -87,100 +78,112 @@ func resetStaleStates() {
 }
 
 func StartRuntime() *Runtime {
-	runtime := &Runtime{}
-
 	resetStaleStates()
 
 	tagging.StartAllWorkers()
 
-	runtime.AutoRefresh = jobs.NewAutoRefreshScheduler(60)
-	if err := runtime.AutoRefresh.Start(); err != nil {
-		logging.Warnf("Failed to start auto-refresh scheduler: %v", err)
-	} else {
-		logging.Infoln("Auto-refresh scheduler started successfully")
-	}
+	registry := admin.NewSchedulerRegistry()
 
-	preferenceUpdateInterval := 1800
-	runtime.PreferenceUpdate = jobs.NewPreferenceUpdateScheduler(preferenceUpdateInterval)
-	if err := runtime.PreferenceUpdate.Start(); err != nil {
-		logging.Warnf("Failed to start preference update scheduler: %v", err)
-	} else {
-		logging.Infoln("Preference update scheduler started successfully")
-	}
+	// Register each scheduler using the BaseScheduler factory pattern.
+	// Each scheduler is configured with its JobFunc, interval, startup delay,
+	// and optional TaskPersistence for DB state tracking.
 
-	runtime.Firecrawl = jobs.NewFirecrawlScheduler()
-	if err := runtime.Firecrawl.Start(); err != nil {
-		logging.Warnf("Failed to start firecrawl scheduler: %v", err)
-	} else {
-		logging.Infoln("Firecrawl scheduler started successfully")
-	}
+	registry.Register("log_cleanup", scheduler.New(scheduler.Config{
+		Name:         "Log Cleanup",
+		Interval:     86400 * time.Second,
+		StartupDelay: 5 * time.Minute,
+		Job:          admin.LogCleanupJob,
+		Persistence: admin.NewTaskPersistence("log_cleanup",
+			"清理过期的 AI 调用日志和追踪数据"),
+	}))
 
+	registry.Register("aux_label_cleanup", scheduler.New(scheduler.Config{
+		Name:         "Aux Label Cleanup",
+		Interval:     3600 * time.Second,
+		StartupDelay: 10 * time.Minute,
+		Job:          admin.AuxLabelCleanupJob,
+		Persistence: admin.NewTaskPersistence("aux_label_cleanup",
+			"清理无活跃标签引用的辅助标签"),
+	}))
+
+	registry.Register("blocked_article_recovery", scheduler.New(scheduler.Config{
+		Name:     "Blocked Article Recovery",
+		Interval: 3600 * time.Second,
+		Job:      admin.BlockedArticleRecoveryJob,
+		Persistence: admin.NewTaskPersistence("blocked_article_recovery",
+			"恢复被阻塞的文章"),
+	}))
+
+	// Medium schedulers: with SchedulerTask DB persistence
+	registry.Register("preference_update", scheduler.New(scheduler.Config{
+		Name:     "Preference Update",
+		Interval: 1800 * time.Second,
+		Job:      admin.PreferenceUpdateJob,
+		Persistence: admin.NewTaskPersistence("preference_update",
+			"Update reading preferences from behavior data"),
+	}))
+
+	registry.Register("tag_quality_score", scheduler.New(scheduler.Config{
+		Name:     "Tag Quality Score",
+		Interval: 3600 * time.Second,
+		Job:      admin.TagQualityScoreJob,
+		Persistence: admin.NewTaskPersistence("tag_quality_score",
+			"Recompute persistent quality scores for topic tags"),
+	}))
+
+	registry.Register("auto_refresh", scheduler.New(scheduler.Config{
+		Name:     "Auto Refresh",
+		Interval: 60 * time.Second,
+		Job:      admin.AutoRefreshJob,
+		Persistence: admin.NewTaskPersistence("auto_refresh",
+			"Auto-refresh RSS feeds"),
+	}))
+
+	// Complex schedulers
 	content.InitContentCompletionHandler()
+	registry.Register("content_completion", scheduler.New(scheduler.Config{
+		Name:     "Content Completion",
+		Interval: 60 * time.Second,
+		Job:      admin.ContentCompletionJob(content.GetContentCompletionService()),
+		Persistence: admin.NewTaskPersistence("ai_summary",
+			"Complete article content and generate article summaries"),
+	}))
 
-	runtime.ContentCompletion = jobs.NewContentCompletionScheduler(
-		content.GetContentCompletionService(),
-		60,
-	)
-	if err := runtime.ContentCompletion.Start(); err != nil {
-		logging.Warnf("Failed to start content completion scheduler: %v", err)
-	} else {
-		logging.Infoln("Content completion scheduler started successfully")
-	}
+	// DailyReport: wrapped with TriggerNowWithDate support
+	dailyReportNextRunFn := scheduler.NextDailyReportTime
+	dailyReportBase := scheduler.New(scheduler.Config{
+		Name:    "Daily Report",
+		NextRun: dailyReportNextRunFn,
+		Job:     admin.DailyReportJob(), // uses current time at each execution
+		Persistence: admin.NewTaskPersistenceWithNextRun("daily_report",
+			"Generate daily reports for all active semantic boards",
+			dailyReportNextRunFn),
+	})
+	dailyReportWrapper := admin.NewDailyReportSchedulerWrapper(dailyReportBase)
+	registry.Register("daily_report", dailyReportWrapper)
 
-	// STAT-04: Blocked article recovery scheduler (hourly)
-	runtime.BlockedArticleRecovery = jobs.NewBlockedArticleRecoveryScheduler(3600)
-	if err := runtime.BlockedArticleRecovery.Start(); err != nil {
-		logging.Warnf("Failed to start blocked article recovery scheduler: %v", err)
-	} else {
-		logging.Infoln("Blocked article recovery scheduler started successfully")
-	}
+	// Firecrawl: with custom status enricher
+	firecrawlQueue := content.NewFirecrawlJobQueue(database.DB)
+	registry.Register("firecrawl", scheduler.New(scheduler.Config{
+		Name:         "Firecrawl Crawler",
+		Interval:     300 * time.Second,
+		StartupDelay: 0,
+		Job:          admin.FirecrawlJob(firecrawlQueue, "scheduled"),
+		StatusDetail: admin.FirecrawlStatusEnricher(),
+		Persistence: admin.NewTaskPersistence("firecrawl",
+			"自动爬取文章全文"),
+	}))
 
-	runtime.TagQualityScore = jobs.NewTagQualityScoreScheduler(3600)
-	if err := runtime.TagQualityScore.Start(); err != nil {
-		logging.Warnf("Failed to start tag quality score scheduler: %v", err)
-	} else {
-		logging.Infoln("Tag quality score scheduler started successfully")
-	}
+	// Set global registry for handler access
+	admin.SetRegistry(registry)
+	content.SetSchedulerLookup(func(name string) interface{} {
+		s, _ := registry.Get(name)
+		return s
+	})
 
-	runtime.NarrativeSummary = jobs.NewNarrativeSummaryScheduler(86400)
-	if err := runtime.NarrativeSummary.Start(); err != nil {
-		logging.Warnf("Failed to start narrative summary scheduler: %v", err)
-	} else {
-		logging.Infoln("Narrative summary scheduler started successfully")
-	}
+	registry.StartAll()
 
-	runtime.LogCleanup = jobs.NewLogCleanupScheduler(86400)
-	if err := runtime.LogCleanup.Start(); err != nil {
-		logging.Warnf("Failed to start log cleanup scheduler: %v", err)
-	} else {
-		logging.Infoln("Log cleanup scheduler started successfully")
-	}
-
-	runtime.DailyReport = jobs.NewDailyReportScheduler(86400)
-	if err := runtime.DailyReport.Start(); err != nil {
-		logging.Warnf("Failed to start daily report scheduler: %v", err)
-	} else {
-		logging.Infoln("Daily report scheduler started successfully")
-	}
-
-	runtime.AuxLabelCleanup = jobs.NewAuxLabelCleanupScheduler(3600)
-	if err := runtime.AuxLabelCleanup.Start(); err != nil {
-		logging.Warnf("Failed to start aux label cleanup scheduler: %v", err)
-	} else {
-		logging.Infoln("Aux label cleanup scheduler started successfully")
-	}
-
-	runtimeinfo.AutoRefreshSchedulerInterface = runtime.AutoRefresh
-	runtimeinfo.PreferenceUpdateSchedulerInterface = runtime.PreferenceUpdate
-	runtimeinfo.ContentCompletionSchedulerInterface = runtime.ContentCompletion
-	runtimeinfo.FirecrawlSchedulerInterface = runtime.Firecrawl
-	runtimeinfo.TagQualityScoreSchedulerInterface = runtime.TagQualityScore
-	runtimeinfo.NarrativeSummarySchedulerInterface = runtime.NarrativeSummary
-	runtimeinfo.LogCleanupSchedulerInterface = runtime.LogCleanup
-	runtimeinfo.DailyReportSchedulerInterface = runtime.DailyReport
-	runtimeinfo.AuxLabelCleanupSchedulerInterface = runtime.AuxLabelCleanup
-
-	return runtime
+	return &Runtime{Registry: registry}
 }
 
 func SetupGracefulShutdown(runtime *Runtime) {
@@ -191,69 +194,13 @@ func SetupGracefulShutdown(runtime *Runtime) {
 		sig := <-sigChan
 		logging.Infof("Received signal: %v, shutting down gracefully...", sig)
 
-		done := make(chan struct{})
-		go func() {
-			tagging.StopAllWorkers()
+		tagging.StopAllWorkers()
 
-			if runtime.AutoRefresh != nil {
-				logging.Infoln("Stopping auto-refresh scheduler...")
-				runtime.AutoRefresh.Stop()
-			}
-
-			if runtime.PreferenceUpdate != nil {
-				logging.Infoln("Stopping preference update scheduler...")
-				runtime.PreferenceUpdate.Stop()
-			}
-
-			if runtime.ContentCompletion != nil {
-				logging.Infoln("Stopping content completion scheduler...")
-				runtime.ContentCompletion.Stop()
-			}
-
-			if runtime.Firecrawl != nil {
-				logging.Infoln("Stopping firecrawl scheduler...")
-				runtime.Firecrawl.Stop()
-			}
-
-			if runtime.BlockedArticleRecovery != nil {
-				logging.Infoln("Stopping blocked article recovery scheduler...")
-				runtime.BlockedArticleRecovery.Stop()
-			}
-
-			if runtime.TagQualityScore != nil {
-				logging.Infoln("Stopping tag quality score scheduler...")
-				runtime.TagQualityScore.Stop()
-			}
-
-			if runtime.NarrativeSummary != nil {
-				logging.Infoln("Stopping narrative summary scheduler...")
-				runtime.NarrativeSummary.Stop()
-			}
-
-			if runtime.LogCleanup != nil {
-				logging.Infoln("Stopping log cleanup scheduler...")
-				runtime.LogCleanup.Stop()
-			}
-
-			if runtime.DailyReport != nil {
-				logging.Infoln("Stopping daily report scheduler...")
-				runtime.DailyReport.Stop()
-			}
-
-			if runtime.AuxLabelCleanup != nil {
-				logging.Infoln("Stopping aux label cleanup scheduler...")
-				runtime.AuxLabelCleanup.Stop()
-			}
-
-			close(done)
-		}()
-
-		select {
-		case <-done:
-			logging.Infoln("Graceful shutdown completed")
-		case <-time.After(30 * time.Second):
-			logging.Warnln("Graceful shutdown timed out after 30s, forcing exit")
+		if runtime.Registry != nil {
+			runtime.Registry.StopAll(30 * time.Second)
 		}
+
+		logging.Infoln("Graceful shutdown completed")
 		os.Exit(0)
 	}()
 }

@@ -13,10 +13,12 @@ const props = defineProps<{
 }>()
 
 const emit = defineEmits<{
-  suggest: []
+  suggest: [mode: string]
   execute: [suggestion: UpgradeSuggestion, index: number]
   cancel: []
 }>()
+
+const upgradeMode = ref<'discover_new' | 'expand_existing'>('discover_new')
 
 const openMergeIndex = ref<number | null>(null)
 
@@ -43,10 +45,10 @@ function decisionLabel(d: string): string {
 
 function decisionStyle(d: string): { border: string; bg: string; color: string } {
   switch (d) {
-    case 'create_new': return { border: 'rgba(52,211,153,0.3)', bg: 'rgba(52,211,153,0.08)', color: 'rgba(134,239,172,0.9)' }
-    case 'merge_into_existing': return { border: 'rgba(96,165,250,0.3)', bg: 'rgba(96,165,250,0.08)', color: 'rgba(147,197,253,0.9)' }
-    case 'skip': return { border: 'rgba(107,114,128,0.3)', bg: 'rgba(107,114,128,0.08)', color: 'rgba(209,213,219,0.7)' }
-    default: return { border: 'rgba(255,255,255,0.1)', bg: 'rgba(255,255,255,0.04)', color: 'rgba(255,255,255,0.6)' }
+    case 'create_new': return { border: 'var(--color-success-border, rgba(61,138,74,0.3))', bg: 'var(--color-success-bg, rgba(61,138,74,0.08))', color: 'var(--color-success)' }
+    case 'merge_into_existing': return { border: 'var(--color-link-border)', bg: 'var(--color-link-subtle)', color: 'var(--color-link)' }
+    case 'skip': return { border: 'var(--color-border-medium)', bg: 'var(--color-bg-sunken)', color: 'var(--color-text-muted)' }
+    default: return { border: 'var(--color-border-subtle)', bg: 'var(--color-bg-hover)', color: 'var(--color-text-secondary)' }
   }
 }
 </script>
@@ -78,12 +80,22 @@ function decisionStyle(d: string): { border: string; bg: string; color: string }
             <Icon icon="mdi:information-outline" width="14" />
             <span>已执行升级建议。历史标签归属不会自动回填，可手动触发匹配回填让新构成生效。</span>
           </div>
+          <div v-if="candidates.length > 0" class="usp-mode-selector">
+            <label class="usp-mode-option">
+              <input v-model="upgradeMode" type="radio" value="discover_new" />
+              <span>发现新版块</span>
+            </label>
+            <label class="usp-mode-option">
+              <input v-model="upgradeMode" type="radio" value="expand_existing" />
+              <span>扩充已有版块</span>
+            </label>
+          </div>
           <button
             v-if="candidates.length > 0"
             type="button"
             class="usp-suggest-btn"
             :disabled="suggesting"
-            @click="emit('suggest')"
+            @click="emit('suggest', upgradeMode)"
           >
             <Icon v-if="suggesting" icon="mdi:loading" width="14" class="animate-spin" />
             <Icon v-else icon="mdi:brain" width="14" />
@@ -98,7 +110,7 @@ function decisionStyle(d: string): { border: string; bg: string; color: string }
               type="button"
               class="usp-suggest-btn usp-suggest-btn--small"
               :disabled="suggesting"
-              @click="emit('suggest')"
+              @click="emit('suggest', upgradeMode)"
             >
               <Icon v-if="suggesting" icon="mdi:loading" width="13" class="animate-spin" />
               <Icon v-else icon="mdi:refresh" width="13" />
@@ -238,7 +250,7 @@ function decisionStyle(d: string): { border: string; bg: string; color: string }
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(8, 12, 18, 0.75);
+  background: var(--color-bg-overlay);
   backdrop-filter: blur(8px);
   padding: 1rem;
 }
@@ -248,8 +260,8 @@ function decisionStyle(d: string): { border: string; bg: string; color: string }
   max-height: 80vh;
   overflow-y: auto;
   border-radius: 1.25rem;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  background: rgba(17, 27, 38, 0.98);
+  border: 1px solid var(--color-border-medium);
+  background: var(--color-bg-elevated);
   padding: 1.5rem;
   box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
   display: flex;
@@ -267,13 +279,13 @@ function decisionStyle(d: string): { border: string; bg: string; color: string }
 .usp-title {
   font-size: 0.95rem;
   font-weight: 600;
-  color: rgba(255, 255, 255, 0.9);
+  color: var(--color-text-primary);
 }
 
 .usp-subtitle {
   margin-top: 0.25rem;
   font-size: 0.72rem;
-  color: rgba(255, 255, 255, 0.4);
+  color: var(--color-text-muted);
 }
 
 .usp-close {
@@ -285,14 +297,14 @@ function decisionStyle(d: string): { border: string; bg: string; color: string }
   border: none;
   border-radius: 8px;
   background: none;
-  color: rgba(255, 255, 255, 0.4);
+  color: var(--color-text-muted);
   cursor: pointer;
   transition: all 0.12s ease;
 }
 
 .usp-close:hover {
-  background: rgba(255, 255, 255, 0.08);
-  color: rgba(255, 255, 255, 0.7);
+  background: var(--color-bg-hover);
+  color: var(--color-text-secondary);
 }
 
 .usp-loading {
@@ -301,7 +313,7 @@ function decisionStyle(d: string): { border: string; bg: string; color: string }
   align-items: center;
   gap: 0.5rem;
   padding: 2rem 0;
-  color: rgba(255, 255, 255, 0.4);
+  color: var(--color-text-muted);
   font-size: 0.8rem;
 }
 
@@ -311,8 +323,29 @@ function decisionStyle(d: string): { border: string; bg: string; color: string }
   align-items: center;
   gap: 0.75rem;
   padding: 2rem 0;
-  color: rgba(255, 255, 255, 0.4);
+  color: var(--color-text-muted);
   font-size: 0.8rem;
+}
+
+.usp-mode-selector {
+  display: flex;
+  gap: 1rem;
+  justify-content: center;
+}
+
+.usp-mode-option {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.75rem;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+}
+
+.usp-mode-option input[type="radio"] {
+  accent-color: var(--color-accent);
+  width: 14px;
+  height: 14px;
 }
 
 .usp-suggest-btn {
@@ -321,16 +354,16 @@ function decisionStyle(d: string): { border: string; bg: string; color: string }
   gap: 0.4rem;
   padding: 0.5rem 1rem;
   border-radius: 10px;
-  border: 1px solid rgba(240, 138, 75, 0.3);
-  background: rgba(240, 138, 75, 0.1);
-  color: rgba(255, 220, 200, 0.9);
+  border: 1px solid var(--color-accent);
+  background: var(--color-accent-subtle);
+  color: var(--color-accent-hover);
   font-size: 0.8rem;
   cursor: pointer;
   transition: all 0.12s ease;
 }
 
 .usp-suggest-btn:hover:not(:disabled) {
-  background: rgba(240, 138, 75, 0.18);
+  background: var(--color-accent-subtle);
 }
 
 .usp-suggest-btn:disabled {
@@ -358,7 +391,7 @@ function decisionStyle(d: string): { border: string; bg: string; color: string }
 
 .usp-toolbar-text {
   font-size: 0.72rem;
-  color: rgba(255, 255, 255, 0.45);
+  color: var(--color-text-muted);
 }
 
 .usp-notice {
@@ -367,9 +400,9 @@ function decisionStyle(d: string): { border: string; bg: string; color: string }
   gap: 0.45rem;
   padding: 0.65rem 0.75rem;
   border-radius: 10px;
-  border: 1px solid rgba(96, 165, 250, 0.2);
-  background: rgba(96, 165, 250, 0.08);
-  color: rgba(191, 219, 254, 0.85);
+  border: 1px solid var(--color-info-bg, rgba(61,122,138,0.25));
+  background: var(--color-info-bg, rgba(61,122,138,0.08));
+  color: var(--color-info);
   font-size: 0.72rem;
   line-height: 1.5;
 }
@@ -395,24 +428,24 @@ function decisionStyle(d: string): { border: string; bg: string; color: string }
   font-weight: 600;
   padding: 0.15rem 0.4rem;
   border-radius: 6px;
-  background: rgba(0, 0, 0, 0.2);
+  background: var(--color-input-bg);
 }
 
 .usp-item-board {
   font-size: 0.8rem;
   font-weight: 500;
-  color: rgba(255, 255, 255, 0.85);
+  color: var(--color-text-primary);
 }
 
 .usp-item-desc {
   font-size: 0.75rem;
-  color: rgba(255, 255, 255, 0.55);
+  color: var(--color-text-muted);
   line-height: 1.5;
 }
 
 .usp-item-reason {
   font-size: 0.72rem;
-  color: rgba(255, 255, 255, 0.4);
+  color: var(--color-text-muted);
   line-height: 1.5;
 }
 
@@ -424,10 +457,10 @@ function decisionStyle(d: string): { border: string; bg: string; color: string }
 
 .usp-item-tag {
   font-size: 0.65rem;
-  color: rgba(255, 255, 255, 0.45);
+  color: var(--color-text-muted);
   padding: 0.1rem 0.35rem;
   border-radius: 6px;
-  background: rgba(255, 255, 255, 0.06);
+  background: var(--color-bg-hover);
 }
 
 .usp-item-actions {
@@ -442,22 +475,22 @@ function decisionStyle(d: string): { border: string; bg: string; color: string }
   gap: 0.3rem;
   padding: 0.35rem 0.7rem;
   border-radius: 8px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  border: 1px solid var(--color-border-medium);
   background: none;
-  color: rgba(255, 255, 255, 0.6);
+  color: var(--color-text-muted);
   font-size: 0.72rem;
   cursor: pointer;
   transition: all 0.12s ease;
 }
 
 .usp-item-btn--primary {
-  border-color: rgba(52, 211, 153, 0.3);
-  background: rgba(52, 211, 153, 0.1);
-  color: rgba(134, 239, 172, 0.9);
+  border-color: var(--color-success-border, rgba(61,138,74,0.3));
+  background: var(--color-success-bg, rgba(61,138,74,0.1));
+  color: var(--color-success);
 }
 
 .usp-item-btn--primary:hover {
-  background: rgba(52, 211, 153, 0.18);
+  background: var(--color-success-bg, rgba(61,138,74,0.18));
 }
 
 .usp-item-affinities {
@@ -466,22 +499,22 @@ function decisionStyle(d: string): { border: string; bg: string; color: string }
   align-items: center;
   gap: 0.35rem;
   font-size: 0.68rem;
-  color: rgba(255, 255, 255, 0.4);
+  color: var(--color-text-muted);
 }
 
 .usp-item-affinities-label {
-  color: rgba(255, 255, 255, 0.35);
+  color: var(--color-text-muted);
 }
 
 .usp-item-affinity {
   padding: 0.1rem 0.3rem;
   border-radius: 4px;
-  background: rgba(96, 165, 250, 0.08);
-  color: rgba(147, 197, 253, 0.8);
+  background: var(--color-link-subtle);
+  color: var(--color-link);
 }
 
 .usp-item-affinity-detail {
-  color: rgba(147, 197, 253, 0.5);
+  color: var(--color-text-muted);
 }
 
 .usp-merge-wrapper {
@@ -489,13 +522,13 @@ function decisionStyle(d: string): { border: string; bg: string; color: string }
 }
 
 .usp-item-btn--merge {
-  border-color: rgba(96, 165, 250, 0.3);
-  background: rgba(96, 165, 250, 0.08);
-  color: rgba(147, 197, 253, 0.9);
+  border-color: var(--color-link-border);
+  background: var(--color-link-subtle);
+  color: var(--color-link);
 }
 
 .usp-item-btn--merge:hover {
-  background: rgba(96, 165, 250, 0.16);
+  background: var(--color-link-border);
 }
 
 .usp-merge-dropdown {
@@ -505,8 +538,8 @@ function decisionStyle(d: string): { border: string; bg: string; color: string }
   margin-bottom: 4px;
   min-width: 200px;
   border-radius: 8px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  background: rgba(25, 35, 50, 0.98);
+  border: 1px solid var(--color-border-medium);
+  background: var(--color-bg-elevated);
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
   z-index: 10;
   overflow: hidden;
@@ -520,18 +553,18 @@ function decisionStyle(d: string): { border: string; bg: string; color: string }
   padding: 0.45rem 0.65rem;
   border: none;
   background: none;
-  color: rgba(255, 255, 255, 0.8);
+  color: var(--color-text-secondary);
   font-size: 0.72rem;
   cursor: pointer;
   transition: background 0.1s ease;
 }
 
 .usp-merge-option:hover {
-  background: rgba(96, 165, 250, 0.12);
+  background: var(--color-bg-hover);
 }
 
 .usp-merge-option-detail {
-  color: rgba(255, 255, 255, 0.4);
+  color: var(--color-text-muted);
   font-size: 0.65rem;
 }
 </style>

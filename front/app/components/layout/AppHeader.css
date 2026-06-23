@@ -3,9 +3,9 @@
   align-items: center;
   justify-content: space-between;
   padding: 0.625rem 1rem;
-  background: rgba(255, 255, 255, 0.75);
+  background: var(--color-bg-elevated);
   backdrop-filter: blur(12px);
-  border-bottom: 1px solid rgba(26, 26, 26, 0.08);
+  border-bottom: 1px solid var(--color-border-subtle);
   flex-shrink: 0;
 }
 
@@ -30,12 +30,12 @@
   padding: 0.625rem;
   border-radius: 0.5rem;
   transition: all 0.2s ease;
-  color: var(--color-ink-medium);
+  color: var(--color-text-secondary);
 }
 
 .menu-btn:hover {
-  background: rgba(26, 26, 26, 0.04);
-  color: var(--color-ink-dark);
+  background: var(--color-bg-hover);
+  color: var(--color-text-primary);
 }
 
 .logo {
@@ -55,7 +55,7 @@
 .logo-text {
   font-weight: 700;
   font-size: 1.125rem;
-  color: var(--color-ink-black);
+  color: var(--color-text-primary);
   letter-spacing: -0.01em;
 }
 
@@ -66,18 +66,18 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  color: var(--color-ink-medium);
+  color: var(--color-text-secondary);
 }
 
 .header-btn:hover {
-  background: rgba(26, 26, 26, 0.04);
-  color: var(--color-ink-dark);
+  background: var(--color-bg-hover);
+  color: var(--color-text-primary);
 }
 
 .header-divider {
   width: 1px;
   height: 1.5rem;
-  background: rgba(26, 26, 26, 0.12);
+  background: var(--color-border-medium);
   margin: 0 0.25rem;
 }
 
@@ -96,11 +96,11 @@
   align-items: center;
   gap: 0.75rem;
   padding: 0.875rem 1.125rem;
-  background: rgba(255, 255, 255, 0.9);
+  background: var(--color-bg-elevated);
   backdrop-filter: blur(12px);
   border-radius: 0.5rem;
-  box-shadow: 0 4px 16px rgba(26, 26, 26, 0.12);
-  border: 1px solid rgba(26, 26, 26, 0.08);
+  box-shadow: var(--shadow-strong);
+  border: 1px solid var(--color-border-subtle);
 }
 
 .toast-content.toast-success {
@@ -130,7 +130,7 @@
 .toast-message {
   font-size: 0.875rem;
   font-weight: 500;
-  color: var(--color-ink-dark);
+  color: var(--color-text-primary);
   flex: 1;
 }
 
@@ -138,10 +138,10 @@
   padding: 0.25rem;
   border-radius: 0.375rem;
   transition: all 0.2s ease;
-  color: var(--color-ink-light);
+  color: var(--color-text-muted);
 }
 
 .toast-close:hover {
-  background: rgba(26, 26, 26, 0.06);
-  color: var(--color-ink-medium);
+  background: var(--color-bg-hover);
+  color: var(--color-text-secondary);
 }

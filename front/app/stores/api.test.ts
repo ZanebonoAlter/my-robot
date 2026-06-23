@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, defineStore, setActivePinia } from 'pinia'
-import { ref } from 'vue'
+import { ref, computed } from 'vue'
+import { acceptHMRUpdate } from 'pinia'
 
 import type { Article, RssFeed } from '~/types'
 
@@ -29,14 +30,21 @@ vi.mock('~/api/opml', () => ({
 const testGlobals = globalThis as typeof globalThis & {
   defineStore: typeof defineStore
   ref: typeof ref
+  computed: typeof computed
+  acceptHMRUpdate: typeof acceptHMRUpdate
 }
 
 testGlobals.defineStore = defineStore
 testGlobals.ref = ref
+testGlobals.computed = computed
+testGlobals.acceptHMRUpdate = acceptHMRUpdate
 
-async function createStore() {
+async function createStores() {
   const { useApiStore } = await import('./api')
-  return useApiStore()
+  const { useArticlesStore } = await import('./articles')
+  const apiStore = useApiStore()
+  const articlesStore = useArticlesStore()
+  return { apiStore, articlesStore }
 }
 
 function createFeed(overrides: Partial<RssFeed> = {}): RssFeed {
@@ -76,50 +84,31 @@ describe('useApiStore', () => {
     bulkUpdateArticlesMock.mockReset()
   })
 
-  it('updateArticle refreshes unread count when marking an article as read', async () => {
-    const store = await createStore()
-    const sidebarFeed = createFeed({ unreadCount: 2 })
-    const filteredFeed = createFeed({ unreadCount: 2 })
-
-    store.allFeeds = [sidebarFeed]
-    store.feeds = [filteredFeed]
-    store.articles = [createArticle({ read: false })]
-
-    updateArticleMock.mockResolvedValue({ success: true })
-
-    await store.updateArticle('1', { read: true })
-
-    expect(updateArticleMock).toHaveBeenCalledWith(1, { read: true })
-    expect(store.articles[0]?.read).toBe(true)
-    expect(store.allFeeds[0]?.unreadCount).toBe(1)
-    expect(store.feeds[0]?.unreadCount).toBe(1)
-  })
-
-  it('markAllAsRead refreshes all feed unread counts including uncategorized', async () => {
-    const store = await createStore()
-    const sidebarFeeds = [
-      createFeed({ id: '1', category: 'cat-1', unreadCount: 3 }),
-      createFeed({ id: '2', category: '', unreadCount: 4 }),
-    ]
-    const filteredFeeds = [
+  it('markAllAsRead via articlesStore clears apiStore feed unread counts', async () => {
+    const { apiStore, articlesStore } = await createStores()
+    const testFeeds = [
       createFeed({ id: '1', category: 'cat-1', unreadCount: 3 }),
       createFeed({ id: '2', category: '', unreadCount: 4 }),
     ]
 
-    store.allFeeds = sidebarFeeds
-    store.feeds = filteredFeeds
-    store.articles = [
-      createArticle({ id: '1', feedId: '1', read: false }),
-      createArticle({ id: '2', feedId: '2', read: false }),
-    ]
+    apiStore.feeds = testFeeds
 
     bulkUpdateArticlesMock.mockResolvedValue({ success: true })
 
-    await store.markAllAsRead()
+    await articlesStore.markAllAsRead()
 
     expect(bulkUpdateArticlesMock).toHaveBeenCalledWith({ read: true })
-    expect(store.articles.every(article => article.read)).toBe(true)
-    expect(store.allFeeds.map(feed => feed.unreadCount)).toEqual([0, 0])
-    expect(store.feeds.map(feed => feed.unreadCount)).toEqual([0, 0])
+    expect(apiStore.feeds.map(feed => feed.unreadCount)).toEqual([0, 0])
+  })
+
+  it('toggleFavorite calls updateArticle with favorite toggle', async () => {
+    const { articlesStore } = await createStores()
+    articlesStore.articles = [createArticle({ id: '1', favorite: false })]
+
+    updateArticleMock.mockResolvedValue({ success: true })
+
+    const result = await articlesStore.toggleFavorite('1')
+    expect(result.success).toBe(true)
+    expect(updateArticleMock).toHaveBeenCalledWith(1, { favorite: true })
   })
 })

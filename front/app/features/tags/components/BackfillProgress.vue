@@ -43,14 +43,14 @@ const isRunning = computed(() => props.task?.status === 'pending' || props.task?
   flex: 1;
   height: 3px;
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.06);
+  background: var(--color-border-subtle);
   overflow: hidden;
 }
 
 .bf-bar-fill {
   height: 100%;
   border-radius: 999px;
-  background: linear-gradient(90deg, rgba(99, 179, 237, 0.7), rgba(147, 197, 253, 0.9));
+  background: linear-gradient(90deg, var(--color-secondary), var(--color-secondary));
   transition: width 0.3s ease;
 }
 
@@ -59,7 +59,7 @@ const isRunning = computed(() => props.task?.status === 'pending' || props.task?
   align-items: center;
   gap: 0.4rem;
   font-size: 0.68rem;
-  color: rgba(255, 255, 255, 0.45);
+  color: var(--color-text-muted);
   white-space: nowrap;
 }
 

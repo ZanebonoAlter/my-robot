@@ -491,14 +491,15 @@ export class CardGroup {
     _dateRange: DateRange,
     scene: Scene,
     viewMode: 'timeline' | 'lanes' = 'timeline',
+    laneBatch = 0,
   ): void {
-    const layout = layoutCards(sections, viewMode)
+    const layout = layoutCards(sections, viewMode, laneBatch)
     for (const section of sections) {
-      const card = new PinCardImpl(section)
+      // 批次外的赛道没有布局坐标，不创建卡片。
       const pos = layout.get(section.id)
-      if (pos) {
-        card.place(pos.position, pos.rotationZ)
-      }
+      if (!pos) continue
+      const card = new PinCardImpl(section)
+      card.place(pos.position, pos.rotationZ)
       this.cards.push(card)
       this.byId.set(section.id, card)
       scene.add(card.group)

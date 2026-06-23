@@ -25,7 +25,7 @@ Syntopica 想回答的不是“今天又有多少篇新文章”，而是：
 > 一个话题是刚刚出现、持续发展，还是正在分化与结束？
 
 <p align="center">
-  <img src="img/product-video-v2/01-reading-workspace.jpg" width="100%" alt="Syntopica 阅读工作台">
+  <img src="img/1.3.3/topic-split.png" width="100%" alt="Syntopica 阅读工作台">
 </p>
 
 ## 为什么做 Syntopica
@@ -60,11 +60,18 @@ RSS 阅读器能把不同网站收进一个列表，热点聚合器能告诉你�
 
 这里的数据边界由用户决定。Syntopica 不追求默认覆盖整个公开网络，而是优先整理你主动选择、愿意长期保留的信息源。
 
+<p align="center">
+  <img src="img/1.3.3/feed-setting.png" width="100%" alt="feed设置">
+</p>
+
 ### 2. 系统把文章加工成可组织的信息
 
 文章进入系统后，会依次经历正文补全、AI 内容整理、语义标签提取和 Embedding。每一步都有独立状态，失败任务可以在队列中观察和重试。
 
 阅读页面仍然保留原始来源、原文入口、收藏、已读状态、预览与 iframe 模式。AI 内容是辅助层，不替代原文。
+<p align="center">
+  <img src="img/1.3.3/overview.png" width="100%" alt="冷启动板块升级建议">
+</p>
 
 ### 3. 冷启动：从已有内容中发现值得追踪的板块
 
@@ -105,7 +112,11 @@ RSS 阅读器能把不同网站收进一个列表，热点聚合器能告诉你�
 日报先去重和筛选标签，再聚类成事件分组，生成今日重点和叙事线索，并按匹配质量区分核心事件、相关事件和其他动态。每条线索保留关联文章，可以继续展开阅读。
 
 <p align="center">
-  <img src="img/product-video-v2/06-daily-report-detail.jpg" width="100%" alt="语义板块日报详情">
+  <img src="img/1.3.3/daily-report.png" width="100%" alt="语义板块日报详情">
+</p>
+
+<p align="center">
+  <img src="img/1.3.3/daily-2.png" width="100%" alt="语义板块日报详情">
 </p>
 
 这不是把若干单篇摘要拼在一起，而是尝试回答：“这个板块今天主要发生了哪些事，它们分别由哪些文章支撑？”
@@ -117,11 +128,11 @@ RSS 阅读器能把不同网站收进一个列表，热点聚合器能告诉你�
 话题总览把连续多天的叙事分组排列在时间轴上，并根据语义关系连接相邻节点。节点状态区分新兴、持续、分化、合并和结束。点击节点后，可以查看当天的叙事摘要和关联文章。
 
 <p align="center">
-  <img src="img/product-video-v2/07-topic-timeline.jpg" width="100%" alt="跨日话题演进时间线">
+  <img src="img/1.3.3/topic-relation.png" width="100%" alt="跨日话题演进时间线">
 </p>
 
 <p align="center">
-  <img src="img/product-video-v2/08-topic-timeline-detail.jpg" width="100%" alt="话题时间线节点详情">
+  <img src="img/1.3.3/topic-split.png" width="100%" alt="话题时间线节点详情">
 </p>
 
 此外，日报图谱和周报图谱从更全局的尺度呈现事件、人物、关键词与文章之间的关系，适合先观察结构，再进入时间线和原始内容。

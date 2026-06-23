@@ -37,3 +37,5 @@ logs/
 logs/
 data.7z
 demo/seed/seed.sql
+backups/
+/.*

@@ -87,6 +87,17 @@ export function useDailyReportReader(boardId: Ref<number>) {
     }
   }
 
+  // 静默加载历史日报详情：写入 detailCache 供历史节点展示，
+  // 但不触碰 detailLoading / detailError，避免遮蔽当前正在阅读的日报。
+  async function ensureHistoricalDetail(reportId: number) {
+    if (detailCache.value.has(reportId)) return detailCache.value.get(reportId)
+    const response = await getDailyReportDetail(reportId)
+    if (!response.success || !response.data) return undefined
+    detailCache.value.set(reportId, response.data.report)
+    detailCache.value = new Map(detailCache.value)
+    return response.data.report
+  }
+
   async function selectReport(index: number) {
     const report = reports.value[index]
     if (!report) return undefined
@@ -166,6 +177,7 @@ export function useDailyReportReader(boardId: Ref<number>) {
     detailCache,
     loadReports,
     ensureDetail,
+    ensureHistoricalDetail,
     getReportDetail,
     selectReport,
     selectReportById,

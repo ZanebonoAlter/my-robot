@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { ref } from 'vue'
 import { flushPromises } from '@vue/test-utils'
 import { useDailyReportReader } from './useDailyReportReader'
+import type { DailyReport } from '~/api/dailyReports'
 
 const api = vi.hoisted(() => ({
   getBoardDailyReports: vi.fn(),
@@ -75,5 +76,46 @@ describe('useDailyReportReader', () => {
     expect(reader.getLifeline(5).status).toBe('idle')
     expect(reader.getArticleTitle(99).status).toBe('idle')
     expect(api.getBoardDailyReports).toHaveBeenLastCalledWith(1980, { days: 7 })
+  })
+
+  // 回归：mini 话题泳道点击历史时间点（loadHistorical → ensureHistoricalDetail）
+  // 不得污染当前选中日报的 detailLoading / detailError，否则整个日报详情会被
+  // 骨架屏替换，表现为“点击时间点就刷新日报”。
+  it('ensureHistoricalDetail fills the cache without setting detailLoading/detailError', async () => {
+    api.getDailyReportDetail.mockResolvedValue({
+      success: true,
+      data: { report: { id: 42 } as DailyReport },
+    })
+
+    const reader = useDailyReportReader(ref(1974))
+    await flushPromises()
+
+    const pending = reader.ensureHistoricalDetail(42)
+    // 加载进行中也不应触碰 detailLoading（这正是 bug 的触发条件）。
+    expect(reader.detailLoading.value).toBeNull()
+    expect(reader.detailError.value).toBe('')
+    await pending
+
+    expect(api.getDailyReportDetail).toHaveBeenCalledWith(42)
+    expect(reader.detailLoading.value).toBeNull()
+    expect(reader.detailError.value).toBe('')
+    expect(reader.detailCache.value.get(42)).toEqual({ id: 42 })
+
+    // 重复加载命中缓存，不再发请求。
+    await reader.ensureHistoricalDetail(42)
+    expect(api.getDailyReportDetail).toHaveBeenCalledTimes(1)
+  })
+
+  it('ensureHistoricalDetail swallows failures without surfacing detailError', async () => {
+    api.getDailyReportDetail.mockResolvedValue({ success: false })
+
+    const reader = useDailyReportReader(ref(1974))
+    await flushPromises()
+
+    const result = await reader.ensureHistoricalDetail(7)
+    expect(result).toBeUndefined()
+    expect(reader.detailLoading.value).toBeNull()
+    expect(reader.detailError.value).toBe('')
+    expect(reader.detailCache.value.has(7)).toBe(false)
   })
 })

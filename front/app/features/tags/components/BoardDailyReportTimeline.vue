@@ -66,7 +66,7 @@ async function shiftReport(offset: number) {
 }
 
 async function loadHistorical(reportIds: number[]) {
-  await Promise.all(reportIds.map(reportId => reader.ensureDetail(reportId)))
+  await Promise.all(reportIds.map(reportId => reader.ensureHistoricalDetail(reportId)))
 }
 
 function scrollTo(target: string) {

@@ -4,7 +4,7 @@
  * @see specs/detective-wall-interaction/spec.md §BFS Lifeline Algorithm
  */
 import { describe, it, expect } from 'vitest'
-import { bfsLifeline, layoutCards, densityForDays, edgeKey, timelineWidth, latestDayX, topicLifelineNodes } from './utils'
+import { bfsLifeline, layoutCards, densityForDays, edgeKey, timelineWidth, latestDayX, topicLifelineNodes, LANES_PER_BATCH } from './utils'
 import { STYLE } from './types'
 import type { SectionTimelineNode, SectionRelation } from '~/api/dailyReports'
 
@@ -243,32 +243,46 @@ describe('layoutCards', () => {
     expect(a.get(1)!.rotationZ).toBe(b.get(1)!.rotationZ)
   })
 
-  it('centers lanes around Y=0 so multi-topic cards stay above the desk', () => {
-    // 3 topics × 2 days → 3 lanes. Without centering, lanes drop to Y=0,-5.72,-11.44
-    // and the card centroid sinks below the desk (desk.y=-1.6).
+  it('stacks lanes upward from the desk so cards never sink below it', () => {
+    // 3 topics × 1 day → 3 lanes. Lane 0 sits just above the desk; higher lanes
+    // stack upward (Y increasing). All lanes must stay above desk.y=-1.6.
     const sections = [
       topicNode(1, '2026-01-01', 7),
       topicNode(2, '2026-01-01', 9),
       topicNode(3, '2026-01-01', 11),
-      topicNode(4, '2026-01-02', 7),
-      topicNode(5, '2026-01-02', 9),
-      topicNode(6, '2026-01-02', 11),
     ]
     const layout = layoutCards(sections, 'lanes')
 
-    const laneYs = [
-      layout.get(1)!.position.y,
-      layout.get(2)!.position.y,
-      layout.get(3)!.position.y,
-    ]
-    // Symmetric about 0: top lane = +spacing, middle = 0, bottom = -spacing.
     const spacing = STYLE.layout.rowHeight * 2.6
-    expect(laneYs[0]).toBeCloseTo(spacing, 5)
-    expect(laneYs[1]).toBeCloseTo(0, 5)
-    expect(laneYs[2]).toBeCloseTo(-spacing, 5)
-    // Centroid of all lanes ≈ 0 → centerY stays near the desk top, not below it.
-    const centroid = laneYs.reduce((sum, y) => sum + y, 0) / laneYs.length
-    expect(Math.abs(centroid)).toBeLessThan(1e-6)
+    // Lane 0 = desk.y + rowHeight; lane 1 = +spacing; lane 2 = +2*spacing.
+    expect(layout.get(1)!.position.y).toBeCloseTo(STYLE.desk.y + STYLE.layout.rowHeight, 5)
+    expect(layout.get(2)!.position.y).toBeCloseTo(STYLE.desk.y + STYLE.layout.rowHeight + spacing, 5)
+    expect(layout.get(3)!.position.y).toBeCloseTo(STYLE.desk.y + STYLE.layout.rowHeight + 2 * spacing, 5)
+    // No card below the desk surface.
+    for (const r of layout.values()) {
+      expect(r.position.y).toBeGreaterThan(STYLE.desk.y)
+    }
+  })
+
+  it('paginates lanes by batch: only the active batch is laid out', () => {
+    // LANES_PER_BATCH + 1 distinct topics → 2 batches. Batch 1 must omit the
+    // first batch's topics and only place the overflow topic.
+    const topics = Array.from({ length: LANES_PER_BATCH + 1 }, (_, i) => i + 1)
+    const sections = topics.map((tid, i) => topicNode(100 + tid, '2026-01-01', tid))
+    // Sanity: enough topics to overflow one batch.
+    expect(sections.length).toBe(LANES_PER_BATCH + 1)
+
+    const batch0 = layoutCards(sections, 'lanes', 0)
+    const batch1 = layoutCards(sections, 'lanes', 1)
+
+    // Batch 0 places exactly LANES_PER_BATCH topics' cards.
+    expect(batch0.size).toBe(LANES_PER_BATCH)
+    // Batch 1 places only the overflow topic's card.
+    expect(batch1.size).toBe(1)
+    // The overflow card is absent from batch 0 and present in batch 1.
+    const overflowId = 100 + topics[topics.length - 1]!
+    expect(batch0.has(overflowId)).toBe(false)
+    expect(batch1.has(overflowId)).toBe(true)
   })
 })
 

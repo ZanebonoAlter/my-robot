@@ -163,6 +163,7 @@ export function topicLifelineNodes(
 export function layoutCards(
   sections: SectionTimelineNode[],
   mode: 'timeline' | 'lanes' = 'timeline',
+  laneBatch = 0,
 ): Map<number, LayoutResult> {
   const { colWidth, rowHeight, zJitter, rotationZDeg } = STYLE.layout
   const rotRad = (rotationZDeg * Math.PI) / 180
@@ -175,19 +176,24 @@ export function layoutCards(
     // 话题泳道模式：Y = 话题索引（每个话题一条横向赛道），X = 天。
     // 同话题同天的多节点在赛道内 Y 方向小幅偏移，避免重叠。未归类话题
     // 归入最后一条“未分类”赛道。归档话题不参与（由上层过滤）。
+    //
+    // 赛道永远从桌面上方往上排（Y 递增），绝不下沉——避免话题一多就把
+    // 卡片压到桌面以下。话题超过 LANES_PER_BATCH 时分批，laneBatch 指定当前
+    // 批次（0=首批）。当前批只展示从 laneBatch*LANES_PER_BATCH 起的一组赛道，
+    // 配合 UI 的“上一批/下一批”翻页。
     const laneKey = (s: SectionTimelineNode) =>
       s.persistent_topic ? `t${s.persistent_topic.id}` : 'unassigned'
     const laneOrder = Array.from(new Set(sections.map(laneKey)))
     const laneIndex = new Map<string, number>(laneOrder.map((k, i) => [k, i]))
     const laneSpacing = rowHeight * 2.6 // 赛道间距，大于同天堆叠跨度
-    // 赛道围绕 Y=0 居中对称分布（顶部为正、底部为负），使整体中心保持在桌面以上。
-    // 否则多话题时赛道从 Y=0 单向往下排，centerY 会被拉到桌面（desk.y=-1.6）以下，
-    // 卡片连同灯靶/墙一起沉到桌子底下。
-    const laneBaseY = ((laneOrder.length - 1) / 2) * laneSpacing
 
-    // 每 (lane,day) 的节点计数，用于同赛道同天居中偏移
+    const batchStart = laneBatch * LANES_PER_BATCH
+    const batchLaneKeys = laneOrder.slice(batchStart, batchStart + LANES_PER_BATCH)
+
+    // 每 (lane,day) 的节点计数，用于同赛道同天居中偏移（只统计当前批赛道）
     const subCount = new Map<string, number>()
     for (const s of sections) {
+      if (!batchLaneKeys.includes(laneKey(s))) continue
       const k = `${laneKey(s)}:${s.period_date.slice(0, 10)}`
       subCount.set(k, (subCount.get(k) ?? 0) + 1)
     }
@@ -202,10 +208,14 @@ export function layoutCards(
       return (dayIndex.get(a.period_date.slice(0, 10)) ?? 0) - (dayIndex.get(b.period_date.slice(0, 10)) ?? 0)
     })
     for (const s of sorted) {
-      const li = laneIndex.get(laneKey(s)) ?? 0
+      const key = laneKey(s)
+      if (!batchLaneKeys.includes(key)) continue
+      // 批内赛道行号（0 起算），从桌面往上排。
+      const batchRow = batchLaneKeys.indexOf(key)
       const x = (dayIndex.get(s.period_date.slice(0, 10)) ?? 0) * colWidth
-      const laneY = laneBaseY - li * laneSpacing
-      const k = `${laneKey(s)}:${s.period_date.slice(0, 10)}`
+      // 第 0 行贴在桌面上方 rowHeight 处，往上每行 +laneSpacing。
+      const laneY = STYLE.desk.y + rowHeight + batchRow * laneSpacing
+      const k = `${key}:${s.period_date.slice(0, 10)}`
       const total = subCount.get(k) ?? 1
       const idx = seen.get(k) ?? 0
       seen.set(k, idx + 1)
@@ -298,3 +308,14 @@ export function latestDayX(sections: SectionTimelineNode[]): number {
   const idx = days.length - 1
   return idx < 0 ? 0 : idx * STYLE.layout.colWidth
 }
+
+// ---------------------------------------------------------------------------
+// Lane batching (话题泳道分批展示)
+// ---------------------------------------------------------------------------
+
+/**
+ * Maximum lanes shown per batch in lanes view mode. The detective wall renders
+ * lanes stacked upward from the desk; when topics exceed this, the UI paginates
+ * (上一批/下一批) and layoutCards only places the active batch's lanes.
+ */
+export const LANES_PER_BATCH = 10

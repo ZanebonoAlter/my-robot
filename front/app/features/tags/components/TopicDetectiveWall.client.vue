@@ -19,7 +19,7 @@ import { DirectorCamera } from './detective-wall/DirectorCamera'
 import { InteractionLayer } from './detective-wall/InteractionLayer'
 import { WallCameraControls } from './detective-wall/WallCameraControls'
 import { SUPPORTED_DAYS } from './detective-wall/types'
-import { latestDayX } from './detective-wall/utils'
+import { latestDayX, LANES_PER_BATCH } from './detective-wall/utils'
 
 type WallSection = 'timeline' | 'lifeline' | 'lifecycle'
 
@@ -60,6 +60,34 @@ const lifecycleOriginNode = ref<SectionTimelineNode | null>(null)
 // 视图模式：timeline=仅匈牙利相似度（默认，隐藏 identity）；lanes=仅话题 identity
 // （同话题延续实线）。镜像 2D BoardThreadBrowser 的语义。
 const viewMode = ref<'timeline' | 'lanes'>('timeline')
+
+// 话题泳道分批：话题超过 LANES_PER_BATCH 时按批翻页，每批从桌面上方往上排，
+// 避免赛道堆太高把卡片压到桌面以下。laneBatch 是当前批次索引（0 起）。
+const laneBatch = ref(0)
+
+// 当前数据的话题总数（含未分类赛道），用于计算批次数与翻页边界。
+const laneCount = computed(() => {
+  const keys = new Set<string>()
+  for (const s of sections.value) {
+    keys.add(s.persistent_topic ? `t${s.persistent_topic.id}` : 'unassigned')
+  }
+  return keys.size
+})
+const laneBatchCount = computed(() => Math.max(1, Math.ceil(laneCount.value / LANES_PER_BATCH)))
+// 当前批展示的话题标签（用于 UI 提示），按出现顺序取本批区间。
+const laneBatchLabels = computed(() => {
+  const order: string[] = []
+  const seen = new Set<string>()
+  for (const s of sections.value) {
+    const k = s.persistent_topic ? `t${s.persistent_topic.id}` : 'unassigned'
+    if (!seen.has(k)) {
+      seen.add(k)
+      order.push(s.persistent_topic?.label ?? '未分类')
+    }
+  }
+  const start = laneBatch.value * LANES_PER_BATCH
+  return order.slice(start, start + LANES_PER_BATCH)
+})
 
 // --- WebGL detection ---
 function hasWebGL(): boolean {
@@ -168,7 +196,7 @@ async function loadBoardData() {
       endDate.setDate(endDate.getDate() - (days.value - 1))
       const start = endDate.toISOString().slice(0, 10)
       const dateRange = { start, end }
-      scene.loadBoardData(res.data.sections, res.data.relations, dateRange, days.value, viewMode.value)
+      scene.loadBoardData(res.data.sections, res.data.relations, dateRange, days.value, viewMode.value, laneBatch.value)
       applyEdgeFilter()
       cameraControls?.setBounds(scene.getCameraBounds())
       interaction.setData(res.data.sections, res.data.relations, dateRange, days.value)
@@ -202,17 +230,33 @@ function applyEdgeFilter() {
 function setViewMode(mode: 'timeline' | 'lanes') {
   if (viewMode.value === mode || lifecycleActive.value || !scene || !interaction) return
   viewMode.value = mode
+  laneBatch.value = 0 // 切换视图模式时回到首批
   // 话题泳道模式需重布局卡片（按话题分赛道），不能只切边；用当前缓存数据重建场景。
+  rebuildFromCache()
+}
+
+// 用当前缓存的 sections/relations 重建场景（视图模式/批次切换时复用）。
+// 不重新请求数据，避免闪烁。
+function rebuildFromCache() {
+  if (!scene || !interaction) return
   const dates = sections.value.map(s => s.period_date.slice(0, 10)).sort()
   const end = dates[dates.length - 1] ?? new Date().toISOString().slice(0, 10)
   const endDate = new Date(end)
   endDate.setDate(endDate.getDate() - (days.value - 1))
   const start = endDate.toISOString().slice(0, 10)
   const dateRange = { start, end }
-  scene.loadBoardData(sections.value, relations.value, dateRange, days.value, viewMode.value)
+  scene.loadBoardData(sections.value, relations.value, dateRange, days.value, viewMode.value, laneBatch.value)
   cameraControls?.setBounds(scene.getCameraBounds())
   interaction.setData(sections.value, relations.value, dateRange, days.value)
   applyEdgeFilter()
+}
+
+// 话题泳道翻页：切批次后重建场景。timeline 模式下不触发。
+function setLaneBatch(batch: number) {
+  if (viewMode.value !== 'lanes' || lifecycleActive.value) return
+  if (batch < 0 || batch >= laneBatchCount.value || batch === laneBatch.value) return
+  laneBatch.value = batch
+  rebuildFromCache()
 }
 
 function setDays(d: 7 | 14 | 30 | 60) {
@@ -586,6 +630,36 @@ async function enterTopicLifeline(topicId: number) {
       </div>
     </div>
 
+    <!-- 话题泳道分批翻页：仅 lanes 模式且话题超过单批容量时显示。样式复用
+         --color-* 主题变量，自动适配日夜双主题。 -->
+    <div
+      v-if="viewMode === 'lanes' && !lifecycleActive && laneBatchCount > 1"
+      class="tdw-lane-pager"
+    >
+      <button
+        class="tdw-lane-pager-btn"
+        :disabled="laneBatch === 0"
+        title="上一批话题"
+        @click="setLaneBatch(laneBatch - 1)"
+      >
+        <Icon icon="mdi:chevron-left" width="16" />
+      </button>
+      <div class="tdw-lane-pager-info">
+        <span class="tdw-lane-pager-title">话题批次 {{ laneBatch + 1 }}/{{ laneBatchCount }}</span>
+        <span class="tdw-lane-pager-tags">
+          {{ laneBatchLabels.join(' · ') }}
+        </span>
+      </div>
+      <button
+        class="tdw-lane-pager-btn"
+        :disabled="laneBatch >= laneBatchCount - 1"
+        title="下一批话题"
+        @click="setLaneBatch(laneBatch + 1)"
+      >
+        <Icon icon="mdi:chevron-right" width="16" />
+      </button>
+    </div>
+
     <!-- Detail panel (plain Vue overlay, fixed position) -->
     <Transition name="tdw-panel">
       <div v-if="showDetailPanel && focusedNode" class="tdw-detail-panel">
@@ -944,6 +1018,67 @@ async function enterTopicLifeline(topicId: number) {
 .tdw-view-btn:disabled {
   opacity: 0.4;
   cursor: not-allowed;
+}
+
+/* 话题泳道分批翻页浮层（左下角）——与 view-toggle 同款深色半透明 HUD。
+   叠在 canvas 上，不随应用主题变（与 topbar/days-toggle 视觉一致）。 */
+.tdw-lane-pager {
+  position: absolute;
+  left: 1rem;
+  bottom: 1rem;
+  z-index: 4;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  max-width: min(560px, calc(100vw - 2rem));
+  padding: 0.4rem 0.55rem;
+  background: rgba(0, 0, 0, 0.55);
+  border: 1px solid rgba(255, 244, 214, 0.12);
+  border-radius: 0.45rem;
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.26);
+  backdrop-filter: blur(6px);
+}
+.tdw-lane-pager-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 1.9rem;
+  height: 1.9rem;
+  padding: 0;
+  border: none;
+  border-radius: 0.3rem;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.7);
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s;
+}
+.tdw-lane-pager-btn:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.12);
+  color: rgba(255, 255, 255, 0.95);
+}
+.tdw-lane-pager-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+.tdw-lane-pager-info {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  min-width: 0;
+}
+.tdw-lane-pager-title {
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.9);
+  white-space: nowrap;
+}
+.tdw-lane-pager-tags {
+  font-size: 0.66rem;
+  color: rgba(255, 255, 255, 0.55);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* Detail panel — right-side case drawer */
@@ -1329,6 +1464,12 @@ async function enterTopicLifeline(topicId: number) {
   .tdw-detail-panel {
     width: min(460px, 100vw);
     border-radius: 0;
+  }
+  .tdw-lane-pager {
+    left: 0.5rem;
+    right: 0.5rem;
+    bottom: 0.5rem;
+    max-width: none;
   }
 }
 

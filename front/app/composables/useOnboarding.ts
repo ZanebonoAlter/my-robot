@@ -122,7 +122,6 @@ const HOME_STEPS: DriveStep[] = [
     },
   },
   { element: '[data-onboarding="sidebar-feeds"]', popover: { title: '订阅源与分类', description: '在这里添加和管理你的 RSS 源与分类，文章会自动抓取。' } },
-  { element: '[data-onboarding="nav-topic-graph"]', popover: { title: '主题图谱', description: '可视化标签之间的关系，发现内容之间的联系。' } },
   { element: '[data-onboarding="nav-tags"]', popover: { title: '标签管理', description: '查看和管理 AI 为文章自动生成的标签与语义版块。' } },
   { element: '[data-onboarding="watched-tags"]', popover: { title: '关注标签', description: '关注感兴趣的标签，获取个性化文章推送。' } },
 ]

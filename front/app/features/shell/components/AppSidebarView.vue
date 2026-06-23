@@ -33,7 +33,6 @@ const emit = defineEmits<{
   categoryClick: [categoryId: string]
   feedClick: [feedId: string]
   favoritesClick: []
-  topicGraphClick: []
   allArticlesClick: []
   editCategory: [categoryId: string]
   editFeed: [feedId: string]
@@ -91,11 +90,6 @@ function handleFeedClick(feedId: string) {
 function handleFavoritesClick() {
   updateSelection('favorites', null)
   emit('favoritesClick')
-}
-
-function handleTopicGraphClick() {
-  updateSelection('topic-graph', null)
-  emit('topicGraphClick')
 }
 
 function handleAllArticlesClick() {
@@ -174,11 +168,6 @@ const navigateTo = useNuxtApp().$router ? (path: string) => useNuxtApp().$router
         <span v-if="!sidebarCollapsed && articlesStore.favoriteCount > 0" class="badge badge-amber">{{ articlesStore.favoriteCount }}</span>
       </button>
 
-      <button class="sidebar-item" :class="{ active: selectedCategory === 'topic-graph' }" data-onboarding="nav-topic-graph" @click="handleTopicGraphClick">
-        <Icon icon="mdi:graph-outline" width="20" height="20" class="text-[var(--color-text-secondary)]" />
-        <span v-if="!sidebarCollapsed" class="flex-1 text-left font-medium">主题图谱</span>
-      </button>
-
       <button class="sidebar-item" data-onboarding="nav-tags" @click="navigateTo('/tags')">
         <Icon icon="mdi:tag-multiple" width="20" height="20" class="text-[var(--color-text-secondary)]" />
         <span v-if="!sidebarCollapsed" class="flex-1 text-left font-medium">标签管理</span>
@@ -215,7 +204,7 @@ const navigateTo = useNuxtApp().$router ? (path: string) => useNuxtApp().$router
 
         <div v-else class="watched-tags-empty">
           <p class="text-xs" style="color: var(--color-text-muted)">关注标签可获取个性化文章推送</p>
-          <button class="watched-tags-go-btn" @click="navigateTo('/topics')">
+          <button class="watched-tags-go-btn" @click="navigateTo('/tags')">
             前往关注
           </button>
         </div>

@@ -21,13 +21,7 @@ export const SIDEBAR_MAX_WIDTH = 500 // 最大宽度（像素）
  */
 export const CAT_FAVORITES = 'favorites'
 export const CAT_UNCATEGORIZED = 'uncategorized'
-export const CAT_TOPIC_GRAPH = 'topic-graph'
 export const CAT_WATCHED_TAGS = 'watched-tags'
-
-/**
- * 路由路径
- */
-export const ROUTE_TOPICS = '/topics'
 
 /**
  * 刷新消息类型

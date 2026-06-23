@@ -287,13 +287,6 @@ async function handleAllArticlesClick() {
   await loadArticles()
 }
 
-function handleTopicGraphClick() {
-  selectedCategory.value = CAT_TOPIC_GRAPH
-  selectedFeed.value = null
-  selectedWatchedTagId.value = null
-  navigateTo(ROUTE_TOPICS)
-}
-
 async function handleWatchedTagsClick() {
   selectedCategory.value = CAT_WATCHED_TAGS
   selectedFeed.value = null
@@ -488,7 +481,6 @@ import '~/components/FeedLayout.css'
         @category-click="handleCategoryClick"
         @feed-click="handleFeedClick"
         @favorites-click="handleFavoritesClick"
-        @topic-graph-click="handleTopicGraphClick"
         @all-articles-click="handleAllArticlesClick"
         @edit-category="handleEditCategory"
         @edit-feed="handleEditFeed"

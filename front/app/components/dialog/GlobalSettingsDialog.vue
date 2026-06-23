@@ -2,7 +2,7 @@
 import { computed } from 'vue'
 import AIRouterSettingsPanel from '~/features/ai/components/AIRouterSettingsPanel.vue'
 import EmbeddingQueuePanel from '~/features/ai/components/EmbeddingQueuePanel.vue'
-import TagQueuePanel from '~/features/topic-graph/components/TagQueuePanel.vue'
+import TagQueuePanel from '~/features/settings/components/TagQueuePanel.vue'
 import FeedSettingsPanel from '~/components/dialog/FeedSettingsPanel.vue'
 import ReadingPreferencesPanel from '~/components/dialog/ReadingPreferencesPanel.vue'
 import FirecrawlConfigPanel from '~/components/dialog/FirecrawlConfigPanel.vue'

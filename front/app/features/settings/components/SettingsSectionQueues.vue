@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import EmbeddingQueuePanel from '~/features/ai/components/EmbeddingQueuePanel.vue'
-import TagQueuePanel from '~/features/topic-graph/components/TagQueuePanel.vue'
+import TagQueuePanel from '~/features/settings/components/TagQueuePanel.vue'
 
 const activeQueue = ref<'embedding' | 'tag'>('embedding')
 </script>

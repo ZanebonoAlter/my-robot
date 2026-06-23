@@ -17,7 +17,7 @@ import type {
 import type { TopicWallScene } from './TopicWallScene'
 import type { DirectorCamera } from './DirectorCamera'
 import { bfsLifeline, edgeKey, topicLifelineNodes } from './utils'
-import { fullComponentHighlight } from '~/features/topic-graph/utils/graphBfsHighlight'
+import { fullComponentHighlight } from '~/utils/graphHighlight'
 
 const CLICK_MAX_MOVE_PX = 5
 /**

@@ -3,7 +3,7 @@ import { ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue'
 import { Icon } from '@iconify/vue'
 import { useDailyReportsApi, type SectionTimelineNode, type SectionRelation, type DailyReportThread } from '~/api/dailyReports'
 import { useArticlesApi } from '~/api/articles'
-import { fullComponentHighlight } from '~/features/topic-graph/utils/graphBfsHighlight'
+import { fullComponentHighlight } from '~/utils/graphHighlight'
 
 const props = defineProps<{ boardId: number }>()
 

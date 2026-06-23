@@ -6,7 +6,7 @@ import {
   MAX_HOPS,
   SMALL_GRAPH_NODE_LIMIT,
   type GraphHighlightEdge,
-} from './graphBfsHighlight'
+} from '~/utils/graphHighlight'
 
 describe('fullComponentHighlight', () => {
   it('returns the entire connected chain without hop or density limits', () => {

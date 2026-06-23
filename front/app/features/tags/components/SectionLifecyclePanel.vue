@@ -3,7 +3,7 @@ import { ref, computed, watch } from 'vue'
 import { Icon } from '@iconify/vue'
 import { useDailyReportsApi, type SectionLifecycleNode, type SectionRelation, type DailyReportThread } from '~/api/dailyReports'
 import { useArticlesApi } from '~/api/articles'
-import { bfsHighlight, type GraphHighlightEdge } from '~/features/topic-graph/utils/graphBfsHighlight'
+import { bfsHighlight, type GraphHighlightEdge } from '~/utils/graphHighlight'
 
 const props = defineProps<{
   sectionId: number

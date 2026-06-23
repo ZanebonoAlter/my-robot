@@ -32,17 +32,8 @@ type (
 	AggregatedTopicTag       = service.AggregatedTopicTag
 	ExtractedTag             = service.ExtractedTag
 	ExtractionInput          = service.ExtractionInput
-	GraphNode                = service.GraphNode
-	GraphEdge                = service.GraphEdge
-	TopicArticleCard         = service.TopicArticleCard
 	TopicTagSummary          = service.TopicTagSummary
-	TopicHistoryPoint        = service.TopicHistoryPoint
-	TopicDetail              = service.TopicDetail
-	RelatedTag               = service.RelatedTag
-	TopicsByCategoryResult   = service.TopicsByCategoryResult
 	PendingArticle           = service.PendingArticle
-	PendingArticlesResponse  = service.PendingArticlesResponse
-	TopicGraphResponse       = service.TopicGraphResponse
 	GetTopicArticlesParams   = service.GetTopicArticlesParams
 	TagResolutionRequest     = service.TagResolutionRequest
 	TagResolutionResponse    = service.TagResolutionResponse

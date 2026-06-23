@@ -1,6 +1,5 @@
 package core
 
-import "time"
 
 type ExtractionInput struct {
 	Title        string
@@ -89,80 +88,11 @@ type TagResolutionResponse struct {
 	NewCategory string `json:"new_category,omitempty"`
 }
 
-// GraphNode represents a node in the topic graph
-type GraphNode struct {
-	ID           string  `json:"id"`
-	Label        string  `json:"label"`
-	Slug         string  `json:"slug,omitempty"`
-	Category     string  `json:"category,omitempty"` // event, person, keyword
-	Icon         string  `json:"icon,omitempty"`
-	Kind         string  `json:"kind"` // "topic" or "feed" (for backward compat)
-	Weight       float64 `json:"weight"`
-	ArticleCount int     `json:"article_count,omitempty"`
-	Color        string  `json:"color,omitempty"`
-	FeedName     string  `json:"feed_name,omitempty"`
-	CategoryName string  `json:"category_name,omitempty"`
-	IsAbstract   bool    `json:"is_abstract,omitempty"`
-}
-
-// GraphEdge represents an edge in the topic graph
-type GraphEdge struct {
-	ID     string  `json:"id"`
-	Source string  `json:"source"`
-	Target string  `json:"target"`
-	Kind   string  `json:"kind"`
-	Weight float64 `json:"weight"`
-}
-
-// TopicArticleCard represents an article in a topic context
-type TopicArticleCard struct {
-	ID       uint              `json:"id"`
-	Title    string            `json:"title"`
-	Link     string            `json:"link"`
-	PubDate  *time.Time        `json:"pub_date,omitempty"`
-	FeedName string            `json:"feed_name,omitempty"`
-	FeedIcon string            `json:"feed_icon,omitempty"`
-	FeedID   uint              `json:"feed_id"`
-	ImageURL string            `json:"image_url,omitempty"`
-	Summary  string            `json:"summary,omitempty"`
-	Content  string            `json:"content,omitempty"`
-	Tags     []TopicTagSummary `json:"tags"`
-}
-
 // TopicTagSummary represents a brief tag reference on an article card
 type TopicTagSummary struct {
 	Slug     string `json:"slug"`
 	Label    string `json:"label"`
 	Category string `json:"category"`
-}
-
-// TopicHistoryPoint represents a point in topic history
-type TopicHistoryPoint struct {
-	AnchorDate string `json:"anchor_date"`
-	Count      int    `json:"count"`
-	Label      string `json:"label"`
-}
-
-// TopicDetail represents detailed information about a topic
-type TopicDetail struct {
-	Topic         TopicTag            `json:"topic"`
-	Articles      []TopicArticleCard  `json:"articles"`
-	TotalArticles int64               `json:"total_articles"`
-	RelatedTags   []RelatedTag        `json:"related_tags"`
-	History       []TopicHistoryPoint `json:"history"`
-	RelatedTopics []TopicTag          `json:"related_topics"`
-	SearchLinks   map[string]string   `json:"search_links"`
-	AppLinks      map[string]string   `json:"app_links"`
-}
-
-// RelatedTag represents a tag that co-occurs with the current topic
-type RelatedTag struct {
-	ID           uint   `json:"id"`
-	Label        string `json:"label"`
-	Slug         string `json:"slug"`
-	Category     string `json:"category"`
-	Kind         string `json:"kind,omitempty"`
-	Cooccurrence int    `json:"cooccurrence"` // Number of co-occurrences
 }
 
 // GetTopicArticlesParams holds query parameters for GetTopicArticles API
@@ -171,26 +101,6 @@ type GetTopicArticlesParams struct {
 	PageSize   int    `form:"page_size" binding:"min=1,max=100"`
 	WindowType string `form:"type" binding:"oneof=daily weekly"`
 	AnchorDate string `form:"date"`
-}
-
-// TopicGraphResponse represents the response for topic graph endpoint
-type TopicGraphResponse struct {
-	Type         string      `json:"type"`
-	AnchorDate   string      `json:"anchor_date"`
-	PeriodLabel  string      `json:"period_label"`
-	Nodes        []GraphNode `json:"nodes"`
-	Edges        []GraphEdge `json:"edges"`
-	TopicCount   int         `json:"topic_count"`
-	ArticleCount int         `json:"article_count"`
-	FeedCount    int         `json:"feed_count"`
-	TopTopics    []TopicTag  `json:"top_topics"`
-}
-
-// TopicsByCategoryResult holds tags grouped by category
-type TopicsByCategoryResult struct {
-	Events   []TopicTag `json:"events"`
-	People   []TopicTag `json:"people"`
-	Keywords []TopicTag `json:"keywords"`
 }
 
 // PendingArticle represents an article that has a tag but is not yet in any digest
@@ -202,12 +112,6 @@ type PendingArticle struct {
 	FeedName  string `json:"feed_name"`
 	FeedIcon  string `json:"feed_icon,omitempty"`
 	FeedColor string `json:"feed_color,omitempty"`
-}
-
-// PendingArticlesResponse is the response for pending articles API
-type PendingArticlesResponse struct {
-	Articles []PendingArticle `json:"articles"`
-	Total    int              `json:"total"`
 }
 
 type SimilarityEdge struct {

@@ -21,17 +21,8 @@ type (
 	AggregatedTopicTag           = core.AggregatedTopicTag
 	ExtractedTag                 = core.ExtractedTag
 	ExtractionInput              = core.ExtractionInput
-	GraphNode                    = core.GraphNode
-	GraphEdge                    = core.GraphEdge
-	TopicArticleCard             = core.TopicArticleCard
 	TopicTagSummary              = core.TopicTagSummary
-	TopicHistoryPoint            = core.TopicHistoryPoint
-	TopicDetail                  = core.TopicDetail
-	RelatedTag                   = core.RelatedTag
-	TopicsByCategoryResult       = core.TopicsByCategoryResult
 	PendingArticle               = core.PendingArticle
-	PendingArticlesResponse      = core.PendingArticlesResponse
-	TopicGraphResponse           = core.TopicGraphResponse
 	GetTopicArticlesParams       = core.GetTopicArticlesParams
 	TagResolutionRequest         = core.TagResolutionRequest
 	TagResolutionResponse        = core.TagResolutionResponse

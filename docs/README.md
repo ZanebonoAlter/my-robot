@@ -60,7 +60,6 @@ Syntopica 全部文档入口。
 | [userguide/reading.md](userguide/reading.md) | 阅读功能（布局、文章阅读、阅读偏好） |
 | [userguide/feeds-and-categories.md](userguide/feeds-and-categories.md) | 订阅源与分类管理 |
 | [userguide/ai-features.md](userguide/ai-features.md) | AI 总结与 Provider 管理 |
-| [userguide/topic-graph.md](userguide/topic-graph.md) | Topic Graph 主题图谱 |
 | [userguide/tags.md](userguide/tags.md) | 文章标签 |
 | [userguide/narrative.md](userguide/narrative.md) | 叙事面板 |
 

@@ -3,7 +3,7 @@
 
 ## 系统概述
 
-Syntopica 是一个个人部署的 RSS 阅读器，采用前后端分离的单体架构。Go 后端（Gin + GORM + PostgreSQL + pgvector）负责 RSS 订阅拉取、文章持久化、AI 内容增强（Firecrawl 全文抓取、AI 整理稿生成）、主题图谱分析、叙事摘要生成和阅读偏好追踪。Nuxt 4 前端（Vue 3 + Pinia + Tailwind CSS v4）以 FeedBro 风格三栏布局呈现订阅、文章和正文，同时提供主题图谱页面。前后端通过 REST API 和 WebSocket 通信，系统面向单用户部署，不含认证体系。
+Syntopica 是一个个人部署的 RSS 阅读器，采用前后端分离的单体架构。Go 后端（Gin + GORM + PostgreSQL + pgvector）负责 RSS 订阅拉取、文章持久化、AI 内容增强（Firecrawl 全文抓取、AI 整理稿生成）、叙事摘要生成和阅读偏好追踪。Nuxt 4 前端（Vue 3 + Pinia + Tailwind CSS v4）以 FeedBro 风格三栏布局呈现订阅、文章和正文。前后端通过 REST API 和 WebSocket 通信，系统面向单用户部署，不含认证体系。
 
 > **注意：SQLite 版本已归档到 `sqlite` 独立分支，主分支不再维护 SQLite 支持。如需使用 SQLite 版本请切换到 `sqlite` 分支。**
 
@@ -56,10 +56,10 @@ Feed 管理（`backend-go/internal/reader/`）和文章管理构成系统的基�
 
 ### 3. 主题图谱
 
-拆分为 `tagmanagement/` 和 `topicgraph/` 域，形成从标签提取到图谱展示的完整链路：
+拆分为 `tagmanagement/` 和 `topicgraph/` 域，形成从标签提取到叙事摘要的完整链路：
 
 - `tagmanagement`（标签系统域）：标签提取、co-tag 扩展、元数据标注、辅助标签管理、语义板匹配与概念、标签合并、关注标签
-- `topicgraph`（主题图谱域）：每日报告生成、图谱可视化
+- `topicgraph`（主题图谱域）：每日报告生成
 
 此外，`tagmanagement` 还承担了以下高级能力：
 - Tag embedding 向量化与自动合并（源 DELETE，不再使用 status='merged'）
@@ -124,7 +124,7 @@ my-robot/
 │   │   ├── assets/css/       # 全局主题与样式
 │   │   ├── components/       # 通用可复用组件（ai, article, category, common, dialog, feed, layout）
 │   │   ├── composables/      # 跨 feature 通用能力（useAI, useRssParser）
-│   │   ├── features/         # 业务实现主体（shell, articles, feeds, preferences, topic-graph, ai）
+│   │   ├── features/         # 业务实现主体（shell, articles, feeds, preferences, ai）
 │   │   ├── pages/            # Nuxt 路由入口（index, topics）
 │   │   ├── plugins/          # Nuxt 插件（dayjs）
 │   │   ├── stores/           # Pinia store（api, feeds, articles, preferences, aiAnalysis）
@@ -206,8 +206,6 @@ my-robot/
 | `/api/schedulers` | 统一调度器状态查询和手动触发 |
 | `/api/reading-behavior` | 阅读行为上报 |
 | `/api/user-preferences` | 偏好查询与更新 |
-| `/api/topic-graph` | 主题图谱、分析、相关文章 |
-| `/api/topic-graph/analysis` | 主题分析、embedding 配置、标签管理 |
 | `/api/embedding` | Embedding 配置与队列管理 |
 | `/api/topic-tags` | 关注标签、标签合并预览 |
 | `/api/narratives` | 叙事摘要查询与历史 |
@@ -236,5 +234,4 @@ my-robot/
 - [数据生命周期](../database/DATA_LIFECYCLE.md)：6 条数据链路的状态字段流转
 - [开发指南](../development.md)：构建、测试、验证命令
 - [内容增强](../content-processing.md)：Firecrawl + AI 内容补全流程
-- [主题图谱](../api/topic-graph.md)：图谱构建与分析
 - [API 文档](../api/_index.md)：按领域拆分的 REST API 参考

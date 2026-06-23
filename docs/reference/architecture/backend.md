@@ -98,7 +98,7 @@ backend-go/
 │   │   ├── repository/
 │   │   └── service/               # core/auxlabel/board/merge/watched
 │   ├── topicgraph/                # 主题图谱域
-│   │   ├── handler/               # daily_report/graph API
+│   │   ├── handler/               # daily_report API
 │   │   ├── repository/
 │   │   └── service/
 │   └── platform/                  # 共享基础设施
@@ -195,9 +195,9 @@ internal/<domain>/
 
 ### `internal/topicgraph/`
 
-主题图谱域：每日报告、图谱可视化。
+主题图谱域：每日报告。
 
-- `handler/`：daily_report、graph API
+- `handler/`：daily_report API
 - `service/`：日报生成（LLM 调用、匹配、合并）
 - `repository/`：图谱域数据访问
 
@@ -236,10 +236,9 @@ internal/<domain>/
 
 ### 主题图谱（`topicgraph` 域）
 
-主题图谱、每日报告生成、图谱可视化。
+每日报告生成。
 - `tagging/analysis`：生成并查询 topic analysis，同时承担 embedding 向量化、Tag 合并（源 DELETE）、辅助标签入库（L1/L2/L3 三级匹配）
 - `tagging/watched`：关注标签管理
-- `topicgraph`：返回图谱节点边、详情、相关文章、相关 digest
 
 #### 辅助标签入库三级匹配（`tagmanagement/service/auxlabel`）
 
@@ -436,11 +435,10 @@ favicon 获取走 RSS channel link（`parsed.Link`，站点首页）的 host 拼
 - `/api/user-preferences`
 - `/api/content-completion`
 - `/api/firecrawl`
-- `/api/topic-graph`
 - `/api/import-opml` / `/api/export-opml`
 - `/ws`
 
-其中 `topic-graph` 组下面还挂了 `analysis` 子路由，AI 管理则已经扩展到 provider 和 route 级别，而不是只有"摘要设置"一个入口。
+AI 管理则已经扩展到 provider 和 route 级别，而不是只有"摘要设置"一个入口。
 
 此外还有以下独立注册的路由组：
 

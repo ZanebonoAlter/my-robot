@@ -282,13 +282,6 @@ front/
 ├── app/api/scheduler.test.ts
 ├── app/features/articles/components/ArticleTagList.test.ts
 ├── app/features/tags/components/SectionLifecyclePanel.test.ts
-├── app/features/topic-graph/components/TagHierarchy.test.ts
-├── app/features/topic-graph/components/TopicTimeline.test.ts
-├── app/features/topic-graph/composables/useTopicGraph.test.ts
-├── app/features/topic-graph/utils/buildDisplayedTopicGraph.test.ts
-├── app/features/topic-graph/utils/buildTopicGraphViewModel.test.ts
-├── app/features/topic-graph/utils/graphBfsHighlight.test.ts
-├── app/features/topic-graph/utils/topicGraphCanvasLinks.test.ts
 ├── app/stores/api.test.ts
 ├── app/utils/api.test.ts
 ├── app/utils/articleContentGuards.test.ts

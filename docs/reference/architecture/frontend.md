@@ -20,7 +20,6 @@
 - 应用壳入口：`front/app/app.vue`
 - 主阅读页：`front/app/pages/index.vue`
 - 标签管理：`front/app/pages/tags.vue`
-- Topic Graph：`front/app/pages/topics.vue`
 
 `app.vue` 只做一件事：启动时调用 `apiStore.initialize()`，先拉分类、订阅源和文章，再渲染页面。
 
@@ -94,11 +93,6 @@ features/
 │  ├─ components/      # TagsPage、BoardCRUD、Timeline、Merge 等
 │  ├─ components/detective-wall/  # 3D 侦探照片墙（Three.js 子模块，见 §3D 侦探墙）
 │  └─ composables/     # useTagsPage、useBoardCRUD、useBoardTimeline、useAuxiliaryLabels
-├─ topic-graph/        # 主题图谱、热点标签、话题详情、analysis、timeline、标签层级、合并预览
-│  ├─ components/      # TopicGraphPage、Canvas、Sidebar、Timeline、TagHierarchy、TagMergePreview、TopicGraphEmptyGuide 等
-│  ├─ composables/     # useTopicGraph、useTopicTimeline、useArticlePreview、useFloatingPanelDrag 等
-│  ├─ utils/           # buildDisplayedTopicGraph、buildTopicGraphViewModel、normalizeTopicCategory
-│  └─ public.ts        # 跨 feature 共享 facade（TagMergePreview）
 ├─ ai/                 # AI Router 设置面板、Embedding 队列
 │  ├─ components/      # AIRouterSettingsPanel、EmbeddingQueuePanel 等
 │  └─ composables/     # useAIRouterSettings
@@ -111,7 +105,6 @@ features/
 
 - `features/articles/public.ts` → `ArticleContentView`、`ArticleCardView`、`useArticlePagination`
 - `features/feeds/public.ts` → `useGlobalAutoRefresh`、`useRefreshPolling`
-- `features/topic-graph/public.ts` → `TagMergePreview`
 - `features/preferences/public.ts` → `useReadingTracker`、`useScrollDepthTracker`
 
 **禁止跨 feature 深 import 对方内部实现**（组件、composable、工具函数）。共享 normalizer 上移到 `api/normalizers/`，共享 UI 上移到 `components/` 或通过 feature facade 暴露。
@@ -142,7 +135,7 @@ features/
 
 **已落地的 API 模块：**
 
-`categories` · `feeds` · `articles` · `summaries` · `digest` · `opml` · `reading_behavior` · `firecrawl` · `scheduler` · `aiAdmin` · `topicGraph` · `abstractTags` · `semanticBoards` · `auxiliaryLabels` · `embeddingConfig` · `embeddingQueue` · `mergeReembeddingQueue` · `tagMergePreview` · `tagQueue` · `watchedTags` · `dailyReports`
+`categories` · `feeds` · `articles` · `summaries` · `digest` · `opml` · `reading_behavior` · `firecrawl` · `scheduler` · `aiAdmin` · `abstractTags` · `semanticBoards` · `auxiliaryLabels` · `embeddingConfig` · `embeddingQueue` · `mergeReembeddingQueue` · `tagMergePreview` · `tagQueue` · `watchedTags` · `dailyReports`
 
 ### Store 层
 
@@ -233,46 +226,6 @@ off()
 
 Digest 页面走独立路由和独立视觉壳，不复用主阅读页的三栏壳。
 
-### Topics 页面架构
-
-#### 组件结构
-
-- `TopicGraphPage`: 主页面容器
-  - `TopicGraphHeader`: 头部控制区（返回首页、刷新图谱）
-  - `TopicGraphCanvas`: 3D 拓扑图
-  - `TopicGraphFooterPanels`: 底部面板区（含 TagQueuePanel）
-  - `TopicGraphSidebar`: 右侧详情栏
-  - `TopicTimeline`: digest timeline
-  - `TagHierarchy`: 标签层级树
-  - `KeywordCloud`: 关键词云
-
-#### Composable 深化拆分（D17）
-
-Topic Graph 页面的复杂度已按内聚行为拆分为多个深 Module：
-
-| Module | 职责 | 外部 Interface |
-|--------|------|----------------|
-| `useTopicGraph` | 页面级状态编排 | `filters`、`viewModel`、`loadGraph`、`loading/error` |
-| `useTopicTimeline` | digest、pending articles、聚合分组 | `items`、`groups`、`selectDigest`、`loadForTopic` |
-| `useArticlePreview` | 文章预览、收藏、局部更新 | `selectedArticle`、`open`、`close`、`toggleFavorite` |
-| `useFloatingPanelDrag` | 浮层拖拽通用逻辑 | `panelRef`、`position`、`startDrag`、`reset` |
-| `useHotspotTopics` | 热点标签加载 | `hotspotTopics`、`loading` |
-
-同样规则适用于 `useTagsPage()` 等其他大型页面 composable。
-
-#### 数据流
-
-1. 用户点击分类入口（热点分类按钮）后更新 `selectedCategory`
-2. 页面基于 `selectedCategory` 计算 `highlightedNodeIds`
-3. `highlightedNodeIds` 传给 `TopicGraphCanvas` 并驱动图谱高亮
-4. 用户切换分析 Tabs 或选中标签后，底部分析面板按类型加载对应分析数据
-
-#### 标签展示约定
-
-- `ArticleContentView` 现在会直接展示标准 article tags
-- digest 列表、digest 详情、topic graph timeline 使用 digest 的 `aggregated_tags`
-- `/topics` 中当前选中的 topic slug 会在 digest/article 标签上做高亮
-
 ## 大组件拆分阈值（D14）
 
 - 单文件超过 **500 行 / ~15KB** 时应考虑拆分
@@ -338,7 +291,7 @@ surgical 边界：不改相机坐标系/布局算法/交互/BFS/红线/全局迷
 
 ### BFS 生命线
 
-`utils.bfsLifeline` 与现有 `topic-graph/utils/graphBfsHighlight.bfsHighlight` **语义不同**：后者返回连通分量（带启发式截断、无日期约束），前者严格受日期窗口约束。两者不互相复用。
+`utils.bfsLifeline` 与现有 `utils/graphHighlight.bfsHighlight` **语义不同**：后者返回连通分量（带启发式截断、无日期约束），前者严格受日期窗口约束。两者不互相复用。
 
 ### 数据层
 

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { Icon } from '@iconify/vue'
-import { useTagMergePreview } from '~/features/topic-graph/composables/useTagMergePreview'
+import { useTagMergePreview } from '~/features/tags/composables/useTagMergePreview'
 import TagMergeGroup from './TagMergeGroup.vue'
 
 interface Props {

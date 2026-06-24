@@ -39,3 +39,5 @@ data.7z
 demo/seed/seed.sql
 backups/
 /.*
+pgvector-pg18-arm64.tar
+syntopica-demo-arm64.tar

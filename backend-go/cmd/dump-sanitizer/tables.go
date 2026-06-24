@@ -183,7 +183,7 @@ func exportSpecs() []ExportSpec {
 		},
 		{
 			Table:   "daily_report_section_relations",
-			Columns: []string{"id", "from_section_id", "to_section_id", "distance", "created_at"},
+			Columns: []string{"id", "from_section_id", "to_section_id", "distance", "relation_type", "created_at"},
 			Where:   "from_section_id IN (SELECT ds.id FROM daily_report_sections ds JOIN board_daily_reports bdr ON bdr.id = ds.report_id WHERE bdr.period_date >= NOW() - INTERVAL ':days days')",
 		},
 

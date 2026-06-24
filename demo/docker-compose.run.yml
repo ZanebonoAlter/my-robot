@@ -1,0 +1,85 @@
+# Runtime-only demo stack for ARM64 hosts (e.g. Raspberry Pi 4).
+#
+# Unlike docker-compose.demo.yml (which builds from source), this pulls a
+# pre-built multi-arch image and applies tight memory limits tuned for a
+# memory-constrained device. Designed for read-only demo mode where the
+# backend skips all background schedulers (DEMO_READ_ONLY=1).
+#
+# Usage:
+#   docker compose -f demo/docker-compose.run.yml up -d
+#   open http://<pi-host>:5080
+#
+# Memory budget target: <=500MB steady-state. The 600MB Pi 4 headroom leaves
+# ~100MB for the Docker daemon + OS.
+
+services:
+  postgres:
+    # pgvector/pgvector:pg16 is ~150MB lighter than :pg18-trixie. If your image
+    # was built against pg18 schema, prefer staying on pg18; otherwise pg16 is
+    # the recommended swap for low-memory devices.
+    image: pgvector/pgvector:pg18-trixie
+    container_name: syntopica-demo-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-syntopica}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      TZ: ${TZ:-Asia/Shanghai}
+      PGTZ: ${TZ:-Asia/Shanghai}
+      # --- Memory tuning for low-RAM host (demo is read-only, few clients) ---
+      # shared_buffers: PG's main cache. Default 128MB is too fat for 600MB host.
+      # work_mem: per-sort/hash memory. Lowered to avoid spikes on vector queries.
+      # max_connections: demo has ~1 concurrent user; 30 is generous headroom.
+    command:
+      - postgres
+      - -c
+      - shared_buffers=48MB
+      - -c
+      - work_mem=2MB
+      - -c
+      - maintenance_work_mem=32MB
+      - -c
+      - max_connections=30
+      - -c
+      - effective_cache_size=128MB
+    volumes:
+      # pgvector extension on first init. No data volume => fresh DB each up.
+      - ../docker/postgres/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-syntopica}
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+    mem_limit: 360m
+    memswap_limit: 480m
+    networks:
+      - syntopica-demo-net
+
+  syntopica-demo:
+    image: zanebonoalter/syntopica-demo:${DEMO_TAG:-v1.3.3-demo}
+    container_name: syntopica-demo
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "${PORT:-5080}:5000"
+    environment:
+      DATABASE_DSN: host=postgres user=${POSTGRES_USER:-postgres} password=${POSTGRES_PASSWORD:-postgres} dbname=${POSTGRES_DB:-syntopica} port=5432 sslmode=disable
+      SERVER_MODE: release
+      DEMO_READ_ONLY: "1"
+      PGHOST: postgres
+      PGUSER: ${POSTGRES_USER:-postgres}
+      PGPASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      PGDATABASE: ${POSTGRES_DB:-syntopica}
+    mem_limit: 120m
+    memswap_limit: 200m
+    networks:
+      - syntopica-demo-net
+
+networks:
+  syntopica-demo-net:
+    name: syntopica-demo-net

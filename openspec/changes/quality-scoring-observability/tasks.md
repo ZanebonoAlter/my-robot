@@ -13,8 +13,8 @@
 ## 2. 后端 MatchTier 语义与截断修复（B · daily-report-system）
 
 - [x] 2.1 `daily_report_orchestrator.go` filterTagsByQuality 截断排序：`MatchTier(kept[i].MatchReason, false)` 改为 `MatchTier(kept[i].MatchReason, kept[i].Downgraded)`（修硬编码，依赖 1.3 的 Downgraded）。验收：降级 max_sim 正确落到 tier=3
-- [ ] 2.2 编写 MatchTier 语义表单测（内存 SQLite 纯逻辑）：覆盖 direct_hit→0 / hit_rate→1 / max_sim非降级→2 / max_sim降级→3 / weighted→3 五分支。验收：五分支返回值符合 design D3 映射表
-- [ ] 2.3 编写 best_tier 聚合单测：组内多 tier 取最优（min）。验收：{0,2,3} → best_tier=0
+- [x] 2.2 编写 MatchTier 语义表单测（内存 SQLite 纯逻辑）：覆盖 direct_hit→0 / hit_rate→1 / max_sim非降级→2 / max_sim降级→3 / weighted→3 五分支。验收：五分支返回值符合 design D3 映射表
+- [x] 2.3 编写 best_tier 聚合单测：组内多 tier 取最优（min）。验收：{0,2,3} → best_tier=0
 
 ## 3. 后端 API 暴露（C · daily-report-system）
 
@@ -44,7 +44,7 @@
 
 ## 7. 测试（§4.2 双层）
 
-- [ ] 7.1 后端纯单元（内存 SQLite `glebarez/sqlite` mode=memory，参考 `feed_service_test.go`）：quality_breakdown JSON 组装、MatchTier 五分支、best_tier 聚合、filterTagsByQuality 截断排序（含真实 downgraded）
+- [x] 7.1 后端纯单元（内存 SQLite `glebarez/sqlite` mode=memory，参考 `feed_service_test.go`）：quality_breakdown JSON 组装、MatchTier 五分支、best_tier 聚合、filterTagsByQuality 截断排序（含真实 downgraded）
 - [ ] 7.2 后端集成（testcontainer pgvector `testutil.SetupTestDB`）：quality_breakdown 列迁移幂等、新日报写入明细、合并重算、历史行 NULL 兼容、API 序列化字段
 - [ ] 7.3 前端单测（Vitest + happy-dom）：tier 徽章四态样式映射、探究区明细渲染（含降级标记）、历史 null 降级文案、matchReasonColor/matchInfoLabel 复用正确
 

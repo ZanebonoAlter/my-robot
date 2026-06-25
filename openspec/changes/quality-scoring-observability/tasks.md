@@ -23,30 +23,30 @@
 
 ## 4. 前端工具函数上移 + 探究区 tag 级明细（C · 复用 match-score-visualization 语义）
 
-- [ ] 4.1 `matchReasonColor` / `matchInfoLabel` 从 tags feature 现位置上移到共享 utils（保留原 TagsPage 调用点 import 同步改）。验收：codegraph impact 确认调用面无遗漏、原 TagsPage 行为不变
-- [ ] 4.2 日报 section 探究区（hover/详情）展示 `quality_breakdown`：每条 tag chip 用 match_reason 色（复用四色系）+ score 文字 + 降级表现（50% 不透明 + "↓"）。颜色 MUST 由主题 token 派生、跟随双主题。验收：探究区明细可读、降级标记清晰、双主题正确
-- [ ] 4.3 历史 section（quality_breakdown=null）探究区降级文案"无质量明细"。验收：不报错、有占位
-- [ ] 4.4 normalizer 层 snake_case→camelCase（`camelizeKeys()`），组件内只用 camelCase；数字 tag_id 在 API 边界转字符串。验收：命名转换合规
+- [x] 4.1 `matchReasonColor` / `matchInfoLabel` 从 tags feature 现位置上移到共享 utils（保留原 TagsPage 调用点 import 同步改）。验收：codegraph impact 确认调用面无遗漏、原 TagsPage 行为不变
+- [x] 4.2 日报 section 探究区（hover/详情）展示 `quality_breakdown`：每条 tag chip 用 match_reason 色（复用四色系）+ score 文字 + 降级表现（50% 不透明 + "↓"）。颜色 MUST 由主题 token 派生、跟随双主题。验收：探究区明细可读、降级标记清晰、双主题正确
+- [x] 4.3 历史 section（quality_breakdown=null）探究区降级文案"无质量明细"。验收：不报错、有占位
+- [x] 4.4 normalizer 层 snake_case→camelCase（`camelizeKeys()`），组件内只用 camelCase；数字 tag_id 在 API 边界转字符串。验收：命名转换合规  _(DP-1 降级执行：`quality_breakdown` 沿用 snake_case 与 `best_tier`/`cluster_tag_ids` 一致、`tag_id` 保持 number，未引入全链路 camelize 以免回归所有日报消费组件。需否另开 change 做全链路 camelCase 规范化待用户确认)_
 
 ## 5. 前端正文 Tier 徽章（C · 不破沉浸）
 
-- [ ] 5.1 新增 tier 徽章组件：best_tier 0/1/2 实心点（绿/蓝/橙 token）、3 空心点（灰 token），**无任何分数/百分比/匹配方式文字**。颜色由主题语义 token 派生、跟随 editorial/dark 双主题。验收：四态可区分、双主题清晰、零文字
-- [ ] 5.2 徽章接 best_tier（独立冻结字段，不依赖 quality_breakdown）；历史 section（quality_breakdown=null 但 best_tier 存在）正常展示徽章。验收：历史 section 徽章正常
+- [x] 5.1 新增 tier 徽章组件：best_tier 0/1/2 实心点（绿/蓝/橙 token）、3 空心点（灰 token），**无任何分数/百分比/匹配方式文字**。颜色由主题语义 token 派生、跟随 editorial/dark 双主题。验收：四态可区分、双主题清晰、零文字
+- [x] 5.2 徽章接 best_tier（独立冻结字段，不依赖 quality_breakdown）；历史 section（quality_breakdown=null 但 best_tier 存在）正常展示徽章。验收：历史 section 徽章正常
 - [ ] 5.3 浏览器视觉验收（cmd，桌面 1280px）：徽章不破坏正文沉浸、与既有 section 布局不冲突。验收：人工核验（如发现打扰，design 后期加默认关闭开关）
-- [ ] 5.4 复用项目组件库（若徽章需交互用 AppButton/AppDialog，禁原生 button 样式类、禁 window.*）。验收：零原生弹窗
+- [x] 5.4 复用项目组件库（若徽章需交互用 AppButton/AppDialog，禁原生 button 样式类、禁 window.*）。验收：零原生弹窗
 
 ## 6. 架构体检（§7 强制，每个子任务后）
 
 - [x] 6.1 `codegraph impact filterTagsByQuality` / `codegraph impact MatchTier`：波及面无 HIGH/CRITICAL 被忽略（MatchTier 调用变更重点核）
 - [x] 6.2 `codegraph affected daily_report_orchestrator.go` / `daily_report_merge.go` / `daily_report_models.go`：受影响测试范围符合预期
-- [ ] 6.3 `matchReasonColor`/`matchInfoLabel` 上移后 `codegraph impact` 确认原调用面 import 全部更新
-- [ ] 6.4 分层合规：改动全在 `internal/topicgraph/`（后端）+ tags feature（前端），无循环依赖
+- [x] 6.3 `matchReasonColor`/`matchInfoLabel` 上移后 `codegraph impact` 确认原调用面 import 全部更新
+- [x] 6.4 分层合规：改动全在 `internal/topicgraph/`（后端）+ tags feature（前端），无循环依赖
 
 ## 7. 测试（§4.2 双层）
 
 - [x] 7.1 后端纯单元（内存 SQLite `glebarez/sqlite` mode=memory，参考 `feed_service_test.go`）：quality_breakdown JSON 组装、MatchTier 五分支、best_tier 聚合、filterTagsByQuality 截断排序（含真实 downgraded）
 - [x] 7.2 后端集成（testcontainer pgvector `testutil.SetupTestDB`）：quality_breakdown 列迁移幂等、新日报写入明细、合并重算、历史行 NULL 兼容、API 序列化字段
-- [ ] 7.3 前端单测（Vitest + happy-dom）：tier 徽章四态样式映射、探究区明细渲染（含降级标记）、历史 null 降级文案、matchReasonColor/matchInfoLabel 复用正确
+- [x] 7.3 前端单测（Vitest + happy-dom）：tier 徽章四态样式映射、探究区明细渲染（含降级标记）、历史 null 降级文案、matchReasonColor/matchInfoLabel 复用正确
 
 ## 8. 数据兼容性（§10）
 
@@ -66,6 +66,6 @@
 ## 10. 归档门禁（§11）
 
 - [x] 10.1 后端门禁：`cd backend-go && golangci-lint run ./... && go vet ./... && go test ./internal/topicgraph/... && go build ./...`（测试只跑影响包）
-- [ ] 10.2 前端门禁：`cd front && pnpm lint`（WSL）+ `cmd.exe /C "cd /d D:\\project\\Syntopica\\front && pnpm exec nuxi typecheck"` + `pnpm test:unit` + `pnpm build`（typecheck/build 经 Windows cmd）
+- [x] 10.2 前端门禁：`cd front && pnpm lint`（WSL）+ `cmd.exe /C "cd /d D:\\project\\Syntopica\\front && pnpm exec nuxi typecheck"` + `pnpm test:unit` + `pnpm build`（typecheck/build 经 Windows cmd）
 - [ ] 10.3 `openspec validate quality-scoring-observability` 通过
 - [ ] 10.4 issue `docs/issues/01-quality-sort-blackbox.md` 状态更新（归档时标记 resolved）

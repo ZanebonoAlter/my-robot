@@ -10,7 +10,7 @@ import type { DailyReportQualityEntry } from '~/api/dailyReports'
  * Historical sections (quality_breakdown = null) show a "无质量明细" placeholder.
  * Pure display: the parent reveals it on hover/focus (see DailyReportTopicSection).
  */
-defineProps<{ breakdown: DailyReportQualityEntry[] | null }>()
+defineProps<{ breakdown?: DailyReportQualityEntry[] | null }>()
 </script>
 
 <template>

@@ -27,7 +27,7 @@ const MATCH_REASON_TOKENS: Record<string, string> = {
 /** Theme-token colour for a match reason. Pass `downgraded` for a 50%-opacity
  *  variant (used for downgraded chip borders / labels). */
 export function matchReasonColor(reason: string, downgraded?: boolean): string {
-  const token = MATCH_REASON_TOKENS[reason] || MATCH_REASON_TOKENS.weighted
+  const token = MATCH_REASON_TOKENS[reason] ?? 'var(--color-match-weighted)'
   return downgraded
     ? `color-mix(in srgb, ${token} 50%, transparent)`
     : token

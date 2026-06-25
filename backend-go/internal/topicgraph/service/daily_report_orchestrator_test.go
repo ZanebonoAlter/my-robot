@@ -137,3 +137,44 @@ func TestFilterTagsByQuality_DowngradedMaxSimSortedToEnd(t *testing.T) {
 	// Downgraded entries correctly don't sneak in.
 	_ = hasDowngraded
 }
+
+// TestBuildQualityBreakdownJSON_MergedSections covers the spec scenario
+// "合并后重算明细": when MergeSimilarSections merges section A (tag IDs {1,2})
+// with section B (tag IDs {3,4}), the recomputed quality_breakdown SHALL be
+// the union of all four tags' details. MergeSimilarSections itself calls
+// buildQualityBreakdownJSON with the merged tagIDSet, so this test asserts the
+// union semantics the merge path relies on.
+func TestBuildQualityBreakdownJSON_MergedSections(t *testing.T) {
+	tags := []repository.TagInput{
+		{ID: 1, Label: "AI芯片", MatchReason: "direct_hit", Score: 1.0, Downgraded: false},
+		{ID: 2, Label: "GPT-5发布", MatchReason: "max_sim", Score: 0.85, Downgraded: false},
+		{ID: 3, Label: "AI竞赛", MatchReason: "weighted", Score: 0.59, Downgraded: false},
+		{ID: 4, Label: "GPU短缺", MatchReason: "max_sim", Score: 0.72, Downgraded: true},
+	}
+
+	// Merged tagIDSet = union of section A {1,2} and section B {3,4}.
+	raw := buildQualityBreakdownJSON(tags, []uint{1, 2, 3, 4})
+	require.NotNil(t, raw)
+
+	var entries []map[string]any
+	err := json.Unmarshal(raw, &entries)
+	require.NoError(t, err)
+
+	// Union of both sections → 4 entries, one per source tag.
+	assert.Len(t, entries, 4)
+
+	seenIDs := make(map[float64]bool, 4)
+	for _, e := range entries {
+		id, ok := e["tag_id"].(float64)
+		require.True(t, ok)
+		seenIDs[id] = true
+		// Every entry carries the full per-tag detail (spec: tag_id/label/
+		// match_reason/score/downgraded).
+		assert.NotNil(t, e["label"])
+		assert.NotNil(t, e["match_reason"])
+		assert.NotNil(t, e["score"])
+		assert.NotNil(t, e["downgraded"])
+	}
+	// All four merged tag IDs are present (union, no drops).
+	assert.True(t, seenIDs[1] && seenIDs[2] && seenIDs[3] && seenIDs[4])
+}

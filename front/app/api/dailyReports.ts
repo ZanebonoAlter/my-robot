@@ -60,6 +60,10 @@ export interface SectionTimelineNode {
   thread_count: number
   image_url?: string
   imageUrl?: string
+  /** Per-tag match-quality snapshot for timeline/lifecycle/lifeline sections.
+   *  Mirrors `DailyReportSection.quality_breakdown`; null for historical
+   *  sections (column added by the quality-scoring-observability change). */
+  quality_breakdown?: DailyReportQualityEntry[] | null
   // Persistent topic assignment (optional — historical/unmatched sections may lack it).
   persistent_topic_id?: number
   topic_match_distance?: number

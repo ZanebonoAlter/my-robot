@@ -8,7 +8,7 @@
 - [x] 1.2 `daily_report_models.go`：`TagInput` 加 `Downgraded bool` 字段；`DailyReportSection` 加 `QualityBreakdown JSON \`gorm:"type:jsonb"\` 字段。验收：AutoMigrate/迁移增列、结构体字段就位
 - [x] 1.3 `daily_report_orchestrator.go` collectBoardTags：SELECT 补 `topic_tag_board_labels.downgraded`（两处来源：主路径 row 扫描 + fallback 路径 boardMatch），填入 `TagInput.Downgraded`。验收：降级 tag 的 Downgraded=true 进管线（治 🔴 事实1）
 - [x] 1.4 `daily_report_orchestrator.go` section 组装处（约 :164）：从当前作用域 `tags` 切片按 cluster.TagIDs 填充 `quality_breakdown`（结构 `[{tag_id,label,match_reason,score,downgraded}]`）。验收：新 section 持久化含完整明细
-- [ ] 1.5 `daily_report_merge.go` MergeSimilarSections：合并后按合并后的 tagIDSet 重算 `quality_breakdown`（与重算 avg_score 同处、同规则）。验收：合并 section 的明细=各成员明细并集，avg_score 与之一致
+- [x] 1.5 `daily_report_merge.go` MergeSimilarSections：合并后按合并后的 tagIDSet 重算 `quality_breakdown`（与重算 avg_score 同处、同规则）。验收：合并 section 的明细=各成员明细并集，avg_score 与之一致
 
 ## 2. 后端 MatchTier 语义与截断修复（B · daily-report-system）
 

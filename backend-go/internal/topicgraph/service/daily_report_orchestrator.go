@@ -180,27 +180,7 @@ func GenerateDailyReport(ctx context.Context, boardID uint, date time.Time) (*re
 			avgScore = totalScore / float64(matchCount)
 		}
 
-		// Build quality_breakdown: snapshot per-tag match detail at generation time.
-		type qualityEntry struct {
-			TagID       uint    `json:"tag_id"`
-			Label       string  `json:"label"`
-			MatchReason string  `json:"match_reason"`
-			Score       float64 `json:"score"`
-			Downgraded  bool    `json:"downgraded"`
-		}
-		breakdown := make([]qualityEntry, 0, len(cluster.TagIDs))
-		for _, t := range tags {
-			if tagIDSet[t.ID] {
-				breakdown = append(breakdown, qualityEntry{
-					TagID:       t.ID,
-					Label:       t.Label,
-					MatchReason: t.MatchReason,
-					Score:       t.Score,
-					Downgraded:  t.Downgraded,
-				})
-			}
-		}
-		breakdownJSON, _ := json.Marshal(breakdown)
+		breakdownJSON := buildQualityBreakdownJSON(tags, cluster.TagIDs)
 
 		sections = append(sections, repository.DailyReportSection{
 			ClusterIndex:      i,
@@ -409,6 +389,36 @@ func findPreviousReportBrief(boardID uint, date time.Time) *repository.BoardDail
 		return nil
 	}
 	return &report
+}
+
+// buildQualityBreakdownJSON builds the quality_breakdown JSON from tags filtered by tagIDs.
+// Each entry carries per-tag match detail: tag_id, label, match_reason, score, downgraded.
+func buildQualityBreakdownJSON(tags []repository.TagInput, tagIDs []uint) []byte {
+	tagIDSet := make(map[uint]bool, len(tagIDs))
+	for _, tid := range tagIDs {
+		tagIDSet[tid] = true
+	}
+	type qEntry struct {
+		TagID       uint    `json:"tag_id"`
+		Label       string  `json:"label"`
+		MatchReason string  `json:"match_reason"`
+		Score       float64 `json:"score"`
+		Downgraded  bool    `json:"downgraded"`
+	}
+	entries := make([]qEntry, 0, len(tagIDs))
+	for _, t := range tags {
+		if tagIDSet[t.ID] {
+			entries = append(entries, qEntry{
+				TagID:       t.ID,
+				Label:       t.Label,
+				MatchReason: t.MatchReason,
+				Score:       t.Score,
+				Downgraded:  t.Downgraded,
+			})
+		}
+	}
+	b, _ := json.Marshal(entries)
+	return b
 }
 func filterTagsByQuality(tags []repository.TagInput) []repository.TagInput {
 	// Separate by match reason quality

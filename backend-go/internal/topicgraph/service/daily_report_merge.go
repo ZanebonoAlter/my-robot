@@ -249,10 +249,14 @@ func MergeSimilarSections(
 			avgScore = totalScore / float64(scoreCount)
 		}
 
+		// Recompute quality_breakdown from merged tag IDs.
+		breakdownJSON := buildQualityBreakdownJSON(tags, mergedTagIDs)
+
 		primary.ClusterTagIDs = mergedTagIDsJSON
 		primary.ArticleCount = totalArticles
 		primary.BestTier = bestTier
 		primary.AvgScore = avgScore
+		primary.QualityBreakdown = breakdownJSON
 
 		mergedSections = append(mergedSections, primary)
 		mergedThreadBatches = append(mergedThreadBatches, allThreads)

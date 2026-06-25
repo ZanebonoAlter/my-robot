@@ -167,7 +167,7 @@ func GenerateDailyReport(ctx context.Context, boardID uint, date time.Time) (*re
 		matchCount := 0
 		for _, t := range tags {
 			if tagIDSet[t.ID] {
-				tier := tagging.MatchTier(t.MatchReason, false)
+				tier := tagging.MatchTier(t.MatchReason, t.Downgraded)
 				if tier < bestTier {
 					bestTier = tier
 				}
@@ -180,14 +180,37 @@ func GenerateDailyReport(ctx context.Context, boardID uint, date time.Time) (*re
 			avgScore = totalScore / float64(matchCount)
 		}
 
+		// Build quality_breakdown: snapshot per-tag match detail at generation time.
+		type qualityEntry struct {
+			TagID       uint    `json:"tag_id"`
+			Label       string  `json:"label"`
+			MatchReason string  `json:"match_reason"`
+			Score       float64 `json:"score"`
+			Downgraded  bool    `json:"downgraded"`
+		}
+		breakdown := make([]qualityEntry, 0, len(cluster.TagIDs))
+		for _, t := range tags {
+			if tagIDSet[t.ID] {
+				breakdown = append(breakdown, qualityEntry{
+					TagID:       t.ID,
+					Label:       t.Label,
+					MatchReason: t.MatchReason,
+					Score:       t.Score,
+					Downgraded:  t.Downgraded,
+				})
+			}
+		}
+		breakdownJSON, _ := json.Marshal(breakdown)
+
 		sections = append(sections, repository.DailyReportSection{
-			ClusterIndex:   i,
-			ClusterLabel:   cluster.GroupName,
-			ClusterTagIDs:  tagIDsJSON,
-			ArticleCount:   clusterArticleCount,
-			BestTier:       bestTier,
-			AvgScore:       avgScore,
-			MatchedTopicID: cluster.MatchedTopicID,
+			ClusterIndex:      i,
+			ClusterLabel:      cluster.GroupName,
+			ClusterTagIDs:     tagIDsJSON,
+			ArticleCount:      clusterArticleCount,
+			BestTier:          bestTier,
+			AvgScore:          avgScore,
+			QualityBreakdown:  breakdownJSON,
+			MatchedTopicID:    cluster.MatchedTopicID,
 		})
 	}
 
@@ -257,6 +280,7 @@ func collectBoardTags(boardID uint, date time.Time) ([]repository.TagInput, [][]
 		Source       string  `json:"source"`
 		MatchReason  string  `json:"match_reason"`
 		Score        float64 `json:"score"`
+		Downgraded   bool    `json:"downgraded"`
 		ArticleCount int     `json:"article_count"`
 	}
 
@@ -269,6 +293,7 @@ func collectBoardTags(boardID uint, date time.Time) ([]repository.TagInput, [][]
 			topic_tags.source AS source,
 			topic_tag_board_labels.match_reason AS match_reason,
 			topic_tag_board_labels.score AS score,
+			topic_tag_board_labels.downgraded AS downgraded,
 			COUNT(DISTINCT articles.id) AS article_count`).
 		Joins("JOIN topic_tag_board_labels ON topic_tag_board_labels.topic_tag_id = topic_tags.id").
 		Joins("JOIN article_topic_tags ON article_topic_tags.topic_tag_id = topic_tags.id").
@@ -300,6 +325,7 @@ func collectBoardTags(boardID uint, date time.Time) ([]repository.TagInput, [][]
 			Source:       row.Source,
 			MatchReason:  row.MatchReason,
 			Score:        row.Score,
+			Downgraded:   row.Downgraded,
 		})
 
 		// Get article IDs for this tag on this date
@@ -366,6 +392,7 @@ func collectBoardTags(boardID uint, date time.Time) ([]repository.TagInput, [][]
 				ArticleCount: len(artIDs),
 				MatchReason:  boardMatch.MatchReason,
 				Score:        boardMatch.Score,
+				Downgraded:   boardMatch.Downgraded,
 			})
 			articleIDSets = append(articleIDSets, artIDs)
 		}
@@ -404,8 +431,8 @@ func filterTagsByQuality(tags []repository.TagInput) []repository.TagInput {
 	// If kept > 30, truncate by quality (截断)
 	if len(kept) > 30 {
 		sort.SliceStable(kept, func(i, j int) bool {
-			ti := tagging.MatchTier(kept[i].MatchReason, false)
-			tj := tagging.MatchTier(kept[j].MatchReason, false)
+			ti := tagging.MatchTier(kept[i].MatchReason, kept[i].Downgraded)
+			tj := tagging.MatchTier(kept[j].MatchReason, kept[j].Downgraded)
 			if ti != tj {
 				return ti < tj
 			}

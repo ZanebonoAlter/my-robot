@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"time"
 
@@ -45,14 +46,15 @@ func NormalizeReportDate(date time.Time) time.Time {
 
 // SectionTimelineNode represents a section in a timeline view.
 type SectionTimelineNode struct {
-	ID           uint      `json:"id"`
-	ReportID     uint      `json:"report_id"`
-	PeriodDate   time.Time `json:"period_date"`
-	ClusterLabel string    `json:"cluster_label"`
-	Status       string    `json:"status"`
-	ArticleCount int       `json:"article_count"`
-	ThreadCount  int       `json:"thread_count"`
-	ImageURL     string    `json:"image_url"`
+	ID               uint              `json:"id"`
+	ReportID         uint              `json:"report_id"`
+	PeriodDate       time.Time         `json:"period_date"`
+	ClusterLabel     string            `json:"cluster_label"`
+	Status           string            `json:"status"`
+	ArticleCount     int               `json:"article_count"`
+	ThreadCount      int               `json:"thread_count"`
+	ImageURL         string            `json:"image_url"`
+	QualityBreakdown json.RawMessage   `json:"quality_breakdown"`
 	// Persistent topic assignment. All optional so historical / unmatched
 	// sections (persistent_topic_id IS NULL) still serialize cleanly.
 	PersistentTopicID    *uint                 `json:"persistent_topic_id,omitempty"`
@@ -387,6 +389,7 @@ func (r *TopicGraphRepository) GetBoardSectionTimeline(boardID uint, days int) (
 	var nodes []SectionTimelineNode
 	err := r.db.Raw(`
 		SELECT ds.id, ds.report_id, bdr.period_date, ds.cluster_label,
+		       ds.quality_breakdown,
 		       ds.article_count,
 		       ds.persistent_topic_id,
 		       ds.topic_match_distance,
@@ -519,6 +522,7 @@ func (r *TopicGraphRepository) GetSectionLifecycle(sectionID uint) (SectionTimel
 	var nodes []SectionTimelineNode
 	if err := r.db.Raw(`
 		SELECT ds.id, ds.report_id, bdr.period_date, ds.cluster_label,
+		       ds.quality_breakdown,
 		       ds.article_count,
 		       ds.persistent_topic_id,
 		       ds.topic_match_distance,
@@ -690,6 +694,7 @@ func (r *TopicGraphRepository) GetTopicLifeline(topicID uint) (SectionTimelineRe
 	var nodes []SectionTimelineNode
 	err := r.db.Raw(`
 		SELECT ds.id, ds.report_id, bdr.period_date, ds.cluster_label,
+		       ds.quality_breakdown,
 		       ds.article_count,
 		       ds.persistent_topic_id,
 		       ds.topic_match_distance,

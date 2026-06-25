@@ -2,6 +2,7 @@
 import { Icon } from '@iconify/vue'
 import type { BoardArticle, BoardArticleTag, AuxiliaryLabelItem } from '~/api/semanticBoards'
 import type { RssFeed } from '~/types'
+import { matchReasonColor, matchInfoLabel } from '~/utils/matchQuality'
 import MatchDetailPanel from './MatchDetailPanel.vue'
 
 const props = defineProps<{
@@ -37,27 +38,6 @@ const emit = defineEmits<{
   'update:show-direction-mismatch': [val: boolean]
   'update:timeline-sort': [mode: 'quality' | 'time']
 }>()
-
-function matchReasonColor(reason: string, downgraded?: boolean): string {
-  const colors: Record<string, string> = {
-    direct_hit: '#22c55e',
-    hit_rate: '#3b82f6',
-    max_sim: '#f59e0b',
-    weighted: '#94a3b8',
-  }
-  const color = colors[reason] || '#94a3b8'
-  return downgraded ? color + '80' : color
-}
-
-function matchInfoLabel(tag: BoardArticleTag): string {
-  const labels: Record<string, string> = {
-    direct_hit: '直接命中',
-    hit_rate: '命中率',
-    max_sim: '相似度',
-    weighted: '综合',
-  }
-  return `${labels[tag.match_reason] || tag.match_reason} ${tag.score.toFixed(2)}${tag.downgraded ? '↓' : ''}`
-}
 
 function strongestMatch(tags: BoardArticleTag[]): BoardArticleTag | null {
   if (!tags?.length) return null

@@ -2,6 +2,7 @@
 import { computed, ref, watch } from 'vue'
 import { Icon } from '@iconify/vue'
 import DailyReportMiniLifeline from './DailyReportMiniLifeline.vue'
+import SectionTierBadge from './SectionTierBadge.vue'
 import {
   groupSectionsByTopic,
   type QualityZone,
@@ -159,7 +160,10 @@ watch([groups, () => props.reportDate], ([nextGroups, reportDate]) => {
         <div v-if="expandedTopics.has(group.key)" class="drm-topic__body">
           <div class="drm-topic__sections">
             <article v-for="section in group.sections" :key="section.id" class="drm-section-card">
-              <h4 v-if="group.sections.length > 1" class="drm-section-card__title">{{ section.cluster_label }}</h4>
+              <div class="drm-section-card__head">
+                <SectionTierBadge :best-tier="section.best_tier" />
+                <h4 v-if="group.sections.length > 1" class="drm-section-card__title">{{ section.cluster_label }}</h4>
+              </div>
               <div class="drm-section-card__threads">
                 <article v-for="thread in section.threads" :key="thread.id" class="drm-thread">
                   <button
@@ -450,8 +454,15 @@ watch([groups, () => props.reportDate], ([nextGroups, reportDate]) => {
   position: relative;
 }
 
+.drm-section-card__head {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin-bottom: 0.35rem;
+}
+
 .drm-section-card__title {
-  margin: 0 0 0.35rem;
+  margin: 0;
   color: var(--color-text-secondary);
   font-family: "Noto Serif SC", serif;
   font-size: 0.85rem;

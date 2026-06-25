@@ -3,6 +3,7 @@ import { computed, ref, watch } from 'vue'
 import { Icon } from '@iconify/vue'
 import DailyReportMiniLifeline from './DailyReportMiniLifeline.vue'
 import SectionTierBadge from './SectionTierBadge.vue'
+import SectionQualityExplore from './SectionQualityExplore.vue'
 import {
   groupSectionsByTopic,
   type QualityZone,
@@ -163,6 +164,10 @@ watch([groups, () => props.reportDate], ([nextGroups, reportDate]) => {
               <div class="drm-section-card__head">
                 <SectionTierBadge :best-tier="section.best_tier" />
                 <h4 v-if="group.sections.length > 1" class="drm-section-card__title">{{ section.cluster_label }}</h4>
+                <SectionQualityExplore
+                  :breakdown="section.quality_breakdown"
+                  class="drm-section-card__explore"
+                />
               </div>
               <div class="drm-section-card__threads">
                 <article v-for="thread in section.threads" :key="thread.id" class="drm-thread">
@@ -455,10 +460,41 @@ watch([groups, () => props.reportDate], ([nextGroups, reportDate]) => {
 }
 
 .drm-section-card__head {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 0.4rem;
+  min-height: 1.25rem;
   margin-bottom: 0.35rem;
+}
+
+/* Quality probe panel — hidden by default, revealed on hover/focus of the
+   section head so it never disturbs immersive reading. Colours and the
+   downgrade marker come from SectionQualityExplore + match-quality tokens. */
+.drm-section-card__explore {
+  position: absolute;
+  top: calc(100% + 0.3rem);
+  left: 0;
+  z-index: 4;
+  max-width: 20rem;
+  padding: 0.5rem 0.65rem;
+  border: 1px solid var(--color-border-medium);
+  border-radius: 8px;
+  background: var(--color-bg-elevated);
+  box-shadow: var(--shadow-medium);
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transform: translateY(-2px);
+  transition: opacity 0.15s ease, transform 0.15s ease, visibility 0.15s ease;
+}
+
+.drm-section-card__head:hover .drm-section-card__explore,
+.drm-section-card__head:focus-within .drm-section-card__explore {
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
+  transform: translateY(0);
 }
 
 .drm-section-card__title {

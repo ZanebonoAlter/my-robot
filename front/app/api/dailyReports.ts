@@ -78,6 +78,18 @@ export interface SectionRelation {
 // SectionLifecycleNode has the same shape as SectionTimelineNode
 export type SectionLifecycleNode = SectionTimelineNode
 
+/** Frozen per-tag match-quality lineage snapshot persisted on
+ *  daily_report_sections.quality_breakdown. snake_case to match the rest of
+ *  the daily-report API surface (the dailyReports client does not camelize).
+ *  Historical sections return null for the whole array. */
+export interface DailyReportQualityEntry {
+  tag_id: number
+  label: string
+  match_reason: string
+  score: number
+  downgraded: boolean
+}
+
 export interface DailyReportSection {
   id: number
   cluster_index: number
@@ -87,6 +99,9 @@ export interface DailyReportSection {
   article_count: number
   best_tier: number
   avg_score: number
+  /** Frozen match-quality lineage for this section's source tags, or null for
+   *  historical sections generated before this field existed (DP-1 snake_case). */
+  quality_breakdown?: DailyReportQualityEntry[] | null
   // Persistent topic assignment (optional; populated by the daily pipeline).
   persistent_topic_id?: number
   topic_match_distance?: number

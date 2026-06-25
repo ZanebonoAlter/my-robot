@@ -148,6 +148,13 @@ func mustContainAll(t *testing.T, text string, needles ...string) {
 	}
 }
 
+func TestQualityBreakdownMigrationRegistered(t *testing.T) {
+	migration := mustFindMigration(t, postgresMigrations(), "20260625_0001")
+	if !strings.Contains(strings.ToLower(migration.Description), "quality_breakdown") {
+		t.Fatalf("expected quality_breakdown migration description, got %q", migration.Description)
+	}
+}
+
 func mustNotContainAny(t *testing.T, text string, needles ...string) {
 	t.Helper()
 	for _, needle := range needles {

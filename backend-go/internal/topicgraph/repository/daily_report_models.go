@@ -102,8 +102,9 @@ type DailyReportSection struct {
 	Threads       []DailyReportThread `gorm:"foreignKey:SectionID" json:"threads,omitempty"`
 	ArticleCount  int                 `json:"article_count"`
 	BestTier      int                 `gorm:"default:0" json:"best_tier"`
-	AvgScore      float64             `gorm:"default:0" json:"avg_score"`
-	Embedding     string              `gorm:"type:vector" json:"-"`
+	AvgScore          float64             `gorm:"default:0" json:"avg_score"`
+	QualityBreakdown  JSON                `gorm:"type:jsonb" json:"quality_breakdown"`
+	Embedding         string              `gorm:"type:vector" json:"-"`
 	// Persistent topic assignment. NOT NULL is intentionally omitted at the DB
 	// layer to tolerate the backfill window and historical rows; the assignment
 	// algorithm guarantees new sections are always assigned (except the
@@ -202,6 +203,7 @@ type TagInput struct {
 	Source       string  `json:"source"`
 	MatchReason  string  `json:"match_reason"`
 	Score        float64 `json:"score"`
+	Downgraded   bool    `json:"downgraded"`
 }
 
 // ClusterGroup represents a group of tags clustered by the LLM.

@@ -787,6 +787,18 @@ func postgresMigrations() []Migration {
 			},
 		},
 
+		// ── Quality scoring observability ──────────────────────────────
+		{
+			Version:     "20260625_0001",
+			Description: "Add quality_breakdown JSONB column to daily_report_sections.",
+			Up: func(db *gorm.DB) error {
+				if !tableExists(db, "daily_report_sections") {
+					return nil
+				}
+				return db.Exec("ALTER TABLE daily_report_sections ADD COLUMN IF NOT EXISTS quality_breakdown JSONB NULL").Error
+			},
+		},
+
 		// ── Widen section_relations unique constraint to (from, to, type) ───
 		// Lets an identity edge (same persistent topic) and a similarity edge
 		// (Hungarian match) on the same section pair coexist as two rows.

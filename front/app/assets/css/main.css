@@ -138,6 +138,14 @@
   --color-tag-keyword-bg:     rgba(74, 93, 138, 0.12);
   --color-tag-keyword-border: rgba(74, 93, 138, 0.25);
 
+  /* Match-quality tiers (direct_hit / hit_rate / max_sim / weighted).
+     Shared by TagsPage chips, daily-report explore panel and section tier badge.
+     Downgraded indicators halve opacity at the call site via color-mix. */
+  --color-match-direct-hit: #22c55e;
+  --color-match-hit-rate:   #3b82f6;
+  --color-match-max-sim:    #f59e0b;
+  --color-match-weighted:   #94a3b8;
+
   /* Interactive/link blue */
   --color-link:            rgba(63, 124, 255, 0.9);
   --color-link-hover:      rgba(63, 124, 255, 1);
@@ -202,6 +210,12 @@
   --color-tag-keyword:        rgba(99, 102, 241, 0.72);
   --color-tag-keyword-bg:     rgba(99, 102, 241, 0.18);
   --color-tag-keyword-border: rgba(99, 102, 241, 0.32);
+
+  /* Match-quality tiers — brightened for the deep dark ground. */
+  --color-match-direct-hit: #4ade80;
+  --color-match-hit-rate:   #60a5fa;
+  --color-match-max-sim:    #fbbf24;
+  --color-match-weighted:   #94a3b8;
 
   /* Interactive/link blue */
   --color-link:            rgba(99, 179, 237, 0.9);

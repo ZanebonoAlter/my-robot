@@ -31,7 +31,7 @@ Syntopica 数据库全景概览。
 ## 相关文档
 
 - [项目架构总览](../architecture/overview.md) — 系统组件和子系统总览
-- [数据流](../architecture/data-flow.md) — 代码执行流（"代码怎么跑的"）
+- [业务流程](../flow/README.md) — 链路概要设计、前后端协作（"业务怎么跑的"）
 - [开发指南](../development.md) — 构建、测试、验证命令
 
 ---

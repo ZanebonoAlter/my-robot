@@ -170,20 +170,7 @@ features/
 
 **使用模式：**
 
-```typescript
-const stream = useEventStream()
-
-// 订阅
-const off = stream.on(EVENT_TYPES.TAG_COMPLETED, (data) => { ... })
-
-// 组件卸载时清理（onUnmounted 中）
-off()
-```
-
-**禁止：**
-
-- Feature/Component 中直接 `new WebSocket` 或 `new EventSource` 订阅全局事件
-- 组件卸载后不退订（必须在 `onUnmounted` 执行返回的 unsubscribe 函数）
+> 使用模式与禁止行为（禁止自建 WebSocket/EventSource、`onUnmounted` 必须退订）的权威定义见 [`standard/frontend/code-style.md`](../standard/frontend/code-style.md) §5。
 
 **特例：** 专用长任务 stream（如 tag merge preview 的 scan/evaluate SSE）在对应 API module 中作为命名 Adapter 暴露。
 
@@ -208,13 +195,11 @@ off()
 
 **禁止同一次失败由多个层同时通知**（如 `apiStore` 和 feature store 同时弹 toast）。
 
+> 该责任分工的权威定义见 [`standard/frontend/code-style.md`](../standard/frontend/code-style.md) §6。
+
 ## 数据映射规则
 
-- 后端字段以 `snake_case` 为主
-- 前端 store 和组件内部统一用 `camelCase`
-- 转换只发生在 API 边界（`api/normalizers/` 和 `utils/api-helpers.ts`）
-- ID 在前端统一存成 `string`；数字 ID 与字符串 ID 的转换只在 API 边界
-- 后端 snake_case DTO 进入 Store/Feature 前必须经 normalizer 转为前端领域类型
+> `snake_case → camelCase` 转换、数字 ID 转字符串、转换只发生在 API 边界的权威定义见 [`standard/frontend/code-style.md`](../standard/frontend/code-style.md) §9；具体字段映射见 [`flow/reading.md`](../flow/reading.md)。
 
 ## 页面骨架
 
@@ -357,7 +342,7 @@ surgical 边界：不改相机坐标系/布局算法/交互/BFS/红线/全局迷
 ## 相关文档
 
 - `docs/reference/architecture/backend.md`
-- `docs/reference/architecture/data-flow.md`
+- `docs/reference/flow/`（业务流程链路）
 - `docs/reference/architecture/overview.md`
 - `front/AGENTS.md`
 

@@ -1,9 +1,9 @@
 # 数据生命周期
 
-本文档从数据状态字段变迁角度描述 Syntopica 的核心数据链路。与 `architecture/data-flow.md` 的分工：
+本文档从数据状态字段变迁角度描述 Syntopica 的核心数据链路。与 `flow/` 的分工：
 
 ```
-data-flow.md       = "代码怎么跑的"（函数调用链、API 调用、前端 store 交互）
+flow/              = "业务怎么跑的"（链路概要设计、函数调用链、API 调用、前后端协作）
 DATA_LIFECYCLE.md  = "数据怎么变的"（哪些表被写入、状态字段怎么流转、数据产出依赖）
 ```
 
@@ -366,7 +366,7 @@ digest_configs (推送配置)
 
 ## 相关文档
 
-- [代码执行流](../architecture/data-flow.md) — 函数调用链、API 调用、前端 store 交互（"代码怎么跑的"）
+- [业务流程](../flow/README.md) — 链路概要设计、函数调用链、前后端协作（"业务怎么跑的"）
 - [数据库字段说明](DATABASE_FIELDS.md) — 35 张表的完整字段字典
 - [全局实体关系图](ER_DIAGRAM.md) — FK 关系图与约束矩阵
 - [项目架构总览](../architecture/overview.md) — 系统架构全局视角

@@ -485,4 +485,4 @@ erDiagram
 - [数据库字段说明](DATABASE_FIELDS.md) — 35 张表的完整字段字典
 - [数据生命周期](DATA_LIFECYCLE.md) — 数据链路的状态字段流转
 - [项目架构总览](../architecture/overview.md) — 系统架构全局视角
-- [数据流](../architecture/data-flow.md) — 代码执行流和 API 调用链
+- [业务流程](../flow/README.md) — 链路概要设计、函数调用链、前后端协作

@@ -87,32 +87,13 @@ OpenTelemetry 集成（`backend-go/internal/platform/tracing/`），HTTP 请求�
 
 ## 数据流
 
-系统主数据流按以下路径运行：
+> 业务链路的详细设计已迁至 [`flow/`](../flow/README.md)（按大功能切分，配 mermaid）。本节只给定位。
 
-```text
-RSS 源
-  → 后端定时/手动拉取解析
-  → PostgreSQL 持久化（feeds + articles）
-  → [可选] Firecrawl 全文抓取 → 内容补全生成 AI 整理稿
-  → [可选] 主题标签提取 → 主题分析 → 图谱构建
-  → [可选] 主题标签 embedding 向量化 → 自动合并相似标签 → 叙事摘要生成
-  → Event 标签延迟 embedding: 描述+关键词生成后入队 → 多行 embedding (semantic + event_keyword)
-  → 概念 bootstrap: 连通分量聚类 → 最小簇过滤 → LLM 命名概念
-  → 前端 REST API 拉取 / WebSocket 推送
-  → Pinia store 映射为 camelCase 前端模型
-  → feature 组件消费渲染
-```
+主数据流：RSS 源 → 后端拉取/解析 → PostgreSQL 持久化 → 可选（Firecrawl 全文抓取 / 内容补全 / AI 总结 / Digest 聚合 / 标签向量化 / 叙事生成）→ 前端 REST API + WebSocket → Pinia store 映射 → feature 组件渲染。
 
-前端内部数据流：
+前端内部：`pages`（路由入口）→ `features/*/components`（业务壳）→ `app/api/*`（唯一 HTTP 边界）→ `stores/api.ts`（主数据源 `useApiStore`）→ `stores/feeds.ts` + `stores/articles.ts`（派生视图）→ 组件渲染。
 
-```text
-pages（路由入口）
-  → features/*/components（业务壳）
-  → app/api/*（唯一 HTTP 边界）
-  → stores/api.ts（主数据源 useApiStore）
-  → stores/feeds.ts + stores/articles.ts（派生视图）
-  → 组件渲染
-```
+逐条链路的代码级追读见 [`map.md`](map.md) 与各 `flow/<大功能>.md`。
 
 ## 目录结构
 
@@ -227,11 +208,12 @@ my-robot/
 - [后端运行时](runtime.md)：启动顺序、调度器管理、路由面、优雅退出
 - [前端架构](frontend.md)：Nuxt 4 分层、feature 组织、数据映射规则、设计系统
 - [前端组件分工](frontend-components.md)：各 feature 组件职责与交互关系
-- [数据流](data-flow.md)：主链路、前端状态职责、定时任务链路
+- [业务流程](../flow/README.md)：主链路、前端状态职责、定时任务链路、叙事数据流
+- [详细设计地图](map.md)：业务域 → 流程文档 → 架构骨架 / 代码入口
 - [链路追踪](tracing.md)：OpenTelemetry 集成、埋点分层、查询 API
 - [数据库字段说明](../database/DATABASE_FIELDS.md)：35 张表完整字段字典
 - [全局实体关系图](../database/ER_DIAGRAM.md)：FK 关系图与约束矩阵
 - [数据生命周期](../database/DATA_LIFECYCLE.md)：6 条数据链路的状态字段流转
 - [开发指南](../development.md)：构建、测试、验证命令
-- [内容增强](../content-processing.md)：Firecrawl + AI 内容补全流程
+- [内容增强](../flow/content-enrichment.md)：Firecrawl + AI 内容补全流程
 - [API 文档](../api/_index.md)：按领域拆分的 REST API 参考

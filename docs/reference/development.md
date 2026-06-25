@@ -1,8 +1,8 @@
-<!-- generated-by: gsd-doc-writer -->
-
 # 开发指南
 
-本地开发、构建、测试和提交前检查的完整参考。如果你是首次参与，请先阅读 [Getting Started](../getting-started.md) 完成环境搭建。
+本地开发与构建命令参考。如果你是首次参与，请先阅读 [Getting Started](../getting-started.md) 完成环境搭建。
+
+> **规范已迁移**：代码风格、目录约定、测试规范、提交前检查、Branch/PR 流程、编码注意事项的**权威定义**已迁至 [`standard/`](standard/README.md)（前后端分文件夹）。本文件只保留**环境搭建**与**构建命令**。
 
 ## 本地开发环境搭建
 
@@ -155,167 +155,17 @@ pytest --cov=. --cov-report=html
 python test_firecrawl_integration.py
 ```
 
-## 代码风格
+---
 
-本项目已配置 ESLint 代码检查工具。代码风格通过以下方式维持：
+## 规范文档导航
 
-### 前端
+本文件原有的代码风格、目录约定、测试、提交前检查、Branch/PR、编码注意事项等内容已迁入 `standard/`，不再在此重复：
 
-- TypeScript 全覆盖，新增代码使用 `<script setup lang="ts">`
-- ESLint 配置：`front/eslint.config.js`（flat config + typescript-eslint）
-- 大部分前端文件不使用分号——保持与周围代码一致的风格
-- 源码必须保持 UTF-8 编码
-- 质量门禁：`pnpm lint && pnpm exec nuxi typecheck && pnpm build`
+| 原内容 | 权威源 |
+|--------|--------|
+| 代码风格（前端 / 后端） | [`standard/frontend/code-style.md`](standard/frontend/code-style.md)、[`standard/backend/code-style.md`](standard/backend/code-style.md) |
+| 目录结构约定 | [`standard/frontend/code-style.md`](standard/frontend/code-style.md) §2、[`standard/backend/package-layout.md`](standard/backend/package-layout.md) |
+| 测试规范 | [`standard/frontend/testing.md`](standard/frontend/testing.md)、[`standard/backend/testing.md`](standard/backend/testing.md) |
+| 提交前检查 / Branch / PR / 编码注意 | [`standard/shared/commit-pr.md`](standard/shared/commit-pr.md) |
 
-### 后端
-
-- 使用 `gofmt` 格式化 Go 代码
-- 静态分析：`golangci-lint run ./...`（配置：`backend-go/.golangci.yml`）
-- 导入分组：标准库 → 空行 → 第三方库 → 空行 → 本地包
-- JSON 字段使用 `snake_case` struct tag
-- 导出符号使用 `PascalCase`，私有符号使用 `lowerCamelCase`
-- 错误包装使用 `fmt.Errorf("...: %w", err)`
-- 后端日志优先复用 `internal/platform/logging`，避免继续用裸 `log.Printf` + 文本前缀人工区分级别
-
-## 目录结构约定
-
-### 前端目录约定
-
-| 目录 | 职责 |
-|------|------|
-| `front/app/api/` | HTTP 请求层（唯一网络请求边界） |
-| `front/app/features/` | 业务逻辑实现主体 |
-| `front/app/components/` | 通用可复用 UI 组件 |
-| `front/app/composables/` | 跨 feature 的通用 composable |
-| `front/app/stores/` | Pinia 状态管理 |
-| `front/app/types/` | 领域类型定义 |
-| `front/app/utils/` | 常量和纯工具函数 |
-| `front/app/pages/` | Nuxt 路由入口（只做挂载，不放业务逻辑） |
-
-### 前端状态约定
-
-- `useApiStore` 是主数据源，其他 store 从中派生
-- `useFeedsStore` 和 `useArticlesStore` 只做派生视图
-- 不新增 `syncToLocalStores()` 一类的副本同步逻辑
-
-### 前端数据映射约定
-
-- 后端数字 ID 在 API/store 边界转为字符串
-- `snake_case → camelCase` 映射集中在 API 或 store 层，不在组件里做
-- 字段重命名直接在类型和 store 映射层切换，不在组件里做兼容
-- API 返回值统一通过 `ApiResponse<T>` 包装
-
-### 前端样式约定
-
-- 保持 editorial / magazine 主题风格，不回退到蓝紫色 SaaS 视觉
-- 使用三层 Token 架构：Primitive (`--raw-*`) → Semantic (`--color-*`) → Component (`--dialog-*` 等)
-- 通过 `data-theme="editorial|dark"` 切换主题，使用 `useTheme()` composable 管理状态
-- 组件只引用 Layer 2 语义 token，不直接使用原始色值
-- 统一组件：对话框使用 `AppDialog`，按钮使用 `AppButton`，开关使用 `AppToggle`，输入框使用 `AppInput`
-- 复用 `app/assets/css/main.css` 里的主题变量
-- 图标使用 Iconify
-
-### 后端目录约定
-
-| 目录 | 职责 |
-|------|------|
-| `cmd/server/` | 应用入口 |
-| `internal/app/` | HTTP 路由、中间件、运行时装配 |
-| `internal/admin/` | 管理后台（handler, service, scheduler, repository, wire） |
-| `internal/reader/` | 订阅与文章域 |
-| `internal/tagmanagement/` | 标签系统域 |
-| `internal/topicgraph/` | 主题图谱域 |
-| `internal/models/` | 共享 GORM 模型 |
-| `internal/platform/` | 共享基础设施（config, database, ws, airouter, aisettings, middleware, tracing, jsonutil, testutil） |
-| `configs/` | 配置文件 |
-
-业务逻辑按业务域（`internal/reader/`、`internal/tagmanagement/`、`internal/topicgraph/`、`internal/admin/`）组织，HTTP 路由注册在 `internal/app/router.go`，不在 handler 中写复杂业务。
-
-## 测试
-
-### 前端测试
-
-- **框架**：Vitest（单元测试）、Playwright（E2E 测试）
-- **单元测试配置**：`front/vitest.config.ts`，使用 `happy-dom` 环境
-- **E2E 测试配置**：`front/playwright.config.ts`，针对 Chromium
-- **测试文件命名**：`*.test.ts`，与被测文件同目录
-- **运行全部单元测试**：`pnpm test:unit`
-- **运行 E2E 测试**：`pnpm test:e2e`
-
-### 后端测试
-
-- **框架**：Go 标准 `testing` 包，`testify` 用于部分断言
-- **测试文件命名**：`*_test.go`，与被测文件同目录
-- **偏好 table-driven 测试**
-- **运行全部测试**：`go test ./...`
-- **运行单个包**：`go test ./internal/reader/service -v`
-
-### 集成测试
-
-位于 `tests/workflow/`，使用 Python + pytest，验证后端调度器和完整工作流。这些测试需要后端运行在 `localhost:5000`。
-
-## 提交前检查
-
-### 前端改动
-
-至少执行以下其中一项：
-
-```bash
-pnpm lint                      # ESLint 检查
-pnpm build                     # 生产构建
-pnpm exec nuxi typecheck       # TypeScript 类型检查
-pnpm test:unit                 # 单元测试
-```
-
-### 后端改动
-
-至少执行以下其中一项：
-
-```bash
-golangci-lint run ./...        # 综合静态分析
-go vet ./...                   # Go 官方静态检查
-go build ./...                 # 编译检查
-go test ./internal/reader/service -v   # 针对范围的单元测试
-go test ./...                  # 全量测试
-```
-
-### 文档改动
-
-如果改动涉及功能、接口或结构变化，需同步更新对应文档：
-
-- `docs/reference/architecture/frontend.md`
-- `docs/reference/architecture/backend.md`
-- `docs/reference/architecture/data-flow.md`
-- `docs/reference/content-processing.md`
-- `docs/reference/database/DATABASE_FIELDS.md`
-
-## Branch 规范与 PR 流程
-
-### Branch 规范
-
-本项目没有文档化的分支命名规范。主分支为 `main`。
-
-### PR 流程
-
-本项目没有预配置的 Pull Request 模板（无 `.github/PULL_REQUEST_TEMPLATE.md`）。提交 PR 时请确保：
-
-- 前端改动通过 `pnpm build` 或 `pnpm exec nuxi typecheck`
-- 后端改动通过 `go build ./...` 和对应的单元测试
-- 文档与代码变更保持同步
-- 在 PR 描述中说明改动范围和原因
-
-## 编码注意事项
-
-- 前端源码必须使用 **UTF-8** 编码
-- PowerShell 写文件时要显式保持 UTF-8
-- 如果构建报 Vue/Vite 编码错误，先检查文件编码，不要先怀疑业务逻辑
-- 后端 handler 应返回 `gin.H{"success": bool, "data"|"error"|"message": ...}` 格式
-- 不要添加新的 linter、formatter 或其他工具，除非明确要求（已配置 golangci-lint 和 ESLint）
-
-## 相关文档
-
-- [Getting Started](../getting-started.md) — 环境搭建与首次运行
-- [Configuration](configuration.md) — 环境变量、配置文件、AI 设置
-- [Architecture Overview](architecture/overview.md) — 系统架构、组件关系、数据流
-- [Troubleshooting](../operations/troubleshooting.md) — 常见问题排查
-- [Database Fields](database/DATABASE_FIELDS.md) — 数据库字段详细说明
+其他参考：[架构总览](architecture/overview.md)、[详细设计地图](architecture/map.md)、[业务流程](flow/README.md)、[测试指南](testing.md)。

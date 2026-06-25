@@ -126,7 +126,7 @@ pnpm config set registry https://registry.npmmirror.com
 ## 下一步
 
 - **[配置指南](reference/configuration.md)** — 完整的环境变量列表、配置文件选项和数据库存储的 AI 设置。
-- **[开发指南](reference/development.md)** — 构建命令、测试命令、编码规范和提交检查清单。
+- **[开发指南](reference/development.md)** — 环境搭建、构建与测试命令。（代码规范见 [standard/](reference/standard/README.md)）
 - **[架构概览](reference/architecture/overview.md)** — 系统设计、组件关系、数据流和后台调度器详情。
 =======
 # 快速开始

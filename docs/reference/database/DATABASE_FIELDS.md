@@ -878,7 +878,7 @@ HNSW 索引：`idx_topic_tag_embeddings_embedding USING hnsw (embedding vector_c
 
 - [全局实体关系图](ER_DIAGRAM.md) — 35 张表的 FK 关系图（ASCII + Mermaid）和约束矩阵
 - [数据生命周期](DATA_LIFECYCLE.md) — 6 条数据链路的状态字段流转说明
-- [数据流](../reference/architecture/data-flow.md) — 代码执行流、API 调用链、前端 store 交互
+- [业务流程](../reference/flow/README.md) — 链路概要设计、函数调用链、前后端协作
 - [数据库运维说明](../../operations/database-operations.md) — 数据库运维说明
 - [PostgreSQL 迁移手册](../operations/postgres-migration.md) — PostgreSQL 迁移手册
 - [AGENTS.md](../../AGENTS.md) — 项目开发指南

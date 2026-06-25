@@ -6,8 +6,8 @@ Agent guide for coding assistants working in `Syntopica` (`D:\project\my-robot`)
 - Syntopica: Nuxt 4 frontend + Go backend (Gin/GORM), single-user, no auth.
 - Frontend API: `http://localhost:5000/api`; WebSocket: `ws://localhost:5000/ws`.
 - PostgreSQL + pgvector for persistence; Redis optional for job queues.
-- 和用户沟通使用中文，开发环境 Windows。
-- 使用 openspec 编写任务时，tasks.md 必须遵循 `docs/reference/开发执行规范.md` §11 归档门禁：以「测试 / 文档 / 验证」三节收尾，验证节每条附可执行命令；归档前重跑验证节确认零失败。归档后按 §12 文档流转把 change 移入当前里程碑 `docs/v1.x/changes/`，reference 在里程碑收尾时统一更新。数据库更新规范（迁移索引 vs gorm 自动建表）按 §10 处理。
+- 和用户沟通使用中文，开发环境 Windows, 返回的回答尽量用大白话，接地气，能让用户理解。
+- 使用 openspec 编写任务时， 必须遵循 `docs/reference/开发执行规范.md` 
 
 ## 开发环境 (Development Environment)
 
@@ -37,14 +37,17 @@ cd front && pnpm dev
 ```
 
 ## Reference Docs (authoritative source)
-- **Architecture**: `docs/reference/architecture/`
+- **Code Standards**: `docs/reference/standard/` — 代码规范/项目约束/lint/测试配置的**唯一权威源**（前后端分文件夹）
+- **Business Flow**: `docs/reference/flow/` — 业务链路概要设计（按大功能切，配 mermaid，跨端）
+- **Architecture**: `docs/reference/architecture/` — 架构定位与骨架；`architecture/map.md` 是业务域→流程→代码入口的索引地图
 - **API**: `docs/reference/api/`
 - **Database**: `docs/reference/database/`
-- **Development**: `docs/reference/development.md`
 - **Configuration**: `docs/reference/configuration.md`
 - **Deployment**: `docs/reference/deployment.md`
-- **Testing**: `docs/reference/testing.md`
+- **执行规范**: `docs/reference/开发执行规范.md` — 任务拆解/TDD/门禁/归档纪律
 - Subdirectory guides: `front/AGENTS.md`, `backend-go/AGENTS.md`.
+
+> `development.md` / `testing.md` 的规范内容已迁入 `standard/`，仅保留构建/运行参考。
 
 ## Repo Layout
 - `front/`: Nuxt 4, Vue 3, TypeScript, Pinia, Tailwind CSS v4.
@@ -82,6 +85,16 @@ cd front && pnpm dev
 - Docs-only edits: consistency check unless behavior changed.
 - Keep code changes minimal and scoped. Match existing code style.
 - 完成任务后更新维护 `./docs/reference/` 知识库；openspec change 归档前满足 `开发执行规范.md` §11 归档门禁，归档后按 §12 流转归类到里程碑。
+
+子线程派发参考(pi的subagent技能使用时如何选择供应商及其模型):
+
+- 简单、重复劳动的任务派发使用opencode go的Deepseek V4 Flash
+- 实现后端功能较为复杂时派发使用opencode go的Deepseek V4 Pro
+- 核心逻辑实现、架构级选型、疑难杂症 使用 zai 的 glm5.2
+- 代码审查用 zai 的 glm5.2
+- 审美有要求的前端任务用 zai 的 glm5.2
+- 编译修复错误这种脏活累活派opencode go的Deepseek V4 Flash
+- TDD 让opencode go的Deepseek V4 Pro
 
 ## Browser Automation
 Use `agent-browser`: `open <url>` → `snapshot -i` → `click @eX` / `fill @eX "text"` → re-snapshot.

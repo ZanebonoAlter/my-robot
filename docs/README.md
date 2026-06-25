@@ -46,7 +46,7 @@ Syntopica 全部文档入口。
 ### 开发规范
 | 文档 | 说明 |
 |------|------|
-| [reference/development.md](reference/development.md) | 构建、测试、编码规范 |
+| [reference/development.md](reference/development.md) | 环境搭建、构建命令 |
 | [reference/configuration.md](reference/configuration.md) | 配置项说明 |
 | [reference/deployment.md](reference/deployment.md) | 部署方式 |
 | [reference/testing.md](reference/testing.md) | 测试指南 |
@@ -74,7 +74,8 @@ Syntopica 全部文档入口。
 | [v1.3-narrative-overhaul/](v1.3-narrative-overhaul/) | 叙事大修 | 已完成 |
 | [v1.3.1-board-bug-fix/](v1.3.1-board-bug-fix/) | 版块 bug 修复 | 已完成 |
 | [v1.3.2-board-section/](v1.3.2-board-section/) | 版块分区 | 已完成 |
-| [v1.3.3-good-taste/](v1.3.3-good-taste/) | 架构深化与一致性 | 进行中 |
+| [v1.3.3-good-taste/](v1.3.3-good-taste/) | 架构深化与一致性 | 已完成 |
+| [v1.3.4-easy-use/](v1.3.4-easy-use/) | 使用简易化 | 进行中 |
 
 每个里程碑根目录含 `SUMMARY.md`（变更清单 + 完成标准），`changes/` 存放从 openspec archive 归类来的 change。完整目录约定见 `reference/开发执行规范.md` §12 文档流转。
 

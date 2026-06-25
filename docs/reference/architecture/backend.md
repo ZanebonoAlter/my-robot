@@ -453,67 +453,13 @@ AI 管理则已经扩展到 provider 和 route 级别，而不是只有"摘要�
 
 ## 具体数据链路示例
 
-下面这几条链路是当前代码里真实存在、而且最值得在阅读代码时重点跟的主线。
+> 逐条业务链路的详细设计已迁至 [`flow/`](../flow/README.md)。本节给追代码时的索引：
 
-### 用例 1：自动刷新 feed -> 新文章入库
-
-场景：用户给某个 feed 配了刷新间隔，或者手动触发 `/api/schedulers/auto_refresh/trigger`。
-
-链路：
-
-1. `admin/scheduler/job_auto_refresh.go` 扫描 `refresh_interval > 0` 的 feed
-2. 到点 feed 调用 `reader/service.FeedService.RefreshFeed`
-3. `RefreshFeed` 通过 RSS parser 拉取源站内容并更新 feed 元信息
-4. 新 entry 去重后写入 `articles`
-5. `buildArticleFromEntry` 按 feed 配置初始化文章状态：
-   - 默认 `summary_status = complete`
-   - 如果 feed 开启 `firecrawl_enabled`，则文章先标记 `firecrawl_status = pending`
-   - 如果同时开启 `article_summary_enabled`，则文章再标记 `summary_status = incomplete`
-6. `cleanupOldArticles` 按 `max_articles` 清理旧文章（收藏文章跳过）
-
-这个链路的关键点是：feed 刷新不只是在“加文章”，它还会把后续 Firecrawl / 内容补全链路需要的状态位一起种进去。
-
-### 用例 2：Firecrawl 抓正文 -> 内容补全生成文章摘要
-
-场景：某个 feed 开启了 Firecrawl，前面的刷新流程已经把文章打成 `firecrawl_status = pending`。
-
-链路：
-
-1. `admin/scheduler/job_firecrawl.go` 轮询待抓取文章
-2. Firecrawl 成功后，文章被更新为：
-   - `firecrawl_status = completed`
-   - `firecrawl_content` 写入抓取正文
-   - `summary_status = incomplete`
-3. `admin/scheduler/job_content_completion.go` 定时查询：
-   - `articles.firecrawl_status = completed`
-   - `articles.summary_status = incomplete`
-   - `feeds.article_summary_enabled = true`
-4. `reader/service.ContentCompletionService.CompleteArticle` 基于 Firecrawl 正文生成 `ai_content_summary`
-5. 文章最终更新为完成态，并记录失败次数、错误信息、最近处理文章等状态
-6. 前端可通过 `/api/content-completion/overview` 和 `/api/content-completion/articles/:article_id/status` 看到结果
-
-这条链路说明：运行时对外现在用 `content_completion` 作为规范 scheduler 名字，但仍兼容旧别名 `ai_summary`；它对应的是“文章级内容补全”，不是 `ai_summaries` 表里的 feed 聚合摘要。
-
-### Article 打标签时机
-
-文章标签现在按以下规则运行：
-
-1. 普通 refresh 新文章：入库后立即打标签（feed 未开启 Firecrawl 时）
-2. 若 feed 开启了 `Firecrawl`：refresh 阶段先不打标签
-	- Firecrawl 抓取完成后，写入 `tag_jobs` 队列，由 `TagQueue` worker 异步执行重新打标签
-	- 若 feed 同时开启了 `自动补全`（`article_summary_enabled`），则由 ContentCompletion scheduler 在生成 `AIContentSummary` 后同样 enqueue `tag_jobs`
-3. 前端文章详情支持手动打标签 / 重新打标签，接口为 `POST /api/articles/:article_id/tags`
-	- 手动接口现在只 enqueue 队列并返回 `job_id`
-	- `TagQueue` 完成后通过 WebSocket 广播 `tag_completed`
-	- LLM 提示词明确要求最多返回 `8` 个标签，并按优先级从高到低排序；后端在写入 `article_topic_tags` 前也会只保留前 `8` 个，作为兜底
-4. `TagQueue.Start()` 首次启动失败时不会阻塞应用；它会后台按 30 秒间隔重试最多 10 次
-
-当前正文提取优先级为：
-
-- `AIContentSummary`
-- `FirecrawlContent`
-- `Content`
-- `Description`
+| 链路 | flow 文档 | 代码入口 |
+|------|----------|----------|
+| 自动刷新 feed → 新文章入库（状态位预埋） | [`flow/scheduler.md`](../flow/scheduler.md) | `admin/scheduler/job_auto_refresh.go` → `reader/service.FeedService.RefreshFeed` → `buildArticleFromEntry` |
+| Firecrawl 抓正文 → 内容补全生成摘要 | [`flow/content-enrichment.md`](../flow/content-enrichment.md) | `job_firecrawl.go` → `job_content_completion.go` → `ContentCompletionService.CompleteArticle` |
+| Article 打标签时机 / 正文提取优先级 | [`flow/reading.md`](../flow/reading.md) | `tag_jobs` 队列 → `TagQueue` worker；手动 `POST /api/articles/:id/tags` |
 
 ## 当前边界上的已知问题
 

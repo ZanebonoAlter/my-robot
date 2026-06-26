@@ -71,6 +71,7 @@ cd front && pnpm dev
 - Do not add linters, formatters, or tooling unless asked.
 - Do not assume Python backend; the product backend is Go.
 - Ignore unrelated dirty-worktree changes. Verify smallest relevant command after edits.
+- git提交使用 zanebonoalter <380207345@qq.com>
 - **测试只跑本次修改影响的包**，不要跑全量 `go test ./...`。例如改了 `daily_report` 和 `ws`，就只跑 `go test ./internal/domain/daily_report ./internal/platform/ws`。
 - **前端 pnpm 编译类命令（typecheck / build）必须通过 Windows cmd 执行**，WSL 环境缺少 native binding（如 `@oxc-parser/binding-linux-x64-gnu`）会失败。lint 可在 WSL 跑。示例：
   ```bash

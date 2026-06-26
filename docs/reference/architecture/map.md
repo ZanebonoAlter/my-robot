@@ -1,7 +1,9 @@
 # 详细设计地图（Map）
 
 > **索引层**：业务域 → 流程文档（flow/）→ 架构骨架（architecture/）→ 代码入口。
-> 这是从"我想了解某个业务怎么跑"出发的导航总图。架构骨架文档（overview/backend/frontend/runtime/tracing）描述定位与骨架；flow/ 描述链路怎么跑；本图把它们和代码入口连起来。
+> 这是从“我想了解某个业务怎么跑”出发的导航总图。架构骨架文档（overview/backend/frontend/runtime/tracing）描述定位与骨架；flow/ 描述链路怎么跑；本图把它们和代码入口连起来。
+>
+> **另见**：[coupling-map.md](coupling-map.md) — 跨功能传导耦合登记表（“改 A 会影响 B”），配合《开发执行规范》§7 架构体检使用。
 
 ## 三层关系
 

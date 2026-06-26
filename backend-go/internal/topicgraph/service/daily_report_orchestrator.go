@@ -239,6 +239,10 @@ func GenerateDailyReport(ctx context.Context, boardID uint, date time.Time) (*re
 		}
 	}
 
+	// Step 6.5: compute thread↔section title fit distances (System 3 observability).
+	// Non-fatal: threads without fit signal render as normal on the frontend.
+	computeThreadFitDistances(ctx, sections, threadBatches, boardID, airouter.NewRouter().Embed)
+
 	// Step 7: Merge similar same-day sections (two-stage: embedding + LLM)
 	sections, threadBatches, mergeErr := MergeSimilarSections(ctx, sections, threadBatches, tags)
 	if mergeErr != nil {

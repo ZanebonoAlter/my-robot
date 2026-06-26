@@ -282,7 +282,7 @@ func collectBoardTags(boardID uint, date time.Time) ([]repository.TagInput, [][]
 		Where("NOT COALESCE(topic_tag_board_labels.direction_mismatch, false)").
 		Where("topic_tags.status = ? AND topic_tags.category = ?", "active", models.TagCategoryEvent).
 		Where("articles.pub_date >= ? AND articles.pub_date < ?", startOfDay, endOfDay).
-		Group("topic_tags.id, topic_tags.label, topic_tags.category, topic_tags.description, topic_tags.source, topic_tag_board_labels.match_reason, topic_tag_board_labels.score").
+		Group("topic_tags.id, topic_tags.label, topic_tags.category, topic_tags.description, topic_tags.source, topic_tag_board_labels.match_reason, topic_tag_board_labels.score, topic_tag_board_labels.downgraded").
 		Order("article_count DESC, topic_tags.id ASC").
 		Scan(&rows).Error
 	if err != nil {

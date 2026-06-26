@@ -89,6 +89,19 @@ section := repository.DailyReportSection{
 
 > 🛑 **切勿**为「优化」删掉 `ReimportTestDB` 末尾的 `openGorm` + `Close`——那是修这个坑的核心，删掉会复现 `cache lookup failed`。回归测试 `TestReimportPreservesVectorInserts` 守住这行。
 
+### ⚠️ 改了发往真实 DB 的 SQL（GROUP BY / 聚合 / 复杂 JOIN / 手写 raw SQL），必须有 testcontainer PG 用例真跑该路径
+
+SQLite（内存单测）对 GROUP BY 语义、类型、约束都宽松；PostgreSQL（生产）严格。**两者语义不一致**——纯逻辑/SQLite 单测覆盖不了真实 SQL 的运行时错误。
+
+**症状**：生产全板失败、报 `SQLSTATE 42803 column "..." must appear in the GROUP BY clause or be used in an aggregate function`（或其它 SQL 语义/类型错误），而本地 SQLite 单测全绿。
+
+**根因（事故）**：`quality-scoring-observability` change 在 `collectBoardTags` 的 SELECT 加了 `topic_tag_board_labels.downgraded`，却漏在 GROUP BY 同步加该列。SQLite 不报错（允许 SELECT 非聚合列不进 GROUP BY），PG 直接拒掉 → 日报生成每个 board 都炸、界面全红。当时 testcontainer 集成测试没真跑到这条 SQL，漏网到生产。
+
+**硬约束**：
+- 凡改动涉及 ① SELECT 新列 + GROUP BY，② 复杂 JOIN/聚合，③ 手写 raw SQL——**门禁必须包含一条真正调用该查询的 testcontainer PG 集成测试**（seed 多行数据触发 GROUP BY/聚合），SQLite 单测**不算**覆盖。
+- 判定法：改的 SQL 换成 PG 跑会不会和 SQLite 表现不同？会 → 必须补 PG 集成测试。
+- 回归守卫样本：`TestCollectBoardTags_PGHonorsDowngradedColumn`（`internal/topicgraph/service/collect_board_tags_test.go`）。
+
 ## 运行
 
 ```bash

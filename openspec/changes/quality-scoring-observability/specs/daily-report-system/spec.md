@@ -105,4 +105,27 @@
 
 #### Scenario: 历史 section 徽章仍展示
 - **WHEN** 历史 section 的 quality_breakdown 为 null 但 best_tier=1
-- **THEN** 正文 SHALL 正常展示 best_tier=1 的蓝色实心徽章，探究区显示"无质量明细"
+- **THEN** 正文 SHALL 正常展示 best_tier=1 的蓝色实心徽章，探究区显示“无质量明细”
+
+### Requirement: 持久话题锚定的双重确认容忍聚类漂移
+
+日报 section 锚定到持久话题（persistent topic）的双重确认机制 SHALL 容忍 LLM 聚类的轻微漂移：当 section 的 embedding 在某 active topic 的匹配阈值（`MatchThreshold`）内，且 LLM 的 `matched_topic_id` 指向**阈值内任一** topic（不要求是 embedding 最近邻）时，SHALL 判定为锚定成功（`anchor_hit`），锚定到 LLM 指向的那个 topic。
+
+先前要求 `matched_topic_id` 必须等于 embedding 单一最近邻的严格规则 SHALL 被放宽——该规则使任何 LLM 聚类变化（如质量排序截断改动导致进聚类的 tag 集合变化）都会令 `matched_topic_id` 落到第 2 近的 topic，从而大面积打断话题血缘、令 section 误判为全新突发话题。
+
+两道闸门仍同时生效：embedding 距离 ≤ 阈值 AND LLM 指向同一 topic。此放宽 **不是** 纯 embedding 匹配，也 **不是** 纯 LLM 匹配。
+
+#### Scenario: LLM 选了阈值内第 2 近的 topic 仍锚定
+- **GIVEN** 两个 active topic：T1（embedding 最近）、T2（embedding 第 2 近，仍在 MatchThreshold 内）
+- **WHEN** 某 section 的 LLM matched_topic_id 指向 T2（因聚类漂移）
+- **THEN** 该 section SHALL 锚定到 T2（anchor_hit），使用 T2 的 embedding 距离，而非开新 candidate
+
+#### Scenario: LLM 选的 topic 超出阈值仍开新 candidate
+- **GIVEN** active topic T1 在阈值内、T2 在阈值外
+- **WHEN** section 的 LLM matched_topic_id 指向 T2
+- **THEN** embedding 闸门拒绝 T2，该 section SHALL 开新 candidate（auto_new），不锚定
+
+#### Scenario: LLM 选了最近邻仍锚定（不回归）
+- **GIVEN** active topic T1 为 embedding 最近邻且在阈值内
+- **WHEN** section 的 LLM matched_topic_id 指向 T1
+- **THEN** 该 section SHALL 锚定到 T1（anchor_hit）

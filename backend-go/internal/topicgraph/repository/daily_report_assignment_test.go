@@ -44,6 +44,56 @@ func TestPlanTopicAssignments_AnchorHit(t *testing.T) {
 	assert.Nil(t, dec[0].newCandidate)
 }
 
+// TestPlanTopicAssignments_AnchorHit_MatchedWithinThresholdNotNearest is the
+// regression guard for the 06-25 "all emerging" incident. The section is
+// nearest to topic 12, but LLM clustering drift made the LLM pick topic 13
+// (2nd-nearest, still within the 0.30 embedding threshold). Pre-fix the dual
+// confirmation demanded matched_id == nearest → it failed (13 != 12) and
+// opened a new candidate, severing the topic lineage. Post-fix the LLM gate
+// accepts any topic within the embedding threshold, so it anchors to 13 at
+// its actual distance. Both gates still apply (embedding AND LLM pointing at
+// the same topic) — this is NOT pure-embedding matching.
+func TestPlanTopicAssignments_AnchorHit_MatchedWithinThresholdNotNearest(t *testing.T) {
+	mit := uint(13)
+	cfg := PersistentTopicConfig{MatchThreshold: 0.30, UpgradeThreshold: 3, DecayWindow: 30}
+	topics := []BoardPersistentTopic{
+		{ID: 12, Embedding: vecStr(1, 0, 0), Status: TopicStatusActive},      // nearest (~0.0001)
+		{ID: 13, Embedding: vecStr(0.9, 0.43, 0), Status: TopicStatusActive}, // 2nd-nearest (~0.093, within threshold)
+	}
+	sections := []DailyReportSection{{
+		ClusterLabel:   "AI 编程竞争",
+		Embedding:      vecStr(1, 0.01, 0),
+		MatchedTopicID: &mit, // LLM drifted to 2nd-nearest
+	}}
+	dec := planTopicAssignments(sections, topics, cfg, time.Now())
+	require.Len(t, dec, 1)
+	assert.Equal(t, TopicConfAnchorHit, dec[0].confidence, "must anchor, not open new candidate")
+	assert.Equal(t, uint(13), dec[0].topicID, "anchor to the LLM-chosen topic, not the nearest")
+	assert.InDelta(t, 0.093, dec[0].distance, 0.01, "distance is the anchored topic's actual distance")
+}
+
+// TestPlanTopicAssignments_AutoNew_MatchedBeyondThreshold verifies the
+// embedding gate still rejects a topic the LLM named when that topic is far
+// (> threshold). The relaxation only accepts topics within the threshold; it
+// is NOT pure-LLM matching.
+func TestPlanTopicAssignments_AutoNew_MatchedBeyondThreshold(t *testing.T) {
+	mit := uint(99)
+	cfg := PersistentTopicConfig{MatchThreshold: 0.30, UpgradeThreshold: 3, DecayWindow: 30}
+	topics := []BoardPersistentTopic{
+		{ID: 12, Embedding: vecStr(1, 0, 0), Status: TopicStatusActive},     // near but LLM didn't pick it
+		{ID: 99, Embedding: vecStr(0.2, 0.98, 0), Status: TopicStatusActive}, // LLM picked, but far (~0.79)
+	}
+	sections := []DailyReportSection{{
+		ClusterLabel:   "量子计算商用",
+		Embedding:      vecStr(1, 0.01, 0),
+		MatchedTopicID: &mit,
+	}}
+	dec := planTopicAssignments(sections, topics, cfg, time.Now())
+	require.Len(t, dec, 1)
+	assert.Equal(t, TopicConfAutoNew, dec[0].confidence)
+	assert.NotNil(t, dec[0].newCandidate)
+}
+
 func TestPlanTopicAssignments_AutoNew_DualConfirmationFail(t *testing.T) {
 	// Section is embedding-close to topic 12 (dist < threshold), but the LLM
 	// did NOT mark it (MatchedTopicID points elsewhere). Dual confirmation fails

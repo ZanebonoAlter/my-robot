@@ -134,12 +134,30 @@ MergeSimilarSections (merge.go:73)  按 embedding 距离合并
 - **match-score-visualization**（TagsPage surface 的 tag 级可视化）：已实现得很全（chip 色、分数、最强匹配、MatchDetailPanel 降级/方向校验）。本 change 不改其 spec，只把日报 magazine surface 的可观测补上，工具函数复用。两者是"同一套匹配质量语义，两个展示面"。
 - **topic-watchlist-observability**（兄弟 change）：归属可观测只动 topicgraph 域且数据已部分持久化；本 change 同域但数据血缘来自 tagmanagement 且需明细快照，关注点不同，已分离。两者共享"正文保持沉浸"原则，本 change 正文徽章是唯一破例点。
 
+### D6. 放宽持久话题锚定的双重确认（治 task 2.1 的二阶副作用）
+
+**选**：`planTopicAssignments`（`daily_report_assignment.go`）的 LLM 闸由“`matched_topic_id` 必须 == embedding 单一最近邻”放宽为“`matched_topic_id` 指向 **阈值内任一** topic”。锚定到 LLM 指向的那个 topic，使用其真实 embedding 距离。阈值复用 `MatchThreshold`（默认 0.30），无新参数。
+
+**理由（事故）**：task 2.1 修了 `filterTagsByQuality` 截断排序的硬编码（`MatchTier(reason, false)` → `(reason, Downgraded)`），这本身是正确的（D3）。但它有一个 design Risks 未预料的二阶副作用：截断后进 LLM 聚类的 tag 集合变化 → LLM 聚类结果漂移 → `matched_topic_id` 落到 embedding 第 2 近的 topic。旧双重确认要求 `matched_id == 最近邻`，这种漂移即判定失败 → section 误开新 candidate → 持久话题血缘大面积断裂 → 前端“全是突发话题”。
+
+实测数据（06-25 重新生成）：section 到最近 active topic 的 embedding 距离分布与历史一致（p50≈0.27，阈值内 38/53），**embedding 一侧完全健康**；崩的纯粹是 LLM 一致性闸门（`anchor_hit` 从历史 ~12/板 跌到 0~2/板）。证明病根在“对聚类漂移过度敏感”，不在 embedding 或截断改动本身。
+
+**两道闸门保留**：embedding 距离 ≤ 阈值 AND LLM 指向同一 topic。放宽的只是“最近”→“阈值内”。这 **不是** 纯 embedding 匹配（仍要 LLM 认），也 **不是** 纯 LLM 匹配（仍要 embedding 阈值内）。
+
+**备选（否决）**：
+- 回滚 task 2.1（改回 `MatchTier(reason, false)`）：放弃 D3 的硬编码修复，且没解决双重确认脆弱性，下次聚类一变还崩。
+- 纯 embedding 匹配（去掉 LLM 闸）：误匹配风险高，双重确认设计意图全丢。
+- 开新 change 修：被否决——病根由 task 2.1 触发，合并进本 change 作为衍生修复更内聚（用户决策）。
+
+**数据修复**：06-25 已受影响的 section 按本逻辑等价规则（embedding ≤0.30 重指最近 active）一次性救回 36 行，清理 48 个孤儿 candidate，保留 14 个合法新 candidate。
+
 ## Risks / Trade-offs
 
 - **[quality_breakdown 体积]** → 一 section 最多 30 tag，每条约 80-120 字节，单 section 上限约 3.5KB。缓解：JSONB 原生压缩；日报 section 数通常个位数到十几，整体可忽略。
 - **[历史 section 无明细]** → `quality_breakdown` 历史 NULL，前端降级为"无质量明细"。与兄弟 change 的 matched_topic_id NULL 降级模式一致。
 - **[tier 徽章破沉浸的边界]** → 即便无数字，色点仍是对正文的视觉注入。缓解：形态克制（仅实心/空心 + 四色）；如验收发现打扰阅读，可在 design 后期加开关默认关闭。**这是需要人工视觉验收的点**（tasks 含 cmd 浏览器验收）。
 - **[MatchTier 改硬编码的副作用]** → 截断排序改用真实 downgraded 后，降级 max_sim tag 从 tier=2 落到 tier=3，可能改变 >30 tag 时的截断边界。缓解：降级 tag 本就该排后，这是修正而非回归；tasks 含对比截断前后结果的测试。
+- **[⚠️ 已发生·截断改动的二阶副作用：打散持久话题血缘]** → 截断后进 LLM 聚类的 tag 集合变化，令 LLM 的 `matched_topic_id` 漂移到 embedding 第 2 近的 topic；旧双重确认（`matched_id == 最近邻`）大面积失败，section 误开新 candidate，前端“全是突发话题”。**已治本**（D6 放宽双重确认为“阈值内任一”）+ 一次性数据修复。教训：截断/聚类输入的任何改动都会经“双重确认”放大成话题血缘断裂，design 评估 scope 时须把这条传导链纳入。
 - **[复用工具函数的迁移风险]** → `matchReasonColor`/`matchInfoLabel` 上移共享 utils，原 TagsPage 调用点需同步改 import。缓解：codegraph impact 确认调用面；纯位置搬迁不改逻辑。
 
 ---

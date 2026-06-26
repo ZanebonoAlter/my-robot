@@ -69,3 +69,12 @@
 - [x] 10.2 前端门禁：`cd front && pnpm lint`（WSL）+ `cmd.exe /C "cd /d D:\\project\\Syntopica\\front && pnpm exec nuxi typecheck"` + `pnpm test:unit` + `pnpm build`（typecheck/build 经 Windows cmd）
 - [ ] 10.3 `openspec validate quality-scoring-observability` 通过
 - [ ] 10.4 issue `docs/issues/01-quality-sort-blackbox.md` 状态更新（归档时标记 resolved）
+
+## 11. 持久话题锚定双重确认放宽（衍生修复 · 治 task 2.1 的二阶副作用）
+
+> task 2.1 截断排序改用真实 `downgraded` 后，进 LLM 聚类的 tag 集合变化，LLM 的 `matched_topic_id` 漂移到 embedding 第 2 近的 topic；旧双重确认要求 `matched_id == 最近邻`，大面积失败 → section 误开新 candidate → 前端“全是突发话题”。本节放宽双重确认（详见 design D6）。
+
+- [x] 11.1 `daily_report_assignment.go`：新增 `findTopicsWithinThreshold`（返回 embedding 距离 ≤ MatchThreshold 的全部 topic，按距离升序）；`planTopicAssignments` 的 LLM 闸由“== 最近邻”放宽为“在阈值内任一”，锚定到 LLM 指向的 topic、用其真实距离。验收：两道闸门仍在（embedding + LLM 同指）
+- [x] 11.2 纯单测（内存）：① LLM 选阈值内第 2 近 → anchor_hit；② LLM 选超阈值 topic → auto_new（embedding 闸仍在）；③ LLM 选最近邻 → anchor_hit（不回归）；④ 无 matched_id → auto_new
+- [x] 11.3 数据修复（一次性）：06-25 受影响 section 按 embedding ≤0.30 重指到同 board 最近 active topic（36 行）、清理 48 个孤儿 candidate；保留 14 个合法新 candidate
+- [ ] 11.4 端到端验证：重启后端，重新生成一个 board 的 06-25，确认 anchor_hit 不再因聚类漂移大面积崩溃（可选，由用户主导以免破坏当前正常显示）

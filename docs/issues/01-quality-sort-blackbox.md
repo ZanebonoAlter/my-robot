@@ -1,6 +1,7 @@
 # Issue 01: 日报质量排序与匹配黑盒 — MatchReason/Score/tier 链路不可见
 
-> **Status:** needs-triage
+> **Status:** resolved
+> **Resolved by:** openspec change `quality-scoring-observability`（2026-06-25）— quality_breakdown 快照下沉 + MatchTier 语义规格化 + 探测区/徽章暴露
 > **Priority:** medium
 > **Component:** backend-go/internal/tagmanagement（tag→board 匹配）, backend-go/internal/topicgraph/service（聚类/聚合/排序）, front/app/features/tags（展示）
 

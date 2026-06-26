@@ -3,6 +3,7 @@ package repository
 import (
 	"fmt"
 	"math"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -92,6 +93,40 @@ func findNearestTopic(vec []float64, topics []parsedTopic) (id uint, dist float6
 	return bestID, best, found
 }
 
+// nearbyTopic pairs a parsed topic with its distance to a query vector.
+type nearbyTopic struct {
+	parsedTopic
+	dist float64
+}
+
+// findTopicsWithinThreshold returns every topic whose cosine embedding
+// distance to vec is <= threshold, sorted nearest-first. Empty when none
+// qualify (the section is embedding-far from every active topic).
+func findTopicsWithinThreshold(vec []float64, topics []parsedTopic, threshold float64) []nearbyTopic {
+	var out []nearbyTopic
+	for _, t := range topics {
+		if len(t.Embedding) == 0 {
+			continue
+		}
+		d := cosineDistance(vec, t.Embedding)
+		if d <= threshold {
+			out = append(out, nearbyTopic{parsedTopic: t, dist: d})
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].dist < out[j].dist })
+	return out
+}
+
+// findTopicInList returns the topic with the given id from a nearby list.
+func findTopicInList(list []nearbyTopic, id uint) (nearbyTopic, bool) {
+	for _, t := range list {
+		if t.ID == id {
+			return t, true
+		}
+	}
+	return nearbyTopic{}, false
+}
+
 // topicAssignmentDecision is the per-section outcome of the dual-confirmation
 // assignment. topicID is set for anchor_hit; newCandidate is set for auto_new.
 type topicAssignmentDecision struct {
@@ -128,15 +163,24 @@ func planTopicAssignments(sections []DailyReportSection, existingTopics []BoardP
 			})
 			continue
 		}
-		nearestID, nearestDist, found := findNearestTopic(vec, parsed)
-		llmAgrees := sec.MatchedTopicID != nil && *sec.MatchedTopicID == nearestID
-		if found && nearestDist <= cfg.MatchThreshold && llmAgrees {
-			decisions = append(decisions, topicAssignmentDecision{
-				sectionIdx: i, topicID: nearestID, distance: nearestDist,
-				confidence: TopicConfAnchorHit,
-			})
-			continue
+		// Dual confirmation: the LLM's matched_topic_id must point at a topic
+		// whose embedding is within the match threshold. Pre-relaxation this
+		// required matched_id == single nearest; that was too brittle — any
+		// drift in LLM clustering (e.g. the quality-scoring truncation change)
+		// made the LLM pick the 2nd-nearest and severed anchoring en masse.
+		// Accepting any within-threshold topic keeps BOTH gates (embedding AND
+		// the LLM naming the same topic) while tolerating minor drift.
+		within := findTopicsWithinThreshold(vec, parsed, cfg.MatchThreshold)
+		if sec.MatchedTopicID != nil {
+			if pt, ok := findTopicInList(within, *sec.MatchedTopicID); ok {
+				decisions = append(decisions, topicAssignmentDecision{
+					sectionIdx: i, topicID: pt.ID, distance: pt.dist,
+					confidence: TopicConfAnchorHit,
+				})
+				continue
+			}
 		}
+		_, nearestDist, _ := findNearestTopic(vec, parsed)
 		candidates = append(candidates, candidateTopicSpec{
 			label:     sec.ClusterLabel,
 			embedding: sec.Embedding,

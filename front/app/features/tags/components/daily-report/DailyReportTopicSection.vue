@@ -171,6 +171,9 @@ watch([groups, () => props.reportDate], ([nextGroups, reportDate]) => {
                 <h4 v-if="group.sections.length > 1" class="drm-section-card__title">{{ section.cluster_label }}</h4>
                 <SectionQualityExplore
                   :breakdown="section.quality_breakdown"
+                  :topic-label="section.persistent_topic?.label || section.cluster_label"
+                  :topic-distance="section.topic_match_distance"
+                  :topic-confidence="section.topic_match_confidence"
                   class="drm-section-card__explore"
                 />
               </div>

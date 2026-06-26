@@ -138,7 +138,14 @@ type DailyReportThread struct {
 	Confidence        float64   `gorm:"default:0" json:"confidence"`
 	RelatedArticleIDs JSON      `gorm:"type:jsonb" json:"related_article_ids,omitempty"`
 	Embedding         string    `gorm:"type:vector" json:"-"`
-	FitDistance       float64   `gorm:"default:0" json:"fit_distance,omitempty"`
+	// FitDistance is a pointer so that nil ("no signal" — embed failure or
+	// owning section without an embedding) is distinguishable from a real 0.0
+	// ("perfect fit" — thread title embedding identical to its section's).
+	// Under float64+omitempty both serialized to an absent `fit_distance`
+	// field, conflating the best possible fit with no signal. nil is omitted by
+	// omitempty; a non-nil 0.0 is serialized as `"fit_distance":0`. No DB
+	// default so historical rows stay NULL per spec.
+	FitDistance       *float64  `json:"fit_distance,omitempty"`
 	CreatedAt         time.Time `json:"created_at"`
 }
 

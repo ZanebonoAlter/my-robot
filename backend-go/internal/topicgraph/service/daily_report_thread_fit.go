@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"strings"
 
 	"syntopica-backend/internal/platform/airouter"
 	"syntopica-backend/internal/platform/logging"
@@ -41,7 +42,7 @@ func computeThreadFitDistances(
 		}
 		for k := range threadBatches[i] {
 			title := threadBatches[i][k].Title
-			if len(title) == 0 {
+			if strings.TrimSpace(title) == "" {
 				continue
 			}
 			texts = append(texts, title)
@@ -80,6 +81,7 @@ func computeThreadFitDistances(
 			continue
 		}
 		threadBatches[l.sec][l.th].Embedding = threadEmb
-		threadBatches[l.sec][l.th].FitDistance = dist
+		d := dist
+		threadBatches[l.sec][l.th].FitDistance = &d
 	}
 }

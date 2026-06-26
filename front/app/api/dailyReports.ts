@@ -15,6 +15,10 @@ export interface DailyReportThread {
   summary: string
   tag_ids: number[]
   confidence: number
+  /** Thread 标题 ↔ 所属 section 标题的余弦贴合距离（observability System 3）。
+   *  nil = 无信号；有值时为 0.0~2.0 的距离，越小越贴合（0.0 = 完美贴合）。
+   *  embedding 字段绝不在此声明（后端 json:"-" 不外泄到前端）。 */
+  fit_distance?: number
   related_article_ids: number[]
   created_at: string
 }

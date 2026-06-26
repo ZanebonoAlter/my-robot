@@ -159,6 +159,7 @@ MergeSimilarSections (merge.go:73)  按 embedding 距离合并
 - **[MatchTier 改硬编码的副作用]** → 截断排序改用真实 downgraded 后，降级 max_sim tag 从 tier=2 落到 tier=3，可能改变 >30 tag 时的截断边界。缓解：降级 tag 本就该排后，这是修正而非回归；tasks 含对比截断前后结果的测试。
 - **[⚠️ 已发生·截断改动的二阶副作用：打散持久话题血缘]** → 截断后进 LLM 聚类的 tag 集合变化，令 LLM 的 `matched_topic_id` 漂移到 embedding 第 2 近的 topic；旧双重确认（`matched_id == 最近邻`）大面积失败，section 误开新 candidate，前端“全是突发话题”。**已治本**（D6 放宽双重确认为“阈值内任一”）+ 一次性数据修复。教训：截断/聚类输入的任何改动都会经“双重确认”放大成话题血缘断裂，design 评估 scope 时须把这条传导链纳入。
 - **[复用工具函数的迁移风险]** → `matchReasonColor`/`matchInfoLabel` 上移共享 utils，原 TagsPage 调用点需同步改 import。缓解：codegraph impact 确认调用面；纯位置搬迁不改逻辑。
+- **[⚠️ 已知未治本缺陷·聚类不看叙事方向致异类 tag 锚定到错误持久话题]** → 本 change 不动匹配/聚类算法（scope 边界），但调研中发现一个真实案例（2026-06-26 board 1974）：事件 tag 30582「伊朗否认将用解冻资产购买美国农产品」（美伊经贸叙事）被聚类 LLM 靠字面「伊朗」塞进「以黎冲突」组，并被锚定到持久话题「以黎冲突升级」(topic 2)，而其真实叙事归属是「资产解冻/美伊经贸」。病根是 `planTopicAssignments` 的双重确认作用于**组级聚合**（`section.embedding` → topic）：2/3 真以黎成员的 embedding 主导组向量，把异类 tag 稀释为不可见（section→topic2 = 0.1344 远低于阈值，`anchor_hit` 放行）；单 tag 级校验缺失（30582→topic2 = 0.3340 实际超阈值 0.30，但无人校验）。**本 change 对本案唯一直接生效的改善**是：`quality_breakdown` 让用户在探究区看见色差（30582 = weighted 0.73 灰，同组 30444/30918 = direct_hit 1.0 绿），「为什么混进来」由黑盒变透明。**治本（tag 级叙事方向校验，复用 `MatchThreshold` 零新参数，只校验 tag 与本组锚定 topic 一致性、不做全局重指派）**记录于 `docs/issues/embedding-content-mismatch.md`「聚类分组与持久话题锚定」章节，作为后续 change 的推荐方向，**不在本 change 实现**。
 
 ---
 

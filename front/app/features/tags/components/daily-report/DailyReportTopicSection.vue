@@ -3,7 +3,9 @@ import { computed, ref, watch } from 'vue'
 import { Icon } from '@iconify/vue'
 import DailyReportMiniLifeline from './DailyReportMiniLifeline.vue'
 import SectionTierBadge from './SectionTierBadge.vue'
+import SectionAnchorBadge from './SectionAnchorBadge.vue'
 import SectionQualityExplore from './SectionQualityExplore.vue'
+import { topicAnchorTier } from '~/utils/topicAnchor'
 import {
   groupSectionsByTopic,
   type QualityZone,
@@ -162,7 +164,10 @@ watch([groups, () => props.reportDate], ([nextGroups, reportDate]) => {
           <div class="drm-topic__sections">
             <article v-for="section in group.sections" :key="section.id" class="drm-section-card">
               <div class="drm-section-card__head">
-                <SectionTierBadge :best-tier="section.best_tier" />
+                <span class="drm-section-card__badges">
+                  <SectionTierBadge :best-tier="section.best_tier" />
+                  <SectionAnchorBadge :tier="topicAnchorTier(section.topic_match_distance, section.topic_match_confidence)" />
+                </span>
                 <h4 v-if="group.sections.length > 1" class="drm-section-card__title">{{ section.cluster_label }}</h4>
                 <SectionQualityExplore
                   :breakdown="section.quality_breakdown"
@@ -466,6 +471,13 @@ watch([groups, () => props.reportDate], ([nextGroups, reportDate]) => {
   gap: 0.4rem;
   min-height: 1.25rem;
   margin-bottom: 0.35rem;
+}
+
+.drm-section-card__badges {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  flex-shrink: 0;
 }
 
 /* Quality probe panel — hidden by default, revealed on hover/focus of the

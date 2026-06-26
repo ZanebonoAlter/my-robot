@@ -36,6 +36,31 @@ pnpm test:unit -- app/utils/articleContentSource.test.ts  # 单文件
 pnpm test:unit -- app/utils/articleContentSource.test.ts -t "prefers firecrawl"  # 按名称
 ```
 
+### 跨平台运行（WSL 必须切 Windows cmd）
+
+> 与 `typecheck` / `build` 同源问题，本节为权威定义；`AGENTS.md` 只留红线速查。
+
+**WSL bash 下 `pnpm test:unit` 跑不起来**：vitest 经 Vite → rollup，依赖原生 binding（`@rollup/rollup-linux-x64-gnu`），但本仓库 `node_modules` 是 Windows 侧 `pnpm install` 的，只装了 win32 平台包，Linux 平台的 optional 包被裁掉。报错形如：`Cannot find module '@rollup/rollup-linux-x64-gnu'`。
+
+**正确做法**：vitest 一律走 Windows cmd（lint 可继续在 WSL 跑）：
+
+```bash
+# test:unit — 必须用 cmd（同 typecheck / build）
+cmd.exe /C "cd /d D:\project\Syntopica\front && pnpm test:unit 2>&1"
+cmd.exe /C "cd /d D:\project\Syntopica\front && pnpm test:unit topicAnchor 2>&1"  # 按名筛选
+```
+
+> 不要为了“在 WSL 跑通”去 `pnpm add -D @rollup/rollup-linux-x64-gnu` —— 会污染 `package.json` / `pnpm-lock.yaml`，引入与具体 change 无关的脏改动。
+
+### 常见陷阱
+
+**happy-dom 静默丢弃 `color-mix()` inline 值**：happy-dom 的 `CSSStyleDeclaration` 把 `color-mix(in srgb, ...)` 视为无效值并**静默丢弃**，赋值后 `getAttribute('style')` 返回 `null`。因此**组件测试不要断言 style 含 `color-mix(...)` 字符串**，否则结构性跑不过。
+
+- 可正常断言：纯 `var(--token)`、`transparent`、固定色值 —— 这些 happy-dom 会保留。
+- 走 `color-mix()` / 计算 alpha 的视觉：断言**形态维度**（如 `--solid` / `--hollow` class、`data-*` 属性）间接验证分档，颜色留给真浏览器/视觉验收。
+- 既有范式：`SectionTierBadge` 颜色值只用 `var(--color-*)` + `transparent`，正是为规避此限制；`SectionAnchorBadge` 的 tier1/2（color-mix）也照此只断 class + `data-anchor-tier`。
+- 组件分档逻辑本身用**纯函数单测**覆盖（如 `utils/topicAnchor.ts` 的边界值 0.05 / 0.15），把可测的逻辑与不可测的 CSS 渲染分离。
+
 ## E2E 测试（Playwright）
 
 - 配置文件：`front/playwright.config.ts`

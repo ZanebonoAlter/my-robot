@@ -137,6 +137,8 @@ type DailyReportThread struct {
 	TagIDs            JSON      `gorm:"type:jsonb" json:"tag_ids"`
 	Confidence        float64   `gorm:"default:0" json:"confidence"`
 	RelatedArticleIDs JSON      `gorm:"type:jsonb" json:"related_article_ids,omitempty"`
+	Embedding         string    `gorm:"type:vector" json:"-"`
+	FitDistance       float64   `gorm:"default:0" json:"fit_distance,omitempty"`
 	CreatedAt         time.Time `json:"created_at"`
 }
 

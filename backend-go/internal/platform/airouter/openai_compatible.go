@@ -209,6 +209,10 @@ func buildPayload(provider models.AIProvider, req ChatRequest) map[string]any {
 	return payload
 }
 
+// stripThinkTags removes <think>...</think> reasoning blocks from content. It is no longer
+// called by Chat (servers that support reasoning now separate it into a reasoning_content field),
+// but is retained as a defensive helper: if a future provider returns <think> tags embedded in
+// content, this can be reapplied without re-deriving the regex.
 func stripThinkTags(content string) string {
 	return strings.TrimSpace(thinkTagRe.ReplaceAllString(content, ""))
 }

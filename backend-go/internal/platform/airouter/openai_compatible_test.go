@@ -115,3 +115,42 @@ func TestBuildPayload_EnableThinking(t *testing.T) {
 		}
 	})
 }
+
+// TestBuildPayload_TemperatureMaxTokensPrecedence guards the request→provider→default
+// fallback chain for temperature/max_tokens — the most regression-prone part of buildPayload.
+func TestBuildPayload_TemperatureMaxTokensPrecedence(t *testing.T) {
+	reqTemp, reqMax := 0.7, 1000
+	provTemp, provMax := 0.5, 500
+
+	tests := []struct {
+		name            string
+		reqTemperature  *float64
+		reqMaxTokens    *int
+		provTemperature *float64
+		provMaxTokens   *int
+		wantTemp        float64
+		wantMax         int
+	}{
+		{"both nil uses defaults", nil, nil, nil, nil, 0.3, 16384},
+		{"req wins over provider", &reqTemp, &reqMax, &provTemp, &provMax, 0.7, 1000},
+		{"provider used when req nil", nil, nil, &provTemp, &provMax, 0.5, 500},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			provider := models.AIProvider{Model: "qwythos", Temperature: tt.provTemperature, MaxTokens: tt.provMaxTokens}
+			req := ChatRequest{
+				Messages:    []Message{{Role: "user", Content: "hi"}},
+				Temperature: tt.reqTemperature,
+				MaxTokens:   tt.reqMaxTokens,
+			}
+			payload := buildPayload(provider, req)
+			if payload["temperature"] != tt.wantTemp {
+				t.Errorf("temperature = %v, want %v", payload["temperature"], tt.wantTemp)
+			}
+			if payload["max_tokens"] != tt.wantMax {
+				t.Errorf("max_tokens = %v, want %v", payload["max_tokens"], tt.wantMax)
+			}
+		})
+	}
+}

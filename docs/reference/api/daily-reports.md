@@ -161,6 +161,7 @@ Response `data`：
           "consecutive_hits": 3,
           "can_activate": false
         },
+        "topic_status_at_report": "active",
         "threads": []
       }
     ]
@@ -169,11 +170,15 @@ Response `data`：
 ```
 
 当 section 已归属持久话题时，详情响应会附带轻量 `persistent_topic` 描述，供前端按
-`active` / `candidate` 状态分区。历史未归属 section 不返回该字段。
+`topic_status_at_report` 快照分区（`active` / `candidate` / `null`）。历史未归属 section 返回 `null`。
 
 ## 前端消费约定
 
-日报阅读层不新增 API：列表和详情分别消费 `GET /semantic-boards/:id/daily-reports` 与 `GET /daily-reports/:id`，并以 `persistent_topic.status` 建立 active / candidate / unassigned 质量分区。masthead 顶部使用板块标题，日报 `title` / `summary` 映射为头条；highlights 最多展示三项。
+日报阅读层不新增 API：列表和详情分别消费 `GET /semantic-boards/:id/daily-reports` 与 `GET /daily-reports/:id`，按 `topic_status_at_report` 快照分区：
+- `"active"` → "关心的话题"
+- `"candidate"` / `null`（含旧数据缺失）→ "其他动态"
+
+前端不再读取 `persistent_topic.status` 做历史日报分区，避免 topic 后续状态变化改变历史归位。masthead 顶部使用板块标题，日报 `title` / `summary` 映射为头条；highlights 最多展示三项。
 
 active 话题展开时按 `persistent_topic.id` 懒加载 `GET /daily-reports/topics/:id/lifeline`。前端只截取当前日报向前七个自然日，同日多个 section 聚合为一个带数量角标的节点；连线只消费 `relation_type=identity`，`similarity` 不进入 mini 泳道。节点点击按 `report_id` 复用日报详情缓存，在时间线模块内原位展示当日 section/thread。
 

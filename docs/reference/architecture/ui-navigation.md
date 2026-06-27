@@ -39,7 +39,7 @@
 ### 1.4 日报详情视图结构（断言锚点）
 
 ```
-.drm-zone[data-zone=...]            质量分区（active/candidate/unassigned）
+.drm-zone[data-zone=...]            质量分区（active/briefs）
   header.drm-zone__header           "N 个话题"
   .drm-zone__topics
     article.drm-topic               话题分组

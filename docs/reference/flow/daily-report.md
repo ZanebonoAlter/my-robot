@@ -43,12 +43,14 @@ flowchart TD
   STEP5 --> STEP6[Step6 组装 section<br/>标题 cluster_label → 算 embedding]
   STEP6 --> STEP7[Step7 合并同日相似 section<br/>embedding + LLM 两阶段]
   STEP7 --> SAVE[SaveReport 落库]
-  SAVE --> ANCHOR[assignAndUpdateTopics<br/>双重确认锚定 §3]
+  SAVE --> ANCHOR[assignAndUpdateTopics<br/>双重确认锚定 §3<br/>同步写入 topic_status_at_report 快照]
   ANCHOR --> REL[RebuildBoardRelations<br/>相似度+身份 双轨连线]
   REL --> FALL[关联前日叙事 / 派生 Board 连接 / 反馈标签 / 清理空 Board]
 ```
 
 > **Step3 是锚定的第一道门**：LLM 聚类时拿到版块已有的持久话题作为叙事框架，**自己决定**当前每个簇归到哪个已有话题（产出 `matched_topic_id`，只在内存里，不落库）。这个"LLM 的主观归属"是后续双重确认的一半。
+>
+> **ANCHOR 同步写入报告时快照**：双重确认完成后，每条 section 的 `topic_status_at_report` 与 `persistent_topic_id`、`topic_match_distance`、`topic_match_confidence` 在同一事务内写入。快照值为当时 PersistentTopic 的 `candidate|active`；未归属写 NULL。历史快照不随后续 topic 状态变化回填。
 
 ## 2. 后端：Section↔话题 锚定机制（System 2）
 
@@ -104,7 +106,15 @@ Step6 section 标题 = "OpenAI 发布管控与治理动荡"
 - **上游治本**：提升 LLM 聚类（`ClusterTags`）的 tag 归簇纯度，或给 thread 增加与 section 主题的校验，不让跑题 thread 进簇。
 - **下游可观测**：本 change（`topic-anchor-match-observability`）如实暴露 section 锚定距离；thread 粒度的贴合度现已有独立信号——`thread-fit-observability`（System 3）事后校验 thread 标题 embedding 与所属 section 标题 embedding 的余弦距离，离群（`fit_distance` > 0.28）软降级（灰显+折叠+离群标记，见 §4）。治理点是**事后校验 thread↔section 贴合度**，而非在 Step3 归簇后做紧凑性剔除——伞形话题的子事件 embedding 天然分散，紧凑性剔除会误杀合理子事件（见 `thread-fit-observability` design D1）。
 
-> 参数 `MatchThreshold` 默认 0.30、`UpgradeThreshold` 3、`DecayWindow` 30 天，运行时可由 `ai_settings` 覆盖（`PersistentTopicConfig`）。话题自身的 candidate→active→archived 生命周期与关系双轨见 `topic-graph.md`，此处不重复。
+### 可锚定话题选择器：聚类与归属共享同一集合
+
+ClusterTags 注入（Step3）与双重确认归属（§2）**共享同一个可锚定 PersistentTopic 选择器**（`ListAnchorableTopicsByBoard`），保证两侧集合一致：
+
+1. 全部 active 话题无条件入选。
+2. candidate 需 `last_seen_date` 在 `persistent_topic_candidate_decay_window`（默认 7 天）内，按 `last_seen_date DESC, hit_count DESC, id ASC` 排序，最多保留 `persistent_topic_candidate_prompt_limit`（默认 20）条。
+3. 窗口外或被截断的 candidate 不出现在任何一侧，消除单边锚定的隐式 bug。
+
+> 参数默认：`MatchThreshold` 0.30、`UpgradeThreshold` 3、`DecayWindow` 30 天、`CandidateDecayWindow` 7 天、`CandidatePromptLimit` 20，运行时可由 `ai_settings` 覆盖（`PersistentTopicConfig`）。话题自身的 candidate→active→archived 生命周期与关系双轨见 `topic-graph.md`，此处不重复。
 
 ## 3. 前端：Digest 预览/查看链路
 

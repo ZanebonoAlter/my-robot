@@ -354,7 +354,7 @@ surgical 边界：不改相机坐标系/布局算法/交互/BFS/红线/全局迷
 
 - `DailyReportMasthead.vue`：板块标题、日报头条与 highlights。
 - `DailyReportSidebar.vue`：目录、持续话题和历史日报切换。
-- `DailyReportTopicSection.vue`：active / candidate / unassigned 分区、单列话题、thread 与文章展开。
+- `DailyReportTopicSection.vue`：按报告时快照 `topic_status_at_report` 分"关心的话题"（active）/ "其他动态"（candidate / archived / null）两区、单列话题、thread 与文章展开。
 - `DailyReportMiniLifeline.vue`：最近七个自然日的通栏泳道、identity 贝塞尔连线、当前日原位详情和侦探墙出口。
 
 `useDailyReportReader.ts` 是唯一数据编排边界：按 board 缓存日报列表与详情，按 topic id 缓存 lifeline，按 article id 去重标题请求；单篇失败只影响对应文章并允许重试。组件仅通过 `openArticle`、`openLifecycle`、`openDetective` 等事件把预览和旧入口交还父级，切换 board 时统一清理日期、展开态和缓存。

@@ -39,10 +39,10 @@
 
 ## 6. 文档
 
-- [ ] 6.1 更新 `docs/reference/flow/` 日报生成/阅读流程：candidate 是内部叙事观察态，日报仅有“关心的话题/其他动态”两类主阅读区；补充报告时快照节点。
-- [ ] 6.2 更新 `docs/reference/architecture/`：说明可锚定话题选择器由 ClusterTags 与 assignment 共享，并明确 PersistentTopic 身份系统与 topic watch 注意力系统的边界。
-- [ ] 6.3 更新 `docs/reference/database/`、`api/` 和 `configuration.md`：记录 `topic_status_at_report`、两个 candidate 配置、NULL 兼容、排序与窗口边界。
-- [ ] 6.4 对照实现更新本 change 的 design/spec/tasks 勾选与校准证据，检查 `docs/reference/` 不再把 candidate 描述为“突发的新话题”。
+- [x] 6.1 更新 `docs/reference/flow/` 日报生成/阅读流程：candidate 是内部叙事观察态，日报仅有"关心的话题/其他动态"两类主阅读区；补充报告时快照节点。
+- [x] 6.2 更新 `docs/reference/architecture/`：说明可锚定话题选择器由 ClusterTags 与 assignment 共享，并明确 PersistentTopic 身份系统与 topic watch 注意力系统的边界。
+- [x] 6.3 更新 `docs/reference/database/`、`api/` 和 `configuration.md`：记录 `topic_status_at_report`、两个 candidate 配置、NULL 兼容、排序与窗口边界。
+- [x] 6.4 对照实现更新本 change 的 design/spec/tasks 勾选与校准证据，检查 `docs/reference/` 不再把 candidate 描述为"突发的新话题"。
 
 ## 7. 验证
 

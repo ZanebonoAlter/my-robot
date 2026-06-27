@@ -236,7 +236,7 @@ internal/<domain>/
 
 ### 主题图谱（`topicgraph` 域）
 
-每日报告生成。
+每日报告生成 + PersistentTopic 生命周期管理。PersistentTopic 身份系统（candidate / active / archived 叙事状态）独立于规划中的 topic-watch 注意力系统——身份系统表示叙事演进阶段，watch 表示用户主动关注，本 change 只做身份侧。
 - `tagging/analysis`：生成并查询 topic analysis，同时承担 embedding 向量化、Tag 合并（源 DELETE）、辅助标签入库（L1/L2/L3 三级匹配）
 - `tagging/watched`：关注标签管理
 

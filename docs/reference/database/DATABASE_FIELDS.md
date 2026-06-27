@@ -752,7 +752,9 @@ HNSW 索引：`idx_topic_tag_embeddings_embedding USING hnsw (embedding vector_c
 | `first_seen_date` / `last_seen_date` | DATE | 首次与最近命中日期 |
 | `hit_count` / `consecutive_hits` | BIGINT | 总命中数与连续命中天数 |
 
-`daily_report_sections` 通过 `persistent_topic_id`、`topic_match_distance`、`topic_match_confidence` 记录归属。`daily_report_section_relations.relation_type` 区分 `similarity`（匈牙利时间线）与 `identity`（持久话题连续性），唯一约束为 `(from_section_id, to_section_id, relation_type)`。
+`daily_report_sections` 通过 `persistent_topic_id`、`topic_match_distance`、`topic_match_confidence` 记录归属，并通过可空字段 `topic_status_at_report`（VARCHAR(20)）记录报告生成时的话题状态快照（`candidate` / `active` / `NULL`），该值与归属在同一事务内写入，不随后续 topic 状态变化回填。历史数据统一为 `NULL`。`daily_report_section_relations.relation_type` 区分 `similarity`（匈牙利时间线）与 `identity`（持久话题连续性），唯一约束为 `(from_section_id, to_section_id, relation_type)`。
+
+**排序与窗口边界**：可锚定话题选择器（`ListAnchorableTopicsByBoard`）选出全部 active 及 `last_seen_date` 在 `persistent_topic_candidate_decay_window`（默认 7 天）内的 candidate，按 `last_seen_date DESC, hit_count DESC, id ASC` 排序，candidate 最多保留 `persistent_topic_candidate_prompt_limit`（默认 20）条。生命周期更新时，candidate `last_seen_date` 超出窗口（>7 天）自动 archived，active 超出 `persistent_topic_decay_window`（30 天）自动 archived。
 
 ---
 

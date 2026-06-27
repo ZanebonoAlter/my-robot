@@ -18,6 +18,14 @@ flowchart TD
   REVIEW --> ACTIVE[只有 active topic 进入<br/>独立持久泳道]
 ```
 
+### 候选生命周期窗口
+
+candidate 超出 `persistent_topic_candidate_decay_window`（默认 7 天）末次命中后自动转为 archived；active 使用独立 `persistent_topic_decay_window`（30 天）。窗口内 miss 仅清零 `consecutive_hits`，不归档。
+
+### 可锚定话题选择器
+
+ClusterTags 注入与双重确认归属共享同一个选择器（`ListAnchorableTopicsByBoard`）：全部 active 无条件入选，窗口内 candidate 按 `last_seen_date DESC, hit_count DESC, id ASC` 排序最多取 `persistent_topic_candidate_prompt_limit`（默认 20）条。窗口外 / 被截断的 candidate 两侧一致排除。
+
 ## 关系双轨
 
 ```text

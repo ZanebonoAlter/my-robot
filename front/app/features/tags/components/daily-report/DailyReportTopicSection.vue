@@ -250,7 +250,7 @@ watch([groups, () => props.reportDate], ([nextGroups, reportDate]) => {
                     class="drm-articles"
                   >
                     <p class="drm-thread__fit-probe">
-                      贴合度<template v-if="typeof thread.fit_distance === 'number'"> {{ thread.fit_distance.toFixed(2) }} ·</template> {{ threadFitLabel(thread.fit_distance) }}
+                      贴合度<template v-if="typeof thread.fit_distance === 'number' && !Number.isNaN(thread.fit_distance)"> {{ thread.fit_distance.toFixed(2) }} ·</template> {{ threadFitLabel(thread.fit_distance) }}
                     </p>
                     <template v-for="articleId in thread.related_article_ids" :key="articleId">
                       <button
@@ -358,7 +358,7 @@ watch([groups, () => props.reportDate], ([nextGroups, reportDate]) => {
                       class="drm-articles"
                     >
                       <p class="drm-thread__fit-probe">
-                        贴合度<template v-if="typeof thread.fit_distance === 'number'"> {{ thread.fit_distance.toFixed(2) }} ·</template> {{ threadFitLabel(thread.fit_distance) }}
+                        贴合度<template v-if="typeof thread.fit_distance === 'number' && !Number.isNaN(thread.fit_distance)"> {{ thread.fit_distance.toFixed(2) }} ·</template> {{ threadFitLabel(thread.fit_distance) }}
                       </p>
                       <template v-for="articleId in thread.related_article_ids" :key="articleId">
                         <button
@@ -759,10 +759,14 @@ watch([groups, () => props.reportDate], ([nextGroups, reportDate]) => {
   transition: color 0.2s ease;
 }
 
-.drm-thread__hint:hover,
+.drm-thread__hint:hover {
+  color: var(--color-text-secondary);
+}
+
 .drm-thread__hint:focus-visible {
   color: var(--color-text-secondary);
-  outline: none;
+  outline: 2px solid var(--color-input-focus);
+  outline-offset: 2px;
 }
 
 .drm-articles {

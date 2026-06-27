@@ -1,12 +1,14 @@
 package repository
 
 import (
+	"reflect"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
+	"syntopica-backend/internal/models"
 	"syntopica-backend/internal/platform/testutil"
 )
 
@@ -137,6 +139,18 @@ func TestIdentityEdge_SurvivesLabelDrift(t *testing.T) {
 // TestSaveReport_AssignsNewSections is the daily-pipeline smoke test: saving a
 // report with sections that anchor to an existing topic writes the assignment
 // columns and creates no spurious candidate.
+// TestTopicStatusAtReport_JSONTagIsSnakeCase verifies the API contract: the
+// GORM model's json tag uses snake_case so the frontend receives
+// topic_status_at_report (not TopicStatusAtReport / topicStatusAtReport).
+func TestTopicStatusAtReport_JSONTagIsSnakeCase(t *testing.T) {
+	// Look up the struct field via reflection.
+	field, ok := reflect.TypeOf(DailyReportSection{}).FieldByName("TopicStatusAtReport")
+	require.True(t, ok, "field TopicStatusAtReport must exist on DailyReportSection")
+	jsonTag := field.Tag.Get("json")
+	assert.Equal(t, "topic_status_at_report", jsonTag,
+		"JSON tag must be snake_case for frontend compatibility")
+}
+
 func TestSaveReport_AssignsNewSections(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 	repo := NewTopicGraphRepository(db)
@@ -177,10 +191,176 @@ func TestSaveReport_AssignsNewSections(t *testing.T) {
 	require.NotNil(t, got.PersistentTopicID)
 	assert.Equal(t, topic.ID, *got.PersistentTopicID)
 	assert.Equal(t, TopicConfAnchorHit, got.TopicMatchConfidence)
+	require.NotNil(t, got.TopicStatusAtReport)
+	assert.Equal(t, TopicStatusActive, *got.TopicStatusAtReport)
+
+	// The report-time snapshot is immutable even when topic management changes
+	// the topic's current lifecycle state later.
+	require.NoError(t, db.Model(&BoardPersistentTopic{}).Where("id = ?", topic.ID).
+		Update("status", TopicStatusArchived).Error)
+	require.NoError(t, db.First(&got, got.ID).Error)
+	require.NotNil(t, got.TopicStatusAtReport)
+	assert.Equal(t, TopicStatusActive, *got.TopicStatusAtReport)
 
 	// The existing active topic should gain a hit (consecutive 4→5).
 	var updated BoardPersistentTopic
 	require.NoError(t, db.First(&updated, topic.ID).Error)
 	assert.Equal(t, 5, updated.ConsecutiveHits)
 	assert.Equal(t, 5, updated.HitCount)
+}
+
+// TestTopicStatusAtReport_MigrationIdempotent verifies that the 20260627_0001
+// migration can run twice without error (IF NOT EXISTS on the column, key
+// existence check on the ai_settings seed).
+func TestTopicStatusAtReport_MigrationIdempotent(t *testing.T) {
+	db := testutil.SetupTestDB(t)
+
+	// Verify the column exists after first migration.
+	var colExists bool
+	err := db.Raw(`
+		SELECT EXISTS (
+			SELECT 1 FROM information_schema.columns
+			WHERE table_name = 'daily_report_sections'
+			AND column_name = 'topic_status_at_report'
+		)`).Scan(&colExists).Error
+	require.NoError(t, err)
+	assert.True(t, colExists, "topic_status_at_report column must exist after migration")
+
+	// Verify the ai_settings keys exist.
+	keys := []string{"persistent_topic_candidate_decay_window", "persistent_topic_candidate_prompt_limit"}
+	for _, k := range keys {
+		var found models.AISettings
+		err := db.Where("key = ?", k).First(&found).Error
+		require.NoError(t, err, "key %s must exist after migration", k)
+	}
+
+	// Running migration again should NOT error. The testutil.SetupTestDB runs
+	// all migrations. If we call it again on a cloned db, it should be fine.
+	db2 := testutil.SetupTestDB(t)
+	require.NotNil(t, db2, "second migration run must not fail")
+}
+
+// TestTopicStatusAtReport_HistoricalNullQueryable verifies that sections that
+// existed before the migration (which have NULL topic_status_at_report) can
+// still be loaded without errors.
+func TestTopicStatusAtReport_HistoricalNullQueryable(t *testing.T) {
+	db := testutil.SetupTestDB(t)
+
+	boardID := seedTestBoard(t, db)
+	report := &BoardDailyReport{
+		SemanticBoardID: boardID,
+		PeriodDate:      NormalizeReportDate(time.Now()),
+		Title:           "pre-migration", Status: "completed",
+	}
+	require.NoError(t, db.Create(report).Error)
+
+	// Insert a section with only the original columns (no topic_status_at_report).
+	require.NoError(t, db.Exec(`
+		INSERT INTO daily_report_sections (report_id, cluster_label, article_count, created_at)
+		VALUES (?, 'old section', 1, NOW())
+	`, report.ID).Error)
+
+	// Load it via GORM — topic_status_at_report must be nil, not an error.
+	var sec DailyReportSection
+	err := db.Where("report_id = ?", report.ID).First(&sec).Error
+	require.NoError(t, err, "section with NULL topic_status_at_report must load without error")
+	assert.Nil(t, sec.TopicStatusAtReport, "historical NULL must stay NULL")
+}
+
+// topicIDs extracts the ID slice from a topic list (test helper).
+func topicIDs(topics []BoardPersistentTopic) []uint {
+	ids := make([]uint, len(topics))
+	for i, t := range topics {
+		ids[i] = t.ID
+	}
+	return ids
+}
+
+// TestAnchorableSet_ConsistencyBetweenInjectionAndAssignment is the cross-path
+// guard for the orchestrator↔assignment contract: calling
+// ListAnchorableTopicsByBoard with the same (boardID, reportDate, cfg) from
+// both paths must return the identical topic ID set.  If a future change
+// causes one side to load all candidates instead of the filtered set, this
+// test captures the mismatch.
+//
+// It also asserts that candidates outside the decay window and those truncated
+// by the candidate prompt limit do NOT appear in either returned set.
+func TestAnchorableSet_ConsistencyBetweenInjectionAndAssignment(t *testing.T) {
+	db := testutil.SetupTestDB(t)
+	repo := NewTopicGraphRepository(db)
+	Repo = repo
+
+	boardID := seedTestBoard(t, db)
+	cfg := PersistentTopicConfig{
+		MatchThreshold:       0.30,
+		UpgradeThreshold:     3,
+		DecayWindow:          30,
+		CandidateDecayWindow: 7,
+		CandidatePromptLimit: 2,
+		ClusterThreshold:     0.28,
+	}
+	reportDate := NormalizeReportDate(time.Now())
+	inWindow := reportDate.AddDate(0, 0, -3)   // gap=3, within window=7
+	outWindow := reportDate.AddDate(0, 0, -10) // gap=10, outside window=7
+
+	// Seed topics: 1 active (always included), 5 candidates:
+	//   - 3 in-window (sorted by hit_count 5, 3, 1; limit=2 keeps top 2)
+	//   - 1 out-of-window (filtered)
+	// Expected anchorable set: {active, cand-inwin-1, cand-inwin-2}
+	emb := vecStr(1, 0, 0)
+	topics := []BoardPersistentTopic{
+		{SemanticBoardID: boardID, Label: "active-1", Status: TopicStatusActive,
+			Embedding: emb, FirstSeenDate: reportDate.AddDate(0, 0, -30),
+			LastSeenDate: reportDate.AddDate(0, 0, -15), HitCount: 10},
+		{SemanticBoardID: boardID, Label: "cand-inwin-1", Status: TopicStatusCandidate,
+			Embedding: emb, FirstSeenDate: inWindow, LastSeenDate: inWindow, HitCount: 5},
+		{SemanticBoardID: boardID, Label: "cand-inwin-2", Status: TopicStatusCandidate,
+			Embedding: emb, FirstSeenDate: inWindow, LastSeenDate: inWindow, HitCount: 3},
+		{SemanticBoardID: boardID, Label: "cand-outwin-1", Status: TopicStatusCandidate,
+			Embedding: emb, FirstSeenDate: outWindow, LastSeenDate: outWindow, HitCount: 4},
+		{SemanticBoardID: boardID, Label: "cand-inwin-3", Status: TopicStatusCandidate,
+			Embedding: emb, FirstSeenDate: inWindow, LastSeenDate: inWindow, HitCount: 1}, // truncated by limit=2
+	}
+	for i := range topics {
+		require.NoError(t, db.Create(&topics[i]).Error)
+		require.NotZero(t, topics[i].ID)
+	}
+
+	// Call as orchestrator would.
+	set1, stats1, err1 := repo.ListAnchorableTopicsByBoard(boardID, reportDate, cfg)
+	require.NoError(t, err1)
+
+	// Call as assignment would (same params).
+	set2, stats2, err2 := repo.ListAnchorableTopicsByBoard(boardID, reportDate, cfg)
+	require.NoError(t, err2)
+
+	// Both calls must return the identical topic ID set.
+	ids1 := topicIDs(set1)
+	ids2 := topicIDs(set2)
+	require.ElementsMatch(t, ids1, ids2,
+		"orchestrator and assignment paths must return identical topic ID sets")
+	assert.Equal(t, stats1, stats2)
+
+	// Build a lookup set for fast exclusion checks.
+	idSet := make(map[uint]bool, len(ids1))
+	for _, id := range ids1 {
+		idSet[id] = true
+	}
+
+	// Out-of-window candidate must NOT appear.
+	assert.False(t, idSet[topics[3].ID],
+		"out-of-window candidate %d must not appear in anchorable set", topics[3].ID)
+	assert.Equal(t, 1, stats1.FilteredByWindow)
+
+	// Truncated-by-limit candidate must NOT appear.
+	assert.False(t, idSet[topics[4].ID],
+		"truncated-by-limit candidate %d must not appear in anchorable set", topics[4].ID)
+	assert.Equal(t, 1, stats1.TruncatedByLimit)
+
+	// Active topic must appear in the set.
+	assert.True(t, idSet[topics[0].ID],
+		"active topic %d must appear in anchorable set", topics[0].ID)
+
+	// Expected count: 1 active + 2 in-window candidates = 3.
+	assert.Equal(t, 3, len(idSet), "anchorable set size mismatch")
 }

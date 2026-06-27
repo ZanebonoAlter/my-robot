@@ -112,6 +112,7 @@ type DailyReportSection struct {
 	PersistentTopicID    *uint   `gorm:"index" json:"persistent_topic_id,omitempty"`
 	TopicMatchDistance   float64 `json:"topic_match_distance,omitempty"`
 	TopicMatchConfidence string  `gorm:"size:20" json:"topic_match_confidence,omitempty"`
+	TopicStatusAtReport  *string `gorm:"size:20" json:"topic_status_at_report"`
 	// PersistentTopic carries the nested topic brief for the daily-report
 	// detail API, so the UI can classify sections by topic status (active vs
 	// candidate). Transient — loaded via AttachTopicBriefsToReport, never

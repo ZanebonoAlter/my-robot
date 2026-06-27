@@ -57,6 +57,7 @@ func cosineDistance(a, b []float64) float64 {
 type parsedTopic struct {
 	ID        uint
 	Embedding []float64
+	Status    string
 }
 
 // parseTopicEmbeddings parses each topic's embedding once, dropping unparseable
@@ -68,7 +69,7 @@ func parseTopicEmbeddings(topics []BoardPersistentTopic) []parsedTopic {
 		if err != nil || len(vec) == 0 {
 			continue
 		}
-		out = append(out, parsedTopic{ID: t.ID, Embedding: vec})
+		out = append(out, parsedTopic{ID: t.ID, Embedding: vec, Status: t.Status})
 	}
 	return out
 }
@@ -130,11 +131,12 @@ func findTopicInList(list []nearbyTopic, id uint) (nearbyTopic, bool) {
 // topicAssignmentDecision is the per-section outcome of the dual-confirmation
 // assignment. topicID is set for anchor_hit; newCandidate is set for auto_new.
 type topicAssignmentDecision struct {
-	sectionIdx   int
-	topicID      uint
-	distance     float64
-	confidence   string
-	newCandidate *candidateTopicSpec
+	sectionIdx          int
+	topicID             uint
+	distance            float64
+	confidence          string
+	newCandidate        *candidateTopicSpec
+	topicStatusAtReport *string
 }
 
 // candidateTopicSpec describes a candidate topic to insert during assignment.
@@ -173,9 +175,10 @@ func planTopicAssignments(sections []DailyReportSection, existingTopics []BoardP
 		within := findTopicsWithinThreshold(vec, parsed, cfg.MatchThreshold)
 		if sec.MatchedTopicID != nil {
 			if pt, ok := findTopicInList(within, *sec.MatchedTopicID); ok {
+				status := pt.Status
 				decisions = append(decisions, topicAssignmentDecision{
 					sectionIdx: i, topicID: pt.ID, distance: pt.dist,
-					confidence: TopicConfAnchorHit,
+					confidence: TopicConfAnchorHit, topicStatusAtReport: &status,
 				})
 				continue
 			}
@@ -188,11 +191,15 @@ func planTopicAssignments(sections []DailyReportSection, existingTopics []BoardP
 		})
 		decisions = append(decisions, topicAssignmentDecision{
 			sectionIdx: i, distance: nearestDist,
-			confidence:   TopicConfAutoNew,
-			newCandidate: &candidates[len(candidates)-1],
+			confidence: TopicConfAutoNew, newCandidate: &candidates[len(candidates)-1],
+			topicStatusAtReport: topicStatusPtr(TopicStatusCandidate),
 		})
 	}
 	return decisions
+}
+
+func topicStatusPtr(value string) *string {
+	return &value
 }
 
 // topicLifecycleChange is a pure lifecycle transition computed without DB
@@ -217,6 +224,10 @@ type topicLifecycleChange struct {
 // the caller includes them, which it should not — see assignAndUpdateTopics).
 func planLifecycle(topics []BoardPersistentTopic, today time.Time, hitTopicIDs map[uint]bool, cfg PersistentTopicConfig) []topicLifecycleChange {
 	todayDate := NormalizeReportDate(today)
+	candidateDecayWindow := cfg.CandidateDecayWindow
+	if candidateDecayWindow <= 0 {
+		candidateDecayWindow = DefaultPersistentTopicConfig().CandidateDecayWindow
+	}
 	var changes []topicLifecycleChange
 	for _, t := range topics {
 		lastSeen := NormalizeReportDate(t.LastSeenDate)
@@ -230,14 +241,26 @@ func planLifecycle(topics []BoardPersistentTopic, today time.Time, hitTopicIDs m
 			changes = append(changes, ch)
 			continue
 		}
-		if t.Status == TopicStatusCandidate && t.ConsecutiveHits != 0 {
-			changes = append(changes, topicLifecycleChange{
-				topicID: t.ID, status: TopicStatusCandidate,
-				consecutiveHits: 0, hitCount: t.HitCount, lastSeen: lastSeen,
-			})
+		if t.Status == TopicStatusCandidate {
+			// gapDays relies on NormalizeReportDate midnight normalisation:
+			// the difference of two noon-UTC timestamps is an integer multiple of 24h.
+			gapDays := int(todayDate.Sub(lastSeen).Hours() / 24)
+			if gapDays > candidateDecayWindow {
+				changes = append(changes, topicLifecycleChange{
+					topicID: t.ID, status: TopicStatusArchived,
+					consecutiveHits: 0, hitCount: t.HitCount, lastSeen: lastSeen,
+				})
+			} else if t.ConsecutiveHits != 0 {
+				changes = append(changes, topicLifecycleChange{
+					topicID: t.ID, status: TopicStatusCandidate,
+					consecutiveHits: 0, hitCount: t.HitCount, lastSeen: lastSeen,
+				})
+			}
 			continue
 		}
 		if t.Status == TopicStatusActive {
+			// gapDays relies on NormalizeReportDate midnight normalisation:
+			// the difference of two noon-UTC timestamps is an integer multiple of 24h.
 			gapDays := int(todayDate.Sub(lastSeen).Hours() / 24)
 			if gapDays > cfg.DecayWindow {
 				changes = append(changes, topicLifecycleChange{
@@ -263,7 +286,10 @@ func planLifecycle(topics []BoardPersistentTopic, today time.Time, hitTopicIDs m
 // inside the same transaction.
 func assignAndUpdateTopics(tx *gorm.DB, boardID uint, periodDate time.Time, sections []DailyReportSection) error {
 	cfg := LoadPersistentTopicConfig(tx)
-	existingTopics, err := Repo.ListActiveTopicsByBoard(boardID)
+	// periodDate must equal the orchestrator's startOfDay (=report.PeriodDate).
+	// Both sides call ListAnchorableTopicsByBoard with the same (boardID, date, cfg)
+	// so the injection set and the acceptance set are guaranteed identical.
+	existingTopics, anchorStats, err := Repo.ListAnchorableTopicsByBoard(boardID, periodDate, cfg)
 	if err != nil {
 		return fmt.Errorf("load existing topics: %w", err)
 	}
@@ -316,7 +342,7 @@ func assignAndUpdateTopics(tx *gorm.DB, boardID uint, periodDate time.Time, sect
 			continue
 		}
 		secID := sections[d.sectionIdx].ID
-		if err := Repo.UpdateSectionTopicAssignment(tx, secID, topicID, d.distance, d.confidence); err != nil {
+		if err := Repo.UpdateSectionTopicAssignment(tx, secID, topicID, d.distance, d.confidence, d.topicStatusAtReport); err != nil {
 			return fmt.Errorf("update section %d assignment: %w", secID, err)
 		}
 	}
@@ -357,7 +383,8 @@ func assignAndUpdateTopics(tx *gorm.DB, boardID uint, periodDate time.Time, sect
 			unmatched++
 		}
 	}
-	logging.Infof("persistent-topic: board %d assigned %d sections (anchor_hit=%d, auto_new=%d, unmatched=%d)",
-		boardID, len(decisions), matched, autoNew, unmatched)
+	logging.Infof("persistent-topic: board %d anchors active=%d candidates=%d filtered_window=%d truncated_limit=%d; assigned %d sections (anchor_hit=%d, auto_new=%d, unmatched=%d)",
+		boardID, anchorStats.ActiveCount, anchorStats.CandidateCount, anchorStats.FilteredByWindow, anchorStats.TruncatedByLimit,
+		len(decisions), matched, autoNew, unmatched)
 	return nil
 }

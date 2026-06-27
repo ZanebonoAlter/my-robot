@@ -2,22 +2,26 @@ package repository
 
 import (
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
 
 	"gorm.io/gorm"
 	"syntopica-backend/internal/models"
+	"syntopica-backend/internal/platform/logging"
 )
 
 // PersistentTopicConfig holds the runtime-tunable parameters that govern
 // assignment, lifecycle and backfill. Loaded from ai_settings with the
 // defaults baked into the migration seed.
 type PersistentTopicConfig struct {
-	MatchThreshold   float64 // persistent_topic_match_threshold
-	UpgradeThreshold int     // persistent_topic_upgrade_threshold
-	DecayWindow      int     // persistent_topic_decay_window (days)
-	ClusterThreshold float64 // persistent_topic_cluster_threshold
+	MatchThreshold       float64 // persistent_topic_match_threshold
+	UpgradeThreshold     int     // persistent_topic_upgrade_threshold
+	DecayWindow          int     // persistent_topic_decay_window (days)
+	CandidateDecayWindow int     // persistent_topic_candidate_decay_window (days)
+	CandidatePromptLimit int     // persistent_topic_candidate_prompt_limit
+	ClusterThreshold     float64 // persistent_topic_cluster_threshold
 }
 
 // DefaultPersistentTopicConfig returns the seed defaults; used when ai_settings
@@ -32,14 +36,75 @@ type PersistentTopicConfig struct {
 // See the change verification-report for the full threshold scan.
 func DefaultPersistentTopicConfig() PersistentTopicConfig {
 	return PersistentTopicConfig{
-		MatchThreshold:   0.30,
-		UpgradeThreshold: 3,
-		DecayWindow:      30,
-		ClusterThreshold: 0.28,
+		MatchThreshold:       0.30,
+		UpgradeThreshold:     3,
+		DecayWindow:          30,
+		CandidateDecayWindow: 7,
+		CandidatePromptLimit: 20,
+		ClusterThreshold:     0.28,
 	}
 }
 
-// LoadPersistentTopicConfig reads the four persistent_topic_* keys from
+type AnchorableTopicStats struct {
+	ActiveCount      int
+	CandidateCount   int
+	FilteredByWindow int
+	TruncatedByLimit int
+}
+
+func selectAnchorableTopics(topics []BoardPersistentTopic, reportDate time.Time, cfg PersistentTopicConfig) ([]BoardPersistentTopic, AnchorableTopicStats) {
+	stats := AnchorableTopicStats{}
+	active := make([]BoardPersistentTopic, 0, len(topics))
+	candidates := make([]BoardPersistentTopic, 0, len(topics))
+	reportDay := NormalizeReportDate(reportDate)
+	defaults := DefaultPersistentTopicConfig()
+	candidateDecayWindow := cfg.CandidateDecayWindow
+	if candidateDecayWindow <= 0 {
+		candidateDecayWindow = defaults.CandidateDecayWindow
+	}
+	candidatePromptLimit := cfg.CandidatePromptLimit
+	if candidatePromptLimit <= 0 {
+		candidatePromptLimit = defaults.CandidatePromptLimit
+	}
+
+	for _, topic := range topics {
+		switch topic.Status {
+		case TopicStatusActive:
+			stats.ActiveCount++
+			active = append(active, topic)
+		case TopicStatusCandidate:
+			stats.CandidateCount++
+			lastSeen := NormalizeReportDate(topic.LastSeenDate)
+			// gapDays relies on NormalizeReportDate midnight normalisation:
+			// the difference of two noon-UTC timestamps is an integer multiple of 24h.
+			gapDays := int(reportDay.Sub(lastSeen).Hours() / 24)
+			if gapDays > candidateDecayWindow {
+				stats.FilteredByWindow++
+				continue
+			}
+			candidates = append(candidates, topic)
+		}
+	}
+
+	sort.SliceStable(candidates, func(i, j int) bool {
+		left, right := candidates[i], candidates[j]
+		if !left.LastSeenDate.Equal(right.LastSeenDate) {
+			return left.LastSeenDate.After(right.LastSeenDate)
+		}
+		if left.HitCount != right.HitCount {
+			return left.HitCount > right.HitCount
+		}
+		return left.ID < right.ID
+	})
+	if len(candidates) > candidatePromptLimit {
+		stats.TruncatedByLimit = len(candidates) - candidatePromptLimit
+		candidates = candidates[:candidatePromptLimit]
+	}
+
+	return append(active, candidates...), stats
+}
+
+// LoadPersistentTopicConfig reads the persistent_topic_* keys from
 // ai_settings, falling back to defaults on missing/invalid rows. Reading is
 // best-effort: a malformed value never fails the report pipeline.
 func LoadPersistentTopicConfig(db *gorm.DB) PersistentTopicConfig {
@@ -48,6 +113,8 @@ func LoadPersistentTopicConfig(db *gorm.DB) PersistentTopicConfig {
 		"persistent_topic_match_threshold",
 		"persistent_topic_upgrade_threshold",
 		"persistent_topic_decay_window",
+		"persistent_topic_candidate_decay_window",
+		"persistent_topic_candidate_prompt_limit",
 		"persistent_topic_cluster_threshold",
 	}
 	var rows []models.AISettings
@@ -67,6 +134,18 @@ func LoadPersistentTopicConfig(db *gorm.DB) PersistentTopicConfig {
 		case "persistent_topic_decay_window":
 			if v, err := strconv.Atoi(r.Value); err == nil {
 				cfg.DecayWindow = v
+			}
+		case "persistent_topic_candidate_decay_window":
+			if v, err := strconv.Atoi(r.Value); err == nil && v > 0 {
+				cfg.CandidateDecayWindow = v
+			} else {
+				logging.Warnf("persistent-topic: invalid candidate decay window %q; using default %d", r.Value, cfg.CandidateDecayWindow)
+			}
+		case "persistent_topic_candidate_prompt_limit":
+			if v, err := strconv.Atoi(r.Value); err == nil && v > 0 {
+				cfg.CandidatePromptLimit = v
+			} else {
+				logging.Warnf("persistent-topic: invalid candidate prompt limit %q; using default %d", r.Value, cfg.CandidatePromptLimit)
 			}
 		case "persistent_topic_cluster_threshold":
 			if v, err := strconv.ParseFloat(r.Value, 64); err == nil {
@@ -108,24 +187,24 @@ func PersistentTopicColor(topicID uint) string {
 	return persistentTopicPalette[h%uint64(len(persistentTopicPalette))]
 }
 
-// ListActiveTopicsByBoard returns candidate + active topics for a board. These
-// are the anchors injected into ClusterTags and consulted by the assignment
-// step. Archived topics are excluded — they are no longer assignable.
-func (r *TopicGraphRepository) ListActiveTopicsByBoard(boardID uint) ([]BoardPersistentTopic, error) {
+// ListAnchorableTopicsByBoard returns the exact active+candidate frame set
+// shared by clustering and dual-confirmation assignment for one report date.
+func (r *TopicGraphRepository) ListAnchorableTopicsByBoard(boardID uint, reportDate time.Time, cfg PersistentTopicConfig) ([]BoardPersistentTopic, AnchorableTopicStats, error) {
 	var topics []BoardPersistentTopic
 	err := r.db.Where("semantic_board_id = ? AND status IN ?", boardID,
 		[]string{TopicStatusCandidate, TopicStatusActive}).
-		Order("status ASC, last_seen_date DESC, id ASC").
 		Find(&topics).Error
 	if err != nil {
-		return nil, fmt.Errorf("list active topics: %w", err)
+		return nil, AnchorableTopicStats{}, fmt.Errorf("list anchorable topics: %w", err)
 	}
-	return topics, nil
+	selected, stats := selectAnchorableTopics(topics, reportDate, cfg)
+	return selected, stats, nil
 }
 
-// ListAllTopicsByBoard returns every non-archived topic for a board (used by
-// the lifecycle updater, which must update consecutive_hits on candidate and
-// active topics alike).
+// ListAllTopicsByBoard returns every non-archived topic (candidate+active) for
+// a board. It does NOT apply window or limit filtering. Used by the lifecycle
+// updater (planLifecycle) and diagnostics — never for ClusterTags injection or
+// assignment (that is ListAnchorableTopicsByBoard's responsibility).
 func (r *TopicGraphRepository) ListAllTopicsByBoard(boardID uint) ([]BoardPersistentTopic, error) {
 	var topics []BoardPersistentTopic
 	err := r.db.Where("semantic_board_id = ? AND status != ?", boardID, TopicStatusArchived).
@@ -220,9 +299,9 @@ func (r *TopicGraphRepository) SaveTopics(tx *gorm.DB, topics []BoardPersistentT
 	return nil
 }
 
-// UpdateSectionTopicAssignment writes the three assignment columns onto an
+// UpdateSectionTopicAssignment writes the assignment columns onto an
 // already-inserted section row (sections have IDs after CreateInBatches).
-func (r *TopicGraphRepository) UpdateSectionTopicAssignment(tx *gorm.DB, sectionID uint, topicID *uint, distance float64, confidence string) error {
+func (r *TopicGraphRepository) UpdateSectionTopicAssignment(tx *gorm.DB, sectionID uint, topicID *uint, distance float64, confidence string, topicStatusAtReport *string) error {
 	if tx == nil {
 		tx = r.db
 	}
@@ -231,6 +310,7 @@ func (r *TopicGraphRepository) UpdateSectionTopicAssignment(tx *gorm.DB, section
 			"persistent_topic_id":    topicID,
 			"topic_match_distance":   distance,
 			"topic_match_confidence": confidence,
+			"topic_status_at_report": topicStatusAtReport,
 		}).Error
 }
 

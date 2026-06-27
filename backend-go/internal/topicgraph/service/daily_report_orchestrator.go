@@ -44,10 +44,15 @@ func GenerateDailyReport(ctx context.Context, boardID uint, date time.Time) (*re
 
 	// Step 3: Cluster via LLM (inject the board's durable narrative frames so
 	// the LLM reuses them and carries a matched_topic_id per group).
-	existingTopics, err := repository.Repo.ListActiveTopicsByBoard(boardID)
+	topicCfg := repository.LoadPersistentTopicConfig(repository.Repo.DB())
+	existingTopics, anchorStats, err := repository.Repo.ListAnchorableTopicsByBoard(boardID, startOfDay, topicCfg)
 	if err != nil {
 		logging.Warnf("daily-report: load existing topics for board %d failed: %v", boardID, err)
 		existingTopics = nil // non-fatal: cluster from scratch
+	} else {
+		logging.Infof("daily-report: board %d cluster anchors active=%d candidates=%d filtered_window=%d truncated_limit=%d",
+			boardID, anchorStats.ActiveCount, anchorStats.CandidateCount,
+			anchorStats.FilteredByWindow, anchorStats.TruncatedByLimit)
 	}
 	clusters, err := ClusterTags(ctx, tags, existingTopics)
 	if err != nil {

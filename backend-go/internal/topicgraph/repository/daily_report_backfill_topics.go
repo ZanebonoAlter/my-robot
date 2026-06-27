@@ -186,7 +186,7 @@ func (r *TopicGraphRepository) backfillTopics(boardID uint, rebuildRelations boo
 			}
 			created++
 			for _, mi := range c.members {
-				if err := r.UpdateSectionTopicAssignment(tx, sections[mi].ID, &topic.ID, 0, TopicConfAnchorHit); err != nil {
+				if err := r.UpdateSectionTopicAssignment(tx, sections[mi].ID, &topic.ID, 0, TopicConfAnchorHit, nil); err != nil {
 					return fmt.Errorf("backfill section %d: %w", sections[mi].ID, err)
 				}
 			}

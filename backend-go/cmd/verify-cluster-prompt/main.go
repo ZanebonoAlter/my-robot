@@ -13,6 +13,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"time"
 
 	"gorm.io/gorm"
 
@@ -57,14 +58,21 @@ func main() {
 	}
 	fmt.Printf("loaded %d tags for board %d\n\n", len(tagInputs), boardID)
 
-	// Inject the board's existing active+candidate topics — this is what the
-	// orchestrator passes so the LLM reuses durable frames (root cause A fix).
-	existing, err := repository.Repo.ListActiveTopicsByBoard(boardID)
+	// Replicate exactly the anchorable set the orchestrator injects into
+	// ClusterTags — window-filtered + limit-capped via
+	// ListAnchorableTopicsByBoard. Using today as the inspection date
+	// (the most common scenario) so the prompt mirrors a real daily run.
+	reportDate := repository.NormalizeReportDate(time.Now())
+	topicCfg := repository.LoadPersistentTopicConfig(repository.Repo.DB())
+	existing, anchorStats, err := repository.Repo.ListAnchorableTopicsByBoard(boardID, reportDate, topicCfg)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "load existing topics: %v\n", err)
 		os.Exit(1)
 	}
-	fmt.Printf("injected %d existing topics as durable frames:\n", len(existing))
+	fmt.Printf("anchorable set: active=%d candidates=%d filtered_window=%d truncated_limit=%d\n",
+		anchorStats.ActiveCount, anchorStats.CandidateCount,
+		anchorStats.FilteredByWindow, anchorStats.TruncatedByLimit)
+	fmt.Printf("injected %d anchorable topics as durable frames:\n", len(existing))
 	for _, t := range existing {
 		fmt.Printf("  [id:%d] %s (status:%s, hits:%d)\n", t.ID, t.Label, t.Status, t.HitCount)
 	}

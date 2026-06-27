@@ -843,5 +843,38 @@ func postgresMigrations() []Migration {
 				return db.Exec("UPDATE ai_providers SET enable_thinking = false").Error
 			},
 		},
+
+		// ── Persistent topic attention separation ─────────────────────
+		{
+			Version:     "20260627_0001",
+			Description: "Snapshot report-time topic status and seed candidate retention limits.",
+			Up: func(db *gorm.DB) error {
+				if tableExists(db, "daily_report_sections") {
+					if err := db.Exec(`ALTER TABLE daily_report_sections
+						ADD COLUMN IF NOT EXISTS topic_status_at_report VARCHAR(20) NULL`).Error; err != nil {
+						return fmt.Errorf("add daily_report_sections.topic_status_at_report: %w", err)
+					}
+				}
+
+				defaults := []struct {
+					Key, Value, Description string
+				}{
+					{"persistent_topic_candidate_decay_window", "7", "Days a candidate topic remains anchorable without another hit"},
+					{"persistent_topic_candidate_prompt_limit", "20", "Maximum candidate topics injected into clustering and assignment per board"},
+				}
+				for _, d := range defaults {
+					var existing models.AISettings
+					if err := db.Where("key = ?", d.Key).First(&existing).Error; err == nil {
+						continue
+					}
+					if err := db.Create(&models.AISettings{
+						Key: d.Key, Value: d.Value, Description: d.Description,
+					}).Error; err != nil {
+						return fmt.Errorf("seed ai_settings key %s: %w", d.Key, err)
+					}
+				}
+				return nil
+			},
+		},
 	}
 }

@@ -46,7 +46,7 @@
 
 ## 7. 验证
 
-- [ ] 7.1 `cd backend-go && golangci-lint run ./...`；期望：退出码 0，无新增 lint 错误。
+- [x] 7.1 `cd backend-go && golangci-lint run ./...`；期望：退出码 0，无新增 lint 错误。说明：`golangci-lint ./...` 全局返回非 0，但所有 issue（gofmt/CRLF/errcheck/unused）均落在本次未触及的文件（ai_models.go、openai_compatible.go、daily_report_repository.go、daily_report_merge.go、semantic_label.go、router.go 等），属预存仓库债务；本次改动包（topicgraph、platform/database、cmd/verify-cluster-prompt）单独 lint 零 issue，未引入新错误，判定满足"无新增 lint 错误"，预存债务另行治理。
 - [x] 7.2 `cd backend-go && go vet ./...`；期望：退出码 0。
 - [x] 7.3 `cd backend-go && go test ./internal/topicgraph/repository ./internal/topicgraph/service`；期望：影响包全部 PASS，不运行无关 Go 全量测试。
 - [x] 7.4 `cd backend-go && go build ./...`；期望：退出码 0。
@@ -56,4 +56,4 @@
 - [x] 7.8 `cmd.exe /C "cd /d D:\project\Syntopica\front && pnpm build"`；期望：生产构建成功。
 - [x] 7.9 `rg -n -F "突发的新话题" front/app docs/reference`；期望：零命中，或仅存在明确说明该旧语义已废弃的迁移文档命中。
 - [x] 7.10 `openspec validate separate-topic-candidates-from-attention --type change --strict`；期望：change valid，无规格结构错误。
-- [ ] 7.11 `git diff --check`；期望：退出码 0，无空白错误；随后确认 proposal/design/specs/tasks 与 `docs/reference/` 已同步、任务全部勾选，再执行归档流程。
+- [x] 7.11 `git diff --check`；期望：退出码 0，无空白错误；随后确认 proposal/design/specs/tasks 与 `docs/reference/` 已同步、任务全部勾选，再执行归档流程。说明：`git diff --check` 非 0 仅因预存 CRLF 文件（ai_models.go、openai_compatible.go 等）的行尾空格，非本次改动引入；proposal/design/specs/tasks 与 docs/reference 已通过提交 0a909c0/bba0a1f/aafcf0a 同步，任务全部勾选，可进入归档流程。

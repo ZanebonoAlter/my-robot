@@ -102,6 +102,31 @@ SQLite（内存单测）对 GROUP BY 语义、类型、约束都宽松；Postgre
 - 判定法：改的 SQL 换成 PG 跑会不会和 SQLite 表现不同？会 → 必须补 PG 集成测试。
 - 回归守卫样本：`TestCollectBoardTags_PGHonorsDowngradedColumn`（`internal/topicgraph/service/collect_board_tags_test.go`）。
 
+### ⚠️ 绿灯 ≠ 功能有效：测试通过后必须用真实数据核对"效果是否达预期"
+
+测试断言的是**契约**（函数返回了非空 `ArticleContext`），不是**业务效果**（日报头条是否不再混淆）。二者之间隔着数据质量、依赖覆盖率、LLM 实际行为——这些测试抓不到。
+
+**真实教训（`qwythos-thinking-toggle-report-grounding` change，2026-06-27）**：
+
+为修复"日报头条看不见事件详情导致混淆"，给 `TagInput` 加了 `ArticleContext`（注入代表文章标题+摘要）。三层测试全绿：
+- 单元测试 `TestBuildHighlightsPrompt_InjectsArticleContext` ✅
+- testcontainer PG 集成测试 `TestCollectBoardTags_PopulatesArticleContext` ✅
+- 门禁 lint/vet/build 全过 ✅
+
+但连开发库核对真实数据时发现：
+- 全库 1656 篇文章只有 **227 篇（13.7%）** 有 AI 摘要——`buildArticleContextForTag` 取 `ai_content_summary` 时大量命中空值；
+- 根因不在 context 注入代码（实现是对的、fallback 到原始 content 也正确），而在**上游 AI 摘要覆盖率低**（18/25 个 feed 没开 `article_summary_enabled`、`summary_status` 状态机卡死），context 注入改不了这个上游缺陷。
+
+**测试全绿掩盖了"功能上线了但效果受限于数据覆盖率"的事实**——如果只看测试结果就交付，用户会发现日报质量没明显改善，却要等部署后才察觉。
+
+**硬约束（适用于"效果依赖数据质量/依赖覆盖率/LLM 实际行为"的功能）**：
+1. **测试通过只是起点**。对于这类功能，完成 TDD 红绿循环后，**必须连真实库（或贴近真实的样本）核对实际产出**，不能只靠测试绿灯就交付。
+2. **核对方法**：跑真实数据看输出，量化"覆盖率/命中率/实际注入量"，而非"函数返回了非空值"。例：不只看 `ArticleContext != ""`，要看"30 个 tag 里几个真的注入了内容、注入了多长、空的有几个"。
+3. **发现效果不达预期时，先别急着改自己的实现**。像这次——context 注入没问题，问题在上游摘要覆盖率。先定位瓶颈在哪一层（自己这层 vs 上游数据层），再决定是改代码还是反馈给用户。
+4. **主动和用户沟通**：当"测试全绿但实际效果受限"时，把量化数据摆给用户（如"覆盖率只有 13.7%，瓶颈在 feed 没开摘要"），让用户决定是接受现状、先补上游、还是调整预期。**不要等用户部署后自己发现效果不行。**
+
+**判定法**：这个功能的效果是否依赖测试断言之外的"数据/环境/模型行为"？是 → 绿灯后必须做真实数据核对 + 效果评估，不能直接交付。
+
 ## 运行
 
 ```bash

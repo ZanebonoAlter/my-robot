@@ -79,38 +79,16 @@ function toggleThread(prefix: string, thread: DailyReportThread) {
 }
 
 // Thread-fit soft-degrade (observability System 3): off-topic threads are
-// de-emphasized but never removed. These helpers drive the per-section demoted
-// count + the "另有 N 条可能跑题的线索" batch-toggle hint row, reusing the
-// existing expandedThreads set / threadKey — no new state machine.
+// de-emphasized but never removed — the row stays visible (faded) with a
+// left-aligned flag icon, and the section footer surfaces a plain status note
+// ("可能跑题的线索 N 条"). No batch toggle: the note is informational, not an
+// action; per-thread articles still open via each thread's own header.
 function demotedThreads(section: DailyReportSection): DailyReportThread[] {
   return section.threads.filter(thread => isThreadFitDemoted(thread.fit_distance))
 }
 
 function demotedCount(section: DailyReportSection): number {
   return demotedThreads(section).length
-}
-
-function allDemotedExpanded(prefix: string, section: DailyReportSection): boolean {
-  const demoted = demotedThreads(section)
-  return demoted.length > 0 && demoted.every(thread => expandedThreads.value.has(threadKey(prefix, thread)))
-}
-
-function toggleAllDemoted(prefix: string, section: DailyReportSection) {
-  const demoted = demotedThreads(section)
-  if (!demoted.length) return
-  const next = new Set(expandedThreads.value)
-  const collapse = demoted.every(thread => next.has(threadKey(prefix, thread)))
-  for (const thread of demoted) {
-    const key = threadKey(prefix, thread)
-    if (collapse) {
-      next.delete(key)
-    }
-    else {
-      next.add(key)
-      if (thread.related_article_ids?.length) emit('ensureArticles', thread.related_article_ids)
-    }
-  }
-  expandedThreads.value = next
 }
 
 function selectLifelineDay(topicId: number, dayKey: string) {
@@ -228,17 +206,19 @@ watch([groups, () => props.reportDate], ([nextGroups, reportDate]) => {
                     @click="toggleThread(`current-${section.id}`, thread)"
                   >
                     <span>
-                      <strong>{{ thread.title }}</strong>
+                      <span class="drm-thread__title">
+                        <Icon
+                          v-if="isThreadFitDemoted(thread.fit_distance)"
+                          icon="mdi:alert-circle-outline"
+                          width="14"
+                          class="drm-thread__flag"
+                          aria-label="可能跑题的线索"
+                        />
+                        <strong>{{ thread.title }}</strong>
+                      </span>
                       <small v-if="thread.summary">{{ thread.summary }}</small>
                     </span>
                     <span class="drm-thread__meta">
-                      <Icon
-                        v-if="isThreadFitDemoted(thread.fit_distance)"
-                        icon="mdi:alert-circle-outline"
-                        width="14"
-                        class="drm-thread__flag"
-                        aria-hidden="true"
-                      />
                       <span v-if="thread.related_article_ids?.length" class="drm-thread__count">
                         {{ thread.related_article_ids.length }} 篇
                         <Icon icon="mdi:chevron-down" width="14" />
@@ -278,16 +258,10 @@ watch([groups, () => props.reportDate], ([nextGroups, reportDate]) => {
                     </template>
                   </div>
                 </article>
-                <button
-                  v-if="demotedCount(section) > 0"
-                  type="button"
-                  class="drm-thread__hint"
-                  :aria-expanded="allDemotedExpanded(`current-${section.id}`, section)"
-                  @click="toggleAllDemoted(`current-${section.id}`, section)"
-                >
+                <p v-if="demotedCount(section) > 0" class="drm-thread__hint">
                   <Icon icon="mdi:alert-circle-outline" width="13" aria-hidden="true" />
-                  另有 {{ demotedCount(section) }} 条可能跑题的线索
-                </button>
+                  可能跑题的线索 {{ demotedCount(section) }} 条
+                </p>
               </div>
             </article>
           </div>
@@ -336,17 +310,19 @@ watch([groups, () => props.reportDate], ([nextGroups, reportDate]) => {
                       @click="toggleThread(`history-${section.id}`, thread)"
                     >
                       <span>
-                        <strong>{{ thread.title }}</strong>
+                        <span class="drm-thread__title">
+                          <Icon
+                            v-if="isThreadFitDemoted(thread.fit_distance)"
+                            icon="mdi:alert-circle-outline"
+                            width="14"
+                            class="drm-thread__flag"
+                            aria-label="可能跑题的线索"
+                          />
+                          <strong>{{ thread.title }}</strong>
+                        </span>
                         <small v-if="thread.summary">{{ thread.summary }}</small>
                       </span>
                       <span class="drm-thread__meta">
-                        <Icon
-                          v-if="isThreadFitDemoted(thread.fit_distance)"
-                          icon="mdi:alert-circle-outline"
-                          width="14"
-                          class="drm-thread__flag"
-                          aria-hidden="true"
-                        />
                         <span v-if="thread.related_article_ids?.length" class="drm-thread__count">
                           {{ thread.related_article_ids.length }} 篇
                           <Icon icon="mdi:chevron-down" width="14" />
@@ -386,16 +362,10 @@ watch([groups, () => props.reportDate], ([nextGroups, reportDate]) => {
                       </template>
                     </div>
                   </article>
-                  <button
-                    v-if="demotedCount(section) > 0"
-                    type="button"
-                    class="drm-thread__hint"
-                    :aria-expanded="allDemotedExpanded(`history-${section.id}`, section)"
-                    @click="toggleAllDemoted(`history-${section.id}`, section)"
-                  >
+                  <p v-if="demotedCount(section) > 0" class="drm-thread__hint">
                     <Icon icon="mdi:alert-circle-outline" width="13" aria-hidden="true" />
-                    另有 {{ demotedCount(section) }} 条可能跑题的线索
-                  </button>
+                    可能跑题的线索 {{ demotedCount(section) }} 条
+                  </p>
                 </article>
               </section>
             </template>
@@ -729,7 +699,16 @@ watch([groups, () => props.reportDate], ([nextGroups, reportDate]) => {
   flex: 0 0 auto;
 }
 
+.drm-thread__title {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  min-width: 0;
+}
+
 .drm-thread__flag {
+  flex: 0 0 auto;
+  align-self: center;
   color: color-mix(in srgb, var(--color-text-muted) 80%, var(--color-accent));
 }
 
@@ -745,28 +724,18 @@ watch([groups, () => props.reportDate], ([nextGroups, reportDate]) => {
   font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
 }
 
+/* Fit-demotion status note: a plain informational line at the section footer
+   ("可能跑题的线索 N 条"), NOT an action. Kept muted and non-interactive so it
+   reads as a state annotation rather than masquerading as a toggle — the flag
+   icon already marks each off-topic thread at its title (left-aligned). */
 .drm-thread__hint {
   display: inline-flex;
   align-items: center;
   gap: 0.3rem;
-  margin-top: 0.4rem;
-  padding: 0.3rem 0 0.3rem 0.875rem;
-  border: 0;
-  background: transparent;
+  margin: 0.4rem 0 0;
+  padding: 0 0 0 0.875rem;
   color: var(--color-text-muted);
   font-size: 0.66rem;
-  cursor: pointer;
-  transition: color 0.2s ease;
-}
-
-.drm-thread__hint:hover {
-  color: var(--color-text-secondary);
-}
-
-.drm-thread__hint:focus-visible {
-  color: var(--color-text-secondary);
-  outline: 2px solid var(--color-input-focus);
-  outline-offset: 2px;
 }
 
 .drm-articles {

@@ -65,7 +65,12 @@ func TestStripThinkTags(t *testing.T) {
 }
 
 func TestBuildPayload_EnableThinking(t *testing.T) {
-	// EnableThinking=true → payload 必须含 chat_template_kwargs.enable_thinking=true
+	// chat_template_kwargs.enable_thinking is sent for BOTH true and false.
+	// Rationale: the Qwen3/Qwythos chat template defaults to thinking ON when the
+	// kwarg is absent (it only inserts an empty <think></think> to suppress reasoning
+	// when enable_thinking=false is sent explicitly). So omitting the kwarg does NOT
+	// mean "off" — it means "default", which for this model family is ON. We must
+	// always send the kwarg explicitly so the per-request toggle actually takes effect.
 	t.Run("enable_thinking true propagates chat_template_kwargs", func(t *testing.T) {
 		provider := models.AIProvider{Model: "qwythos", EnableThinking: true}
 		req := ChatRequest{
@@ -81,15 +86,22 @@ func TestBuildPayload_EnableThinking(t *testing.T) {
 		}
 	})
 
-	// EnableThinking=false → payload 必须不含 chat_template_kwargs
-	t.Run("enable_thinking false omits chat_template_kwargs", func(t *testing.T) {
+	// EnableThinking=false → payload MUST still contain chat_template_kwargs.enable_thinking=false.
+	// (Previously this asserted the field was omitted — that was wrong: omitting lets the
+	// model fall back to its default, which is thinking ON for Qwen3. Sending false explicitly
+	// is the only way to actually suppress reasoning.)
+	t.Run("enable_thinking false sends chat_template_kwargs=false", func(t *testing.T) {
 		provider := models.AIProvider{Model: "qwythos", EnableThinking: false}
 		req := ChatRequest{
 			Messages: []Message{{Role: "user", Content: "hi"}},
 		}
 		payload := buildPayload(provider, req)
-		if _, ok := payload["chat_template_kwargs"]; ok {
-			t.Fatalf("expected no chat_template_kwargs when EnableThinking=false, got %v", payload["chat_template_kwargs"])
+		kwargs, ok := payload["chat_template_kwargs"].(map[string]any)
+		if !ok {
+			t.Fatalf("expected chat_template_kwargs map even when EnableThinking=false, got %T", payload["chat_template_kwargs"])
+		}
+		if kwargs["enable_thinking"] != false {
+			t.Fatalf("expected enable_thinking=false, got %v", kwargs["enable_thinking"])
 		}
 	})
 

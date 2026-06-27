@@ -162,19 +162,37 @@ describe('DailyReportTopicSection — thread-fit soft-degrade (current loop)', (
     expect(wrapper.find('.drm-thread__hint').exists()).toBe(false)
   })
 
-  it('batch-expands all demoted threads when the hint row is clicked', async () => {
+  it('renders the hint row as a non-interactive status note (clicking it does not expand threads)', async () => {
     const wrapper = mountSection({
       zone: activeZone([makeSection(100, [
         makeThread(1, { title: '跑题A', fit_distance: 0.31, related_article_ids: [101] }),
         makeThread(2, { title: '跑题B', fit_distance: 0.45, related_article_ids: [102] }),
       ])]),
     })
-    // collapsed initially
+    const hint = wrapper.find('.drm-thread__hint')
+    // status note is a plain <p>, not an actionable <button>
+    expect(hint.element.tagName).toBe('P')
+    expect(hint.text()).toContain('可能跑题的线索')
+    // clicking it must NOT expand any thread (no batch toggle anymore)
+    await hint.trigger('click')
     expect(wrapper.findAll('.drm-articles')).toHaveLength(0)
+  })
 
-    await wrapper.find('.drm-thread__hint').trigger('click')
-    // both demoted threads now expanded
-    expect(wrapper.findAll('.drm-articles')).toHaveLength(2)
+  it('flags a demoted thread with a left-aligned icon before its title', () => {
+    const wrapper = mountSection({
+      zone: activeZone([makeSection(100, [
+        makeThread(1, { title: '跑题线索', fit_distance: 0.4 }),
+      ])]),
+    })
+    const title = wrapper.find('.drm-thread__title')
+    expect(title.exists()).toBe(true)
+    // icon sits before the <strong> title in DOM order (left-aligned, not buried in the right meta)
+    const iconNode = title.find('.drm-thread__flag').element
+    const strongNode = title.find('strong').element
+    const children = Array.from(title.element.childNodes)
+    expect(children.indexOf(iconNode)).toBeLessThan(children.indexOf(strongNode))
+    // icon carries the status label for assistive tech
+    expect(wrapper.find('.drm-thread__flag').attributes('aria-label')).toBe('可能跑题的线索')
   })
 
   it('shows the fit-distance probe (number + label) only after a thread is expanded', async () => {

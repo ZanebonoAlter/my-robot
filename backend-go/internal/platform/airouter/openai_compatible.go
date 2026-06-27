@@ -158,8 +158,11 @@ func (c *openAICompatibleClient) Chat(ctx context.Context, provider models.AIPro
 }
 
 // buildPayload constructs the OpenAI-compatible request payload from provider settings and chat request.
-// When provider.EnableThinking is true, it propagates chat_template_kwargs.enable_thinking=true so the
-// backend can control whether the model reasons (per-request), instead of relying on a global CLI flag.
+// It ALWAYS propagates chat_template_kwargs.enable_thinking (true or false) per-request: the
+// Qwen3/Qwythos chat template defaults to thinking ON when this kwarg is absent (it only inserts an
+// empty <think></think> to suppress reasoning when enable_thinking=false is sent explicitly). So
+// omitting the kwarg does not mean "off" — we must send it explicitly for the toggle to take effect.
+// For non-llama.cpp servers this is an unknown field that is harmlessly ignored.
 func buildPayload(provider models.AIProvider, req ChatRequest) map[string]any {
 	temperature := 0.3
 	if req.Temperature != nil {
@@ -182,9 +185,8 @@ func buildPayload(provider models.AIProvider, req ChatRequest) map[string]any {
 		"max_tokens":  maxTokens,
 	}
 
-	if provider.EnableThinking {
-		payload["chat_template_kwargs"] = map[string]any{"enable_thinking": true}
-	}
+	// Always send enable_thinking explicitly. See buildPayload doc comment for rationale.
+	payload["chat_template_kwargs"] = map[string]any{"enable_thinking": provider.EnableThinking}
 
 	if provider.ProviderType == ProviderTypeOllama {
 		if req.JSONMode && req.JSONSchema != nil {

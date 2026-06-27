@@ -4,6 +4,8 @@
 > 这是从“我想了解某个业务怎么跑”出发的导航总图。架构骨架文档（overview/backend/frontend/runtime/tracing）描述定位与骨架；flow/ 描述链路怎么跑；本图把它们和代码入口连起来。
 >
 > **另见**：[coupling-map.md](coupling-map.md) — 跨功能传导耦合登记表（“改 A 会影响 B”），配合《开发执行规范》§7 架构体检使用。
+>
+> **另见**：[ui-navigation.md](ui-navigation.md) — 前端多步导航地图（板块日报 → 话题 → section → thread 等），给 Playwright / DeepSeek v4 Flash 按需功能验证复用。
 
 ## 三层关系
 
@@ -44,3 +46,10 @@ flowchart LR
 - 代码怎么写、包怎么分层、lint/测试配置 → [`standard/`](../standard/README.md)
 - 业务链路怎么跑 → [`flow/`](../flow/README.md)
 - 架构骨架与定位 → 本目录其余文档
+
+## 前端交互验证怎么跑
+
+- **导航地图**：[ui-navigation.md](ui-navigation.md)（多步导航 + 选择器 + 断言锚点，增量维护）
+- **验证方式**：DeepSeek v4 Flash 按需功能验证（断言现写现跑，不堆固定回归脚本）；规范与派发模板见 `.agents/skills/playwright-e2e/`
+- **交互约定**：状态标记左对齐、状态说明不伪装动作、可观测性展示分层 → [`standard/frontend/interaction-conventions.md`](../standard/frontend/interaction-conventions.md)
+- **稳定 smoke**：`front/tests/e2e/{baseline,daily-report-magazine}.spec.ts`（仅页面骨架/响应式，不堆业务交互回归）

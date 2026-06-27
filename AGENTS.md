@@ -102,6 +102,7 @@ cd front && pnpm dev
 | 实现后端功能较复杂、TDD | `opencode-go/deepseek-v4-pro` |
 | 核心逻辑实现、架构级选型、疑难杂症 | `zai-coding-cn/glm-5.2` |
 | 代码审查、审美有要求的前端任务 | `zai-coding-cn/glm-5.2` |
+| E2E脚本执行和验证 | `opencode-go/deepseek-v4-flash` |
 
 > glm 系列统一走当前默认供应商 `zai-coding-cn`（国内 coding 专用），优于 `zai`（国际站）/ `opencode-go`（聚合网关）。
 

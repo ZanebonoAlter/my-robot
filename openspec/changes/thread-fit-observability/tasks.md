@@ -23,8 +23,8 @@
 
 ## 5. 前端 thread 软降级渲染
 
-- [x] 5.1 在 `DailyReportTopicSection.vue` 的 `.drm-section-card__threads` thread 渲染处（`<article class="drm-thread">`）接入贴合度：对 `isThreadFitDemoted(thread.fit_distance)` 为真的 thread 加降级样式（灰 token + 默认折叠 `expandedThreads` 初始不含离群 thread key + 离群标记图标）
-- [x] 5.2 section 内有 ≥1 离群 thread 时，在 thread 列表底部渲染提示行"另有 N 条可能跑题的线索"，点击展开离群 thread 的完整内容（复用现有 `toggleThread` 机制）
+- [x] 5.1 在 `DailyReportTopicSection.vue` 的 `.drm-section-card__threads` thread 渲染处（`<article class="drm-thread">`）接入贴合度：对 `isThreadFitDemoted(thread.fit_distance)` 为真的 thread 加降级样式（灰 token + **左对齐离群标记图标**，置于标题文字前，带 aria-label）。**【设计 A 修订 · 2026-06-27】** 初版图标埋在右侧 meta「根本看不见」，改为标题左侧；同时取消「默认折叠」（跑题 thread 行保持可见）。
+- [x] 5.2 section 内有 ≥1 离群 thread 时，在 thread 列表底部渲染状态说明行「可能跑题的线索 N 条」（纯 `<p>` 说明，**不可点**）。**【设计 A 修订 · 2026-06-27】** 初版做成可点 button 批量展开关联文章，但「展开文章对提示跑题无意义」，改为纯状态说明，删除 toggleAllDemoted。
 - [x] 5.3 thread hover/展开时（探究区）展示贴合度数值（`fitDistance.toFixed(2)`）与中文标签（`threadFitLabel`），正文 thread 标题不出现任何数字。验收：正文极轻、分数仅进探究区
 - [x] 5.4 历史 thread（无 fit_distance）按正常 thread 渲染，不降级、不折叠、不报错。验收：缺失字段的 thread 样式与正常 thread 一致
 - [x] 5.5 **TDD**：写/扩 `DailyReportTopicSection` 或 thread 渲染相关单测，覆盖：离群 thread 灰显折叠、贴合 thread 正常、阈值边界、提示行 N 计数、探究行贴合度数值、历史 thread 不降级。先红后绿

@@ -87,7 +87,14 @@ pnpm test:e2e:list      # 只列出
 pnpm test:e2e:args -- --grep "topic-graph"  # 传参
 ```
 
-### ⚠️ 绿灯 ≠ 功能有效
+### E2E 范围与交互验证策略
+
+`tests/e2e/` **只放极稳定、全局的 smoke**（页面骨架、响应式、阅读器渲染等），**不堆业务交互回归脚本**——SPA 多步导航脆弱，换板块或大改 UI 就大面积失效，维护成本 > 收益。
+
+**业务交互验证走「DeepSeek v4 Flash 按需验证」**：某次变更怀疑交互问题时，派 Flash 子代理跑一段现写现跑的断言，验证完即弃，不沉淀 spec。规范与派发模板见：
+- `.agents/skills/playwright-e2e/`（铁律：Vue 异步等 nextTick、只用 localhost、断言写代码自己判、Flash 只报 JSON）
+- [`architecture/ui-navigation.md`](../../architecture/ui-navigation.md)（多步导航 + 选择器 + 断言锡点）
+
 
 E2E/Vitest 断言的是"元素出现/接口返回了"（契约），不是"用户看到的效果达预期"。对于依赖后端数据质量、LLM 实际行为、真实渲染效果的功能，测试通过只是起点——完成后应核对实际产出的视觉效果/数据内容是否符合设计预期，发现偏差及时和用户沟通，不要等用户自己发现。详细案例与硬约束见 [`standard/backend/testing.md` §绿灯 ≠ 功能有效](../backend/testing.md)（该原则跨端通用）。
 

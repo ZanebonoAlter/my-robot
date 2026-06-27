@@ -63,16 +63,16 @@ type AISettings struct {
 }
 
 type AIProvider struct {
-	ID             uint      `gorm:"primaryKey" json:"id"`
-	Name           string    `gorm:"size:100;unique;not null;index" json:"name"`
-	ProviderType   string    `gorm:"size:50;not null;default:openai_compatible;index" json:"provider_type"`
-	BaseURL        string    `gorm:"size:500;not null" json:"base_url"`
-	APIKey         string    `gorm:"type:text" json:"api_key"`
-	Model          string    `gorm:"size:100;not null" json:"model"`
-	Enabled        bool      `gorm:"not null;default:true;index" json:"enabled"`
-	TimeoutSeconds int       `gorm:"not null;default:120" json:"timeout_seconds"`
-	MaxTokens      *int      `json:"max_tokens,omitempty"`
-	Temperature    *float64  `json:"temperature,omitempty"`
+	ID             uint     `gorm:"primaryKey" json:"id"`
+	Name           string   `gorm:"size:100;unique;not null;index" json:"name"`
+	ProviderType   string   `gorm:"size:50;not null;default:openai_compatible;index" json:"provider_type"`
+	BaseURL        string   `gorm:"size:500;not null" json:"base_url"`
+	APIKey         string   `gorm:"type:text" json:"api_key"`
+	Model          string   `gorm:"size:100;not null" json:"model"`
+	Enabled        bool     `gorm:"not null;default:true;index" json:"enabled"`
+	TimeoutSeconds int      `gorm:"not null;default:120" json:"timeout_seconds"`
+	MaxTokens      *int     `json:"max_tokens,omitempty"`
+	Temperature    *float64 `json:"temperature,omitempty"`
 	// EnableThinking controls whether the request propagates
 	// chat_template_kwargs.enable_thinking=true, letting the model reason.
 	// (Previously this flag only stripped <think> tags from responses after-the-fact.)

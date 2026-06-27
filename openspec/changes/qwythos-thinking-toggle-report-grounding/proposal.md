@@ -4,7 +4,7 @@
 
 ## What Changes
 
-- **修正 `AIProvider.EnableThinking` 语义**：从「事后剥除 think 标签」改为「真正开启模型思考」——在 `openai_compatible.go` 的请求体里透传 `chat_template_kwargs.enable_thinking=true`；移除事后 `stripThinkTags` 调用（服务器已把思考分离到 `reasoning_content`，`content` 本就干净）。
+- **修正 `AIProvider.EnableThinking` 语义**：从「事后剥除 think 标签」改为「真正开启模型思考」——在 `openai_compatible.go` 的请求体里**始终显式透传** `chat_template_kwargs.enable_thinking`（取 `provider.EnableThinking` 的值，true/false 都发）；移除事后 `stripThinkTags` 调用（服务器已把思考分离到 `reasoning_content`，`content` 本就干净）。注：必须始终显式发，因为 Qwen3/Qwythos 模板在 kwarg 缺失时默认开思考，「不发参数」= 开思考。
 - **数据迁移统一清零**：新增幂等 versioned migration `UPDATE ai_providers SET enable_thinking = false`，兜底语义反转风险（旧 `true` 含义是「剥标签」，反转后清零最安全，避免误开启思考拖慢打标签）。
 - **日报 context 注入**：`TagInput` 新增 `ArticleContext` 字段，在 `collectBoardTags` 两处文章 ID 查询点顺带取出代表性文章标题+摘要（每 tag 前 2-3 篇、每篇截断 ~200 字），填进 highlights/threads/cluster 三个 prompt，修复头条「看不见事件详情导致混淆」。
 - **差异化靠配置实现**：不新增代码层路由开关；运维侧在后台配两条 provider 指向同一本地服务（`qwythos-think` / `qwythos-nothink`），分别挂到 `digest_polish` 与 `topic_tagging` route。

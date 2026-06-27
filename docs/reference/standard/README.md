@@ -9,6 +9,7 @@
 |---------|------|
 | 代码怎么写（命名、import、错误处理、目录归属） | `frontend/code-style.md` / `backend/code-style.md` |
 | 双主题 / 设计系统 / Token 架构 | `frontend/theming.md` |
+| 交互友好性 / 可观测性展示分层（状态标记左对齐、状态说明不伪装动作） | `frontend/interaction-conventions.md` |
 | Lint 工具配置（ESLint / golangci-lint） | `frontend/lint.md` / `backend/lint.md` |
 | 测试框架、运行方式、编写约定 | `frontend/testing.md` / `backend/testing.md` |
 | 后端包结构 / domain 白名单 | `backend/package-layout.md` |
@@ -23,6 +24,7 @@ standard/
 ├── README.md                  # 本文件（索引）
 ├── frontend/
 │   ├── theming.md             # 双主题三层 Token
+│   ├── interaction-conventions.md # 交互友好性/可观测性展示分层
 │   ├── code-style.md          # 目录归属/API归一化/Store/事件流/拆分
 │   ├── lint.md                # ESLint 配置
 │   └── testing.md             # Vitest + Playwright

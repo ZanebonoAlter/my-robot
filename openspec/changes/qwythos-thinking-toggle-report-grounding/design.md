@@ -44,6 +44,8 @@
 
 **为何不选 `--reasoning-budget 0`**：该参数是全局的，且与 `--jinja` 模板的 `enable_thinking` 是两套机制；per-request 的 `chat_template_kwargs` 更贴合「按 provider 配置」的本设计。
 
+> **勘误（2026-06-27，部署后实测发现）**：本节最初要求「`EnableThinking=false` 时请求体 MUST NOT 包含 `chat_template_kwargs`，由服务端模板默认分支决定，对 Qwythos 即不强制开思考」——这个「即不强制开思考」的前提是错的。Qwen3/Qwythos 模板在该 kwarg **缺失**时走默认分支即**开启思考**（证据2 实测：传 false 才预置空 `<think></think>` 关闭，「否则开 `<think>`」包含「不传」）。因此「不发参数」= 开思考，导致打标签 provider（migration 清零成 false）实际仍在思考。修正：请求体**始终显式发送** `chat_template_kwargs.enable_thinking`（true/false 都发），per-request 钉死，不赌模板默认。对应 spec.md 的 Requirement 已同步修正。
+
 ### D2. 差异化靠「两条 provider 指向同一服务」，不下沉开关到 link 级
 
 `ai_route_providers` 是多对多关联，同一个 provider 记录可被多 capability 的 route 共用。若打标签与日报共用一条 provider 记录，provider 级 `EnableThinking` 会让两者绑死。考虑过的方案对比：

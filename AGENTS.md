@@ -88,15 +88,22 @@ cd front && pnpm dev
 - Keep code changes minimal and scoped. Match existing code style.
 - 完成任务后更新维护 `./docs/reference/` 知识库；openspec change 归档前满足 `开发执行规范.md` §11 归档门禁，归档后按 §12 流转归类到里程碑。
 
-子线程派发参考(pi的subagent技能使用时如何选择供应商及其模型):
+子线程派发参考（pi 的 subagent 派发如何选供应商与模型）:
 
-- 简单、重复劳动的任务派发使用opencode go的Deepseek V4 Flash
-- 实现后端功能较为复杂时派发使用opencode go的Deepseek V4 Pro
-- 核心逻辑实现、架构级选型、疑难杂症 使用 zai 的 glm5.2
-- 代码审查用 zai 的 glm5.2
-- 审美有要求的前端任务用 zai 的 glm5.2
-- 编译修复错误这种脏活累活派opencode go的Deepseek V4 Flash
-- TDD 让opencode go的Deepseek V4 Pro
+> ⚠️ **硬规则：Agent 的 `model` 参数必须用 `provider/modelId` 全称**（如 `zai-coding-cn/glm-5.2`），**禁止用 fuzzy 名**（如 `glm-5.2`）。
+>
+> 原因：pi 里有 10 个 model id 跨多个 provider 重复注册（`glm-5.2`/`glm-5.1`/`glm-4.7`/`glm-5-turbo`/`glm-4.5-air`/`glm-5v-turbo`/`deepseek-v4-pro`/`deepseek-v4-flash`/`mimo-v2.5`/`mimo-v2.5-pro`）。fuzzy 名会按字母序解析到**非预期**的供应商——实测传 `glm-5.2` 会落到 `opencode-go`（字母序最先），而不是默认供应商 `zai-coding-cn`。想用默认供应商（`zai-coding-cn/glm-5.2`）时，**省略 `model` 参数即可**；一旦显式传 fuzzy 名反而绕过默认、落到错误供应商。实时清单查 `pi --list-models`。
+
+**任务→模型全称对照**（`model` 参数照填下表全称）：
+
+| 任务类型 | model 全称 |
+|---------|------------|
+| 简单/重复劳动、编译修复脏活累活 | `opencode-go/deepseek-v4-flash` |
+| 实现后端功能较复杂、TDD | `opencode-go/deepseek-v4-pro` |
+| 核心逻辑实现、架构级选型、疑难杂症 | `zai-coding-cn/glm-5.2` |
+| 代码审查、审美有要求的前端任务 | `zai-coding-cn/glm-5.2` |
+
+> glm 系列统一走当前默认供应商 `zai-coding-cn`（国内 coding 专用），优于 `zai`（国际站）/ `opencode-go`（聚合网关）。
 
 ## Browser Automation
 Use `agent-browser`: `open <url>` → `snapshot -i` → `click @eX` / `fill @eX "text"` → re-snapshot.

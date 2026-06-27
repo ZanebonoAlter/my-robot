@@ -15,10 +15,15 @@
  * Pure functions, no side effects, no DOM access.
  */
 
-/** Candidate default demote threshold; tune after live distribution
- *  calibration (see change `thread-fit-observability` design D3).
+/** Demote threshold, calibrated against the live 2026-06-26 fit_distance
+ *  distribution (86 signalled threads): min 0.000, p50 0.156, p90 0.274,
+ *  p99 0.306. At 0.28 exactly 7/86 (8%) threads are demoted — the natural
+ *  upper tail where titles genuinely drift from their section narrative
+ *  (e.g. personnel changes filed under a market-movement section). The
+ *  earlier candidate 0.20 would have demoted 35%, mostly false positives;
+ *  see change `thread-fit-observability` design D3 for the calibration note.
  *  Boundary tests reference this constant so recalibration touches one place. */
-export const THREAD_FIT_DEMOTE_THRESHOLD = 0.20
+export const THREAD_FIT_DEMOTE_THRESHOLD = 0.28
 
 /**
  * Whether a thread's title fit is "demoted" (likely off-topic) relative to its

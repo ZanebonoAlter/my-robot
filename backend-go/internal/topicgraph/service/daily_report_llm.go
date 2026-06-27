@@ -85,6 +85,9 @@ func buildHighlightsPrompt(tags []repository.TagInput, clusters []repository.Clu
 	sb.WriteString("## 事件标签\n\n")
 	for _, t := range tags {
 		fmt.Fprintf(&sb, "- [ID:%d] %s (文章数:%d)\n", t.ID, t.Label, t.ArticleCount)
+		if t.ArticleContext != "" {
+			fmt.Fprintf(&sb, "  代表文章: %s\n", t.ArticleContext)
+		}
 	}
 	if len(clusters) > 0 {
 		sb.WriteString("\n## 聚类分组\n\n")
@@ -200,6 +203,9 @@ func buildThreadsPrompt(cluster repository.ClusterGroup, tags []repository.TagIn
 		fmt.Fprintf(&sb, "- [ID:%d] %s (文章数:%d", t.ID, t.Label, t.ArticleCount)
 		if t.Description != "" {
 			fmt.Fprintf(&sb, ", 描述:%s", t.Description)
+		}
+		if t.ArticleContext != "" {
+			fmt.Fprintf(&sb, ", 代表文章: %s", t.ArticleContext)
 		}
 		sb.WriteString(")\n")
 	}

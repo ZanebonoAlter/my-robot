@@ -147,6 +147,9 @@ func buildClusterPrompt(tags []repository.TagInput) string {
 		if t.Description != "" {
 			fmt.Fprintf(&sb, ", 描述:%s", t.Description)
 		}
+		if t.ArticleContext != "" {
+			fmt.Fprintf(&sb, ", 代表文章: %s", t.ArticleContext)
+		}
 		sb.WriteString(")\n")
 	}
 	sb.WriteString("\n请将以上标签按核心事件分组。\n")

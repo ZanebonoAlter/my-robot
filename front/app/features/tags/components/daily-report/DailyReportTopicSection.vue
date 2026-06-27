@@ -12,6 +12,7 @@ import {
   type RequestCacheEntry,
   type TopicGroup,
 } from './dailyReportMagazine'
+import { isThreadFitDemoted, threadFitLabel } from '~/utils/threadFit'
 import type { ArticleTitle, TopicLifelineData } from '~/features/tags/composables/useDailyReportReader'
 import type { DailyReport, DailyReportSection, DailyReportThread } from '~/api/dailyReports'
 
@@ -73,6 +74,41 @@ function toggleThread(prefix: string, thread: DailyReportThread) {
   else {
     next.add(key)
     if (thread.related_article_ids?.length) emit('ensureArticles', thread.related_article_ids)
+  }
+  expandedThreads.value = next
+}
+
+// Thread-fit soft-degrade (observability System 3): off-topic threads are
+// de-emphasized but never removed. These helpers drive the per-section demoted
+// count + the "另有 N 条可能跑题的线索" batch-toggle hint row, reusing the
+// existing expandedThreads set / threadKey — no new state machine.
+function demotedThreads(section: DailyReportSection): DailyReportThread[] {
+  return section.threads.filter(thread => isThreadFitDemoted(thread.fit_distance))
+}
+
+function demotedCount(section: DailyReportSection): number {
+  return demotedThreads(section).length
+}
+
+function allDemotedExpanded(prefix: string, section: DailyReportSection): boolean {
+  const demoted = demotedThreads(section)
+  return demoted.length > 0 && demoted.every(thread => expandedThreads.value.has(threadKey(prefix, thread)))
+}
+
+function toggleAllDemoted(prefix: string, section: DailyReportSection) {
+  const demoted = demotedThreads(section)
+  if (!demoted.length) return
+  const next = new Set(expandedThreads.value)
+  const collapse = demoted.every(thread => next.has(threadKey(prefix, thread)))
+  for (const thread of demoted) {
+    const key = threadKey(prefix, thread)
+    if (collapse) {
+      next.delete(key)
+    }
+    else {
+      next.add(key)
+      if (thread.related_article_ids?.length) emit('ensureArticles', thread.related_article_ids)
+    }
   }
   expandedThreads.value = next
 }
@@ -178,7 +214,12 @@ watch([groups, () => props.reportDate], ([nextGroups, reportDate]) => {
                 />
               </div>
               <div class="drm-section-card__threads">
-                <article v-for="thread in section.threads" :key="thread.id" class="drm-thread">
+                <article
+                  v-for="thread in section.threads"
+                  :key="thread.id"
+                  class="drm-thread"
+                  :class="{ 'drm-thread--demoted': isThreadFitDemoted(thread.fit_distance) }"
+                >
                   <button
                     type="button"
                     class="drm-thread__header"
@@ -190,15 +231,27 @@ watch([groups, () => props.reportDate], ([nextGroups, reportDate]) => {
                       <strong>{{ thread.title }}</strong>
                       <small v-if="thread.summary">{{ thread.summary }}</small>
                     </span>
-                    <span v-if="thread.related_article_ids?.length" class="drm-thread__count">
-                      {{ thread.related_article_ids.length }} 篇
-                      <Icon icon="mdi:chevron-down" width="14" />
+                    <span class="drm-thread__meta">
+                      <Icon
+                        v-if="isThreadFitDemoted(thread.fit_distance)"
+                        icon="mdi:alert-circle-outline"
+                        width="14"
+                        class="drm-thread__flag"
+                        aria-hidden="true"
+                      />
+                      <span v-if="thread.related_article_ids?.length" class="drm-thread__count">
+                        {{ thread.related_article_ids.length }} 篇
+                        <Icon icon="mdi:chevron-down" width="14" />
+                      </span>
                     </span>
                   </button>
                   <div
                     v-if="expandedThreads.has(threadKey(`current-${section.id}`, thread))"
                     class="drm-articles"
                   >
+                    <p class="drm-thread__fit-probe">
+                      贴合度<template v-if="typeof thread.fit_distance === 'number'"> {{ thread.fit_distance.toFixed(2) }} ·</template> {{ threadFitLabel(thread.fit_distance) }}
+                    </p>
                     <template v-for="articleId in thread.related_article_ids" :key="articleId">
                       <button
                         v-if="articleEntry(articleId).status === 'success'"
@@ -225,6 +278,16 @@ watch([groups, () => props.reportDate], ([nextGroups, reportDate]) => {
                     </template>
                   </div>
                 </article>
+                <button
+                  v-if="demotedCount(section) > 0"
+                  type="button"
+                  class="drm-thread__hint"
+                  :aria-expanded="allDemotedExpanded(`current-${section.id}`, section)"
+                  @click="toggleAllDemoted(`current-${section.id}`, section)"
+                >
+                  <Icon icon="mdi:alert-circle-outline" width="13" aria-hidden="true" />
+                  另有 {{ demotedCount(section) }} 条可能跑题的线索
+                </button>
               </div>
             </article>
           </div>
@@ -259,7 +322,12 @@ watch([groups, () => props.reportDate], ([nextGroups, reportDate]) => {
                 <div v-else-if="!historicalSections(group).length" class="drm-history__loading">当日暂无可展开线索。</div>
                 <article v-for="section in historicalSections(group)" :key="section.id" class="drm-history__section">
                   <h3>{{ section.cluster_label }}</h3>
-                  <article v-for="thread in section.threads" :key="thread.id" class="drm-thread">
+                  <article
+                    v-for="thread in section.threads"
+                    :key="thread.id"
+                    class="drm-thread"
+                    :class="{ 'drm-thread--demoted': isThreadFitDemoted(thread.fit_distance) }"
+                  >
                     <button
                       type="button"
                       class="drm-thread__header"
@@ -271,15 +339,27 @@ watch([groups, () => props.reportDate], ([nextGroups, reportDate]) => {
                         <strong>{{ thread.title }}</strong>
                         <small v-if="thread.summary">{{ thread.summary }}</small>
                       </span>
-                      <span v-if="thread.related_article_ids?.length" class="drm-thread__count">
-                        {{ thread.related_article_ids.length }} 篇
-                        <Icon icon="mdi:chevron-down" width="14" />
+                      <span class="drm-thread__meta">
+                        <Icon
+                          v-if="isThreadFitDemoted(thread.fit_distance)"
+                          icon="mdi:alert-circle-outline"
+                          width="14"
+                          class="drm-thread__flag"
+                          aria-hidden="true"
+                        />
+                        <span v-if="thread.related_article_ids?.length" class="drm-thread__count">
+                          {{ thread.related_article_ids.length }} 篇
+                          <Icon icon="mdi:chevron-down" width="14" />
+                        </span>
                       </span>
                     </button>
                     <div
                       v-if="expandedThreads.has(threadKey(`history-${section.id}`, thread))"
                       class="drm-articles"
                     >
+                      <p class="drm-thread__fit-probe">
+                        贴合度<template v-if="typeof thread.fit_distance === 'number'"> {{ thread.fit_distance.toFixed(2) }} ·</template> {{ threadFitLabel(thread.fit_distance) }}
+                      </p>
                       <template v-for="articleId in thread.related_article_ids" :key="articleId">
                         <button
                           v-if="articleEntry(articleId).status === 'success'"
@@ -306,6 +386,16 @@ watch([groups, () => props.reportDate], ([nextGroups, reportDate]) => {
                       </template>
                     </div>
                   </article>
+                  <button
+                    v-if="demotedCount(section) > 0"
+                    type="button"
+                    class="drm-thread__hint"
+                    :aria-expanded="allDemotedExpanded(`history-${section.id}`, section)"
+                    @click="toggleAllDemoted(`history-${section.id}`, section)"
+                  >
+                    <Icon icon="mdi:alert-circle-outline" width="13" aria-hidden="true" />
+                    另有 {{ demotedCount(section) }} 条可能跑题的线索
+                  </button>
                 </article>
               </section>
             </template>
@@ -605,6 +695,74 @@ watch([groups, () => props.reportDate], ([nextGroups, reportDate]) => {
   flex: 0 0 auto;
   color: var(--color-text-muted);
   font-size: 0.65rem;
+}
+
+/* Thread-fit soft-degrade (observability System 3): an off-topic thread is
+   de-emphasized (faded title + flag) but never removed. Colours derive from
+   theme tokens via color-mix so they follow the editorial/dark themes — no
+   hard-coded hex, mirroring matchQuality.ts. */
+.drm-thread--demoted {
+  border-left-color: color-mix(in srgb, var(--color-text-muted) 60%, transparent);
+}
+
+.drm-thread--demoted:hover {
+  border-left-color: color-mix(in srgb, var(--color-accent) 55%, var(--color-text-muted));
+}
+
+.drm-thread--demoted::before {
+  background: color-mix(in srgb, var(--color-text-muted) 70%, transparent);
+}
+
+.drm-thread--demoted .drm-thread__header strong {
+  color: color-mix(in srgb, var(--color-text-primary) 55%, var(--color-text-muted));
+  font-weight: 500;
+}
+
+.drm-thread--demoted .drm-thread__header small {
+  color: var(--color-text-muted);
+}
+
+.drm-thread__meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  flex: 0 0 auto;
+}
+
+.drm-thread__flag {
+  color: color-mix(in srgb, var(--color-text-muted) 80%, var(--color-accent));
+}
+
+/* Fit probe lives inside the expanded .drm-articles block, so the distance
+   number only surfaces once the reader digs in — it never leaks into the
+   collapsed thread header (observability display layering). */
+.drm-thread__fit-probe {
+  margin: 0 0 0.5rem;
+  padding: 0.25rem 0.5rem;
+  border-left: 2px solid var(--color-border-subtle);
+  color: var(--color-text-muted);
+  font-size: 0.65rem;
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+}
+
+.drm-thread__hint {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  margin-top: 0.4rem;
+  padding: 0.3rem 0 0.3rem 0.875rem;
+  border: 0;
+  background: transparent;
+  color: var(--color-text-muted);
+  font-size: 0.66rem;
+  cursor: pointer;
+  transition: color 0.2s ease;
+}
+
+.drm-thread__hint:hover,
+.drm-thread__hint:focus-visible {
+  color: var(--color-text-secondary);
+  outline: none;
 }
 
 .drm-articles {

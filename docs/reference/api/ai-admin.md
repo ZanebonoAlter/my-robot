@@ -87,7 +87,7 @@
 | `timeout_seconds` | int | 否 | 超时 |
 | `max_tokens` | int* | 否 | 最大 tokens |
 | `temperature` | float64* | 否 | 温度 |
-| `enable_thinking` | bool | 否 | 清理推理输出（剥离 `<think>` 标签），默认 `false` |
+| `enable_thinking` | bool | 否 | 是否开启模型推理思考（透传 `chat_template_kwargs.enable_thinking=true` 到请求体），默认 `false`。用于差异化控制：同一台本地模型（如 Qwythos）可配两条 provider——一条 `true` 挂 `digest_polish`（日报思考）、一条 `false` 挂 `topic_tagging`（打标签不思考） |
 | `metadata` | string | 否 | 附加元数据 |
 
 返回 `{"success": true, "data": {"id": ...}}`。

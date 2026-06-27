@@ -167,3 +167,15 @@ AI 相关配置不存储在文件或环境变量中 — 通过 Web UI 管理并�
 这些设置通过 `aisettings.LoadSummaryConfig()`、`aisettings.LoadFirecrawlConfig()` 等函数加载，在前端设置页面中配置。
 
 文章手动总结会在每次请求时重新读取 AI Provider 配置：优先使用 `summary` capability 的启用路由；未配置该路由时，回退到任一启用且具有 Base URL 和 Model 的 Provider。因此服务启动后新增 Provider 无需重启。API Key 对本地 Ollama、llama.cpp 或无需鉴权的 OpenAI-compatible 服务是可选项。
+
+### Provider 思考开关（`enable_thinking`）
+
+`ai_providers.enable_thinking` 字段控制是否让被调用的模型进行推理思考——后端在请求体中透传 `chat_template_kwargs.enable_thinking=true`（适用于 Qwen3.x / Qwythos 等带思考模板的 llama.cpp 模型）。**注意语义**：该字段只控制「模型是否思考」，服务器会把思考内容分离到 `reasoning_content` 字段，`content` 始终是干净答案。
+
+**典型场景：同一台本地模型，打标签不思考、生成日报思考**。靠配两条 provider 指向同一服务实现差异化（无需改代码）：
+
+1. 后台新建 provider `qwythos-nothink`：`base_url=http://127.0.0.1:8080`、`model=<模型名>`、`enable_thinking=false`。挂到 `topic_tagging` route（打标签走它，省 token、更快）。
+2. 后台新建 provider `qwythos-think`：同样的 `base_url` 和 `model`、`enable_thinking=true`。挂到 `digest_polish` route（日报走它，思考后质量更高）。
+
+> 历史语义提示：该字段曾表示「事后剥离 `<think>` 标签」，migration `20260626_0001` 已将所有 provider 的该字段重置为 `false` 以兜底语义反转。升级后请按需手动开启日报 provider 的思考。
+

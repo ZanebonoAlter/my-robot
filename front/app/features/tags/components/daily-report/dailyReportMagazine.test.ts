@@ -8,7 +8,13 @@ import {
 } from './dailyReportMagazine'
 import type { DailyReport, DailyReportSection, SectionRelation, SectionTimelineNode } from '~/api/dailyReports'
 
-function section(id: number, tier: number, score: number, status?: string): DailyReportSection {
+function section(
+  id: number,
+  tier: number,
+  score: number,
+  status?: string,
+  topicStatusAtReport?: string | null,
+): DailyReportSection {
   return {
     id,
     cluster_index: id,
@@ -18,7 +24,7 @@ function section(id: number, tier: number, score: number, status?: string): Dail
     article_count: 1,
     best_tier: tier,
     avg_score: score,
-    persistent_topic_id: status ? id : undefined,
+    persistent_topic_id: status || topicStatusAtReport != null ? id : undefined,
     persistent_topic: status ? {
       id,
       label: `topic-${id}`,
@@ -27,20 +33,75 @@ function section(id: number, tier: number, score: number, status?: string): Dail
       consecutive_hits: 1,
       can_activate: false,
     } : undefined,
+    topic_status_at_report: topicStatusAtReport,
   }
 }
 
 describe('dailyReportMagazine data mapping', () => {
-  it('sorts sections inside active, candidate, and unassigned zones', () => {
+  it('sorts sections inside active and briefs zones by snapshot', () => {
     const zones = buildQualityZones([
-      section(1, 2, 0.5, 'active'),
-      section(2, 0, 0.9, 'candidate'),
-      section(3, 1, 0.7, 'active'),
-      section(4, 3, 0.1),
+      section(1, 2, 0.5, 'active', 'active'),
+      section(2, 0, 0.9, 'candidate', 'candidate'),
+      section(3, 1, 0.7, 'active', 'active'),
+      section(4, 3, 0.1, undefined, null),
     ])
 
-    expect(zones.map(zone => zone.key)).toEqual(['active', 'candidate', 'unassigned'])
+    expect(zones.map(zone => zone.key)).toEqual(['active', 'briefs'])
     expect(zones[0]?.sections.map(item => item.id)).toEqual([3, 1])
+  })
+
+  it('puts snapshot=active into "关心的话题"', () => {
+    const zones = buildQualityZones([section(1, 0, 0.9, 'active', 'active')])
+    expect(zones).toHaveLength(1)
+    expect(zones[0]!.key).toBe('active')
+    expect(zones[0]!.label).toBe('关心的话题')
+  })
+
+  it('puts snapshot=candidate into "其他动态" (briefs)', () => {
+    const zones = buildQualityZones([section(1, 0, 0.9, 'candidate', 'candidate')])
+    expect(zones).toHaveLength(1)
+    expect(zones[0]!.key).toBe('briefs')
+    expect(zones[0]!.label).toBe('其他动态')
+  })
+
+  it('puts snapshot=null into "其他动态"', () => {
+    const zones = buildQualityZones([section(1, 0, 0.9, 'active', null)])
+    expect(zones).toHaveLength(1)
+    expect(zones[0]!.key).toBe('briefs')
+  })
+
+  it('puts missing snapshot (undefined) into "其他动态"', () => {
+    const zones = buildQualityZones([section(1, 0, 0.9, 'active')])
+    expect(zones).toHaveLength(1)
+    expect(zones[0]!.key).toBe('briefs')
+  })
+
+  it('does not give candidates sorting bonus — briefs zone sorted only by (tier, score)', () => {
+    const zones = buildQualityZones([
+      section(1, 1, 0.3, 'candidate', 'candidate'),
+      section(2, 1, 0.7, 'active', 'active'),
+      section(3, 1, 0.5, 'active', 'candidate'),
+    ])
+    const briefs = zones.find(z => z.key === 'briefs')!
+    // Both sections in briefs sorted by tier ASC, score DESC; candidate gets no bonus.
+    expect(briefs.sections.map(s => s.id)).toEqual([3, 1])
+  })
+
+  it('uses snapshot, not current topic.status, for zoning (immutable)', () => {
+    // section was active at report time; topic later archived
+    const zones = buildQualityZones([section(1, 0, 0.9, 'archived', 'active')])
+    expect(zones[0]!.key).toBe('active')
+    expect(zones[0]!.label).toBe('关心的话题')
+  })
+
+  it('no longer renders three zones or "突发的新话题" label', () => {
+    const zones = buildQualityZones([
+      section(1, 0, 0.9, 'active', 'active'),
+      section(2, 1, 0.5, 'candidate', 'candidate'),
+      section(3, 2, 0.3),
+    ])
+    expect(zones.map(z => z.key)).toEqual(['active', 'briefs'])
+    expect(zones.flatMap(z => z.sections.map(s => s.id))).toEqual(expect.arrayContaining([1, 2, 3]))
   })
 
   it('uses the first highlight, then falls back to the best section', () => {

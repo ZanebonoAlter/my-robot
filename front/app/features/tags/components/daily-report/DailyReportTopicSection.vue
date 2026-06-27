@@ -41,8 +41,7 @@ let autoExpandedDate = ''
 
 const topicStatusLabel: Record<QualityZone['key'], string> = {
   active: '关心 · 持续追踪',
-  candidate: '突发 · 观察中',
-  unassigned: '其他动态',
+  briefs: '其他动态',
 }
 
 function lifelineEntry(topicId?: number): RequestCacheEntry<TopicLifelineData> {
@@ -58,7 +57,7 @@ function toggleTopic(group: TopicGroup) {
   if (next.has(group.key)) next.delete(group.key)
   else {
     next.add(group.key)
-    if (group.topicId != null && group.status === 'active') emit('ensureLifeline', group.topicId)
+    if (group.topicId != null && props.zone.key === 'active') emit('ensureLifeline', group.topicId)
   }
   expandedTopics.value = next
 }
@@ -267,7 +266,7 @@ watch([groups, () => props.reportDate], ([nextGroups, reportDate]) => {
           </div>
 
           <DailyReportMiniLifeline
-            v-if="group.status === 'active' && group.topicId != null"
+            v-if="zone.key === 'active' && group.topicId != null"
             :topic-id="group.topicId"
             :topic-color="group.color"
             :report-date="reportDate"

@@ -115,6 +115,11 @@ export interface DailyReportSection {
   topic_match_distance?: number
   topic_match_confidence?: string
   persistent_topic?: PersistentTopicBrief
+  /** 报告生成时的话题状态快照（active | candidate | null），用于阅读分区而非
+   *  当前 topic.status。旧数据可能为 null；缺失时保守降级到"其他动态"。
+   *  后端必须输出小写枚举值（active | candidate）；混合大小写将降级到"其他动态"。
+   *  snake_case，与 daily-report API 约定一致。 */
+  topic_status_at_report?: string | null
 }
 
 export interface DailyReport {

@@ -70,6 +70,10 @@ function activeZone(sections: DailyReportSection[]): QualityZone {
   return { key: 'active', label: '关心的话题', eyebrow: 'Following', sections }
 }
 
+function briefsZone(sections: DailyReportSection[]): QualityZone {
+  return { key: 'briefs', label: '其他动态', eyebrow: 'Briefs', sections }
+}
+
 function mountSection(over: {
   zone?: QualityZone
   reportDate?: string
@@ -227,6 +231,64 @@ describe('DailyReportTopicSection — thread-fit soft-degrade (current loop)', (
     const probe = wrapper.find('.drm-thread__fit-probe')
     expect(probe.text()).toContain('0.12')
     expect(probe.text()).toContain('贴合')
+  })
+})
+
+describe('DailyReportTopicSection — candidate badge removal (two-zone model)', () => {
+  it('does not render "突发" or candidate badge in briefs zone', () => {
+    const wrapper = mountSection({
+      zone: briefsZone([makeSection(100, [makeThread(1)], {
+        persistent_topic: {
+          id: 5, label: '候选话题', status: 'candidate',
+          color: '#b44f45', consecutive_hits: 3, can_activate: false,
+        },
+      })]),
+    })
+    expect(wrapper.text()).not.toContain('突发')
+    expect(wrapper.text()).not.toContain('Developing')
+    expect(wrapper.text()).not.toContain('观察中')
+    // 正向硬约束：briefs zone 的状态文案必须是"其他动态"，绝非旧 candidate 文案
+    expect(wrapper.find('.drm-topic__status').text()).toBe('其他动态')
+  })
+
+  it('renders active zone status label as "关心 · 持续追踪" and not old candidate text', () => {
+    const wrapper = mountSection({
+      zone: activeZone([makeSection(100, [makeThread(1)], {
+        persistent_topic: {
+          id: 5, label: '测试话题', status: 'active',
+          color: '#b44f45', consecutive_hits: 3, can_activate: false,
+        },
+      })]),
+    })
+    expect(wrapper.find('.drm-topic__status').text()).toBe('关心 · 持续追踪')
+    expect(wrapper.text()).not.toContain('candidate')
+    expect(wrapper.text()).not.toContain('观察中')
+  })
+
+  it('shows candidate topic label in briefs zone (still readable)', () => {
+    const wrapper = mountSection({
+      zone: briefsZone([makeSection(100, [makeThread(1)], {
+        persistent_topic: {
+          id: 5, label: '候选话题', status: 'candidate',
+          color: '#b44f45', consecutive_hits: 3, can_activate: false,
+        },
+      })]),
+    })
+    expect(wrapper.text()).toContain('候选话题')
+    expect(wrapper.text()).toContain('其他动态')
+  })
+
+  it('does not auto-expand topics in briefs zone', async () => {
+    const wrapper = mountSection({
+      zone: briefsZone([makeSection(100, [makeThread(1)], {
+        persistent_topic: {
+          id: 5, label: '候选话题', status: 'candidate',
+          color: '#b44f45', consecutive_hits: 3, can_activate: false,
+        },
+      })]),
+    })
+    // briefs zone should not auto-expand topics (no lifeline stub visible)
+    expect(wrapper.find('.lifeline-stub').exists()).toBe(false)
   })
 })
 

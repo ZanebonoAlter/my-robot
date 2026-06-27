@@ -17,24 +17,24 @@
 
 ## 3. 前端 TDD — 阅读分区解耦
 
-- [ ] 3.1 RED：扩展 `dailyReportMagazine.test.ts`，覆盖快照 active →“关心的话题”、candidate/null →“其他动态”、candidate 不获得排序加权，以及当前 topic.status 变化不改变历史分区；验收：旧三分区实现下测试先失败。
-- [ ] 3.2 RED：扩展 `DailyReportTopicSection.test.ts` / `BoardDailyReportTimeline` 相关测试，断言页面不再出现“突发的新话题”“Developing”或 candidate 状态徽章，candidate 仍能在“其他动态”正常阅读；验收：旧文案与旧 zone 使测试先红。
-- [ ] 3.3 GREEN：更新 `DailyReportSection` 类型和 normalizer，接收可空 `topic_status_at_report`，对缺失字段保持兼容。
-- [ ] 3.4 GREEN：把 `QualityZone` 收敛为 active/briefs 两类，按报告时快照分区；candidate、archived 和旧数据 NULL 统一进入“其他动态”，保持 `(best_tier, avg_score)` 排序。
-- [ ] 3.5 GREEN：更新日报侧栏、正文话题组和状态文案；仅 active 快照话题进入目录和自动展开逻辑，其他动态不得自动请求 topic lifeline。
-- [ ] 3.6 REFACTOR：删除本次变更造成的废弃 candidate zone 分支、类型和样式，不改动相邻的主题、文章展开或 section 生命周期交互。
+- [x] 3.1 RED：扩展 `dailyReportMagazine.test.ts`，覆盖快照 active →"关心的话题"、candidate/null →"其他动态"、candidate 不获得排序加权，以及当前 topic.status 变化不改变历史分区；验收：旧三分区实现下测试先失败。
+- [x] 3.2 RED：扩展 `DailyReportTopicSection.test.ts` / `BoardDailyReportTimeline` 相关测试，断言页面不再出现"突发的新话题""Developing"或 candidate 状态徽章，candidate 仍能在"其他动态"正常阅读；验收：旧文案与旧 zone 使测试先红。
+- [x] 3.3 GREEN：更新 `DailyReportSection` 类型和 normalizer，接收可空 `topic_status_at_report`，对缺失字段保持兼容。
+- [x] 3.4 GREEN：把 `QualityZone` 收敛为 active/briefs 两类，按报告时快照分区；candidate、archived 和旧数据 NULL 统一进入"其他动态"，保持 `(best_tier, avg_score)` 排序。
+- [x] 3.5 GREEN：更新日报侧栏、正文话题组和状态文案；仅 active 快照话题进入目录和自动展开逻辑，其他动态不得自动请求 topic lifeline。
+- [x] 3.6 REFACTOR：删除本次变更造成的废弃 candidate zone 分支、类型和样式，不改动相邻的主题、文章展开或 section 生命周期交互。
 
 ## 4. 兼容性与集成
 
 - [x] 4.1 使用 `testutil.SetupTestDB` 增加 repository 集成测试：迁移重复执行成功，新报告写入快照，历史 NULL 可查询，candidate 自动归档后退出可锚定集合，active 不受 candidate 上限影响。
 - [x] 4.2 增加 service/repository 协同测试，断言同一报告日期下 ClusterTags 收到的 topic id 集合与 assignment 接受集合一致，窗口外/被截断 candidate 不会单边参与双重确认。
 - [x] 4.3 更新日报 API 契约测试与前端 fixture，覆盖 snake_case 字段、NULL 兼容和 current status 与 snapshot status 不一致的历史案例。
-- [ ] 4.4 更新受影响的日报 magazine E2E fixture/断言，验证 candidate 内容可读但不形成独立注意力区；不新增脆弱的整页视觉快照。
+- [x] 4.4 更新受影响的日报 magazine E2E fixture/断言，验证 candidate 内容可读但不形成独立注意力区；不新增脆弱的整页视觉快照。
 
 ## 5. 测试
 
 - [x] 5.1 后端 RED/GREEN 过程只运行影响包：`go test ./internal/topicgraph/repository ./internal/topicgraph/service`；验收：新增测试先红，完成实现后全部 PASS。
-- [ ] 5.2 前端 RED/GREEN 过程通过 Windows cmd 运行受影响 Vitest 文件：`cmd.exe /C "cd /d D:\project\Syntopica\front && pnpm test:unit -- app/features/tags/components/daily-report/dailyReportMagazine.test.ts app/features/tags/components/daily-report/DailyReportTopicSection.test.ts"`；验收：新增测试先红，完成实现后 PASS。
+- [x] 5.2 前端 RED/GREEN 过程通过 Windows cmd 运行受影响 Vitest 文件：`cmd.exe /C "cd /d D:\project\Syntopica\front && pnpm test:unit -- app/features/tags/components/daily-report/dailyReportMagazine.test.ts app/features/tags/components/daily-report/DailyReportTopicSection.test.ts"`；验收：新增测试先红，完成实现后 PASS。
 - [x] 5.3 数据库集成测试在 Docker/testcontainer 可用时运行 `go test ./internal/topicgraph/repository -run "Test.*(PersistentTopic|TopicAssignment|Candidate)" -count=1`；验收：迁移幂等、NULL 兼容、快照稳定和 candidate 归档全部 PASS。
 
 ## 6. 文档

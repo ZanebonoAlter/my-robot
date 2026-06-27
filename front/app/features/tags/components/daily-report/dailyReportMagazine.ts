@@ -6,7 +6,7 @@ import type {
   SectionTimelineNode,
 } from '~/api/dailyReports'
 
-export type QualityZoneKey = 'active' | 'candidate' | 'unassigned'
+export type QualityZoneKey = 'active' | 'briefs'
 
 export interface QualityZone {
   key: QualityZoneKey
@@ -20,7 +20,6 @@ export interface TopicGroup {
   topicId?: number
   label: string
   color?: string
-  status: string
   sections: DailyReportSection[]
   articleCount: number
   threadCount: number
@@ -70,17 +69,12 @@ export function sortDailyReportSections(sections: DailyReportSection[]): DailyRe
 
 export function buildQualityZones(sections: DailyReportSection[]): QualityZone[] {
   const sorted = sortDailyReportSections(sections)
-  const active = sorted.filter(section => section.persistent_topic?.status === 'active')
-  const candidate = sorted.filter(section => (
-    section.persistent_topic_id != null
-    && section.persistent_topic?.status !== 'active'
-  ))
-  const unassigned = sorted.filter(section => section.persistent_topic_id == null)
+  const active = sorted.filter(section => section.topic_status_at_report === 'active')
+  const briefs = sorted.filter(section => section.topic_status_at_report !== 'active')
 
   return [
     active.length ? { key: 'active' as const, label: '关心的话题', eyebrow: 'Following', sections: active } : null,
-    candidate.length ? { key: 'candidate' as const, label: '突发的新话题', eyebrow: 'Developing', sections: candidate } : null,
-    unassigned.length ? { key: 'unassigned' as const, label: '其他动态', eyebrow: 'Briefs', sections: unassigned } : null,
+    briefs.length ? { key: 'briefs' as const, label: '其他动态', eyebrow: 'Briefs', sections: briefs } : null,
   ].filter((zone): zone is QualityZone => zone !== null)
 }
 
@@ -103,7 +97,6 @@ export function groupSectionsByTopic(zone: QualityZone): TopicGroup[] {
       topicId,
       label: section.persistent_topic?.label || section.cluster_label,
       color: section.persistent_topic?.color,
-      status: section.persistent_topic?.status || zone.key,
       sections: [section],
       articleCount: section.article_count,
       threadCount: section.threads?.length ?? 0,

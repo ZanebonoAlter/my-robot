@@ -22,10 +22,12 @@ flowchart LR
 | 阅读 | [reading.md](../flow/reading.md) | [frontend.md](frontend.md) §页面骨架 | `internal/reader/{handler,service}/` | `features/articles/`、`features/shell/`、`stores/` |
 | 内容增强 | [content-enrichment.md](../flow/content-enrichment.md) | [backend.md](backend.md) §具体数据链路示例 | `internal/reader/handler/`、`internal/platform/`(firecrawl) | `features/articles/`、`app/api/` |
 | AI 总结 | [ai-summary.md](../flow/ai-summary.md) | [backend.md](backend.md) | `internal/reader/`、`internal/platform/airouter/`、`internal/platform/ws/` | `features/ai/` |
-| 日报 / Digest | [daily-report.md](../flow/daily-report.md) | [tracing.md](tracing.md) | `internal/admin/`(scheduler, daily_report job)、`internal/topicgraph/` | `features/ai/`(Digest 预览)、`features/articles/`(关联文章)、`features/tags/components/daily-report/`(section 可视化与匹配血缘) |
+| 日报 / Digest | [daily-report.md](../flow/daily-report.md) | [tracing.md](tracing.md) | `internal/admin/`(scheduler, daily_report job)、`internal/topicgraph/` | `features/ai/`(Digest 预览)、`features/articles/`(关联文章)、`features/tags/components/daily-report/`(section 可视化)、`app/utils/{topicAnchor,matchQuality,threadFit}.ts`(observability: System 1 tag↔板块 / System 2 section↔话题 / System 3 thread↔section) |
 | 话题图谱 | [topic-graph.md](../flow/topic-graph.md) | [backend.md](backend.md) | `internal/topicgraph/{handler,service,repository}/` | `features/tags/`、`tests/e2e/topic-graph.spec.ts` |
 | 语义版块 | [semantic-board.md](../flow/semantic-board.md) | [backend.md](backend.md) | `internal/tagmanagement/{handler,service}/`(auxlabel, board) | `features/tags/` |
 | 定时任务（横切） | [scheduler.md](../flow/scheduler.md) | [runtime.md](runtime.md) §Scheduler | `internal/admin/scheduler/`、`internal/app/`(runtime) | `features/settings/` |
+
+> 日报域三套 observability 并列、展示面互补（System 1 tag↔板块 / System 2 section↔话题 / System 3 thread↔section），入口 utils 见上行，细节见 [daily-report.md](../flow/daily-report.md) §0/§4。
 
 ## 横切基础设施（非业务域，不进 flow/）
 

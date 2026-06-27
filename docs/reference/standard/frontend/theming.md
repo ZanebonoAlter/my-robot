@@ -37,6 +37,17 @@ editorial / magazine（杂志感），**禁止回退到蓝紫色 SaaS 视觉**�
 
 使用 Iconify，不引入新的图标库。
 
+## Observability 数据展示分层
+
+可观测信号（质量 / 匹配度 / 贴合度等）的前端展示遵循**分层哲学**，避免数字污染沉浸阅读：
+
+- **正文极轻**：用形态 / 色彩 / 降级表达状态，**不直接渲染数字**。
+- **分数进探究区**：具体数值与明细只在 hover 或展开的探究区呈现。
+- **软降级保信息**：离群 / 异常项做视觉降级（灰 token + 折叠 + 标记），**不删除**，由用户甄别。
+- **token 派生**：降级 / 分档样式从 Layer 2 语义 token 派生，不在 utils 里硬编码颜色（纯函数只产布尔判定 / 中文标签，如 `topicAnchor.ts` / `matchQuality.ts` / `threadFit.ts`）。
+
+具体三系列实例（日报 section 头部徽章 + thread 行降级）见 [daily-report.md](../../flow/daily-report.md) §4；本规范仅收敛为跨 feature 可复用的展示约定。
+
 ## 资料来源
 
 本规范源自 v1.3.3 架构深化，内容收敛自原 `front/AGENTS.md` §主题系统 与 `development.md` §前端样式约定。

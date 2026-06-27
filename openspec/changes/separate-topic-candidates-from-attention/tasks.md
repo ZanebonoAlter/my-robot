@@ -47,13 +47,13 @@
 ## 7. 验证
 
 - [ ] 7.1 `cd backend-go && golangci-lint run ./...`；期望：退出码 0，无新增 lint 错误。
-- [ ] 7.2 `cd backend-go && go vet ./...`；期望：退出码 0。
-- [ ] 7.3 `cd backend-go && go test ./internal/topicgraph/repository ./internal/topicgraph/service`；期望：影响包全部 PASS，不运行无关 Go 全量测试。
-- [ ] 7.4 `cd backend-go && go build ./...`；期望：退出码 0。
-- [ ] 7.5 `cd front && pnpm lint`；期望：退出码 0。
-- [ ] 7.6 `cmd.exe /C "cd /d D:\project\Syntopica\front && pnpm exec nuxi typecheck"`；期望：退出码 0。
-- [ ] 7.7 `cmd.exe /C "cd /d D:\project\Syntopica\front && pnpm test:unit"`；期望：全部 Vitest 用例 PASS。
-- [ ] 7.8 `cmd.exe /C "cd /d D:\project\Syntopica\front && pnpm build"`；期望：生产构建成功。
-- [ ] 7.9 `rg -n -F "突发的新话题" front/app docs/reference`；期望：零命中，或仅存在明确说明该旧语义已废弃的迁移文档命中。
-- [ ] 7.10 `openspec validate separate-topic-candidates-from-attention --type change --strict`；期望：change valid，无规格结构错误。
+- [x] 7.2 `cd backend-go && go vet ./...`；期望：退出码 0。
+- [x] 7.3 `cd backend-go && go test ./internal/topicgraph/repository ./internal/topicgraph/service`；期望：影响包全部 PASS，不运行无关 Go 全量测试。
+- [x] 7.4 `cd backend-go && go build ./...`；期望：退出码 0。
+- [x] 7.5 `cd front && pnpm lint`；期望：退出码 0。
+- [x] 7.6 `cmd.exe /C "cd /d D:\project\Syntopica\front && pnpm exec nuxi typecheck"`；期望：退出码 0。
+- [x] 7.7 `cmd.exe /C "cd /d D:\project\Syntopica\front && pnpm test:unit"`；期望：全部 Vitest 用例 PASS。
+- [x] 7.8 `cmd.exe /C "cd /d D:\project\Syntopica\front && pnpm build"`；期望：生产构建成功。
+- [x] 7.9 `rg -n -F "突发的新话题" front/app docs/reference`；期望：零命中，或仅存在明确说明该旧语义已废弃的迁移文档命中。
+- [x] 7.10 `openspec validate separate-topic-candidates-from-attention --type change --strict`；期望：change valid，无规格结构错误。
 - [ ] 7.11 `git diff --check`；期望：退出码 0，无空白错误；随后确认 proposal/design/specs/tasks 与 `docs/reference/` 已同步、任务全部勾选，再执行归档流程。

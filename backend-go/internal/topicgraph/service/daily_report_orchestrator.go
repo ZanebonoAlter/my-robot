@@ -262,7 +262,7 @@ const (
 // maxContextArticles representative articles for the given tag in [start, end), to ground the
 // daily report LLM prompts in actual event content. Summary precedence mirrors article_tagger's
 // buildArticleSummary (AIContentSummary > FirecrawlContent > Content > Description) but is
-// reimplemented here to avoid importing tagmanagement (no circular dependency).
+// reimplemented here because buildArticleSummary is unexported in tagmanagement/service/core.
 func buildArticleContextForTag(tagID uint, start, end time.Time) string {
 	type articleRow struct {
 		Title            string

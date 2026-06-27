@@ -15,7 +15,7 @@ import (
 	// "syntopica-backend/internal/platform/logging"
 )
 
-var thinkTagRe = regexp.MustCompile(`(?s)<think\s*>.*?</think\s*>`)
+var thinkTagRe = regexp.MustCompile(`(?s)<think\s*>.*?</think\s*>`) //nolint:unused // retained defensively; see design.md Risks/Trade-offs
 
 type Message struct {
 	Role    string `json:"role"`
@@ -213,6 +213,8 @@ func buildPayload(provider models.AIProvider, req ChatRequest) map[string]any {
 // called by Chat (servers that support reasoning now separate it into a reasoning_content field),
 // but is retained as a defensive helper: if a future provider returns <think> tags embedded in
 // content, this can be reapplied without re-deriving the regex.
+//
+//nolint:unused // retained defensively; see design.md Risks/Trade-offs
 func stripThinkTags(content string) string {
 	return strings.TrimSpace(thinkTagRe.ReplaceAllString(content, ""))
 }

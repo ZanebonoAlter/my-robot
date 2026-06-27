@@ -183,14 +183,14 @@ func GenerateDailyReport(ctx context.Context, boardID uint, date time.Time) (*re
 		breakdownJSON := buildQualityBreakdownJSON(tags, cluster.TagIDs)
 
 		sections = append(sections, repository.DailyReportSection{
-			ClusterIndex:      i,
-			ClusterLabel:      cluster.GroupName,
-			ClusterTagIDs:     tagIDsJSON,
-			ArticleCount:      clusterArticleCount,
-			BestTier:          bestTier,
-			AvgScore:          avgScore,
-			QualityBreakdown:  breakdownJSON,
-			MatchedTopicID:    cluster.MatchedTopicID,
+			ClusterIndex:     i,
+			ClusterLabel:     cluster.GroupName,
+			ClusterTagIDs:    tagIDsJSON,
+			ArticleCount:     clusterArticleCount,
+			BestTier:         bestTier,
+			AvgScore:         avgScore,
+			QualityBreakdown: breakdownJSON,
+			MatchedTopicID:   cluster.MatchedTopicID,
 		})
 	}
 
@@ -252,6 +252,65 @@ func GenerateDailyReport(ctx context.Context, boardID uint, date time.Time) (*re
 
 	return report, sections, threadBatches, nil
 }
+
+const (
+	maxContextArticles     = 3
+	maxContextSummaryRunes = 200
+)
+
+// buildArticleContextForTag returns a compact "《title》summary; ..." string of up to
+// maxContextArticles representative articles for the given tag in [start, end), to ground the
+// daily report LLM prompts in actual event content. Summary precedence mirrors article_tagger's
+// buildArticleSummary (AIContentSummary > FirecrawlContent > Content > Description) but is
+// reimplemented here to avoid importing tagmanagement (no circular dependency).
+func buildArticleContextForTag(tagID uint, start, end time.Time) string {
+	type articleRow struct {
+		Title            string
+		AIContentSummary string
+		FirecrawlContent string
+		Content          string
+		Description      string
+	}
+	var rows []articleRow
+	err := repository.Repo.DB().Model(&models.Article{}).
+		Joins("JOIN article_topic_tags ON article_topic_tags.article_id = articles.id").
+		Where("article_topic_tags.topic_tag_id = ? AND articles.pub_date >= ? AND articles.pub_date < ?", tagID, start, end).
+		Order("articles.pub_date DESC").
+		Limit(maxContextArticles).
+		Find(&rows).Error
+	if err != nil || len(rows) == 0 {
+		return ""
+	}
+	var parts []string
+	for _, r := range rows {
+		summary := pickArticleSummary(r.AIContentSummary, r.FirecrawlContent, r.Content, r.Description)
+		if strings.TrimSpace(summary) == "" {
+			continue
+		}
+		runes := []rune(summary)
+		if len(runes) > maxContextSummaryRunes {
+			summary = string(runes[:maxContextSummaryRunes])
+		}
+		title := strings.TrimSpace(r.Title)
+		if title == "" {
+			parts = append(parts, summary)
+		} else {
+			parts = append(parts, fmt.Sprintf("《%s》%s", title, summary))
+		}
+	}
+	return strings.Join(parts, " ; ")
+}
+
+// pickArticleSummary returns the first non-blank string in precedence order:
+// AIContentSummary > FirecrawlContent > Content > Description.
+func pickArticleSummary(fields ...string) string {
+	for _, s := range fields {
+		if trimmed := strings.TrimSpace(s); trimmed != "" {
+			return trimmed
+		}
+	}
+	return ""
+}
 func collectBoardTags(boardID uint, date time.Time) ([]repository.TagInput, [][]uint, error) {
 	startOfDay := time.Date(date.Year(), date.Month(), date.Day(), 0, 0, 0, 0, date.Location())
 	endOfDay := startOfDay.Add(24 * time.Hour)
@@ -301,15 +360,16 @@ func collectBoardTags(boardID uint, date time.Time) ([]repository.TagInput, [][]
 	var articleIDSets [][]uint
 	for _, row := range rows {
 		tags = append(tags, repository.TagInput{
-			ID:           row.ID,
-			Label:        row.Label,
-			Category:     row.Category,
-			Description:  row.Description,
-			ArticleCount: row.ArticleCount,
-			Source:       row.Source,
-			MatchReason:  row.MatchReason,
-			Score:        row.Score,
-			Downgraded:   row.Downgraded,
+			ID:             row.ID,
+			Label:          row.Label,
+			Category:       row.Category,
+			Description:    row.Description,
+			ArticleCount:   row.ArticleCount,
+			Source:         row.Source,
+			MatchReason:    row.MatchReason,
+			Score:          row.Score,
+			Downgraded:     row.Downgraded,
+			ArticleContext: buildArticleContextForTag(row.ID, startOfDay, endOfDay),
 		})
 
 		// Get article IDs for this tag on this date
@@ -368,15 +428,16 @@ func collectBoardTags(boardID uint, date time.Time) ([]repository.TagInput, [][]
 				Pluck("article_topic_tags.article_id", &artIDs)
 
 			tags = append(tags, repository.TagInput{
-				ID:           t.ID,
-				Label:        t.Label,
-				Category:     t.Category,
-				Description:  t.Description,
-				Source:       t.Source,
-				ArticleCount: len(artIDs),
-				MatchReason:  boardMatch.MatchReason,
-				Score:        boardMatch.Score,
-				Downgraded:   boardMatch.Downgraded,
+				ID:             t.ID,
+				Label:          t.Label,
+				Category:       t.Category,
+				Description:    t.Description,
+				Source:         t.Source,
+				ArticleCount:   len(artIDs),
+				MatchReason:    boardMatch.MatchReason,
+				Score:          boardMatch.Score,
+				Downgraded:     boardMatch.Downgraded,
+				ArticleContext: buildArticleContextForTag(t.ID, startOfDay, endOfDay),
 			})
 			articleIDSets = append(articleIDSets, artIDs)
 		}

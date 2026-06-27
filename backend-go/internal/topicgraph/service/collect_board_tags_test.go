@@ -91,3 +91,46 @@ func TestCollectBoardTags_PGHonorsDowngradedColumn(t *testing.T) {
 	assert.Equal(t, true, byLabel["GPU短缺"].Downgraded, "downgraded flag must round-trip through PostgreSQL GROUP BY")
 	assert.Equal(t, "max_sim", byLabel["GPU短缺"].MatchReason)
 }
+
+// TestCollectBoardTags_PopulatesArticleContext verifies the representative article
+// titles+summaries are injected into TagInput.ArticleContext, grounding the daily report
+// LLM prompts in actual event content (fix for headline confusion).
+func TestCollectBoardTags_PopulatesArticleContext(t *testing.T) {
+	db := testutil.SetupTestDB(t)
+	repository.Repo = repository.NewTopicGraphRepository(db)
+
+	feed := models.Feed{Title: "ctx-feed", URL: "https://example.com/feed-ctx"}
+	require.NoError(t, db.Create(&feed).Error)
+
+	board := models.SemanticLabel{Label: "ctx-board", Slug: "ctx-board", LabelType: "board"}
+	require.NoError(t, db.Create(&board).Error)
+
+	tag := models.TopicTag{
+		Slug: "rate-cut", Label: "降准", Category: models.TagCategoryEvent, Status: "active",
+	}
+	require.NoError(t, db.Create(&tag).Error)
+	require.NoError(t, db.Create(&models.TopicTagBoardLabel{
+		TopicTagID: tag.ID, SemanticBoardID: board.ID,
+		MatchReason: "direct_hit", Score: 1.0, Downgraded: false,
+	}).Error)
+
+	now := time.Now()
+	pubDate := time.Date(now.Year(), now.Month(), now.Day(), 12, 0, 0, 0, now.Location())
+	art := models.Article{
+		FeedID:           feed.ID,
+		Title:            "央行宣布降准",
+		AIContentSummary: "央行决定下调存款准备金率0.5个百分点。",
+		PubDate:          &pubDate,
+	}
+	require.NoError(t, db.Create(&art).Error)
+	require.NoError(t, db.Create(&models.ArticleTopicTag{ArticleID: art.ID, TopicTagID: tag.ID}).Error)
+
+	tags, _, err := collectBoardTags(board.ID, now)
+	require.NoError(t, err)
+	require.Len(t, tags, 1)
+
+	ctx := tags[0].ArticleContext
+	assert.NotEmpty(t, ctx, "ArticleContext should be populated from representative article")
+	assert.Contains(t, ctx, "央行宣布降准", "ArticleContext should include article title")
+	assert.Contains(t, ctx, "央行决定下调", "ArticleContext should include article summary")
+}

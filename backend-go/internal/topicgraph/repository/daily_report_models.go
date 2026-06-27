@@ -94,17 +94,17 @@ func (BoardPersistentTopic) TableName() string {
 
 // DailyReportSection — one section per cluster
 type DailyReportSection struct {
-	ID            uint                `gorm:"primarykey" json:"id"`
-	ReportID      uint                `gorm:"index;not null" json:"report_id"`
-	ClusterIndex  int                 `json:"cluster_index"`
-	ClusterLabel  string              `gorm:"size:200" json:"cluster_label"`
-	ClusterTagIDs JSON                `gorm:"type:jsonb" json:"cluster_tag_ids"`
-	Threads       []DailyReportThread `gorm:"foreignKey:SectionID" json:"threads,omitempty"`
-	ArticleCount  int                 `json:"article_count"`
-	BestTier      int                 `gorm:"default:0" json:"best_tier"`
-	AvgScore          float64             `gorm:"default:0" json:"avg_score"`
-	QualityBreakdown  JSON                `gorm:"type:jsonb" json:"quality_breakdown"`
-	Embedding         string              `gorm:"type:vector" json:"-"`
+	ID               uint                `gorm:"primarykey" json:"id"`
+	ReportID         uint                `gorm:"index;not null" json:"report_id"`
+	ClusterIndex     int                 `json:"cluster_index"`
+	ClusterLabel     string              `gorm:"size:200" json:"cluster_label"`
+	ClusterTagIDs    JSON                `gorm:"type:jsonb" json:"cluster_tag_ids"`
+	Threads          []DailyReportThread `gorm:"foreignKey:SectionID" json:"threads,omitempty"`
+	ArticleCount     int                 `json:"article_count"`
+	BestTier         int                 `gorm:"default:0" json:"best_tier"`
+	AvgScore         float64             `gorm:"default:0" json:"avg_score"`
+	QualityBreakdown JSON                `gorm:"type:jsonb" json:"quality_breakdown"`
+	Embedding        string              `gorm:"type:vector" json:"-"`
 	// Persistent topic assignment. NOT NULL is intentionally omitted at the DB
 	// layer to tolerate the backfill window and historical rows; the assignment
 	// algorithm guarantees new sections are always assigned (except the
@@ -129,15 +129,15 @@ func (DailyReportSection) TableName() string {
 
 // DailyReportThread — one narrative thread, stored independently
 type DailyReportThread struct {
-	ID                uint      `gorm:"primarykey" json:"id"`
-	ReportID          uint      `gorm:"index;not null" json:"report_id"`
-	SectionID         uint      `gorm:"index;not null" json:"section_id"`
-	Title             string    `json:"title"`
-	Summary           string    `json:"summary"`
-	TagIDs            JSON      `gorm:"type:jsonb" json:"tag_ids"`
-	Confidence        float64   `gorm:"default:0" json:"confidence"`
-	RelatedArticleIDs JSON      `gorm:"type:jsonb" json:"related_article_ids,omitempty"`
-	Embedding         string    `gorm:"type:vector" json:"-"`
+	ID                uint    `gorm:"primarykey" json:"id"`
+	ReportID          uint    `gorm:"index;not null" json:"report_id"`
+	SectionID         uint    `gorm:"index;not null" json:"section_id"`
+	Title             string  `json:"title"`
+	Summary           string  `json:"summary"`
+	TagIDs            JSON    `gorm:"type:jsonb" json:"tag_ids"`
+	Confidence        float64 `gorm:"default:0" json:"confidence"`
+	RelatedArticleIDs JSON    `gorm:"type:jsonb" json:"related_article_ids,omitempty"`
+	Embedding         string  `gorm:"type:vector" json:"-"`
 	// FitDistance is a pointer so that nil ("no signal" — embed failure or
 	// owning section without an embedding) is distinguishable from a real 0.0
 	// ("perfect fit" — thread title embedding identical to its section's).
@@ -145,8 +145,8 @@ type DailyReportThread struct {
 	// field, conflating the best possible fit with no signal. nil is omitted by
 	// omitempty; a non-nil 0.0 is serialized as `"fit_distance":0`. No DB
 	// default so historical rows stay NULL per spec.
-	FitDistance       *float64  `json:"fit_distance,omitempty"`
-	CreatedAt         time.Time `json:"created_at"`
+	FitDistance *float64  `json:"fit_distance,omitempty"`
+	CreatedAt   time.Time `json:"created_at"`
 }
 
 func (DailyReportThread) TableName() string {
@@ -213,6 +213,10 @@ type TagInput struct {
 	MatchReason  string  `json:"match_reason"`
 	Score        float64 `json:"score"`
 	Downgraded   bool    `json:"downgraded"`
+	// ArticleContext carries representative article titles + summaries for the LLM prompt so
+	// highlights/threads are grounded in actual event content, not just tag names. Populated in
+	// collectBoardTags from up to 3 representative articles per tag.
+	ArticleContext string `json:"article_context,omitempty"`
 }
 
 // ClusterGroup represents a group of tags clustered by the LLM.

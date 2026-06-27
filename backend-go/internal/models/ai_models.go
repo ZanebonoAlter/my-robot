@@ -73,6 +73,9 @@ type AIProvider struct {
 	TimeoutSeconds int       `gorm:"not null;default:120" json:"timeout_seconds"`
 	MaxTokens      *int      `json:"max_tokens,omitempty"`
 	Temperature    *float64  `json:"temperature,omitempty"`
+	// EnableThinking controls whether the request propagates
+	// chat_template_kwargs.enable_thinking=true, letting the model reason.
+	// (Previously this flag only stripped <think> tags from responses after-the-fact.)
 	EnableThinking bool      `gorm:"not null;default:false" json:"enable_thinking"`
 	Metadata       string    `gorm:"type:text" json:"metadata"`
 	CreatedAt      time.Time `json:"created_at"`

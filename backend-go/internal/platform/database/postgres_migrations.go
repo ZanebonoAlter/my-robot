@@ -825,10 +825,23 @@ func postgresMigrations() []Migration {
 					ALTER TABLE daily_report_section_relations
 					ADD CONSTRAINT uq_section_relations_pair UNIQUE (from_section_id, to_section_id, relation_type)
 				`).Error; err != nil {
-					return fmt.Errorf("add widened section_relations pair constraint: %w", err)
-				}
-				return nil
-			},
+				return fmt.Errorf("add widened section_relations pair constraint: %w", err)
+			}
+			return nil
 		},
-	}
+	},
+
+	// ── Data migration: enable_thinking semantics flip ──────────
+	// AIProvider.EnableThinking's meaning changed from "strip <think> tags after-the-fact"
+	// to "enable model reasoning (propagate chat_template_kwargs.enable_thinking)". Stale
+	// true values (set under the old meaning) would accidentally enable thinking and slow
+	// down topic tagging, so reset all to false on deploy. Idempotent.
+	{
+		Version:     "20260626_0001",
+		Description: "Reset ai_providers.enable_thinking to false (semantics flipped from strip-think-tags to enable-thinking).",
+		Up: func(db *gorm.DB) error {
+			return db.Exec("UPDATE ai_providers SET enable_thinking = false").Error
+		},
+	},
+}
 }

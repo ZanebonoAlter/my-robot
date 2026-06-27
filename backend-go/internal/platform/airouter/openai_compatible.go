@@ -82,47 +82,7 @@ func NewOpenAICompatibleClient() ProviderClient {
 }
 
 func (c *openAICompatibleClient) Chat(ctx context.Context, provider models.AIProvider, req ChatRequest) (string, error) {
-	temperature := 0.3
-	if req.Temperature != nil {
-		temperature = *req.Temperature
-	} else if provider.Temperature != nil {
-		temperature = *provider.Temperature
-	}
-
-	maxTokens := 16384
-	if req.MaxTokens != nil {
-		maxTokens = *req.MaxTokens
-	} else if provider.MaxTokens != nil {
-		maxTokens = *provider.MaxTokens
-	}
-
-	payload := map[string]any{
-		"model":       provider.Model,
-		"messages":    req.Messages,
-		"temperature": temperature,
-		"max_tokens":  maxTokens,
-	}
-
-	if provider.ProviderType == ProviderTypeOllama {
-		if req.JSONMode && req.JSONSchema != nil {
-			payload["format"] = req.JSONSchema
-		} else if req.JSONMode {
-			payload["format"] = "json"
-		}
-	} else if req.JSONMode {
-		if req.JSONSchema != nil {
-			payload["response_format"] = map[string]any{
-				"type": "json_schema",
-				"json_schema": map[string]any{
-					"name":   "response",
-					"strict": true,
-					"schema": req.JSONSchema,
-				},
-			}
-		} else {
-			payload["response_format"] = map[string]any{"type": "json_object"}
-		}
-	}
+	payload := buildPayload(provider, req)
 	body, err := json.Marshal(payload)
 	if err != nil {
 		return "", err
@@ -194,11 +154,59 @@ func (c *openAICompatibleClient) Chat(ctx context.Context, provider models.AIPro
 	}
 
 	content := strings.TrimSpace(parsed.Choices[0].Message.Content)
-	if provider.EnableThinking {
-		content = stripThinkTags(content)
+	return content, nil
+}
+
+// buildPayload constructs the OpenAI-compatible request payload from provider settings and chat request.
+// When provider.EnableThinking is true, it propagates chat_template_kwargs.enable_thinking=true so the
+// backend can control whether the model reasons (per-request), instead of relying on a global CLI flag.
+func buildPayload(provider models.AIProvider, req ChatRequest) map[string]any {
+	temperature := 0.3
+	if req.Temperature != nil {
+		temperature = *req.Temperature
+	} else if provider.Temperature != nil {
+		temperature = *provider.Temperature
 	}
 
-	return content, nil
+	maxTokens := 16384
+	if req.MaxTokens != nil {
+		maxTokens = *req.MaxTokens
+	} else if provider.MaxTokens != nil {
+		maxTokens = *provider.MaxTokens
+	}
+
+	payload := map[string]any{
+		"model":       provider.Model,
+		"messages":    req.Messages,
+		"temperature": temperature,
+		"max_tokens":  maxTokens,
+	}
+
+	if provider.EnableThinking {
+		payload["chat_template_kwargs"] = map[string]any{"enable_thinking": true}
+	}
+
+	if provider.ProviderType == ProviderTypeOllama {
+		if req.JSONMode && req.JSONSchema != nil {
+			payload["format"] = req.JSONSchema
+		} else if req.JSONMode {
+			payload["format"] = "json"
+		}
+	} else if req.JSONMode {
+		if req.JSONSchema != nil {
+			payload["response_format"] = map[string]any{
+				"type": "json_schema",
+				"json_schema": map[string]any{
+					"name":   "response",
+					"strict": true,
+					"schema": req.JSONSchema,
+				},
+			}
+		} else {
+			payload["response_format"] = map[string]any{"type": "json_object"}
+		}
+	}
+	return payload
 }
 
 func stripThinkTags(content string) string {

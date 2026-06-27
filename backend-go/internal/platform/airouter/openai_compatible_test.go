@@ -1,6 +1,10 @@
 package airouter
 
-import "testing"
+import (
+	"testing"
+
+	"syntopica-backend/internal/models"
+)
 
 func TestStripThinkTags(t *testing.T) {
 	tests := []struct {
@@ -58,4 +62,56 @@ func TestStripThinkTags(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestBuildPayload_EnableThinking(t *testing.T) {
+	// EnableThinking=true → payload 必须含 chat_template_kwargs.enable_thinking=true
+	t.Run("enable_thinking true propagates chat_template_kwargs", func(t *testing.T) {
+		provider := models.AIProvider{Model: "qwythos", EnableThinking: true}
+		req := ChatRequest{
+			Messages: []Message{{Role: "user", Content: "hi"}},
+		}
+		payload := buildPayload(provider, req)
+		kwargs, ok := payload["chat_template_kwargs"].(map[string]any)
+		if !ok {
+			t.Fatalf("expected chat_template_kwargs map, got %T", payload["chat_template_kwargs"])
+		}
+		if kwargs["enable_thinking"] != true {
+			t.Fatalf("expected enable_thinking=true, got %v", kwargs["enable_thinking"])
+		}
+	})
+
+	// EnableThinking=false → payload 必须不含 chat_template_kwargs
+	t.Run("enable_thinking false omits chat_template_kwargs", func(t *testing.T) {
+		provider := models.AIProvider{Model: "qwythos", EnableThinking: false}
+		req := ChatRequest{
+			Messages: []Message{{Role: "user", Content: "hi"}},
+		}
+		payload := buildPayload(provider, req)
+		if _, ok := payload["chat_template_kwargs"]; ok {
+			t.Fatalf("expected no chat_template_kwargs when EnableThinking=false, got %v", payload["chat_template_kwargs"])
+		}
+	})
+
+	// 既有行为不回归：model/messages/temperature/max_tokens 仍在
+	t.Run("preserves base payload fields", func(t *testing.T) {
+		temp := 0.3
+		maxTok := 2000
+		provider := models.AIProvider{Model: "qwythos"}
+		req := ChatRequest{
+			Messages:    []Message{{Role: "user", Content: "hi"}},
+			Temperature: &temp,
+			MaxTokens:   &maxTok,
+		}
+		payload := buildPayload(provider, req)
+		if payload["model"] != "qwythos" {
+			t.Fatalf("expected model=qwythos, got %v", payload["model"])
+		}
+		if payload["temperature"] != 0.3 {
+			t.Fatalf("expected temperature=0.3, got %v", payload["temperature"])
+		}
+		if payload["max_tokens"] != 2000 {
+			t.Fatalf("expected max_tokens=2000, got %v", payload["max_tokens"])
+		}
+	})
 }

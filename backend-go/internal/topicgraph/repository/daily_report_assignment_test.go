@@ -139,7 +139,7 @@ func TestPlanTopicAssignments_AnchorHit(t *testing.T) {
 	// Existing topic at [1,0,0]; section at [0.99,0.01,0] is near (dist ~0.0),
 	// and the LLM agrees by setting MatchedTopicID to that topic.
 	mit := uint(12)
-	cfg := PersistentTopicConfig{MatchThreshold: 0.30, UpgradeThreshold: 3, DecayWindow: 30}
+	cfg := PersistentTopicConfig{MatchThreshold: 0.30, UpgradeThreshold: 3}
 	topics := []BoardPersistentTopic{{ID: 12, Embedding: vecStr(1, 0, 0), Status: TopicStatusActive}}
 	sections := []DailyReportSection{{
 		ClusterLabel: "AI 编程竞争", Embedding: vecStr(0.99, 0.01, 0),
@@ -165,7 +165,7 @@ func TestPlanTopicAssignments_AnchorHit(t *testing.T) {
 // the same topic) — this is NOT pure-embedding matching.
 func TestPlanTopicAssignments_AnchorHit_MatchedWithinThresholdNotNearest(t *testing.T) {
 	mit := uint(13)
-	cfg := PersistentTopicConfig{MatchThreshold: 0.30, UpgradeThreshold: 3, DecayWindow: 30}
+	cfg := PersistentTopicConfig{MatchThreshold: 0.30, UpgradeThreshold: 3}
 	topics := []BoardPersistentTopic{
 		{ID: 12, Embedding: vecStr(1, 0, 0), Status: TopicStatusActive},      // nearest (~0.0001)
 		{ID: 13, Embedding: vecStr(0.9, 0.43, 0), Status: TopicStatusActive}, // 2nd-nearest (~0.093, within threshold)
@@ -188,7 +188,7 @@ func TestPlanTopicAssignments_AnchorHit_MatchedWithinThresholdNotNearest(t *test
 // is NOT pure-LLM matching.
 func TestPlanTopicAssignments_AutoNew_MatchedBeyondThreshold(t *testing.T) {
 	mit := uint(99)
-	cfg := PersistentTopicConfig{MatchThreshold: 0.30, UpgradeThreshold: 3, DecayWindow: 30}
+	cfg := PersistentTopicConfig{MatchThreshold: 0.30, UpgradeThreshold: 3}
 	topics := []BoardPersistentTopic{
 		{ID: 12, Embedding: vecStr(1, 0, 0), Status: TopicStatusActive},      // near but LLM didn't pick it
 		{ID: 99, Embedding: vecStr(0.2, 0.98, 0), Status: TopicStatusActive}, // LLM picked, but far (~0.79)
@@ -211,7 +211,7 @@ func TestPlanTopicAssignments_AutoNew_DualConfirmationFail(t *testing.T) {
 	// did NOT mark it (MatchedTopicID points elsewhere). Dual confirmation fails
 	// → a new candidate must be opened, NOT an anchor hit.
 	other := uint(99)
-	cfg := PersistentTopicConfig{MatchThreshold: 0.30, UpgradeThreshold: 3, DecayWindow: 30}
+	cfg := PersistentTopicConfig{MatchThreshold: 0.30, UpgradeThreshold: 3}
 	topics := []BoardPersistentTopic{{ID: 12, Embedding: vecStr(1, 0, 0), Status: TopicStatusActive}}
 	sections := []DailyReportSection{{
 		ClusterLabel: "开发者生态重构", Embedding: vecStr(0.99, 0.01, 0),
@@ -227,7 +227,7 @@ func TestPlanTopicAssignments_AutoNew_DualConfirmationFail(t *testing.T) {
 func TestPlanTopicAssignments_AutoNew_DistanceExceedsThreshold(t *testing.T) {
 	// Section is far from every topic (orthogonal, dist=1 > 0.30) → auto_new
 	// even though there is no MatchedTopicID to disagree with.
-	cfg := PersistentTopicConfig{MatchThreshold: 0.30, UpgradeThreshold: 3, DecayWindow: 30}
+	cfg := PersistentTopicConfig{MatchThreshold: 0.30, UpgradeThreshold: 3}
 	topics := []BoardPersistentTopic{{ID: 12, Embedding: vecStr(1, 0, 0), Status: TopicStatusActive}}
 	sections := []DailyReportSection{{
 		ClusterLabel: "量子计算商用", Embedding: vecStr(0, 1, 0),
@@ -251,12 +251,11 @@ func TestPlanTopicAssignments_Unmatched_EmptyEmbedding(t *testing.T) {
 func TestPlanLifecycle_EligibleCandidateStillRequiresManualConfirmation(t *testing.T) {
 	// Reaching the occurrence threshold makes a candidate eligible for manual
 	// confirmation, but the daily pipeline must not publish it automatically.
-	cfg := PersistentTopicConfig{MatchThreshold: 0.30, UpgradeThreshold: 3, DecayWindow: 30}
 	topics := []BoardPersistentTopic{{
 		ID: 1, Status: TopicStatusCandidate, ConsecutiveHits: 2, HitCount: 2,
 		LastSeenDate: time.Now().AddDate(0, 0, -1),
 	}}
-	changes := planLifecycle(topics, time.Now(), map[uint]bool{1: true}, cfg)
+	changes := planLifecycle(topics, time.Now(), map[uint]bool{1: true})
 	require.Len(t, changes, 1)
 	assert.Equal(t, TopicStatusCandidate, changes[0].status)
 	assert.Equal(t, 3, changes[0].consecutiveHits)
@@ -265,12 +264,11 @@ func TestPlanLifecycle_EligibleCandidateStillRequiresManualConfirmation(t *testi
 
 func TestPlanLifecycle_HitKeepsCandidateBelowThreshold(t *testing.T) {
 	// candidate at consecutive=1, hit today → stays candidate (2 < 3).
-	cfg := PersistentTopicConfig{MatchThreshold: 0.30, UpgradeThreshold: 3, DecayWindow: 30}
 	topics := []BoardPersistentTopic{{
 		ID: 1, Status: TopicStatusCandidate, ConsecutiveHits: 1, HitCount: 1,
 		LastSeenDate: time.Now().AddDate(0, 0, -1),
 	}}
-	changes := planLifecycle(topics, time.Now(), map[uint]bool{1: true}, cfg)
+	changes := planLifecycle(topics, time.Now(), map[uint]bool{1: true})
 	require.Len(t, changes, 1)
 	assert.Equal(t, TopicStatusCandidate, changes[0].status)
 	assert.Equal(t, 2, changes[0].consecutiveHits)
@@ -278,67 +276,33 @@ func TestPlanLifecycle_HitKeepsCandidateBelowThreshold(t *testing.T) {
 
 func TestPlanLifecycle_MissResetsConsecutive(t *testing.T) {
 	// candidate not hit today → consecutive resets to 0; stays candidate.
-	cfg := PersistentTopicConfig{MatchThreshold: 0.30, UpgradeThreshold: 3, DecayWindow: 30}
 	topics := []BoardPersistentTopic{{
 		ID: 1, Status: TopicStatusCandidate, ConsecutiveHits: 2, HitCount: 2,
 		LastSeenDate: time.Now().AddDate(0, 0, -1),
 	}}
-	changes := planLifecycle(topics, time.Now(), map[uint]bool{}, cfg)
+	changes := planLifecycle(topics, time.Now(), map[uint]bool{})
 	require.Len(t, changes, 1)
 	assert.Equal(t, TopicStatusCandidate, changes[0].status)
 	assert.Equal(t, 0, changes[0].consecutiveHits)
 	assert.Equal(t, 2, changes[0].hitCount)
 }
 
-func TestPlanLifecycle_CandidateDecayBoundary(t *testing.T) {
-	today := time.Date(2026, 6, 19, 18, 0, 0, 0, time.FixedZone("CST", 8*60*60))
-	cfg := PersistentTopicConfig{CandidateDecayWindow: 7, DecayWindow: 30}
-	tests := []struct {
-		name       string
-		gapDays    int
-		wantStatus string
-	}{
-		{name: "boundary day remains observable", gapDays: 7, wantStatus: TopicStatusCandidate},
-		{name: "past boundary archives", gapDays: 8, wantStatus: TopicStatusArchived},
+func TestPlanLifecycle_LongGapNeverArchives(t *testing.T) {
+	// candidate 60 days behind last_seen, active 35 days behind last_seen —
+	// neither must be archived because archiving is manual-only. Both miss
+	// today, so both reset consecutive_hits to 0.
+	today := time.Date(2026, 6, 26, 0, 0, 0, 0, time.UTC)
+	topics := []BoardPersistentTopic{
+		{ID: 1, Status: TopicStatusCandidate, ConsecutiveHits: 2, HitCount: 4, LastSeenDate: today.AddDate(0, 0, -60)},
+		{ID: 2, Status: TopicStatusActive, ConsecutiveHits: 5, HitCount: 10, LastSeenDate: today.AddDate(0, 0, -35)},
 	}
+	changes := planLifecycle(topics, today, map[uint]bool{})
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			topics := []BoardPersistentTopic{{
-				ID: 1, Status: TopicStatusCandidate, ConsecutiveHits: 2, HitCount: 3,
-				LastSeenDate: today.AddDate(0, 0, -tt.gapDays),
-			}}
-
-			changes := planLifecycle(topics, today, map[uint]bool{}, cfg)
-
-			require.Len(t, changes, 1)
-			assert.Equal(t, tt.wantStatus, changes[0].status)
-			assert.Equal(t, 0, changes[0].consecutiveHits)
-		})
-	}
-}
-
-func TestPlanLifecycle_ArchiveOnDecay(t *testing.T) {
-	// active not hit for 35 days (> decay 30) → archived.
-	cfg := PersistentTopicConfig{MatchThreshold: 0.30, UpgradeThreshold: 3, DecayWindow: 30}
-	today := time.Date(2026, 6, 19, 0, 0, 0, 0, time.UTC)
-	topics := []BoardPersistentTopic{{
-		ID: 1, Status: TopicStatusActive, ConsecutiveHits: 5, HitCount: 10,
-		LastSeenDate: today.AddDate(0, 0, -35),
-	}}
-	changes := planLifecycle(topics, today, map[uint]bool{}, cfg)
-	require.Len(t, changes, 1)
-	assert.Equal(t, TopicStatusArchived, changes[0].status)
-}
-
-func TestPlanLifecycle_KeepWithinDecayWindow(t *testing.T) {
-	// active not hit for 14 days (< decay 30) → stays active, no change row.
-	cfg := PersistentTopicConfig{MatchThreshold: 0.30, UpgradeThreshold: 3, DecayWindow: 30}
-	today := time.Date(2026, 6, 19, 0, 0, 0, 0, time.UTC)
-	topics := []BoardPersistentTopic{{
-		ID: 1, Status: TopicStatusActive, ConsecutiveHits: 5, HitCount: 10,
-		LastSeenDate: today.AddDate(0, 0, -14),
-	}}
-	changes := planLifecycle(topics, today, map[uint]bool{}, cfg)
-	assert.Len(t, changes, 0)
+	require.Len(t, changes, 2)
+	assert.Equal(t, uint(1), changes[0].topicID)
+	assert.Equal(t, TopicStatusCandidate, changes[0].status)
+	assert.Equal(t, 0, changes[0].consecutiveHits)
+	assert.Equal(t, uint(2), changes[1].topicID)
+	assert.Equal(t, TopicStatusActive, changes[1].status)
+	assert.Equal(t, 0, changes[1].consecutiveHits)
 }

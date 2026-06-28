@@ -212,25 +212,22 @@ type topicLifecycleChange struct {
 	lastSeen        time.Time
 }
 
-// planLifecycle computes the candidate→active→archived transitions for a
-// board's topics given today's hit set. Pure and unit-testable.
+// planLifecycle computes hit-count updates for a board's topics given today's
+// hit set. Pure and unit-testable.
 //
-// hit: consecutive_hits+1, hit_count+1, last_seen=today. Candidates remain
-// candidates until a user confirms them after they reach UpgradeThreshold.
-// miss: consecutive_hits reset to 0; active archives after DecayWindow days.
+// hit:   consecutive_hits+1, hit_count+1, last_seen=today, status unchanged.
+// miss:  consecutive_hits reset to 0, status unchanged (manual-archive only).
+//
+// No automatic archiving — candidate→archived and active→archived transitions
+// are exclusively triggered by user operations (updateTopicStatus, DeleteTopic).
 //
 // New candidates created by the assignment step already carry consecutive_hits=1
 // in the DB; they are NOT passed through here (they are in hitTopicIDs only if
 // the caller includes them, which it should not — see assignAndUpdateTopics).
-func planLifecycle(topics []BoardPersistentTopic, today time.Time, hitTopicIDs map[uint]bool, cfg PersistentTopicConfig) []topicLifecycleChange {
+func planLifecycle(topics []BoardPersistentTopic, today time.Time, hitTopicIDs map[uint]bool) []topicLifecycleChange {
 	todayDate := NormalizeReportDate(today)
-	candidateDecayWindow := cfg.CandidateDecayWindow
-	if candidateDecayWindow <= 0 {
-		candidateDecayWindow = DefaultPersistentTopicConfig().CandidateDecayWindow
-	}
 	var changes []topicLifecycleChange
 	for _, t := range topics {
-		lastSeen := NormalizeReportDate(t.LastSeenDate)
 		if hitTopicIDs[t.ID] {
 			newHits := t.ConsecutiveHits + 1
 			ch := topicLifecycleChange{
@@ -241,33 +238,13 @@ func planLifecycle(topics []BoardPersistentTopic, today time.Time, hitTopicIDs m
 			changes = append(changes, ch)
 			continue
 		}
-		if t.Status == TopicStatusCandidate {
-			// gapDays relies on NormalizeReportDate midnight normalisation:
-			// the difference of two noon-UTC timestamps is an integer multiple of 24h.
-			gapDays := int(todayDate.Sub(lastSeen).Hours() / 24)
-			if gapDays > candidateDecayWindow {
-				changes = append(changes, topicLifecycleChange{
-					topicID: t.ID, status: TopicStatusArchived,
-					consecutiveHits: 0, hitCount: t.HitCount, lastSeen: lastSeen,
-				})
-			} else if t.ConsecutiveHits != 0 {
-				changes = append(changes, topicLifecycleChange{
-					topicID: t.ID, status: TopicStatusCandidate,
-					consecutiveHits: 0, hitCount: t.HitCount, lastSeen: lastSeen,
-				})
-			}
-			continue
-		}
-		if t.Status == TopicStatusActive {
-			// gapDays relies on NormalizeReportDate midnight normalisation:
-			// the difference of two noon-UTC timestamps is an integer multiple of 24h.
-			gapDays := int(todayDate.Sub(lastSeen).Hours() / 24)
-			if gapDays > cfg.DecayWindow {
-				changes = append(changes, topicLifecycleChange{
-					topicID: t.ID, status: TopicStatusArchived,
-					consecutiveHits: 0, hitCount: t.HitCount, lastSeen: lastSeen,
-				})
-			}
+		// Miss: consecutive resets to 0; status and last_seen stay unchanged.
+		if t.Status != TopicStatusArchived && t.ConsecutiveHits != 0 {
+			changes = append(changes, topicLifecycleChange{
+				topicID: t.ID, status: t.Status,
+				consecutiveHits: 0, hitCount: t.HitCount,
+				lastSeen: NormalizeReportDate(t.LastSeenDate),
+			})
 		}
 	}
 	return changes
@@ -352,7 +329,7 @@ func assignAndUpdateTopics(tx *gorm.DB, boardID uint, periodDate time.Time, sect
 	if err != nil {
 		return fmt.Errorf("load topics for lifecycle: %w", err)
 	}
-	changes := planLifecycle(allTopics, today, hitTopicIDs, cfg)
+	changes := planLifecycle(allTopics, today, hitTopicIDs)
 	if len(changes) > 0 {
 		toSave := make([]BoardPersistentTopic, 0, len(changes))
 		for _, ch := range changes {

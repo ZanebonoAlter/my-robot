@@ -2,11 +2,18 @@ package database
 
 import (
 	"fmt"
+	"strconv"
 
 	"gorm.io/gorm"
 	"syntopica-backend/internal/models"
 	"syntopica-backend/internal/platform/logging"
 )
+
+// PruneRelationsRebuild is an optional hook called after PruneUnderqualifiedCandidates
+// deletes topics. When set, it is invoked once per affected semantic board to
+// rebuild daily_report_section_relations (drop stale identity/similarity edges).
+// Set from a package that imports both database and the relation-rebuild logic.
+var PruneRelationsRebuild func(tx *gorm.DB, boardID uint) error
 
 // tableExists reports whether a table exists in the public schema. Migrations
 // that target optional/domain-registered tables (e.g. the daily_report_* tables
@@ -876,5 +883,93 @@ func postgresMigrations() []Migration {
 				return nil
 			},
 		},
+
+		// ── Prune underqualified observing candidates ───────────────
+		{
+			Version:     "20260628_0001",
+			Description: "Hard-delete candidate topics with consecutive_hits < upgrade_threshold (one-shot cleanup of historical observing candidates).",
+			Up: func(db *gorm.DB) error {
+				if !tableExists(db, "board_persistent_topics") || !tableExists(db, "daily_report_sections") {
+					return nil
+				}
+				threshold := 3 // default
+				var key models.AISettings
+				if err := db.Where("key = ?", "persistent_topic_upgrade_threshold").First(&key).Error; err == nil {
+					if v, err2 := strconv.Atoi(key.Value); err2 == nil && v > 0 {
+						threshold = v
+					}
+				}
+				deleted, err := PruneUnderqualifiedCandidates(db, threshold)
+				if err != nil {
+					return fmt.Errorf("prune underqualified candidates: %w", err)
+				}
+				logging.Infof("Migration 20260628_0001: pruned %d underqualified candidate topics (consecutive_hits < %d)", deleted, threshold)
+				return nil
+			},
+		},
 	}
+}
+
+// PruneUnderqualifiedCandidates hard-deletes all candidate topics with
+// consecutive_hits < upgradeThreshold. Sections referencing them are unlinked
+// (persistent_topic_id / match fields / topic_status_at_report set to NULL).
+// Relations pointing to deleted topics are cleaned up. Idempotent — second run
+// is a no-op. Returns the number of topics deleted.
+func PruneUnderqualifiedCandidates(db *gorm.DB, upgradeThreshold int) (deleted int, err error) {
+	var topicIDs []uint
+	if err = db.Table("board_persistent_topics").
+		Where("status = ? AND consecutive_hits < ?", "candidate", upgradeThreshold).
+		Pluck("id", &topicIDs).Error; err != nil {
+		return 0, fmt.Errorf("prune: query candidates: %w", err)
+	}
+	if len(topicIDs) == 0 {
+		return 0, nil
+	}
+
+	// Collect affected board IDs before any mutation so we can rebuild
+	// their relations after topic deletion.
+	var boardIDs []uint
+	if PruneRelationsRebuild != nil {
+		if err = db.Table("board_persistent_topics").
+			Where("id IN ?", topicIDs).
+			Distinct("semantic_board_id").
+			Pluck("semantic_board_id", &boardIDs).Error; err != nil {
+			return 0, fmt.Errorf("prune: query board IDs: %w", err)
+		}
+	}
+
+	err = db.Transaction(func(tx *gorm.DB) error {
+		// Unlink sections that reference the to-be-deleted topics.
+		if err2 := tx.Table("daily_report_sections").
+			Where("persistent_topic_id IN ?", topicIDs).
+			Updates(map[string]interface{}{
+				"persistent_topic_id":    nil,
+				"topic_match_distance":   nil,
+				"topic_match_confidence": nil,
+				"topic_status_at_report": nil,
+			}).Error; err2 != nil {
+			return fmt.Errorf("prune: unlink sections: %w", err2)
+		}
+
+		// Delete the candidate rows.
+		if err2 := tx.Table("board_persistent_topics").
+			Where("id IN ?", topicIDs).
+			Delete(nil).Error; err2 != nil {
+			return fmt.Errorf("prune: delete topics: %w", err2)
+		}
+
+		// Rebuild relations for each affected board so stale identity /
+		// similarity edges pointing to now-deleted topics are dropped.
+		for _, boardID := range boardIDs {
+			if err2 := PruneRelationsRebuild(tx, boardID); err2 != nil {
+				return fmt.Errorf("prune: rebuild relations for board %d: %w", boardID, err2)
+			}
+		}
+
+		return nil
+	})
+	if err != nil {
+		return 0, err
+	}
+	return len(topicIDs), nil
 }

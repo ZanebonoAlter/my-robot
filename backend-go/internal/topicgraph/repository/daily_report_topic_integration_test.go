@@ -9,6 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 	"syntopica-backend/internal/models"
+	"syntopica-backend/internal/platform/database"
 	"syntopica-backend/internal/platform/testutil"
 )
 
@@ -294,7 +295,6 @@ func TestAnchorableSet_ConsistencyBetweenInjectionAndAssignment(t *testing.T) {
 	cfg := PersistentTopicConfig{
 		MatchThreshold:       0.30,
 		UpgradeThreshold:     3,
-		DecayWindow:          30,
 		CandidateDecayWindow: 7,
 		CandidatePromptLimit: 2,
 		ClusterThreshold:     0.28,
@@ -363,4 +363,198 @@ func TestAnchorableSet_ConsistencyBetweenInjectionAndAssignment(t *testing.T) {
 
 	// Expected count: 1 active + 2 in-window candidates = 3.
 	assert.Equal(t, 3, len(idSet), "anchorable set size mismatch")
+}
+
+// TestCleanup_PruneUnderqualifiedCandidates verifies the one-shot cleanup
+// migration: observing candidates (consecutive_hits < upgrade_threshold) are
+// deleted, their sections unlinked, and active/qualified candidates preserved.
+// Second run must be idempotent (no-op).
+func TestCleanup_PruneUnderqualifiedCandidates(t *testing.T) {
+	db := testutil.SetupTestDB(t)
+
+	boardID := seedTestBoard(t, db)
+	emb := vecStr(1, 0, 0)
+	reportDate := NormalizeReportDate(time.Now())
+	report := &BoardDailyReport{
+		SemanticBoardID: boardID,
+		PeriodDate:      reportDate,
+		Title:           "cleanup test", Status: "completed",
+	}
+	require.NoError(t, db.Create(report).Error)
+
+	// Seed topics:
+	//   id=1 (active)                  → preserved
+	//   id=2 (candidate cons=3, >=3)   → preserved (qualified)
+	//   id=3 (candidate cons=1, <3)    → deleted (observing, no section ref)
+	//   id=4 (candidate cons=1, <3)    → deleted (observing, referenced by section)
+	topics := []BoardPersistentTopic{
+		{ID: 1, SemanticBoardID: boardID, Label: "active-1", Status: TopicStatusActive,
+			Embedding: emb, FirstSeenDate: reportDate.AddDate(0, 0, -5), LastSeenDate: reportDate,
+			HitCount: 5, ConsecutiveHits: 5},
+		{ID: 2, SemanticBoardID: boardID, Label: "qual-cand", Status: TopicStatusCandidate,
+			Embedding: emb, FirstSeenDate: reportDate.AddDate(0, 0, -3), LastSeenDate: reportDate,
+			HitCount: 3, ConsecutiveHits: 3},
+		{ID: 3, SemanticBoardID: boardID, Label: "obs-no-ref", Status: TopicStatusCandidate,
+			Embedding: emb, FirstSeenDate: reportDate.AddDate(0, 0, -10), LastSeenDate: reportDate.AddDate(0, 0, -10),
+			HitCount: 1, ConsecutiveHits: 1},
+		{ID: 4, SemanticBoardID: boardID, Label: "obs-with-ref", Status: TopicStatusCandidate,
+			Embedding: emb, FirstSeenDate: reportDate.AddDate(0, 0, -8), LastSeenDate: reportDate.AddDate(0, 0, -8),
+			HitCount: 1, ConsecutiveHits: 1},
+	}
+	for i := range topics {
+		require.NoError(t, db.Create(&topics[i]).Error)
+	}
+
+	// Create a section that references the observing candidate id=4.
+	tid4 := topics[3].ID
+	statusAtReport := TopicStatusCandidate
+	sec := DailyReportSection{
+		ReportID:            report.ID,
+		ClusterLabel:        "test section",
+		ArticleCount:        1,
+		Embedding:           emb,
+		PersistentTopicID:   &tid4,
+		TopicMatchDistance:  0.15,
+		TopicMatchConfidence: TopicConfAnchorHit,
+		TopicStatusAtReport: &statusAtReport,
+	}
+	require.NoError(t, db.Create(&sec).Error)
+
+	// Run prune with upgrade_threshold=3.
+	deleted, err := database.PruneUnderqualifiedCandidates(db, 3)
+	require.NoError(t, err)
+	assert.Equal(t, 2, deleted, "should delete topics id=3 and id=4")
+
+	// Preserved topics.
+	var remaining []BoardPersistentTopic
+	require.NoError(t, db.Where("semantic_board_id = ?", boardID).Find(&remaining).Error)
+	require.Len(t, remaining, 2)
+	remainingIDs := make(map[uint]bool)
+	for _, t := range remaining {
+		remainingIDs[t.ID] = true
+	}
+	assert.True(t, remainingIDs[uint(1)], "active must be preserved")
+	assert.True(t, remainingIDs[uint(2)], "qualified candidate must be preserved")
+	assert.False(t, remainingIDs[uint(3)], "observing candidate id=3 must be deleted")
+	assert.False(t, remainingIDs[uint(4)], "observing candidate id=4 must be deleted")
+
+	// Section that referenced deleted topic id=4: all topic fields set to NULL.
+	var reloaded DailyReportSection
+	require.NoError(t, db.First(&reloaded, sec.ID).Error)
+	assert.Nil(t, reloaded.PersistentTopicID, "persistent_topic_id must be NULL after unlink")
+	assert.Zero(t, reloaded.TopicMatchDistance, "topic_match_distance must be 0 after unlink")
+	assert.Empty(t, reloaded.TopicMatchConfidence, "topic_match_confidence must be empty after unlink")
+	assert.Nil(t, reloaded.TopicStatusAtReport, "topic_status_at_report must be NULL after unlink")
+	assert.Equal(t, "test section", reloaded.ClusterLabel, "section content preserved")
+	assert.Equal(t, 1, reloaded.ArticleCount, "section article_count preserved")
+
+	// Idempotency: second run is no-op.
+	deleted2, err2 := database.PruneUnderqualifiedCandidates(db, 3)
+	require.NoError(t, err2)
+	assert.Equal(t, 0, deleted2, "second run must delete 0 (idempotent)")
+}
+
+// TestCleanup_PruneRebuildsRelations verifies that pruning observing candidates
+// correctly rebuilds board relations: identity edges pointing to deleted topics
+// are dropped, while edges belonging to active topics survive. The test creates
+// two adjacent-day reports with sections under both an active topic and an
+// observing candidate, builds relations, prunes the candidate, then asserts the
+// relations delta.
+func TestCleanup_PruneRebuildsRelations(t *testing.T) {
+	db := testutil.SetupTestDB(t)
+
+	boardID := seedTestBoard(t, db)
+	emb := vecStr(1, 0, 0)
+
+	// Two adjacent-day reports.
+	d1 := NormalizeReportDate(time.Now().AddDate(0, 0, -2))
+	d2 := NormalizeReportDate(time.Now().AddDate(0, 0, -1))
+	r1 := seedTestReport(t, db, boardID, d1)
+	r2 := seedTestReport(t, db, boardID, d2)
+
+	// Active topic (survives prune).
+	activeTopic := BoardPersistentTopic{
+		SemanticBoardID: boardID, Label: "active", Status: TopicStatusActive,
+		Embedding: emb, FirstSeenDate: d1, LastSeenDate: d2,
+		HitCount: 5, ConsecutiveHits: 5,
+	}
+	require.NoError(t, db.Create(&activeTopic).Error)
+
+	// Observing candidate (will be pruned: consecutive_hits=1 < threshold=3).
+	candTopic := BoardPersistentTopic{
+		SemanticBoardID: boardID, Label: "obs", Status: TopicStatusCandidate,
+		Embedding: emb, FirstSeenDate: d1, LastSeenDate: d1,
+		HitCount: 1, ConsecutiveHits: 1,
+	}
+	require.NoError(t, db.Create(&candTopic).Error)
+
+	// Section s1 (day1) under active topic.
+	s1 := seedTopicSection(t, db, r1, "a1", emb)
+	require.NoError(t, db.Model(&DailyReportSection{}).Where("id = ?", s1).
+		Updates(map[string]interface{}{"persistent_topic_id": activeTopic.ID}).Error)
+
+	// Section s2 (day2) under active topic — identity edge s1→s2.
+	s2 := seedTopicSection(t, db, r2, "a2", emb)
+	require.NoError(t, db.Model(&DailyReportSection{}).Where("id = ?", s2).
+		Updates(map[string]interface{}{"persistent_topic_id": activeTopic.ID}).Error)
+
+	// Section s3 (day1) under candidate topic.
+	s3 := seedTopicSection(t, db, r1, "c1", emb)
+	require.NoError(t, db.Model(&DailyReportSection{}).Where("id = ?", s3).
+		Updates(map[string]interface{}{"persistent_topic_id": candTopic.ID}).Error)
+
+	// Section s4 (day2) under candidate topic — identity edge s3→s4.
+	s4 := seedTopicSection(t, db, r2, "c2", emb)
+	require.NoError(t, db.Model(&DailyReportSection{}).Where("id = ?", s4).
+		Updates(map[string]interface{}{"persistent_topic_id": candTopic.ID}).Error)
+
+	// Build initial relations: identity edges for both topics.
+	require.NoError(t, RebuildBoardRelations(db, boardID))
+
+	// Verify identity edges exist before prune.
+	var activeRel SectionRelation
+	errActive := db.Where("from_section_id = ? AND to_section_id = ? AND relation_type = ?",
+		s1, s2, "identity").First(&activeRel).Error
+	require.NoError(t, errActive, "identity edge for active topic must exist before prune")
+
+	var candRel SectionRelation
+	errCand := db.Where("from_section_id = ? AND to_section_id = ? AND relation_type = ?",
+		s3, s4, "identity").First(&candRel).Error
+	require.NoError(t, errCand, "identity edge for candidate topic must exist before prune")
+
+	// Prune: delete the observing candidate (consecutive_hits=1 < threshold=3).
+	deleted, err := database.PruneUnderqualifiedCandidates(db, 3)
+	require.NoError(t, err)
+	assert.Equal(t, 1, deleted, "should delete 1 observing candidate")
+
+	// After prune: identity edge s1→s2 (active topic) MUST survive.
+	var activeRel2 SectionRelation
+	errActive2 := db.Where("from_section_id = ? AND to_section_id = ? AND relation_type = ?",
+		s1, s2, "identity").First(&activeRel2).Error
+	assert.NoError(t, errActive2,
+		"identity edge for active topic must survive prune")
+
+	// After prune: identity edge s3→s4 (pruned candidate) MUST be gone.
+	var candRel2 SectionRelation
+	errCand2 := db.Where("from_section_id = ? AND to_section_id = ? AND relation_type = ?",
+		s3, s4, "identity").First(&candRel2).Error
+	assert.Error(t, errCand2,
+		"identity edge for pruned candidate must be removed")
+
+	// Sections referencing the deleted candidate are unlinked but still renderable.
+	for _, sid := range []uint{s3, s4} {
+		var sec DailyReportSection
+		require.NoError(t, db.First(&sec, sid).Error)
+		assert.Nil(t, sec.PersistentTopicID,
+			"section %d must be unlinked after candidate deletion", sid)
+		assert.NotEmpty(t, sec.ClusterLabel,
+			"section %d must still have content (cluster_label)", sid)
+	}
+
+	// Section under active topic still has its assignment.
+	var sec1 DailyReportSection
+	require.NoError(t, db.First(&sec1, s1).Error)
+	require.NotNil(t, sec1.PersistentTopicID)
+	assert.Equal(t, activeTopic.ID, *sec1.PersistentTopicID,
+		"section under active topic must retain its assignment")
 }

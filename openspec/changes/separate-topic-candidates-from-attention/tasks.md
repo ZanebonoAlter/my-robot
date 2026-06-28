@@ -68,19 +68,19 @@
 
 ### 后端 — 删除自动归档
 
-- [ ] 8.1 RED：为 `planLifecycle` 新增"长期未命中不归档"用例——candidate/active 距 last_seen 超过任意天数（7/30/60 天），执行状态机更新后 status 保持不变；验收：在现有自动归档实现下这些用例红（会转 archived）。
-- [ ] 8.2 GREEN：删除 `planLifecycle`（`daily_report_assignment.go`）中 candidate 7 天自动归档分支与 active 30 天自动归档分支，仅保留命中计数逻辑（命中 +1、未命中清零、status 不变）；删除对应的 `TestPlanLifecycle_CandidateDecayBoundary`、`TestPlanLifecycle_ArchiveOnDecay`、`TestPlanLifecycle_KeepWithinDecayWindow`；确认 8.1 新用例转绿。
-- [ ] 8.3 顺手修正：`DeleteTopic`（`daily_report_topic_repository.go`）置 NULL 时连同 `topic_status_at_report` 一起置 NULL（当前漏了，会留下 snapshot≠NULL 但 topic_id=NULL 的脟脏数据）。
+- [x] 8.1 RED：为 `planLifecycle` 新增"长期未命中不归档"用例——candidate/active 距 last_seen 超过任意天数（7/30/60 天），执行状态机更新后 status 保持不变；验收：在现有自动归档实现下这些用例红（会转 archived）。
+- [x] 8.2 GREEN：删除 `planLifecycle`（`daily_report_assignment.go`）中 candidate 7 天自动归档分支与 active 30 天自动归档分支，仅保留命中计数逻辑（命中 +1、未命中清零、status 不变）；删除对应的 `TestPlanLifecycle_CandidateDecayBoundary`、`TestPlanLifecycle_ArchiveOnDecay`、`TestPlanLifecycle_KeepWithinDecayWindow`；确认 8.1 新用例转绿。
+- [x] 8.3 顺手修正：`DeleteTopic`（`daily_report_topic_repository.go`）置 NULL 时连同 `topic_status_at_report` 一起置 NULL（当前漏了，会留下 snapshot≠NULL 但 topic_id=NULL 的脟脏数据）。
 
 ### 后端 — 候选展示门槛（observing 隐藏）
 
-- [ ] 8.4 RED：为 `listBoardTopics`（`handler/daily_report_handler.go`）补测试，断言 `status=candidate AND consecutive_hits < upgrade_threshold` 的 topic 不出现在响应中，而 active/archived 与达门槛 candidate 出现；验收：未加过滤前红。
-- [ ] 8.5 GREEN：在 `listBoardTopics` 组装响应前过滤掉 observing candidate（`t.Status==candidate && t.ConsecutiveHits < upgradeThreshold`）；active 与 archived 不过滤。
+- [x] 8.4 RED：为 `listBoardTopics`（`handler/daily_report_handler.go`）补测试，断言 `status=candidate AND consecutive_hits < upgrade_threshold` 的 topic 不出现在响应中，而 active/archived 与达门槛 candidate 出现；验收：未加过滤前红。
+- [x] 8.5 GREEN：在 `listBoardTopics` 组装响应前过滤掉 observing candidate（`t.Status==candidate && t.ConsecutiveHits < upgradeThreshold`）；active 与 archived 不过滤。
 
 ### 后端 — 一次性清理迁移
 
-- [ ] 8.6 新增幂等迁移（`platform/database/postgres_migrations.go`）：删除所有 `status='candidate' AND consecutive_hits < upgrade_threshold` 的 topic，采用与 `DeleteTopic` 一致语义——先 UPDATE 被引用 section 的 `persistent_topic_id`/`topic_match_distance`/`topic_match_confidence`/`topic_status_at_report` 置 NULL，再 DELETE topic 行，最后对每个受影响 board 重建 relations。
-- [ ] 8.7 RED→GREEN：新增集成测试 `TestCleanup_PruneUnderqualifiedCandidates`——插入 active、达门槛 candidate、未达门槛 candidate（含被 section 引用的），跑迁移后断言：未达门槛者硬删、section 的归属字段置 NULL 但内容/渲染正常、达门槛与 active/archived 保留、二次执行为 no-op。
+- [x] 8.6 新增幂等迁移（`platform/database/postgres_migrations.go`）：删除所有 `status='candidate' AND consecutive_hits < upgrade_threshold` 的 topic，采用与 `DeleteTopic` 一致语义——先 UPDATE 被引用 section 的 `persistent_topic_id`/`topic_match_distance`/`topic_match_confidence`/`topic_status_at_report` 置 NULL，再 DELETE topic 行，最后对每个受影响 board 重建 relations。
+- [x] 8.7 RED→GREEN：新增集成测试 `TestCleanup_PruneUnderqualifiedCandidates`——插入 active、达门槛 candidate、未达门槛 candidate（含被 section 引用的），跑迁移后断言：未达门槛者硬删、section 的归属字段置 NULL 但内容/渲染正常、达门槛与 active/archived 保留、二次执行为 no-op。
 
 ### 文档
 

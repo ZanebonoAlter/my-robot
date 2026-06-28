@@ -293,6 +293,8 @@ func listBoardTopics(c *gin.Context) {
 		countMap[cr.PersistentTopicID] = cr.N
 	}
 	upgradeThreshold := repository.LoadPersistentTopicConfig(database.DB).UpgradeThreshold
+	// Filter out observing candidates (consecutive_hits < upgrade_threshold).
+	topics = repository.FilterVisibleTopics(topics, upgradeThreshold)
 	type topicListItem struct {
 		repository.BoardPersistentTopic
 		SectionCount int    `json:"section_count"`

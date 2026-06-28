@@ -18,7 +18,6 @@ import (
 type PersistentTopicConfig struct {
 	MatchThreshold       float64 // persistent_topic_match_threshold
 	UpgradeThreshold     int     // persistent_topic_upgrade_threshold
-	DecayWindow          int     // persistent_topic_decay_window (days)
 	CandidateDecayWindow int     // persistent_topic_candidate_decay_window (days)
 	CandidatePromptLimit int     // persistent_topic_candidate_prompt_limit
 	ClusterThreshold     float64 // persistent_topic_cluster_threshold
@@ -38,7 +37,6 @@ func DefaultPersistentTopicConfig() PersistentTopicConfig {
 	return PersistentTopicConfig{
 		MatchThreshold:       0.30,
 		UpgradeThreshold:     3,
-		DecayWindow:          30,
 		CandidateDecayWindow: 7,
 		CandidatePromptLimit: 20,
 		ClusterThreshold:     0.28,
@@ -112,7 +110,6 @@ func LoadPersistentTopicConfig(db *gorm.DB) PersistentTopicConfig {
 	keys := []string{
 		"persistent_topic_match_threshold",
 		"persistent_topic_upgrade_threshold",
-		"persistent_topic_decay_window",
 		"persistent_topic_candidate_decay_window",
 		"persistent_topic_candidate_prompt_limit",
 		"persistent_topic_cluster_threshold",
@@ -130,10 +127,6 @@ func LoadPersistentTopicConfig(db *gorm.DB) PersistentTopicConfig {
 		case "persistent_topic_upgrade_threshold":
 			if v, err := strconv.Atoi(r.Value); err == nil {
 				cfg.UpgradeThreshold = v
-			}
-		case "persistent_topic_decay_window":
-			if v, err := strconv.Atoi(r.Value); err == nil {
-				cfg.DecayWindow = v
 			}
 		case "persistent_topic_candidate_decay_window":
 			if v, err := strconv.Atoi(r.Value); err == nil && v > 0 {
@@ -248,6 +241,7 @@ func (r *TopicGraphRepository) DeleteTopic(topicID uint) error {
 				"persistent_topic_id":    nil,
 				"topic_match_distance":   nil,
 				"topic_match_confidence": nil,
+				"topic_status_at_report": nil,
 			}).Error; err != nil {
 			return fmt.Errorf("unlink sections: %w", err)
 		}
@@ -261,6 +255,19 @@ func (r *TopicGraphRepository) DeleteTopic(topicID uint) error {
 		}
 		return nil
 	})
+}
+
+// FilterVisibleTopics returns topics that should appear in the management UI.
+// Active and archived always visible; candidates only visible when
+// consecutive_hits >= upgrade_threshold (observing candidates are hidden).
+func FilterVisibleTopics(topics []BoardPersistentTopic, upgradeThreshold int) []BoardPersistentTopic {
+	result := make([]BoardPersistentTopic, 0, len(topics))
+	for _, t := range topics {
+		if t.Status != TopicStatusCandidate || t.ConsecutiveHits >= upgradeThreshold {
+			result = append(result, t)
+		}
+	}
+	return result
 }
 
 // CreateTopic inserts a new persistent topic row and returns it with the ID set.

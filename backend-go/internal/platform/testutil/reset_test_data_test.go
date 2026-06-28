@@ -13,14 +13,13 @@ import (
 // that tests inserted, (d) preserve schema_migrations.
 func TestResetTestData_ClearsBusinessTables(t *testing.T) {
 	db := SetupTestDB(t)
-	takeSeedSnapshot(db) // establish snapshot from the clean post-migration state
 
 	require.NoError(t, db.Create(&models.TopicTag{Slug: "tt-1"}).Error)
 	var n int64
 	db.Model(&models.TopicTag{}).Count(&n)
 	require.EqualValues(t, 1, n)
 
-	ResetTestData(t, db)
+	db = ResetTestData(t, db)
 
 	db.Model(&models.TopicTag{}).Count(&n)
 	require.EqualValues(t, 0, n, "ResetTestData must clear business tables")
@@ -28,7 +27,6 @@ func TestResetTestData_ClearsBusinessTables(t *testing.T) {
 
 func TestResetTestData_RestoresSeedAndClearsCustomKeys(t *testing.T) {
 	db := SetupTestDB(t)
-	takeSeedSnapshot(db)
 
 	// Simulate a test inserting a non-seed custom ai_settings key.
 	// The probe key is deliberately NOT one of the migration seed keys
@@ -43,7 +41,7 @@ func TestResetTestData_RestoresSeedAndClearsCustomKeys(t *testing.T) {
 		Key: nonSeedKey, Value: "0.6",
 	}).Error)
 
-	ResetTestData(t, db)
+	db = ResetTestData(t, db)
 
 	var custom models.AISettings
 	err := db.Where("key = ?", nonSeedKey).First(&custom).Error
@@ -58,9 +56,8 @@ func TestResetTestData_RestoresSeedAndClearsCustomKeys(t *testing.T) {
 
 func TestResetTestData_PreservesSchemaMigrations(t *testing.T) {
 	db := SetupTestDB(t)
-	takeSeedSnapshot(db)
 
-	ResetTestData(t, db)
+	db = ResetTestData(t, db)
 
 	var n int64
 	db.Raw("SELECT count(*) FROM schema_migrations").Scan(&n)
@@ -69,14 +66,13 @@ func TestResetTestData_PreservesSchemaMigrations(t *testing.T) {
 
 func TestResetTestData_IdempotentAcrossCalls(t *testing.T) {
 	db := SetupTestDB(t)
-	takeSeedSnapshot(db)
 
-	ResetTestData(t, db)
+	db = ResetTestData(t, db)
 	var firstCount int64
 	db.Model(&models.AISettings{}).Count(&firstCount)
 
-	ResetTestData(t, db)
-	ResetTestData(t, db)
+	db = ResetTestData(t, db)
+	db = ResetTestData(t, db)
 	var finalCount int64
 	db.Model(&models.AISettings{}).Count(&finalCount)
 

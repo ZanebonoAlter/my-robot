@@ -43,6 +43,6 @@ func TestGoldenSchema_OIDStableAcrossResets(t *testing.T) {
 		require.NoError(t, db.Raw("SELECT '[0]'::vector::text").Row().Scan(&v),
 			"cycle %d: vector cast failed => OID drift", cycle)
 
-		ResetTestData(t, db)
+		db = ResetTestData(t, db)
 	}
 }

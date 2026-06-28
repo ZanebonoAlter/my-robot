@@ -114,7 +114,7 @@ ClusterTags 注入（Step3）与双重确认归属（§2）**共享同一个可�
 2. candidate 需 `last_seen_date` 在 `persistent_topic_candidate_decay_window`（默认 7 天）内，按 `last_seen_date DESC, hit_count DESC, id ASC` 排序，最多保留 `persistent_topic_candidate_prompt_limit`（默认 20）条。
 3. 窗口外或被截断的 candidate 不出现在任何一侧，消除单边锚定的隐式 bug。
 
-> 参数默认：`MatchThreshold` 0.30、`UpgradeThreshold` 3、`DecayWindow` 30 天、`CandidateDecayWindow` 7 天、`CandidatePromptLimit` 20，运行时可由 `ai_settings` 覆盖（`PersistentTopicConfig`）。话题自身的 candidate→active→archived 生命周期与关系双轨见 `topic-graph.md`，此处不重复。
+> 参数默认：`MatchThreshold` 0.30、`UpgradeThreshold` 3（兼管理 UI 可见门槛）、`CandidateDecayWindow` 7 天（仅 prompt 卫生过滤，不触发归档）、`CandidatePromptLimit` 20，运行时可由 `ai_settings` 覆盖（`PersistentTopicConfig`）。话题自身的 candidate→active→archived 生命周期（全人工归档）与关系双轨见 `topic-graph.md`，此处不重复。
 
 ## 3. 前端：Digest 预览/查看链路
 

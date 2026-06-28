@@ -160,9 +160,8 @@ AI 相关配置不存储在文件或环境变量中 — 通过 Web UI 管理并�
 | `open_notebook_config` | Open Notebook digest 导出设置（启用、base URL、API key、model、目标笔记本、prompt 模式、自动发送日报/周报） |
 | `daily_report_time` | 日报生成时刻（HH:MM 格式，默认 `21:00`） |
 | `persistent_topic_match_threshold` | 新 section 锚定已有话题的余弦距离阈值（默认 `0.30`） |
-| `persistent_topic_upgrade_threshold` | candidate 允许人工确认所需的连续命中天数（默认 `3`；不会自动转 active） |
-| `persistent_topic_decay_window` | active 话题无命中后自动归档的天数（默认 `30`） |
-| `persistent_topic_candidate_decay_window` | candidate 无命中后自动归档的天数（默认 `7`） |
+| `persistent_topic_upgrade_threshold` | candidate 允许人工确认所需、同时为管理 UI 可见门槛的连续命中天数（默认 `3`；不会自动转 active） |
+| `persistent_topic_candidate_decay_window` | candidate 被注入聚类 prompt 的观察窗口天数（默认 `7`）；仅用于 prompt 卫生过滤，不触发状态变更 |
 | `persistent_topic_candidate_prompt_limit` | 每次聚类注入与归属锚定集合的 candidate 数量上限（默认 `20`） |
 | `persistent_topic_cluster_threshold` | 历史回刷 complete-link 聚类阈值（默认 `0.28`） |
 

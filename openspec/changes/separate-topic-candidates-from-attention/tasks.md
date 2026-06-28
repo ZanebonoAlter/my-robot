@@ -84,13 +84,13 @@
 
 ### 文档
 
-- [ ] 8.8 更新 `docs/reference/flow/topic-graph.md`：明确生命周期"仅命中计数、归档全人工"；补"候选展示门槛：observing 隐藏，达门槛自动可见"；说明 auto_new 创建门槛与清理迁移。
-- [ ] 8.9 更新 `docs/reference/architecture/`、`configuration.md`：删除 active 30 天 decay_window 的自动归档描述，明确 candidate_decay_window 仅为 prompt 卫生过滤；记录展示门槛语义。
-- [ ] 8.10 更新 `docs/reference/database/`：记录一次性清理迁移的行为与幂等性。
+- [x] 8.8 更新 `docs/reference/flow/topic-graph.md`：明确生命周期"仅命中计数、归档全人工"；补"候选展示门槛：observing 隐藏，达门槛自动可见"；说明 auto_new 创建门槛与清理迁移。
+- [x] 8.9 更新 `docs/reference/architecture/`、`configuration.md`：删除 active 30 天 decay_window 的自动归档描述，明确 candidate_decay_window 仅为 prompt 卫生过滤；记录展示门槛语义。
+- [x] 8.10 更新 `docs/reference/database/`：记录一次性清理迁移的行为与幂等性。
 
 ### AGENTS.md 汇报原则
 
-- [ ] 8.11 在 `AGENTS.md` AI Behavior Rules 补一条汇报原则：完工或开工前必须主动汇报"部署后影响 + 需要的用户操作"，避免误会；规则表述见 design Open Questions。
+- [x] 8.11 在 `AGENTS.md` AI Behavior Rules 补一条汇报原则：完工或开工前必须主动汇报"部署后影响 + 需要的用户操作"，避免误会；规则表述见 design Open Questions。
 
 ### 验证
 

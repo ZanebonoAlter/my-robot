@@ -754,7 +754,11 @@ HNSW 索引：`idx_topic_tag_embeddings_embedding USING hnsw (embedding vector_c
 
 `daily_report_sections` 通过 `persistent_topic_id`、`topic_match_distance`、`topic_match_confidence` 记录归属，并通过可空字段 `topic_status_at_report`（VARCHAR(20)）记录报告生成时的话题状态快照（`candidate` / `active` / `NULL`），该值与归属在同一事务内写入，不随后续 topic 状态变化回填。历史数据统一为 `NULL`。`daily_report_section_relations.relation_type` 区分 `similarity`（匈牙利时间线）与 `identity`（持久话题连续性），唯一约束为 `(from_section_id, to_section_id, relation_type)`。
 
-**排序与窗口边界**：可锚定话题选择器（`ListAnchorableTopicsByBoard`）选出全部 active 及 `last_seen_date` 在 `persistent_topic_candidate_decay_window`（默认 7 天）内的 candidate，按 `last_seen_date DESC, hit_count DESC, id ASC` 排序，candidate 最多保留 `persistent_topic_candidate_prompt_limit`（默认 20）条。生命周期更新时，candidate `last_seen_date` 超出窗口（>7 天）自动 archived，active 超出 `persistent_topic_decay_window`（30 天）自动 archived。
+**排序与窗口边界**：可锚定话题选择器（`ListAnchorableTopicsByBoard`）选出全部 active 及 `last_seen_date` 在 `persistent_topic_candidate_decay_window`（默认 7 天）内的 candidate，按 `last_seen_date DESC, hit_count DESC, id ASC` 排序，candidate 最多保留 `persistent_topic_candidate_prompt_limit`（默认 20）条。`candidate_decay_window` 仅用于 prompt 卫生过滤，不触发任何状态变更；所有 status → archived 的转换仅由用户在话题管理界面手动操作。
+
+**候选展示门槛**：`consecutive_hits < upgrade_threshold`（默认 3）的 candidate（"observing"）在话题管理 UI 中隐藏，但仍持久化并参与可锚定集合。达门槛后自动可见。
+
+**一次性清理迁移 `20260628_0001`**：幂等删除所有 `status=candidate AND consecutive_hits < upgrade_threshold` 的历史 candidate。删除采用 `DeleteTopic` 语义：先将引用 section 的 `persistent_topic_id`、`topic_match_distance`、`topic_match_confidence`、`topic_status_at_report` 置 NULL（section 内容保留，仍可正常渲染为"其他动态"中的独立节点），再硬删 candidate 行，最后按 board 重建 relations 以清除指向已删 topic 的 identity/similarity 边。不可逆但 section 内容完整保留。第二次执行是 no-op。
 
 ---
 
@@ -818,6 +822,12 @@ HNSW 索引：`idx_topic_tag_embeddings_embedding USING hnsw (embedding vector_c
 ---
 
 ## 更新日志
+
+### 2026-06-28
+
+- 修正排序与窗口边界描述：取消所有自动状态变更，candidate_decay_window 仅用于 prompt 卫生过滤
+- 新增候选展示门槛说明（observing 隐藏 / 达门槛可见）
+- 新增一次性清理迁移 `20260628_0001` 说明：DeleteTopic 语义删除未达门槛 candidate
 
 ### 2026-05-30
 

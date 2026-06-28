@@ -87,6 +87,7 @@ cd front && pnpm dev
 - Docs-only edits: consistency check unless behavior changed.
 - Keep code changes minimal and scoped. Match existing code style.
 - 完成任务后更新维护 `./docs/reference/` 知识库；openspec change 归档前满足 `开发执行规范.md` §11 归档门禁，归档后按 §12 流转归类到里程碑。
+- **开工前/完工后必须汇报"部署后影响 + 需要的操作"**：每个 change 完工汇报必须包含一节明确告诉用户——(a) 部署/合并后用户可见行为会发生什么变化；(b) 需要用户手动执行的操作（如重新生成数据、清理、配置）；(c) 旧数据如何降级。避免用户打开界面才发现行为变了产生误会。涉及数据迁移、状态机变更、UI 分区变更时尤其强制。
 
 子线程派发参考（pi 的 subagent 派发如何选供应商与模型）:
 

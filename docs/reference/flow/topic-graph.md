@@ -18,9 +18,23 @@ flowchart TD
   REVIEW --> ACTIVE[只有 active topic 进入<br/>独立持久泳道]
 ```
 
-### 候选生命周期窗口
+### 候选生命周期窗口（全人工归档）
 
-candidate 超出 `persistent_topic_candidate_decay_window`（默认 7 天）末次命中后自动转为 archived；active 使用独立 `persistent_topic_decay_window`（30 天）。窗口内 miss 仅清零 `consecutive_hits`，不归档。
+candidate 与 active 的归档**完全由用户在话题管理界面手动操作**。`planLifecycle` 仅更新命中计数：当天有 section 归属则 `consecutive_hits += 1`、`hit_count += 1`、`last_seen_date = 当天`；无归属则 `consecutive_hits` 归零。**不自动变更任何 status**；任何 status → archived 的转换只能由显式的用户操作触发。
+
+`persistent_topic_candidate_decay_window`（默认 7 天）在此处仅用于 ClusterTags prompt 的卫生过滤——决定哪些 candidate 注入 LLM prompt，**不触发任何状态变更**。
+
+### 候选展示门槛（observing → 可见 candidate）
+
+`consecutive_hits < upgrade_threshold`（默认 3）的 candidate（"observing"）在话题管理 UI（`GET /api/semantic-boards/:id/topics`）中**隐藏**，但对用户不可见；它们仍持久化于数据库并参与可锚定话题集合（保证跨天命中能累积）。当 `consecutive_hits` 达到 `upgrade_threshold` 后，candidate 自动在管理 UI 可见（无需额外操作）。
+
+### `auto_new` 创建门槛
+
+当天 section 无法归属到已有 topic 时，系统自动创建 `status=candidate`、`consecutive_hits=1` 的 PersistentTopic。
+
+### 一次性清理迁移
+
+本 change 附带一次性迁移 `20260628_0001`：幂等删除 `status=candidate AND consecutive_hits < upgrade_threshold` 的历史 candidate，采用 `DeleteTopic` 语义——unlink 关联 section（置 NULL 含 `topic_status_at_report`），硬删 candidate，按 board 重建 relations。
 
 ### 可锚定话题选择器
 

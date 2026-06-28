@@ -12,6 +12,7 @@ import (
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 
+	"syntopica-backend/internal/models"
 	"syntopica-backend/internal/platform/database"
 )
 
@@ -40,6 +41,13 @@ var (
 	cachedDB  *gorm.DB
 	startErr  error
 	cachedDSN string // container connection string; used to reopen the pool after a schema rebuild
+
+	// Golden-schema state. migrateOnce builds the schema once per process;
+	// every later SetupTestDB call resets via ResetTestData (fast path).
+	// (Task 2 wires migrateOnce into SetupTestDB; Task 1 only adds the state.)
+	seedSnapshotMu   sync.Mutex
+	aiSettingsSeed   []models.AISettings
+	embeddingCfgSeed []models.EmbeddingConfig
 )
 
 // OpenTestDB returns a *gorm.DB connected to a throwaway pgvector Postgres
@@ -202,6 +210,84 @@ func TruncateAllTables(t *testing.T, db *gorm.DB) {
 	if err := db.Exec(fmt.Sprintf("TRUNCATE TABLE %s CASCADE", strings.Join(tables, ", "))).Error; err != nil {
 		t.Fatalf("truncate tables: %v", err)
 	}
+}
+
+// takeSeedSnapshot reads the current seed rows of ai_settings/embedding_config
+// from the golden schema into package-level slices. MUST be called immediately
+// after runTestMigrations, before any test mutates those tables. Content comes
+// from the DB at runtime — there is no hardcoded seed copy in testutil.
+func takeSeedSnapshot(db *gorm.DB) error {
+	seedSnapshotMu.Lock()
+	defer seedSnapshotMu.Unlock()
+
+	aiSettingsSeed = nil
+	embeddingCfgSeed = nil
+	if err := db.Find(&aiSettingsSeed).Error; err != nil {
+		return fmt.Errorf("snapshot ai_settings: %w", err)
+	}
+	if err := db.Find(&embeddingCfgSeed).Error; err != nil {
+		return fmt.Errorf("snapshot embedding_config: %w", err)
+	}
+	return nil
+}
+
+// ResetTestData resets the golden schema to the "fresh production startup"
+// state for the next test: TRUNCATE all business tables (RESTART IDENTITY
+// CASCADE, skipping schema_migrations) then restore the migration seed rows
+// snapshotted right after the golden schema was built.
+//
+// This is the fast-path reset used between tests once the golden schema exists.
+// TruncateAllTables (no snapshot restore) is retained for callers that
+// deliberately want a truly empty DB including seeds.
+func ResetTestData(t *testing.T, db *gorm.DB) {
+	t.Helper()
+
+	seedSnapshotMu.Lock()
+	defer seedSnapshotMu.Unlock()
+
+	if aiSettingsSeed == nil || embeddingCfgSeed == nil {
+		t.Fatal("ResetTestData: seed snapshot not taken; golden schema must be built first")
+	}
+
+	var tables []string
+	if err := db.Raw(`SELECT table_name FROM information_schema.tables
+		WHERE table_schema = 'public' AND table_type = 'BASE TABLE'
+		AND table_name <> 'schema_migrations'`).Scan(&tables).Error; err != nil {
+		t.Fatalf("list tables: %v", err)
+	}
+	if len(tables) > 0 {
+		if err := db.Exec(fmt.Sprintf("TRUNCATE TABLE %s RESTART IDENTITY CASCADE",
+			strings.Join(tables, ", "))).Error; err != nil {
+			t.Fatalf("truncate tables: %v", err)
+		}
+	}
+
+	// Restore migration seed rows from the golden-schema snapshot.
+	if len(aiSettingsSeed) > 0 {
+		if err := db.Create(&aiSettingsSeed).Error; err != nil {
+			t.Fatalf("restore ai_settings seed: %v", err)
+		}
+	}
+	if len(embeddingCfgSeed) > 0 {
+		if err := db.Create(&embeddingCfgSeed).Error; err != nil {
+			t.Fatalf("restore embedding_config seed: %v", err)
+		}
+	}
+
+	// Advance serial sequences past the restored explicit-id seed rows.
+	// TRUNCATE RESTART IDENTITY resets sequences to 1, but the seed rows are
+	// restored with their original ids (1..N); explicit-id inserts don't call
+	// nextval, so the sequence stays at 1 and the next auto-id Create would
+	// collide on PK id=1. setval() advances it past max(id).
+	for _, tbl := range []string{"ai_settings", "embedding_config"} {
+		if err := db.Exec(fmt.Sprintf(
+			"SELECT setval(pg_get_serial_sequence('%s', 'id'), COALESCE((SELECT MAX(id) FROM %s), 0))",
+			tbl, tbl)).Error; err != nil {
+			t.Fatalf("advance %s id sequence: %v", tbl, err)
+		}
+	}
+
+	database.DB = db
 }
 
 // TestEmbeddingDim is the vector dimension enforced by the production schema

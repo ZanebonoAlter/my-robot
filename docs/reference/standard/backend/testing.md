@@ -21,19 +21,19 @@
 
 ## `testutil.SetupTestDB` 使用模式
 
-集成测试标准入口函数，负责：
+集成测试标准入口函数，**进程级「黄金 schema」模型**——首次调用构建一次 schema，后续调用走轻量重置：
 
 1. **跳过单元模式**：`-short` 时自动 `t.Skip`
 2. **启动隔离容器**：testcontainers-go 启动一次性 pgvector 容器（镜像 `pgvector/pgvector:pg18-trixie`，与生产同构；进程级单例，首次调用启动，后续复用，进程退出由 Ryuk sidecar 自动销毁）
-3. **重建 schema**：每次删除并重建隔离容器的 `public` schema
-4. **导入生产状态**：执行生产 `RunAutoMigrate` 与 `RunMigrations`，重新导入默认数据
+3. **首次调用——构建黄金 schema（进程内只发生一次）**：执行一次生产 `RunAutoMigrate` 与 `RunMigrations`（含迁移注入的 seed），并立即快照①迁移 seed 表全部行、②所有 vector 类型列的类型声明，缓存为进程级黄金 schema
+4. **后续调用——`ResetTestData` 快速重置**：不再重建 schema，改为清空业务表 + 从快照恢复 seed + re-ALTER vector 列回黄金维度 + 重开连接池，结果等价于「生产首次启动后的状态」
 5. **设置全局 DB**：兼容生产代码的 `database.DB`
 
 ```go
 // xxx_test.go（集成）
 func TestSomethingIntegration(t *testing.T) {
     db := testutil.SetupTestDB(t)
-    // db 已连接，恢复为生产首次启动后的 schema 与默认数据
+    // db 已连接，等价于生产首次启动后的 schema 与默认数据
     // ... 测试逻辑
 }
 
@@ -43,7 +43,20 @@ func TestSomethingUnit(t *testing.T) {
 }
 ```
 
-恢复首次启动状态用 `testutil.ReimportTestDB(t, db)`（只操作临时容器，不读开发/生产 DSN）。
+### 相关函数
+
+- **`SetupTestDB(t) *gorm.DB`**：集成测试唯一入口（上述两阶段模型）。
+- **`ResetTestData(t, db) *gorm.DB`**：黄金 schema 模式下测试间重置——truncate 业务表（跳过 `schema_migrations`）+ 从快照恢复 seed + re-ALTER vector 列回黄金维度 + 重开连接池。返回**重开后的新连接句柄**，调用方 MUST 重新赋值。黄金 schema 已构建后由 `SetupTestDB` 内部自动调用，一般无需手动调。
+- **`TruncateAllTables(t, db)`**：CASCADE 清空所有业务表（**含 seed**，真·全空），无快照恢复、无重开。原义保留，供显式需要「连 seed 一起清空」的场景。
+- **`ReimportTestDB(t, db) *gorm.DB`**：DROP schema + 重建 + 重跑迁移 + 重开连接池。作为**逃生口保留**——少数需要「干净迁移态」的回归测试（如 `TestReimportPreservesVectorInserts`）继续可用（只操作临时容器，不读开发/生产 DSN）。
+
+### 🛑 黄金 schema 模型的两条约束
+
+**约束①——新增迁移 seed 表必须同步登记快照**：当前快照表名清单仅 `ai_settings`、`embedding_config`（受控元数据，快照**内容**运行时从黄金 schema 的 DB 读取，不存手工副本，不会 drift）。未来若版本化迁移向第三张表注入 seed，MUST 同步把该表名加入 `ResetTestData` 的快照表名列表，否则该表 seed 不被恢复、测试失败。
+
+**约束②——共享 schema 模型下禁止对集成测试加 `t.Parallel()`**：黄金 schema 是进程级共享态，所有测试串行轮流使用、测试间用 truncate 清数据。给集成测试加 `t.Parallel()` 会并发 truncate 串台、跨测试数据污染。
+
+> **性能现实**：黄金 schema + reset 把 `topicgraph/repository` 包（41 个 `SetupTestDB` 调用点）从 ~382s 降到 ~147s（~2.6x）。瓶颈在每次 reset 重开连接池（撤销测试对 vector 列的 ALTER 变异、清除失效 prepared statement）；进一步优化路径见 `openspec/changes/speed-up-testcontainer-setup/design.md` 决策⑥。
 
 ## 🛑 DSN 安全红线（事故教训 — 不可违反）
 
@@ -86,6 +99,8 @@ section := repository.DailyReportSection{
 - `cached plan must not change result type (SQLSTATE 0A000)`
 
 **关键认知**：catalog 本身没坏（`pg_depend` 正常、扩展正确重注册），坏的是**连接的 prepared statement 缓存**。修复不是动 schema/扩展，而是 `ReimportTestDB` 重建后**关闭旧池、开新池**（已实现）。
+
+> 补充：主路径（黄金 schema + `ResetTestData`）已不再触发 OID 漂移——黄金 schema 只建一次、从不 DROP 扩展，`vector` 类型 OID 全程稳定；`ResetTestData` 末尾的重开连接池改为清除「测试 `ALTER COLUMN ... TYPE vector(N)` 变异导致的 prepared statement 失效」。`ReimportTestDB` 仅作少数显式回归的逃生口走这条 DROP+重建+重开路径。
 
 > 🛑 **切勿**为「优化」删掉 `ReimportTestDB` 末尾的 `openGorm` + `Close`——那是修这个坑的核心，删掉会复现 `cache lookup failed`。回归测试 `TestReimportPreservesVectorInserts` 守住这行。
 

@@ -53,5 +53,5 @@
 - [x] 8.5 `grep -rn "chat_template_kwargs" backend-go/internal/platform/airouter → 命中透传点（openai_compatible.go buildPayload）+ 测试`
 - [x] 8.6 `grep -rn "ArticleContext" backend-go/internal/topicgraph → 命中 TagInput 字段定义、collectBoardTags 主/fallback 填充、三处 prompt 注入、测试`
 - [x] 8.7 `grep -rn "stripThinkTags(content)" backend-go/internal/platform/airouter/openai_compatible.go → 零命中（事后调用已移除，函数本体 //nolint:unused 保留）`
-- [ ] 8.8 `bash scripts/check-standards.sh → L1 规范验收零失败`（归档前由归档流程执行）
+- [x] 8.8 `bash scripts/check-standards.sh` → L1 规范验收零失败（归档前实测 44/44 通过，EXIT=0）
 - [ ] 8.9 运维侧端到端实测（代码外，部署后执行）：后台建 `qwythos-think`(enable_thinking=true) 挂 `digest_polish`、`qwythos-nothink`(false) 挂 `topic_tagging`；触发日报生成确认 highlights 不再混淆；观察打标签请求无 reasoning 产出、token 下降。（运维侧任务，部署后执行）

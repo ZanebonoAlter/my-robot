@@ -67,8 +67,8 @@
 
 - [x] 10.1 后端门禁：`cd backend-go && golangci-lint run ./... && go vet ./... && go test ./internal/topicgraph/... && go build ./...`（测试只跑影响包）
 - [x] 10.2 前端门禁：`cd front && pnpm lint`（WSL）+ `cmd.exe /C "cd /d D:\\project\\Syntopica\\front && pnpm exec nuxi typecheck"` + `pnpm test:unit` + `pnpm build`（typecheck/build 经 Windows cmd）
-- [ ] 10.3 `openspec validate quality-scoring-observability` 通过
-- [ ] 10.4 issue `docs/issues/01-quality-sort-blackbox.md` 状态更新（归档时标记 resolved）
+- [x] 10.3 `openspec validate quality-scoring-observability --type change --strict` 通过（归档前实测 valid，EXIT=0）
+- [x] 10.4 issue `docs/issues/01-quality-sort-blackbox.md` 已标 `Status: resolved`（Resolved by 本 change）
 
 ## 11. 持久话题锚定双重确认放宽（衍生修复 · 治 task 2.1 的二阶副作用）
 

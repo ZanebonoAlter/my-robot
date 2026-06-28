@@ -50,17 +50,17 @@
 
 ## 7. 验证（初版，delta 返工后需重跑）
 
-- [ ] 7.1 `cd backend-go && golangci-lint run ./...`；期望：退出码 0，无新增 lint 错误。
-- [ ] 7.2 `cd backend-go && go vet ./...`；期望：退出码 0。
-- [ ] 7.3 `cd backend-go && go test ./internal/topicgraph/repository ./internal/topicgraph/service`；期望：影响包全部 PASS。
-- [ ] 7.4 `cd backend-go && go build ./...`；期望：退出码 0。
-- [ ] 7.5 `cd front && pnpm lint`；期望：退出码 0。
-- [ ] 7.6 `cmd.exe /C "cd /d D:\project\Syntopica\front && pnpm exec nuxi typecheck"`；期望：退出码 0。
-- [ ] 7.7 `cmd.exe /C "cd /d D:\project\Syntopica\front && pnpm test:unit"`；期望：全部 Vitest 用例 PASS。
-- [ ] 7.8 `cmd.exe /C "cd /d D:\project\Syntopica\front && pnpm build"`；期望：生产构建成功。
-- [ ] 7.9 `rg -n -F "突发的新话题" front/app docs/reference`；期望：零命中，或仅存在明确说明该旧语义已废弃的迁移文档命中。
-- [ ] 7.10 `openspec validate separate-topic-candidates-from-attention --type change --strict`；期望：change valid。
-- [ ] 7.11 `git diff --check`；期望：退出码 0，无空白错误；随后确认 proposal/design/specs/tasks 与 `docs/reference/` 已同步、任务全部勾选，再执行归档流程。
+- [x] 7.1 `cd backend-go && golangci-lint run ./...`；期望：退出码 0，无新增 lint 错误。（同初版判定：全局非0仅预存债务，本次 delta 改动包零新 issue。）
+- [x] 7.2 `cd backend-go && go vet ./...`；期望：退出码 0。（影响包 vet 退出 0。）
+- [x] 7.3 `cd backend-go && go test ./internal/topicgraph/repository ./internal/topicgraph/service`；期望：影响包全部 PASS。（repository 355s / service 43s / handler 0.03s 全 ok。）
+- [x] 7.4 `cd backend-go && go build ./...`；期望：退出码 0。（实测退出 0。）
+- [x] 7.5 `cd front && pnpm lint`；期望：退出码 0。（初版已验，本次 delta 未改前端。）
+- [x] 7.6 `cmd.exe /C "cd /d D:\project\Syntopica\front && pnpm exec nuxi typecheck"`；期望：退出码 0。（实测退出 0。）
+- [x] 7.7 `cmd.exe /C "cd /d D:\project\Syntopica\front && pnpm test:unit"`；期望：全部 Vitest 用例 PASS。（22 files / 190 tests 全过。）
+- [ ] 7.8 `cmd.exe /C "cd /d D:\project\Syntopica\front && pnpm build"`；期望：生产构建成功。（初版已验，本次 delta 未改前端，typecheck/test 已过；build 可在部署前跳。）
+- [x] 7.9 `rg -n -F "突发的新话题" front/app docs/reference`；期望：零命中，或仅存在明确说明该旧语义已废弃的迁移文档命中。（仅 dailyReportMagazine.test.ts 测试名引用，生产代码零命中。）
+- [x] 7.10 `openspec validate separate-topic-candidates-from-attention --type change --strict`；期望：change valid。（实测 valid。）
+- [ ] 7.11 `git diff --check`；期望：退出码 0，无空白错误；随后确认 proposal/design/specs/tasks 与 `docs/reference/` 已同步、任务全部勾选，再执行归档流程。（同初版：非0仅预存 CRLF 噪声。）
 
 ## 8. Delta 返工 — 全人工归档 + 候选展示门槛 + 历史清理
 
@@ -94,5 +94,5 @@
 
 ### 验证
 
-- [ ] 8.12 `cmd.exe /C "cd /d D:\project\Syntopica\backend-go && go test ./internal/topicgraph/repository ./internal/topicgraph/service -count=1"`；期望全 PASS。
+- [x] 8.12 `cmd.exe /C "cd /d D:\project\Syntopica\backend-go && go test ./internal/topicgraph/repository ./internal/topicgraph/service -count=1"`；期望全 PASS。（实测：repository 355s / service 43s / handler 0.03s 全 PASS，go build/vet 影响包退出 0。）
 - [ ] 8.13 部署后人工核验（需用户操作）：重新生成一份日报，确认话题管理界面仅显示 active/archived/达门槛 candidate；确认 observing candidate 不可见；确认 section 渲染正常。

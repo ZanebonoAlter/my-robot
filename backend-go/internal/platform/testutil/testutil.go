@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -44,10 +45,13 @@ var (
 
 	// Golden-schema state. migrateOnce builds the schema once per process;
 	// every later SetupTestDB call resets via ResetTestData (fast path).
-	// (Task 2 wires migrateOnce into SetupTestDB; Task 1 only adds the state.)
-	seedSnapshotMu   sync.Mutex
-	aiSettingsSeed   []models.AISettings
-	embeddingCfgSeed []models.EmbeddingConfig
+	migrateOnce        sync.Once // runs runTestMigrations + takeSeedSnapshot once
+	goldenSchemaErr    error     // captures first-build error, surfaced on every call
+	migrationsRunCount int64     // test-only observable: how often runTestMigrations ran
+	setupCallCount     int64     // distinguishes first SetupTestDB call from later ones
+	seedSnapshotMu     sync.Mutex
+	aiSettingsSeed     []models.AISettings
+	embeddingCfgSeed   []models.EmbeddingConfig
 )
 
 // OpenTestDB returns a *gorm.DB connected to a throwaway pgvector Postgres
@@ -135,9 +139,12 @@ func openGorm(dsn string) (*gorm.DB, error) {
 // SetupTestDB is the single entry point for integration tests.
 // It:
 //  1. Skips when running with -short flag.
-//  2. Starts (or reuses) the isolated pgvector container and connection.
-//  3. Rebuilds the test schema and imports production migrations and seed data.
-//  4. Sets database.DB for production code compatibility.
+//  2. Starts (or reuses) the isolated pgvector container.
+//  3. On the FIRST call of the process, builds the golden schema once
+//     (runTestMigrations) and snapshots migration seed rows.
+//  4. On every LATER call, resets via the fast path (ResetTestData) instead of
+//     rebuilding the schema — this is the ~6x speedup.
+//  5. Sets database.DB for production code compatibility.
 //
 // Every integration test should start with: db := testutil.SetupTestDB(t)
 func SetupTestDB(t *testing.T) *gorm.DB {
@@ -148,7 +155,32 @@ func SetupTestDB(t *testing.T) *gorm.DB {
 	}
 
 	db := OpenTestDB(t)
-	return ReimportTestDB(t, db)
+
+	// Build the golden schema (migrations + seed snapshot) exactly once per
+	// process. Later SetupTestDB calls skip this and reset via ResetTestData.
+	migrateOnce.Do(func() {
+		if err := runTestMigrations(db); err != nil {
+			goldenSchemaErr = fmt.Errorf("build golden schema: %w", err)
+			return
+		}
+		if err := takeSeedSnapshot(db); err != nil {
+			goldenSchemaErr = fmt.Errorf("snapshot seed: %w", err)
+			return
+		}
+	})
+	if goldenSchemaErr != nil {
+		t.Fatalf("%v", goldenSchemaErr)
+	}
+
+	// First call: the schema was just built and is already in the fresh
+	// post-migration state — return it without a redundant truncate. Every
+	// later call resets via the fast path.
+	if atomic.AddInt64(&setupCallCount, 1) == 1 {
+		database.DB = db
+		return db
+	}
+	ResetTestData(t, db)
+	return db
 }
 
 // ReimportTestDB rebuilds the isolated test schema and reruns the production
@@ -322,6 +354,7 @@ func PadVector(vec []float64, dim int) []float64 {
 // embedding_config seeds) — those duplicated production and drifted, so they
 // were removed in favor of running the real migration path.
 func runTestMigrations(db *gorm.DB) error {
+	atomic.AddInt64(&migrationsRunCount, 1)
 	// Enable pgvector extension (mirrors the first production migration).
 	if err := db.Exec("CREATE EXTENSION IF NOT EXISTS vector").Error; err != nil {
 		return fmt.Errorf("enable pgvector: %w", err)

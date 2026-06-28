@@ -52,13 +52,15 @@ PersistentTopic 同时承担两类职责：后台用它给每日 section 建立�
 
 **备选：保留折叠的“新线索”区。** 暂不采用。即使折叠，它仍建立了一个由算法不确定性驱动的注意力队列；真正值得提醒的线索应由后续 watch/显著性规则产生。
 
-### 3. candidate 使用独立失活窗口
+### 3. candidate/active 归档完全人工，candidate 不可见直到达到门槛
 
-新增配置 `persistent_topic_candidate_decay_window`，默认 7 个自然日。生命周期执行时，candidate 若 `today - last_seen_date > window`，转为 archived；窗口内未命中仍只清零 `consecutive_hits`。active 继续使用现有 30 天 `persistent_topic_decay_window`。
+本 change **取消** candidate 与 active 的所有自动归档。`planLifecycle` 仅更新命中计数（命中累加、未命中清零），不变更任何 topic 的 status。candidate → archived 与 active → archived 都由用户在话题管理界面手动操作。
 
-7 天比 active 窗口短，允许周内断续事件重新归属，又避免一次性新闻永久留在候选池。该默认值在实现前通过真实数据可丢弃分析验证；若数据否定该值，应先更新本 change 的设计和规格再实现。
+`persistent_topic_candidate_decay_window`（默认 7 天）**降级为纯 prompt 卫生过滤**：它只决定哪些 candidate 被注入 ClusterTags prompt（避免向 LLM 喂长期未复现的陈旧候选），**不**触发任何状态变更或归档。这与最初草案的语义不同——最初草案让窗口驱动自动归档，但部署后发现自动归档门槛与本 change 的核心目标不一致，已改为全人工。
 
-**备选：首次 miss 立即归档。** 否决，因为周末、采集缺口和非每日演化会造成同一叙事反复新建。
+**候选展示门槛（observing vs 可见 candidate）：** `consecutive_hits < upgrade_threshold`（默认 3）的 candidate 定义为"observing"——持久化在数据库、参与可锚定集合（保证跨天命中能累积），但**对用户隐藏**：话题管理端点 `GET /api/semantic-boards/:id/topics` SHALL 不返回它们。只有达到门槛的 candidate 才在管理 UI 可见、可被用户确认启用。这避免一次性 candidate 干扰用户心智，同时不丢失跨天归属的累积能力。
+
+**备选：observing candidate 也自动清理。** 否决——清理需要定时扫描，与本 change "归档全人工" 的原则冲突；且 observing 仍可能复现，保留其命中累积更稳妥。历史脏数据通过一次性迁移单独清理（见 ADDED Requirement）。
 
 ### 4. 聚类与归属共享同一个“可锚定话题集合”
 
@@ -68,7 +70,7 @@ PersistentTopic 同时承担两类职责：后台用它给每日 section 建立�
 2. `last_seen_date` 仍在 candidate 失活窗口内的 candidate；
 3. candidate 按 `last_seen_date DESC, hit_count DESC, id ASC` 排序，最多取 `persistent_topic_candidate_prompt_limit` 条，默认 20。
 
-ClusterTags 注入和后续双重确认归属必须使用同样的集合，避免 LLM 看到了某话题但 assignment 不接受，或 assignment 期待一个未注入的 id。生命周期更新仍查询全部非 archived 话题，以便把窗口外 candidate 转 archived。
+ClusterTags 注入和后续双重确认归属必须使用同样的集合，避免 LLM 看到了某话题但 assignment 不接受，或 assignment 期待一个未注入的 id。生命周期更新仍查询全部非 archived 话题（candidate 含 observing），但**仅更新命中计数，不归档**（归档见 Decision 3 全人工）。
 
 **备选：只限制 prompt，assignment 仍加载全部 candidate。** 否决，因为双重确认两侧集合不一致会制造新的 `auto_new`。
 
@@ -82,21 +84,23 @@ ClusterTags 注入和后续双重确认归属必须使用同样的集合，避�
 
 ## Risks / Trade-offs
 
-- **[候选淘汰过快导致同一叙事重建]** → 真实数据原型校准 7 天窗口；保留配置项并测试边界日。
+- **[observing candidate 无限累积]** → 接受：它们对用户隐藏，不影响心智；参与可锚定集合是为了保留跨天命中累积。长期堆积的治理留待后续（不引入自动归档，避免与本 change 全人工原则冲突）。
 - **[candidate 上限截掉应复用的话题]** → 最近命中优先、累计命中次优；记录截断数，并验证 auto_new 比例没有异常上升。
 - **[旧日报全部落入“其他动态”显得保守]** → 接受这一降级；它比根据当前状态伪造历史注意力更可信。
 - **[active 数量本身过多仍占 prompt]** → 本 change 不限制用户已确认的 active；后续可依据观测数据另行治理。
 - **[与 watchlist UI 重复]** → 本 change 不新增注意力组件，并在 reference 文档明确“身份锚点 vs 主动关注”。
+- **[一次性清理误删有价值 candidate]** → 清理仅针对 consecutive_hits<upgrade_threshold；达门槛或 active/archived 不动；section 内容保留、仅解除归属（置 NULL）可恢复，不删 section。
 
 ## Migration Plan
 
-1. 用真实数据库只读快照做可丢弃分析，统计 candidate 年龄、复现间隔和不同窗口/上限下的保留率，确认或修订默认值。
-2. 增加可空 `topic_status_at_report` 列及两个 ai_settings 配置，迁移必须幂等。
-3. 先发布后端：写入快照、收紧 candidate 生命周期和锚点选择；API 对旧数据返回 NULL。
-4. 再发布前端：读取快照，移除 candidate 分区，旧数据保守归入“其他动态”。
-5. 观察 auto_new、候选截断和归档数量；出现明显复用退化时，可把窗口/上限调大。
+1. 用真实数据库只读快照做可丢弃分析，统计 candidate 年龄、复现间隔和不同窗口/上限下的保留率，确认或修订默认值（已完成）。
+2. 增加可空 `topic_status_at_report` 列及 ai_settings 配置，迁移必须幂等（已完成）。
+3. 先发布后端：写入快照、收紧 candidate 生命周期和锚点选择；API 对旧数据返回 NULL（已完成）。
+4. 再发布前端：读取快照，移除 candidate 分区，旧数据保守归入“其他动态”（已完成）。
+5. **delta 修订（本变更）**：取消 candidate/active 自动归档（仅保留命中计数），加候选展示门槛（observing 隐藏），一次性清理未达门槛的历史 candidate。
+6. 观察 auto_new、候选截断和 observing 累积量；出现明显复用退化时，可把窗口/上限调大。
 
-**回滚：** 前端可回滚到旧分区而不影响新增列；后端逻辑可回滚，新增可空列和配置保留不删。已自动归档的 candidate 可通过现有话题管理接口恢复，禁止通过破坏性迁移批量删除。
+**回滚：** 前端可回滚到旧分区而不影响新增列；后端逻辑可回滚，新增可空列和配置保留不删。一次性清理不可逆（已删 candidate 需重新由归属算法创建），但被解除归属的 section 内容完整保留，不会丢失。
 
 ## Calibration Evidence
 

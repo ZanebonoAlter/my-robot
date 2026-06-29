@@ -6,6 +6,7 @@
 #   B. 后端结构（golangci 配置、domain 白名单、三层包结构）
 #   C. 前端结构（ESLint 配置、Token 三层、双主题）
 #   D. 防孤立引用（每个 standard/*.md 被至少一处 AGENTS.md / README 引用）
+#   E. flow 变更溯源链接（archive change 被某 flow 文档「变更溯源」表引用，归档后校验）
 #
 # 用法： bash scripts/check-standards.sh
 # 退出码：0 全过；1 有失败。
@@ -104,6 +105,29 @@ for f in docs/reference/standard/frontend/*.md docs/reference/standard/backend/*
     fail "孤立文档 $base 未被任何 AGENTS.md / README 引用"
   fi
 done
+
+echo ""
+echo "== E. flow 变更溯源链接（归档后校验，见《开发执行规范》§12.2）=="
+# 新流程生效日（2026-06-29）之后的 archive change 必须被 flow 文档的变更溯源表引用；
+# 历史存量免校验，避免一次性爆 FAIL。
+CUTOFF="2026-06-29"
+FLOW_DIR="docs/reference/flow"
+if [ -d "openspec/changes/archive" ]; then
+  for d in openspec/changes/archive/*/; do
+    [ -d "$d" ] || continue
+    name="$(basename "$d")"
+    arch_date="${name:0:10}"
+    # 只校验生效日及之后的 archive（YYYY-MM-DD 字典序比较 = 日期比较）
+    if [[ "$arch_date" < "$CUTOFF" ]]; then
+      continue
+    fi
+    if grep -rq "$name" "$FLOW_DIR"/*.md 2>/dev/null; then
+      ok "已溯源 $name"
+    else
+      fail "未溯源 $name（在 docs/reference/flow/*.md 变更溯源表补一行链接回该 archive）"
+    fi
+  done
+fi
 
 echo ""
 echo "=============================="

@@ -52,7 +52,7 @@ cd front && pnpm dev
 ## Repo Layout
 - `front/`: Nuxt 4, Vue 3, TypeScript, Pinia, Tailwind CSS v4.
 - `backend-go/`: Gin, GORM, PostgreSQL + pgvector.
-- `docs/`: reference/ (活文档) + v1.x/ (里程碑) + experience/.
+- `docs/`: reference/ (活文档，含 flow 变更溯源) + v1.x/ (里程碑，可选) + experience/.
 - `tests/workflow/`, `tests/firecrawl/`: Python integration tests.
 
 ## Key Entry Points
@@ -86,7 +86,7 @@ cd front && pnpm dev
 - Backend edits → `golangci-lint run ./...` / targeted `go test` first, then `go test ./...` / `go build ./...`。
 - Docs-only edits: consistency check unless behavior changed.
 - Keep code changes minimal and scoped. Match existing code style.
-- 完成任务后更新维护 `./docs/reference/` 知识库；openspec change 归档前满足 `开发执行规范.md` §11 归档门禁，归档后按 §12 流转归类到里程碑。
+- 完成任务后更新维护 `./docs/reference/` 知识库；openspec change 执行走 `开发执行规范.md` §0.6 标准编排流程，归档前满足 §11 门禁，归档后按 §12 补 flow 变更溯源链接（archive 即永久家，v1.x 里程碑可选）。
 - **开工前/完工后必须汇报"部署后影响 + 需要的操作"**：每个 change 完工汇报必须包含一节明确告诉用户——(a) 部署/合并后用户可见行为会发生什么变化；(b) 需要用户手动执行的操作（如重新生成数据、清理、配置）；(c) 旧数据如何降级。避免用户打开界面才发现行为变了产生误会。涉及数据迁移、状态机变更、UI 分区变更时尤其强制。
 
 子线程派发参考（pi 的 subagent 派发如何选供应商与模型）:
@@ -106,6 +106,8 @@ cd front && pnpm dev
 | E2E脚本执行和验证 | `opencode-go/deepseek-v4-flash` |
 
 > glm 系列统一走当前默认供应商 `zai-coding-cn`（国内 coding 专用），优于 `zai`（国际站）/ `opencode-go`（聚合网关）。
+>
+> change 执行的完整编排（主线程调度 + 子线程派发六步）见 `docs/reference/开发执行规范.md` §0.6。
 
 ## Browser Automation
 Use `agent-browser`: `open <url>` → `snapshot -i` → `click @eX` / `fill @eX "text"` → re-snapshot.

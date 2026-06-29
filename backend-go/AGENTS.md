@@ -1,6 +1,6 @@
 # Backend Agent Guide
 
-遵循根 `AGENTS.md` 的所有规则。以下为后端特有差异。
+遵循根 `AGENTS.md` 的所有规则。以下为后端特有差异。openspec change 执行走 `docs/reference/开发执行规范.md` §0.6 标准编排流程。
 
 > **权威源声明（方案 B，防孤立）**：后端代码规范、包结构、domain 白名单、lint/测试配置的**唯一权威源**在 `docs/reference/standard/backend/`。本文件只保留 agent 秒级要看到的**红线速查**，每节末尾给 `→ standard/xxx.md` 深链。规范有出入时以 standard/ 为准。
 

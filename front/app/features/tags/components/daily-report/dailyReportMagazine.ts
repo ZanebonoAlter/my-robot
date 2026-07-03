@@ -18,7 +18,10 @@ export interface QualityZone {
 export interface TopicGroup {
   key: string
   topicId?: number
+  /** 当天组名（= 组内首个 section 的 cluster_label），做大标题，贴当日内容。 */
   label: string
+  /** 规范名（= persistent_topic.label），做跨天锚点；无 persistent_topic 时为 undefined。 */
+  canonicalLabel?: string
   color?: string
   sections: DailyReportSection[]
   articleCount: number
@@ -95,7 +98,8 @@ export function groupSectionsByTopic(zone: QualityZone): TopicGroup[] {
     groups.set(key, {
       key,
       topicId,
-      label: section.persistent_topic?.label || section.cluster_label,
+      label: section.cluster_label,
+      canonicalLabel: section.persistent_topic?.label,
       color: section.persistent_topic?.color,
       sections: [section],
       articleCount: section.article_count,

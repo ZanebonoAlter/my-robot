@@ -258,12 +258,14 @@ func (r *TopicGraphRepository) DeleteTopic(topicID uint) error {
 }
 
 // FilterVisibleTopics returns topics that should appear in the management UI.
-// Active and archived always visible; candidates only visible when
-// consecutive_hits >= upgrade_threshold (observing candidates are hidden).
+// Active and archived always visible; candidates only visible when their
+// cumulative hit_count >= upgrade_threshold (observing candidates are hidden).
+// Note: the gate is cumulative hits, NOT consecutive hits — a topic that
+// appears on-and-off still qualifies once it has been hit enough times total.
 func FilterVisibleTopics(topics []BoardPersistentTopic, upgradeThreshold int) []BoardPersistentTopic {
 	result := make([]BoardPersistentTopic, 0, len(topics))
 	for _, t := range topics {
-		if t.Status != TopicStatusCandidate || t.ConsecutiveHits >= upgradeThreshold {
+		if t.Status != TopicStatusCandidate || t.HitCount >= upgradeThreshold {
 			result = append(result, t)
 		}
 	}
@@ -390,8 +392,8 @@ func (r *TopicGraphRepository) UpdateTopic(topicID uint, label *string, status *
 		case TopicStatusActive, TopicStatusArchived:
 			if *status == TopicStatusActive && topic.Status == TopicStatusCandidate {
 				threshold := LoadPersistentTopicConfig(r.db).UpgradeThreshold
-				if topic.ConsecutiveHits < threshold {
-					return nil, fmt.Errorf("话题需连续出现至少 %d 天后才能人工确认（当前 %d 天）", threshold, topic.ConsecutiveHits)
+				if topic.HitCount < threshold {
+					return nil, fmt.Errorf("话题需累计命中至少 %d 次后才能人工确认（当前 %d 次）", threshold, topic.HitCount)
 				}
 			}
 			updates["status"] = *status

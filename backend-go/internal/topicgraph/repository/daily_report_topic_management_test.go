@@ -97,9 +97,9 @@ func TestUpdateTopic_CandidateRequiresOccurrenceThresholdBeforeActivation(t *tes
 
 	active := TopicStatusActive
 	_, err := repo.UpdateTopic(topic.ID, nil, &active)
-	require.ErrorContains(t, err, "连续出现")
+	require.ErrorContains(t, err, "累计命中")
 
-	require.NoError(t, db.Model(&topic).Update("consecutive_hits", 3).Error)
+	require.NoError(t, db.Model(&topic).Update("hit_count", 3).Error)
 	got, err := repo.UpdateTopic(topic.ID, nil, &active)
 	require.NoError(t, err)
 	assert.Equal(t, TopicStatusActive, got.Status)

@@ -4,6 +4,7 @@ import {
   buildLifelineWindow,
   buildQualityZones,
   createRequestCache,
+  groupSectionsByTopic,
   selectLeadStory,
 } from './dailyReportMagazine'
 import type { DailyReport, DailyReportSection, SectionRelation, SectionTimelineNode } from '~/api/dailyReports'
@@ -166,6 +167,64 @@ describe('dailyReportMagazine data mapping', () => {
 
   it('uses the shared cubic bezier geometry', () => {
     expect(buildBezierPath(10, 20, 110, 60)).toBe('M10,20 C60,20 60,60 110,60')
+  })
+})
+
+describe('groupSectionsByTopic — 双轨命名（当天组名 + 规范名）', () => {
+  // 复用 section() 工厂：有 persistent_topic 时 id 传作 topicId，label=`topic-${id}`。
+  function zone(sections: DailyReportSection[]) {
+    return { key: 'active' as const, label: '关心的话题', eyebrow: 'Following', sections }
+  }
+
+  it('命中已有话题：label 用当天 cluster_label，canonicalLabel 用 persistent_topic.label', () => {
+    // section() 传 status='active' 时会带上 persistent_topic(id=id, label=`topic-${id}`)。
+    const sec = section(7, 0, 0.9, 'active', 'active')
+    sec.cluster_label = '当日组名'
+    const groups = groupSectionsByTopic(zone([sec]))
+
+    expect(groups).toHaveLength(1)
+    expect(groups[0]!.label).toBe('当日组名')
+    expect(groups[0]!.canonicalLabel).toBe('topic-7')
+    expect(groups[0]!.topicId).toBe(7)
+  })
+
+  it('无 persistent_topic：canonicalLabel 为 undefined，label 回退 cluster_label', () => {
+    const sec = section(7, 0, 0.9) // 不传 status / topicStatusAtReport → 无 persistent_topic
+    sec.cluster_label = '孤儿组名'
+    const groups = groupSectionsByTopic(zone([sec]))
+
+    expect(groups).toHaveLength(1)
+    expect(groups[0]!.label).toBe('孤儿组名')
+    expect(groups[0]!.canonicalLabel).toBeUndefined()
+    expect(groups[0]!.topicId).toBeUndefined()
+  })
+
+  it('同一 topic 的多个 section 合并为一个 group，计数累加', () => {
+    const a = section(7, 0, 0.9, 'active', 'active')
+    a.cluster_label = '组名A'
+    a.article_count = 3
+    a.threads = [{ id: 1, title: 't1', summary: '', tag_ids: [], confidence: 0, related_article_ids: [] } as never]
+    const b = section(7, 1, 0.5, 'active', 'active')
+    b.cluster_label = '组名B'
+    b.article_count = 2
+    b.threads = [{ id: 2, title: 't2', summary: '', tag_ids: [], confidence: 0, related_article_ids: [] } as never]
+    const groups = groupSectionsByTopic(zone([a, b]))
+
+    expect(groups).toHaveLength(1)
+    expect(groups[0]!.sections).toHaveLength(2)
+    // label/canonicalLabel 取组内首个 section 的值（现有聚合规则）。
+    expect(groups[0]!.label).toBe('组名A')
+    expect(groups[0]!.canonicalLabel).toBe('topic-7')
+    expect(groups[0]!.articleCount).toBe(5)
+    expect(groups[0]!.threadCount).toBe(2)
+  })
+
+  it('不同 topic 分别成组，按出现顺序排列', () => {
+    const groups = groupSectionsByTopic(zone([
+      section(7, 0, 0.9, 'active', 'active'),
+      section(8, 0, 0.8, 'active', 'active'),
+    ]))
+    expect(groups.map(g => g.topicId)).toEqual([7, 8])
   })
 })
 

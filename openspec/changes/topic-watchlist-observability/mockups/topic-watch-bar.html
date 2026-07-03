@@ -1,0 +1,280 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="editorial">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>关注标记栏 · Mockup</title>
+<style>
+  /* === 主题 token（从 main.css 精简内联，保证 mockup 独立可看）=== */
+  :root {
+    --raw-red-500: #d94a4a; --raw-red-600: #c12f2f; --raw-red-700: #a41f1f;
+    --raw-amber-400: #f0a24b; --raw-amber-500: #d4883c;
+    --raw-blue-400: #63b3ed; --raw-blue-500: #3f7cff;
+    --raw-teal-500: #2d8a7a;
+  }
+  [data-theme="editorial"] {
+    --color-bg-base:#faf7f2; --color-bg-elevated:#f5f0e6; --color-bg-sunken:#e8dfd1;
+    --color-bg-hover:rgba(255,255,255,.85); --color-bg-active:rgba(255,255,255,.6);
+    --color-text-primary:#1a1a1a; --color-text-secondary:#5a5a5a; --color-text-muted:#8a8a8a;
+    --color-border-subtle:rgba(26,26,26,.08); --color-border-medium:rgba(26,26,26,.15); --color-border-strong:rgba(26,26,26,.25);
+    --color-accent:#d94a4a; --color-accent-hover:#c12f2f; --color-accent-subtle:rgba(217,74,74,.08);
+    --color-accent-soft:#d0dde8; --shadow-medium:0 2px 8px rgba(26,26,26,.08);
+    --serif:"Noto Serif SC","Source Han Serif SC",Georgia,serif;
+    --sans:system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;
+  }
+  [data-theme="dark"] {
+    --color-bg-base:#080c12; --color-bg-elevated:rgba(17,27,38,.98); --color-bg-sunken:#0e161d;
+    --color-bg-hover:rgba(255,255,255,.06); --color-bg-active:rgba(255,255,255,.08);
+    --color-text-primary:rgba(255,255,255,.9); --color-text-secondary:rgba(255,255,255,.6); --color-text-muted:rgba(255,255,255,.35);
+    --color-border-subtle:rgba(255,255,255,.06); --color-border-medium:rgba(255,255,255,.10); --color-border-strong:rgba(255,255,255,.18);
+    --color-accent:rgba(240,138,75,.85); --color-accent-hover:rgba(240,138,75,1); --color-accent-subtle:rgba(240,138,75,.08);
+    --color-accent-soft:rgba(255,255,255,.12); --shadow-medium:0 2px 8px rgba(0,0,0,.4);
+    --serif:"Noto Serif SC","Source Han Serif SC",Georgia,serif;
+    --sans:system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;
+  }
+
+  *{box-sizing:border-box}
+  html,body{margin:0;background:var(--color-bg-base);color:var(--color-text-primary);font-family:var(--sans);transition:background .3s}
+  body{padding:0 0 5rem}
+
+  /* mockup 控制条 */
+  .mock-bar{position:sticky;top:0;z-index:50;display:flex;align-items:center;gap:.75rem;
+    padding:.6rem 1.25rem;background:var(--color-bg-sunken);border-bottom:1px solid var(--color-border-medium);
+    font-size:.78rem;color:var(--color-text-secondary)}
+  .mock-bar b{color:var(--color-text-primary)}
+  .mock-bar .spacer{flex:1}
+  .seg{display:inline-flex;border:1px solid var(--color-border-medium);border-radius:6px;overflow:hidden}
+  .seg button{appearance:none;border:0;background:transparent;color:var(--color-text-secondary);
+    padding:.3rem .7rem;font-size:.74rem;cursor:pointer;font-family:var(--sans)}
+  .seg button.on{background:var(--color-accent);color:#fff}
+  [data-theme="dark"] .seg button.on{color:#080c12}
+
+  /* 日报容器（窄栏，贴近真实阅读列宽）*/
+  .report{max-width:46rem;margin:0 auto;padding:2.5rem 1.25rem 0}
+
+  /* masthead 简化示意 */
+  .mast{padding-bottom:1rem;border-bottom:3px double var(--color-border-strong);text-align:center;font-family:var(--serif)}
+  .mast .eye{color:var(--color-accent);font-size:.74rem;font-style:italic;letter-spacing:.18em;text-transform:uppercase;margin-bottom:.4rem}
+  .mast h1{margin:0;font-size:2rem;font-weight:900;letter-spacing:-.02em}
+  .mast .meta{margin-top:.5rem;color:var(--color-text-muted);font-size:.68rem;font-family:ui-monospace,monospace;letter-spacing:.08em}
+  .mast .sep{color:var(--color-accent);margin:0 .4rem}
+
+  /* ====== 关注标记栏（本 mockup 核心）====== */
+  .watch{margin-top:1.75rem;font-family:var(--serif)}
+  .watch__head{display:flex;align-items:center;gap:.5rem;padding-bottom:.6rem}
+  .watch__eye{display:inline-flex;align-items:center;gap:.4rem;color:var(--color-accent);
+    font-size:.72rem;font-style:italic;letter-spacing:.16em;text-transform:uppercase;font-family:var(--sans)}
+  .watch__eye svg{width:14px;height:14px}
+  .watch__title{font-size:.92rem;color:var(--color-text-secondary);font-style:italic}
+  .watch__add{margin-left:auto;appearance:none;border:1px solid var(--color-border-medium);
+    background:transparent;color:var(--color-text-secondary);padding:.32rem .7rem;border-radius:6px;
+    font-size:.74rem;cursor:pointer;font-family:var(--sans);display:inline-flex;align-items:center;gap:.3rem}
+  .watch__add:hover{border-color:var(--color-accent);color:var(--color-accent)}
+
+  /* 关注分组卡片 */
+  .wgroup{border:1px solid var(--color-border-medium);border-left:3px solid var(--color-accent);
+    background:var(--color-bg-elevated);border-radius:0 4px 4px 0;margin-top:.6rem;overflow:hidden}
+  .wgroup__bar{display:flex;align-items:center;gap:.5rem;padding:.6rem .85rem;cursor:pointer;
+    border-bottom:1px solid transparent}
+  .wgroup.open .wgroup__bar{border-bottom-color:var(--color-border-subtle)}
+  .wgroup__chev{width:12px;height:12px;color:var(--color-text-muted);transition:transform .2s;flex:none}
+  .wgroup.open .wgroup__chev{transform:rotate(90deg)}
+  .wgroup__label{font-size:1rem;font-weight:700;color:var(--color-text-primary);line-height:1.35}
+  .wgroup__count{font-family:ui-monospace,monospace;font-size:.68rem;color:var(--color-text-muted);
+    background:var(--color-accent-subtle);padding:.1rem .45rem;border-radius:10px}
+  .wgroup__ops{margin-left:auto;display:flex;gap:.2rem;opacity:0;transition:opacity .15s}
+  .wgroup:hover .wgroup__ops,.wgroup__ops:focus-within{opacity:1}
+  .wop{appearance:none;border:0;background:transparent;color:var(--color-text-muted);
+    width:24px;height:24px;border-radius:4px;cursor:pointer;display:inline-flex;align-items:center;justify-content:center}
+  .wop:hover{background:var(--color-bg-hover);color:var(--color-text-secondary)}
+  .wop svg{width:14px;height:14px}
+
+  .wgroup__body{display:none;padding:.2rem .85rem .7rem}
+  .wgroup.open .wgroup__body{display:block}
+  .whit{display:block;padding:.5rem .2rem;border-top:1px dashed var(--color-border-subtle);text-decoration:none;color:inherit}
+  .whit:first-child{border-top:0}
+  .whit__title{font-size:.9rem;font-weight:600;color:var(--color-text-primary);line-height:1.5;
+    font-family:var(--serif);display:inline}
+  .whit:hover .whit__title{color:var(--color-accent)}
+  .whit__reason{display:block;margin-top:.2rem;font-size:.78rem;font-style:italic;
+    color:var(--color-text-secondary);line-height:1.6;font-family:var(--serif)}
+  .whit__meta{display:inline-flex;align-items:center;gap:.4rem;margin-left:.5rem;
+    font-size:.64rem;color:var(--color-text-muted);font-family:ui-monospace,monospace;vertical-align:middle}
+  .whit__more{display:block;margin-top:.5rem;text-align:center;font-size:.72rem;font-style:italic;
+    color:var(--color-text-muted);cursor:pointer;font-family:var(--serif);padding:.3rem}
+  .whit__more:hover{color:var(--color-accent)}
+
+  /* 折叠态：只显示分组条 + 命中数 */
+  .watch.collapsed .wgroup__body{display:none!important}
+  .watch.collapsed .wgroup__chev{display:none}
+  .watch.collapsed .wgroup__bar{border-bottom:0}
+
+  /* 空态 */
+  .watch__empty{margin-top:.6rem;padding:1.2rem;text-align:center;border:1px dashed var(--color-border-medium);
+    border-radius:6px;color:var(--color-text-muted);font-style:italic;font-family:var(--serif)}
+  .watch__empty b{color:var(--color-text-secondary);font-style:normal}
+
+  /* 正文分区示意（让关注栏有"上下文"）*/
+  .body-hint{margin-top:3rem;padding-top:1.5rem;border-top:4px double var(--color-border-strong);
+    font-family:var(--serif)}
+  .body-hint .eye{color:var(--color-text-muted);font-size:.7rem;letter-spacing:.16em;text-transform:uppercase;font-family:var(--sans)}
+  .body-hint h2{margin:.4rem 0;font-size:1.3rem}
+  .body-hint p{margin:0;color:var(--color-text-secondary);font-size:.82rem;line-height:1.7}
+
+  .note{max-width:46rem;margin:2rem auto 0;padding:1rem 1.25rem;font-size:.74rem;line-height:1.7;
+    color:var(--color-text-muted);font-family:var(--sans);border-top:1px solid var(--color-border-subtle)}
+  .note b{color:var(--color-text-secondary)}
+</style>
+</head>
+<body>
+
+<div class="mock-bar">
+  <b>关注标记栏 · Mockup</b>
+  <span>日报顶部独立栏 · 不侵入正文</span>
+  <span class="spacer"></span>
+  <div class="seg" id="seg-state">
+    <button data-state="hits" class="on">有命中</button>
+    <button data-state="empty">空态</button>
+    <button data-state="collapsed">折叠</button>
+  </div>
+  <div class="seg" id="seg-theme">
+    <button data-theme="editorial" class="on">Editorial</button>
+    <button data-theme="dark">Dark</button>
+  </div>
+</div>
+
+<div class="report">
+  <!-- masthead 简化，只为给关注栏"上下文" -->
+  <header class="mast">
+    <div class="eye">Syntopica · 每日脉络</div>
+    <h1>地缘周报</h1>
+    <div class="meta">2026年6月29日<span class="sep">·</span>48 篇<span class="sep">·</span>12 话题</div>
+  </header>
+
+  <!-- ============ 关注标记栏 ============ -->
+  <section class="watch" id="watch">
+    <div class="watch__head">
+      <span class="watch__eye">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+        你在追踪 · Watchlist
+      </span>
+      <span class="watch__title">命中你主动标记的动态</span>
+      <button class="watch__add">
+        <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
+        新建关注
+      </button>
+    </div>
+
+    <!-- 命中态内容 -->
+    <div id="pane-hits">
+      <div class="wgroup open">
+        <div class="wgroup__bar" onclick="this.parentElement.classList.toggle('open')">
+          <svg class="wgroup__chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M9 6l6 6-6 6"/></svg>
+          <span class="wgroup__label">美伊会不会真打起来</span>
+          <span class="wgroup__count">命中 2</span>
+          <span class="wgroup__ops">
+            <button class="wop" title="暂停"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg></button>
+            <button class="wop" title="删除"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6"/></svg></button>
+          </span>
+        </div>
+        <div class="wgroup__body">
+          <a class="whit" href="#">
+            <span class="whit__title">霍尔木兹海峡油轮遇袭，油价单日跳涨 4%</span>
+            <span class="whit__meta">§ A-03</span>
+            <span class="whit__reason">↳ 这是事态升级的直接信号：海峡通航安全首次受实质威胁，与你关注的"会不会真打"高度相关。</span>
+          </a>
+          <a class="whit" href="#">
+            <span class="whit__title">IAEA 报告：伊朗浓缩铀纯度突破 90%</span>
+            <span class="whit__meta">§ A-07</span>
+            <span class="whit__reason">↳ 距武器级（90%+）仅一步之遥，是"打不打"的关键前置变量。</span>
+          </a>
+        </div>
+      </div>
+
+      <div class="wgroup">
+        <div class="wgroup__bar" onclick="this.parentElement.classList.toggle('open')">
+          <svg class="wgroup__chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M9 6l6 6-6 6"/></svg>
+          <span class="wgroup__label">AI 监管立法进展</span>
+          <span class="wgroup__count">命中 1</span>
+          <span class="wgroup__ops">
+            <button class="wop" title="暂停"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg></button>
+            <button class="wop" title="删除"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6"/></svg></button>
+          </span>
+        </div>
+        <div class="wgroup__body">
+          <a class="whit" href="#">
+            <span class="whit__title">欧盟 AI Act 执行细则公布，首批合规清单落地</span>
+            <span class="whit__meta">§ B-02</span>
+            <span class="whit__reason">↳ 直接命中：从立法阶段进入执行阶段，是监管进展的里程碑节点。</span>
+          </a>
+        </div>
+      </div>
+
+      <div class="wgroup">
+        <div class="wgroup__bar" onclick="this.parentElement.classList.toggle('open')">
+          <svg class="wgroup__chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M9 6l6 6-6 6"/></svg>
+          <span class="wgroup__label">半导体出口管制博弈</span>
+          <span class="wgroup__count">命中 3</span>
+          <span class="wgroup__ops">
+            <button class="wop" title="暂停"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg></button>
+            <button class="wop" title="删除"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6"/></svg></button>
+          </span>
+        </div>
+        <div class="wgroup__body">
+          <a class="whit" href="#">
+            <span class="whit__title">荷兰扩大 ASML 对华 DUV 设备出口限制</span>
+            <span class="whit__meta">§ C-01</span>
+            <span class="whit__reason">↳ 管制清单再扩，直接命中你追踪的博弈主线。</span>
+          </a>
+          <a class="whit" href="#">
+            <span class="whit__title">中国对镓、锗出口实施新一轮反制许可</span>
+            <span class="whit__meta">§ C-04</span>
+            <span class="whit__reason">↳ 反制回合升级，管制博弈进入"你限制我、我反制你"的螺旋。</span>
+          </a>
+          <span class="whit__more">还有 1 条命中 ↓</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- 空态 -->
+    <div class="watch__empty" id="pane-empty" style="display:none">
+      今天没有命中你关注的动态。<br>
+      <b>3 个关注仍在监控中</b>，命中后这里会第一时间提示。
+    </div>
+  </section>
+
+  <!-- 正文分区示意（系统归属的话题，与上方"关注命中"语义区分）-->
+  <section class="body-hint">
+    <div class="eye">话题 · 今日动态</div>
+    <h2>（正文从这里开始）</h2>
+    <p>这里是系统按 persistent_topic 归属的正文分区——与上方"你在追踪"栏语义不同：上方是你主动盯的命中，这里是聚类涌现的话题归属。两者分区独立，避免混淆。</p>
+  </section>
+</div>
+
+<p class="note">
+  <b>设计要点：</b>① 顶部"你在追踪 · Watchlist"eyebrow + 左侧 accent 竖条，与下方"话题·今日动态"分区视觉区分（关注命中 vs 系统归属）。② 每个关注一张卡，命中 section 标题可点进正文，下方斜体一句 AI 理由。③ 命中多时折叠（§C "还有 1 条"）。④ 操作（暂停/删除）hover 才显，安静。⑤ 全程语义 token，editorial 红强调 / dark 琥珀强调，零写死色值。
+</p>
+
+<script>
+  // 主题切换
+  document.querySelectorAll('#seg-theme button').forEach(b=>{
+    b.onclick=()=>{
+      document.documentElement.setAttribute('data-theme', b.dataset.theme);
+      document.querySelectorAll('#seg-theme button').forEach(x=>x.classList.toggle('on', x===b));
+    };
+  });
+  // 状态切换
+  const watch=document.getElementById('watch');
+  document.querySelectorAll('#seg-state button').forEach(b=>{
+    b.onclick=()=>{
+      document.querySelectorAll('#seg-state button').forEach(x=>x.classList.toggle('on', x===b));
+      const s=b.dataset.state;
+      watch.classList.toggle('collapsed', s==='collapsed');
+      document.getElementById('pane-hits').style.display = (s==='empty')?'none':'block';
+      document.getElementById('pane-empty').style.display = (s==='empty')?'block':'none';
+      if(s==='hits') watch.querySelectorAll('.wgroup').forEach((g,i)=>g.classList.toggle('open', i===0));
+    };
+  });
+</script>
+</body>
+</html>

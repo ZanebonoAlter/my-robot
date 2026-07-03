@@ -6,6 +6,7 @@ import TopicDetectiveWall from './TopicDetectiveWall.client.vue'
 import DailyReportMasthead from './daily-report/DailyReportMasthead.vue'
 import DailyReportSidebar from './daily-report/DailyReportSidebar.vue'
 import DailyReportTopicSection from './daily-report/DailyReportTopicSection.vue'
+import DailyReportWatchBar from './daily-report/DailyReportWatchBar.vue'
 import {
   buildQualityZones,
   formatMagazineDate,
@@ -210,6 +211,11 @@ onUnmounted(() => {
           </div>
           <template v-else-if="reader.selectedDetail.value">
             <DailyReportMasthead :report="reader.selectedDetail.value" :board-title="boardTitle" />
+            <DailyReportWatchBar
+              :board-id="boardId"
+              :report-id="reader.selectedDetail.value.id"
+              :sections="reader.selectedDetail.value.sections"
+            />
             <div class="drm-layout">
               <DailyReportSidebar
                 :zones="qualityZones"

@@ -166,7 +166,10 @@ watch([groups, () => props.reportDate], ([nextGroups, reportDate]) => {
             <strong>{{ group.label }}</strong>
             <small>
               <i class="drm-topic__color-dot" aria-hidden="true" />
-              话题色 · {{ group.articleCount }} 篇文章 · {{ group.threadCount }} 条线索 ·
+              <template v-if="group.canonicalLabel && group.canonicalLabel !== group.label">
+                规范名 {{ group.canonicalLabel }} ·
+              </template>
+              {{ group.articleCount }} 篇文章 · {{ group.threadCount }} 条线索 ·
               {{ expandedTopics.has(group.key) ? '收起话题泳道' : '展开话题泳道' }}
             </small>
           </span>

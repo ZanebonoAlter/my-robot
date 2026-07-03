@@ -128,12 +128,14 @@ func TestRealData_BackfillTopicConvergence(t *testing.T) {
 		assert.Less(t, len(topics), boardCounts[boardID],
 			"board %d: topics should be fewer than sections (clustering happened)", boardID)
 
-		// No section left unassigned.
+		// Single-member clusters no longer seed topics (left for the daily
+		// candidate path); orphan sections are now expected. We log orphan and
+		// assert instead that every created topic has >= 2 members — the new
+		// invariant (no single-section noise lanes).
 		var orphan int64
 		db.Raw(`SELECT count(*) FROM daily_report_sections s
 			JOIN board_daily_reports r ON r.id=s.report_id
 			WHERE r.semantic_board_id=? AND s.persistent_topic_id IS NULL`, boardID).Scan(&orphan)
-		assert.Equal(t, int64(0), orphan, "board %d: all sections must be assigned", boardID)
 
 		// Topic size distribution (members per topic).
 		sizes := map[uint]int{}
@@ -144,6 +146,9 @@ func TestRealData_BackfillTopicConvergence(t *testing.T) {
 			JOIN board_daily_reports r ON r.id=s.report_id
 			WHERE r.semantic_board_id=?`, boardID).Scan(&rows)
 		for _, rw := range rows {
+			if rw.TopicID == 0 {
+				continue // unassigned (NULL) — not a topic
+			}
 			sizes[rw.TopicID]++
 		}
 		sizeList := make([]int, 0, len(sizes))
@@ -156,8 +161,14 @@ func TestRealData_BackfillTopicConvergence(t *testing.T) {
 		}
 		sort.Sort(sort.Reverse(sort.IntSlice(sizeList)))
 
-		t.Logf("board %d: %d sections → %d topics (sizes desc: %v), largest topic #%d=%d",
-			boardID, boardCounts[boardID], created, sizeList, maxTopic, maxSize)
+		// Min-size gate: no created topic may have fewer than 2 members.
+		if len(sizeList) > 0 {
+			assert.GreaterOrEqual(t, sizeList[len(sizeList)-1], 2,
+				"board %d: every backfilled topic must have >=2 members (no single-member noise lanes)", boardID)
+		}
+
+		t.Logf("board %d: %d sections → %d topics (sizes desc: %v), largest topic #%d=%d, orphan=%d",
+			boardID, boardCounts[boardID], created, sizeList, maxTopic, maxSize, orphan)
 		totalTopics += created
 		totalSections += boardCounts[boardID]
 	}

@@ -887,7 +887,7 @@ func postgresMigrations() []Migration {
 		// ── Prune underqualified observing candidates ───────────────
 		{
 			Version:     "20260628_0001",
-			Description: "Hard-delete candidate topics with consecutive_hits < upgrade_threshold (one-shot cleanup of historical observing candidates).",
+			Description: "Hard-delete candidate topics with hit_count < upgrade_threshold (one-shot cleanup of historical observing candidates).",
 			Up: func(db *gorm.DB) error {
 				if !tableExists(db, "board_persistent_topics") || !tableExists(db, "daily_report_sections") {
 					return nil
@@ -903,7 +903,88 @@ func postgresMigrations() []Migration {
 				if err != nil {
 					return fmt.Errorf("prune underqualified candidates: %w", err)
 				}
-				logging.Infof("Migration 20260628_0001: pruned %d underqualified candidate topics (consecutive_hits < %d)", deleted, threshold)
+				logging.Infof("Migration 20260628_0001: pruned %d underqualified candidate topics (hit_count < %d)", deleted, threshold)
+				return nil
+			},
+		},
+
+		// ── Topic watch CHECK constraint ───────────────────────────────
+		// board_topic_watches and topic_watch_hits tables are created by
+		// AutoMigrate (registered by internal/topicgraph). This migration
+		// adds the domain-specific CHECK constraint AutoMigrate cannot
+		// express: board_topic_watches.status IN ('active','paused').
+		// Idempotent — second run is a no-op.
+		{
+			Version:     "20260630_0001",
+			Description: "Add CHECK constraint on board_topic_watches.status (active|paused).",
+			Up: func(db *gorm.DB) error {
+				if !tableExists(db, "board_topic_watches") {
+					return nil
+				}
+				if err := db.Exec(`
+					DO $$ BEGIN
+						IF NOT EXISTS (
+							SELECT 1 FROM information_schema.table_constraints
+							WHERE constraint_name = 'chk_board_topic_watches_status'
+							  AND table_name = 'board_topic_watches'
+						) THEN
+							ALTER TABLE board_topic_watches
+								ADD CONSTRAINT chk_board_topic_watches_status
+								CHECK (status IN ('active', 'paused'));
+						END IF;
+					END $$
+				`).Error; err != nil {
+					return fmt.Errorf("add board_topic_watches status CHECK: %w", err)
+				}
+				return nil
+			},
+		},
+		{
+			Version:     "20260630_0002",
+			Description: "Add composite unique index on topic_watch_hits(watch_id, section_id, report_id).",
+			Up: func(db *gorm.DB) error {
+				if !tableExists(db, "topic_watch_hits") {
+					return nil
+				}
+				// Rollback: DROP INDEX IF EXISTS idx_watch_section_report;
+				if err := db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_watch_section_report ON topic_watch_hits(watch_id, section_id, report_id)`).Error; err != nil {
+					return fmt.Errorf("add topic_watch_hits unique index: %w", err)
+				}
+				return nil
+			},
+		},
+
+		// ── Manual topic lane source column ───────────────────────────
+		{
+			Version:     "20260702_0001",
+			Description: "Add board_persistent_topics.source column (auto/manual) with CHECK constraint.",
+			Up: func(db *gorm.DB) error {
+				if !tableExists(db, "board_persistent_topics") {
+					return nil
+				}
+				// Add column with default 'auto' (idempotent via IF NOT EXISTS).
+				if err := db.Exec(`
+					ALTER TABLE board_persistent_topics
+					ADD COLUMN IF NOT EXISTS source VARCHAR(10) NOT NULL DEFAULT 'auto'
+				`).Error; err != nil {
+					return fmt.Errorf("add board_persistent_topics.source column: %w", err)
+				}
+				// Add CHECK constraint (idempotent: check information_schema first).
+				if err := db.Exec(`
+					DO $$ BEGIN
+						IF NOT EXISTS (
+							SELECT 1 FROM information_schema.table_constraints
+							WHERE constraint_name = 'chk_board_persistent_topics_source'
+							  AND table_name = 'board_persistent_topics'
+						) THEN
+							ALTER TABLE board_persistent_topics
+								ADD CONSTRAINT chk_board_persistent_topics_source
+								CHECK (source IN ('auto', 'manual'));
+						END IF;
+					END $$
+				`).Error; err != nil {
+					return fmt.Errorf("add board_persistent_topics.source CHECK: %w", err)
+				}
 				return nil
 			},
 		},
@@ -911,14 +992,14 @@ func postgresMigrations() []Migration {
 }
 
 // PruneUnderqualifiedCandidates hard-deletes all candidate topics with
-// consecutive_hits < upgradeThreshold. Sections referencing them are unlinked
+// hit_count < upgradeThreshold. Sections referencing them are unlinked
 // (persistent_topic_id / match fields / topic_status_at_report set to NULL).
 // Relations pointing to deleted topics are cleaned up. Idempotent — second run
 // is a no-op. Returns the number of topics deleted.
 func PruneUnderqualifiedCandidates(db *gorm.DB, upgradeThreshold int) (deleted int, err error) {
 	var topicIDs []uint
 	if err = db.Table("board_persistent_topics").
-		Where("status = ? AND consecutive_hits < ?", "candidate", upgradeThreshold).
+		Where("status = ? AND hit_count < ?", "candidate", upgradeThreshold).
 		Pluck("id", &topicIDs).Error; err != nil {
 		return 0, fmt.Errorf("prune: query candidates: %w", err)
 	}

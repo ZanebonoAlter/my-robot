@@ -1,89 +1,83 @@
-# Tasks: 关注标记 + 归属理由可视化 + 画布密度
+# Tasks: 关注标记 + 话题专注视图 + 泳道上下文注入
 
-> 垂直切片，每切片独立可交付、可验证。三块（C 画布密度 / B 理由可视化 / A 关注标记）可并行，B 前端依赖 C 的空间放宽与 B 后端的数据。尾部遵循开发执行规范 §11 归档门禁。
+> 垂直切片，每切片独立可交付、可验证。推荐顺序：D 泳道注入（核心、后端先行）→ C′ 专注视图（前端，独立）→ A 关注标记（前后端，最重）。尾部遵循开发执行规范 §11 归档门禁。
 
-## 1. 画布密度（C · section-lifecycle）
+## 1. 泳道上下文注入（D · persistent-topic / daily-report-system）
 
-- [ ] 1.1 `front/app/features/tags/components/BoardThreadBrowser.vue`：放宽 `COL_W`（148→约 200）、上调节点标签与正文文字字号至常规可读区间。验收：默认状态下节点标签清晰可读
-- [ ] 1.2 同文件：默认 `zoomScale` 由 1 调至约 1.2-1.3，首屏即可读。验收：首次打开无需浏览器缩放
-- [ ] 1.3 确认 `btb-zoom-bar`（0.4x-3x）在放宽后仍正常响应。验收：手动缩放行为不变
-- [ ] 1.4 lanes 视图布局验证：节点标签变大后不挤压同泳道节点、不溢出泳道背景。验收：多话题 board 的 lanes 视图无重叠
-- [ ] 1.5 浏览器视觉验收（cmd）：桌面 1280px 宽下默认可读、横向滚动正常。验收：人工核验
+- [x] 1.1 新增查询 `ListTopicRecentBriefs(boardID, sinceDays, perTopicLimit)`：按 active 话题拉最近 7 天 section brief（标题）+ 每条 section 代表性 thread 标题（按 fit_distance 升序，每 section 至多 2 条）。验收：返回 `map[topicID][]TopicRecentBrief`，按 last_seen/period_date 倒序截断
+- [x] 1.2 token 截断保护：每话题最多 N 条 section（N=5），超则截断。验收：注入内容有上限
+- [x] 1.3 `buildClusterSystemPrompt` 增强：active 话题注入"近期实际内容"（section + thread），candidate 维持 label-only；补指示"依据近期内容判断归属而非字面沾边"。验收：prompt 含 active 内容、candidate 仅 label
+- [x] 1.4 注入查询失败非致命：拉取失败降级 label-only，不阻断 ClusterTags。验收：降级路径有效
+- [x] 1.5 单测：注入 prompt 构造四分支（active 含内容 / candidate label-only / 截断 / 降级）。验收：7 个 repository 测试 + 5 个 service 测试 PASS
 
-## 2. 归属理由持久化与 API 暴露（B 后端 · topic-assignment-reasoning / daily-report-system）
+## 2. 话题专注视图（C′ · section-lifecycle，前端）
 
-- [ ] 2.1 新增版本化迁移 `20260624_*`：`daily_report_sections` 加 `matched_topic_id BIGINT NULL`（无外键约束，兼容历史 NULL）。验收：迁移在 testcontainer 幂等执行
-- [ ] 2.2 `daily_report_models.go`：`DailyReportSection.MatchedTopicID` 由 `gorm:"-"` 改为持久化 tag（`gorm:"column:matched_topic_id;index"`）。验收：AutoMigrate/迁移增列
-- [ ] 2.3 `daily_report_assignment.go`：anchor_hit / auto_new 分支写入持久化 `matched_topic_id`（anchor_hit 写 LLM 指向的 id，auto_new 写 NULL）。验收：归属后列被正确写入
-- [ ] 2.4 section / timeline / lifeline 接口的 section 表示暴露 `matched_topic_id`（JSON 字段）。验收：前端能取到三元组
-- [ ] 2.5 历史行 matched_topic_id 保持 NULL，前端降级文案（"历史数据，无 AI 判断记录"）。验收：NULL 不报错
+- [x] 2.1 `BoardThreadBrowser.vue` 新增 `viewMode='focus'` + `focusedTopicId`；lanes 点泳道进 focus、返回总览。验收：三模式可切换
+- [x] 2.2 focus sticky 标题栏（话题名 + 状态 + 动态数/跨度/最近日期），全语义 token。验收：sticky 生效、双主题清晰
+- [x] 2.3 横向时间轴（仅 focusedTopicId 节点，复用 lanes 数据过滤）+ 按住拖拽平移（区分 click/drag 阈值 3px）。验收：拖拽正常、click 不误触
+- [x] 2.4 节点点击就地展开 thread（复用 selectNode 加载，focus 模式 SHALL NOT 弹 popup overlay）。验收：就地展开、无弹窗
+- [x] 2.5 空话题降级（窗口内无节点 → 提示 + 返回，不报错）。验收：空态不崩
+- [ ] 2.6 浏览器视觉验收（cmd 起前后端）：点泳道进 focus、sticky、拖拽、就地展开（对照 `mockups/topic-focus-view.html`）。验收：人工核验（待里程碑验收）
+- [x] 2.7 前端单测：纯函数（filterFocusNodes/isDragMove/buildFocusMeta）11 个 + 组件 mount 8 个。验收：PASS
 
-## 3. 归属理由画布可视化（B 前端 · topic-assignment-reasoning，依赖 1 + 2）
+## 3. 关注标记后端（A · topic-watch）
 
-- [ ] 3.1 `BoardThreadBrowser.vue`：节点按 `topic_match_confidence` + `topic_match_distance` 分层样式（anchor_hit 实心 / 边界命中半实心 / auto_new 空心）。三种样式颜色 MUST 由主题语义 token（`--color-*`）派生，跟随 editorial/dark 双主题，不写死色值。验收：三种样式可区分 + 两主题下均清晰
-- [ ] 3.2 边界命中比例可配置常量（默认 `match_threshold × 0.85`），集中定义便于调参。验收：常量单一来源
-- [ ] 3.3 节点 hover 气泡：人话理由（“与『X』约 N% 相关，AI 也认同” / “相似接近但 AI 未确认，已开新候选”）+ 原始数值（distance/confidence/matched_topic_id）。气泡样式跟主题 token。验收：hover 显示翻译后理由 + 原始值
-- [ ] 3.4 话题详情侧栏：点击话题展示 `getTopicLifeline` 聚合的历史 section + 各自信度。验收：详情列表每条含信度
-- [ ] 3.5 用真实 board 的 section distance 分布直方图校准边界比例（0.85），避免边界区间过宽/过窄。验收：边界命中占比合理（不超 30%）
+- [x] 3.1 版本化迁移 `20260630_0001`：`board_topic_watches.status` CHECK(active,paused)，幂等。验收：testcontainer 反复执行无错
+- [x] 3.2 版本化迁移 `20260630_0002`：`topic_watch_hits(watch_id, section_id, report_id)` 复合唯一索引（防重复命中行），幂等。验收：testcontainer 幂等 + 去重测试 PASS
+- [x] 3.3 模型 `BoardTopicWatch`/`TopicWatchHit` + repository CRUD（CreateWatch/ListWatchesByBoard/UpdateWatch/DeleteWatch 含命中级联/ListActiveWatchesByBoard/GetWatchHitsByReport）。验收：8 个 SQLite 单测 PASS
+- [x] 3.4 service 编排统一入口 `GenerateAndSaveReport` = Generate→Save→EvaluateWatchHits（事务外，失败 log.Warnf 吞）。两入口（handler+scheduler）改调它。验收：统一入口生效
+- [x] 3.5 `EvaluateWatchHits`/`evaluateWatchHitsWithChat`：active 关注 × 当期 section 批量 AI 单信号命中判定，输出 JSON `{hits:[{watch_id,section_id,reason}]}`，合法 id 集防幻觉。插入 upsert（OnConflict DoNothing，防重复）。验收：单信号、防幻觉、去重
+- [x] 3.6 handler + 路由（5 端点）：POST/GET `/semantic-boards/:boardId/topic-watches`、PATCH/DELETE `/topic-watches/:id`、GET `/daily-reports/:id/watch-hits`。grep 路由注册二次确认（codegraph 追不到 group.POST）。验收：7 个 handler 测试 PASS
+- [x] 3.7 paused 关注跳过判定。验收：测试覆盖
+- [x] 3.8 零副作用集成测试（testcontainer）：断言 `section.persistent_topic_id` 与 `topic.consecutive_hits` 命中后不变（2 个硬约束 Scenario）+ 防幻觉过滤。验收：3 个集成测试 PASS
 
-## 4. 关注标记后端（A · topic-watch）
+## 4. 关注标记前端（A · topic-watch，依赖 3）
 
-- [ ] 4.1 版本化迁移：新建 `board_topic_watches`（id / semantic_board_id / label / status CHECK(active,paused) / created_at / updated_at）与 `topic_watch_hits`（id / watch_id / section_id / report_id / period_date / reason）。验收：迁移幂等
-- [ ] 4.2 模型与 repository：`BoardTopicWatch` / `TopicWatchHit`，CRUD 方法（CreateWatch / ListWatchesByBoard / UpdateWatch / DeleteWatch 含命中级联清理 / ListActiveWatchesByBoard）。验收：CRUD 单测
-- [ ] 4.3 `EvaluateWatchHits(boardID, report)`：日报生成流程末尾接入，对该 board 全部 active 关注 + 当期 section 批量提交 AI 判定命中，写 `topic_watch_hits`。SHALL NOT 改 section 归属或 persistent_topic 生命周期。SHALL 失败时记日志跳过、不阻断日报生成。验收：单信号命中、零副作用
-- [ ] 4.4 AI 命中判定 prompt schema（一次请求：全部 section + 全部 active 关注 → 输出 watch_id×section_id 命中矩阵 + reason）。验收：批量单次请求
-- [ ] 4.5 handler + 路由：`POST/GET /api/semantic-boards/:boardId/topic-watches`、`PATCH/DELETE /api/topic-watches/:id`、`GET /api/daily-reports/:id/watch-hits`（或并入日报详情）。验收：四端点可用
-- [ ] 4.6 `paused` 关注跳过判定。验收：paused 不产生命中记录
+- [x] 4.1 API 封装 `app/api/topicWatches.ts`（5 方法，经 ApiClient，snake→camel normalizer，ID 转字符串）。验收：10 个测试 PASS
+- [x] 4.2 日报顶部独立栏 `DailyReportWatchBar.vue`（masthead 下、正文上）：按关注分组展示命中 section 标题 + 理由；空态；每组折叠（阈值 2）。全语义 token。对照 `mockups/topic-watch-bar.html`。验收：11 个组件测试 PASS
+- [x] 4.3 关注管理（新建/暂停/恢复/删除）复用 AppDialog/AppButton/AppInput，删除走 AppDialog 二次确认，禁 window.*。验收：测试断言无 window.* 调用
+- [x] 4.4 顶部栏与正文 persistent_topic 分区语义区分（eyebrow「你在追踪·Watchlist」+ accent 竖条）。验收：测试断言标识存在
+- [x] 4.5 纯函数（groupHitsByWatch/partitionByStatus/formatMoreLabel）单测。验收：9 个 PASS
 
-## 5. 关注标记前端（A · topic-watch，依赖 4）
+## 5. 架构体检（§7 强制，每个子任务后）
 
-- [ ] 5.1 API 封装进 `app/api/`（新 `topicWatches.ts` 或并入 `dailyReports.ts`）：createWatch / listWatches / updateWatch / deleteWatch，经 `ApiClient`、snake_case→camelCase 在 normalizer 层。验收：类型完整、不直接 fetch
-- [ ] 5.2 日报顶部独立栏组件（新）：按关注分组展示命中 section 标题 + 一句话理由；空态显示“今天无你关注的动态”或隐藏；每组限展条数 + 折叠。颜色跟主题 token。验收：分组渲染、空态正确、双主题清晰
-- [ ] 5.3 关注管理入口（新建关注 / 暂停 / 删除），MUST 复用项目组件库（AppDialog/AppButton/AppInput，禁原生 button/input 样式类、禁 window.*）。验收：CRUD 可用、零原生弹窗
-- [ ] 5.4 顶部栏与正文 persistent_topic 分区在 UI 上语义区分（关注命中 vs 话题归属）。验收：用户可区分两者
+- [x] 5.1 `codegraph impact`：`buildClusterSystemPrompt`/`EvaluateWatchHits`/viewMode focus 三处波及面无 HIGH/CRITICAL 忽略
+- [x] 5.2 传导链守卫（coupling-map §1）：D 改聚类输入，重跑 `TestPlanTopicAssignments_AnchorHit_MatchedWithinThresholdNotNearest` + `TestTopicLineageSurvivesClusterDrift` 确认血缘未打散。验收：两测试 PASS
+- [x] 5.3 新增 Gin handler grep 路由注册二次确认（codegraph 追不到 group.POST）。验收：5 端点路由均已注册
+- [x] 5.4 分层合规：关注逻辑在 `internal/topicgraph/`、注入增强在 `service/`、不引入循环依赖
 
-## 6. 架构体检（§7 强制，每个子任务后）
+## 6. 数据兼容性（§10）
 
-- [ ] 6.1 `codegraph impact <修改的符号>`：波及面无 HIGH/CRITICAL 被忽略；EvaluateWatchHits / matched_topic_id 持久化 / 画布分层三处重点核
-- [ ] 6.2 `codegraph affected <改动文件>`：受影响测试范围符合预期
-- [ ] 6.3 新增 Gin handler（关注四端点）grep 路由注册二次确认（codegraph 追不到 group.POST 注册，会误报“无调用者”）
-- [ ] 6.4 分层合规：关注逻辑在 `internal/topicgraph/` 内、不引入循环依赖
+- [x] 6.1 迁移幂等：两表 + CHECK + 复合唯一索引在 testcontainer 反复执行无错
+- [x] 6.2 D 注入对历史日报无副作用（注入是生成期行为，不回刷）
+- [x] 6.3 JSON 响应向后兼容：关注 API 为全新端点，不破坏现有响应
+- [x] 6.4 回滚路径：DROP TABLE / DROP INDEX 可逆，记录于迁移注释；D/C′ 可独立 revert
 
-## 7. 测试
+## 7. 文档（§12.4 里程碑收尾统一更新）
 
-- [ ] 7.1 后端纯单元（内存 SQLite，`glebarez/sqlite` mode=memory，参考 `feed_service_test.go`）：关注命中 prompt 构造、边界命中比例计算、matched_topic_id 写入分支、状态机纯逻辑
-- [ ] 7.2 后端集成（testcontainer pgvector `testutil.SetupTestDB`）：迁移幂等、关注 CRUD、命中级联清理、EvaluateWatchHits 零副作用（断言 section.persistent_topic_id 与 topic.consecutive_hits 不变）、matched_topic_id 持久化与历史 NULL 兼容
-- [ ] 7.3 后端 CORS：确认新 POST/PATCH/DELETE 端点 preflight 通过（cors.methods 已含 PATCH，§13 已修）
-- [ ] 7.4 前端单测（Vitest + happy-dom）：节点分层样式映射、hover 理由人话翻译、顶部栏分组与空态、关注管理无 window.*
+> 以下 reference 更新在**里程碑收尾时**统一做，不在本 change 内逐条改活文档；此处列清单备忘。触及 flow 的，archive 后按 §12.2 补「变更溯源」链接。
 
-## 8. 数据兼容性（§10）
+- [ ] 7.1 `docs/reference/flow/daily-report.md` §1 Step3：补"注入 active 话题最近 7 天 section/thread 内容（不止 label）"
+- [ ] 7.2 `docs/reference/api/`：补关注标记五端点
+- [ ] 7.3 `docs/reference/database/`：补 board_topic_watches / topic_watch_hits 表 + 复合唯一索引
+- [ ] 7.4 `docs/reference/architecture/`：日报生成流程图补 EvaluateWatchHits 接入点 + ClusterTags 注入增强；说明关注标记与 persistent_topic 隔离边界
 
-- [ ] 8.1 迁移幂等验证：matched_topic_id 列、两表在 testcontainer 反复执行无错
-- [ ] 8.2 历史数据兼容：历史 section matched_topic_id 为 NULL，前端/API 不报错
-- [ ] 8.3 JSON 响应向后兼容：新增字段为可空，不破坏现有 section/timeline/lifeline 响应格式
-- [ ] 8.4 回滚路径：DROP COLUMN / DROP TABLE 可逆，记录于迁移注释
+## 8. 测试（§11.2）
 
-## 9. 文档（§12.4 里程碑收尾统一更新）
+> 归档前重跑，确认零失败。后端命令须走 cmd.exe（Go 仅 Windows .exe）；前端 typecheck/build/test 须 cmd，lint 可 WSL。
 
-> 以下 reference 更新在**里程碑收尾时**统一做，不在本 change 内逐条改活文档；此处列清单备忘。
+- [ ] T.1 `cmd.exe /C "cd /d D:\project\Syntopica\backend-go && go test ./internal/topicgraph/service ./internal/topicgraph/repository ./internal/topicgraph/handler -short"` → PASS
+- [ ] T.2 testcontainer 集成（含 Docker）：迁移幂等 + EvaluateWatchHits 零副作用（3 个）+ 去重（1 个）+ 传导链守卫（`TestTopicLineageSurvivesClusterDrift`）→ PASS
+- [ ] T.3 `cmd.exe /C "cd /d D:\project\Syntopica\front && pnpm test:unit"` → 全过（含 topicFocus 11 + BoardThreadBrowser.focus 8 + topicWatches 10 + DailyReportWatchBar 11 + topicWatchGrouping 9）
+- [ ] T.4 `grep -rnE "window.(alert|prompt|confirm)" front/app` → 零命中
 
-- [ ] 9.1 `docs/reference/api/`：补关注标记四端点、section 理由三元组字段（matched_topic_id / topic_match_distance / topic_match_confidence）
-- [ ] 9.2 `docs/reference/database/`：补 board_topic_watches / topic_watch_hits 表、daily_report_sections.matched_topic_id 列
-- [ ] 9.3 `docs/reference/architecture/`：日报生成流程图补 EvaluateWatchHits 接入点；说明关注标记与 persistent_topic 的隔离边界
+## 9. 验证（§11.2，归档前实测）
 
-## 10. 验证
-
-> 归档前重跑本节，确认零失败。
-
-- [ ] V.1 `cd backend-go && go build ./internal/topicgraph/... ./internal/platform/...` → BUILD_OK
-- [ ] V.2 `cd backend-go && golangci-lint run ./internal/topicgraph/...` → 0 issues
-- [ ] V.3 `cd backend-go && go vet ./internal/topicgraph/...` → VET_OK
-- [ ] V.4 `cd backend-go && go test ./internal/topicgraph/repository ./internal/topicgraph/handler ./internal/topicgraph/service -count=1` → PASS（关注 CRUD / 命中零副作用 / matched_topic_id 持久化用例全过）
-- [ ] V.5 testcontainer pgvector 集成测试（迁移幂等 + EvaluateWatchHits 零副作用）→ PASS
-- [ ] V.6 `cd front && pnpm lint` → 0 error（lint 可在 WSL 跑）
-- [ ] V.7 `cmd.exe /C "cd /d D:\project\Syntopica\front && pnpm exec nuxi typecheck"` → TYPECHECK_PASS
-- [ ] V.8 `cmd.exe /C "cd /d D:\project\Syntopica\front && pnpm test:unit"` → 全过（节点分层 / hover 翻译 / 顶部栏 / 关注管理无 window.*）
-- [ ] V.8a `grep -rn "window.\(alert\|prompt\|confirm\)" front/app` → 零命中（§13 零原生弹窗不回退）
-- [ ] V.9 `cmd.exe /C "cd /d D:\project\Syntopica\front && pnpm build"` → BUILD_PASS
-- [ ] V.10 浏览器视觉验收（cmd 起后端 + 前端）：① 话题画布默认可读无需放大 ② hover 节点出理由气泡 ③ 日报顶部关注栏分组渲染 ④ 关注 CRUD 可用且无原生弹窗
-- [ ] V.11 真实 board 数据核验：边界命中占比 ≤ 30%（直方图校准后）；matched_topic_id 对新日报非空、对历史行 NULL
+- [ ] V.1 `cmd.exe /C "cd /d D:\project\Syntopica\backend-go && go build ./..."` → BUILD_OK
+- [ ] V.2 `cmd.exe /C "cd /d D:\project\Syntopica\backend-go && go vet ./internal/topicgraph/..."` → VET_OK
+- [ ] V.3 `cmd.exe /C "cd /d D:\project\Syntopica\backend-go && golangci-lint run ./internal/topicgraph/..."` → 0 issues（已知预存在 gofmt 2 处非本次引入）
+- [ ] V.4 `cd front && pnpm lint` → 0 error（lint WSL 可跑，5 warnings 全 pre-existing）
+- [ ] V.5 `cmd.exe /C "cd /d D:\project\Syntopica\front && pnpm exec nuxi typecheck"` → TYPECHECK_PASS
+- [ ] V.6 `cmd.exe /C "cd /d D:\project\Syntopica\front && pnpm build"` → BUILD_PASS
+- [ ] V.7 `bash scripts/check-standards.sh` → A-D 段零失败（E 段归档后校验）
+- [ ] V.8 浏览器视觉验收（cmd 起后端 + 前端）：① 点泳道进 focus、sticky、拖拽、就地展开（对照 topic-focus-view.html）② 日报顶部关注栏分组（对照 topic-watch-bar.html）③ 关注 CRUD 无原生弹窗 ④ D 注入后新生成日报归属质量人工抽查

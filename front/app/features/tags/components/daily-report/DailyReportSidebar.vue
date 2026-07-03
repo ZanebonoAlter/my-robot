@@ -39,7 +39,7 @@ const emit = defineEmits<{
         @click="emit('scrollTo', `report-topic-${topic.topicId}`)"
       >
         <span class="drm-sidebar__swatch" :style="{ backgroundColor: topic.color || 'var(--color-accent)' }" />
-        <span>{{ topic.label }}</span>
+        <span>{{ topic.canonicalLabel || topic.label }}</span>
       </button>
     </section>
 

@@ -11,11 +11,11 @@ import (
 
 func TestFilterVisibleTopics_HidesObservingCandidates(t *testing.T) {
 	topics := []repository.BoardPersistentTopic{
-		{ID: 1, Status: repository.TopicStatusActive, ConsecutiveHits: 0},
-		{ID: 2, Status: repository.TopicStatusArchived, ConsecutiveHits: 0},
-		{ID: 3, Status: repository.TopicStatusCandidate, ConsecutiveHits: 2}, // below threshold 3
-		{ID: 4, Status: repository.TopicStatusCandidate, ConsecutiveHits: 3}, // meets threshold
-		{ID: 5, Status: repository.TopicStatusCandidate, ConsecutiveHits: 5}, // above threshold
+		{ID: 1, Status: repository.TopicStatusActive, ConsecutiveHits: 0, HitCount: 1},
+		{ID: 2, Status: repository.TopicStatusArchived, ConsecutiveHits: 0, HitCount: 1},
+		{ID: 3, Status: repository.TopicStatusCandidate, ConsecutiveHits: 0, HitCount: 2}, // below threshold 3 (by hit_count)
+		{ID: 4, Status: repository.TopicStatusCandidate, ConsecutiveHits: 0, HitCount: 3}, // meets threshold (by hit_count)
+		{ID: 5, Status: repository.TopicStatusCandidate, ConsecutiveHits: 1, HitCount: 5}, // above threshold; cons kept low to prove hit_count is the gate
 	}
 	result := repository.FilterVisibleTopics(topics, 3)
 	require.Len(t, result, 4)
@@ -28,6 +28,22 @@ func TestFilterVisibleTopics_HidesObservingCandidates(t *testing.T) {
 	for _, topic := range result {
 		assert.NotEqual(t, uint(3), topic.ID, "observing candidate id=3 must not be visible")
 	}
+}
+
+// TestFilterVisibleTopics_UsesHitCountNotConsecutive confirms the visibility
+// gate is cumulative hit_count, NOT consecutive_hits: a candidate with high
+// consecutive_hits but low hit_count is hidden, and one with low consecutive
+// but high hit_count is shown.
+func TestFilterVisibleTopics_UsesHitCountNotConsecutive(t *testing.T) {
+	topics := []repository.BoardPersistentTopic{
+		// high consecutive (5) but low hit_count (1) → hidden (underqualified by cumulative)
+		{ID: 1, Status: repository.TopicStatusCandidate, ConsecutiveHits: 5, HitCount: 1},
+		// low consecutive (0) but high hit_count (3) → shown (qualified by cumulative)
+		{ID: 2, Status: repository.TopicStatusCandidate, ConsecutiveHits: 0, HitCount: 3},
+	}
+	result := repository.FilterVisibleTopics(topics, 3)
+	require.Len(t, result, 1)
+	require.Equal(t, uint(2), result[0].ID, "only cumulative hit_count>=threshold qualifies, regardless of consecutive")
 }
 
 func TestBuildDailyReportProgressMessageMatchesFrontendContract(t *testing.T) {

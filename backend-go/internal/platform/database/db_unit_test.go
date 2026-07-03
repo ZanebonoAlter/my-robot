@@ -148,6 +148,24 @@ func mustContainAll(t *testing.T, text string, needles ...string) {
 	}
 }
 
+func TestWatchHitUniqueIndexMigrationRegistered(t *testing.T) {
+	migration := mustFindMigration(t, postgresMigrations(), "20260630_0002")
+	if !strings.Contains(strings.ToLower(migration.Description), "topic_watch_hits") {
+		t.Fatalf("expected topic_watch_hits migration description, got %q", migration.Description)
+	}
+
+	source, err := os.ReadFile("postgres_migrations.go")
+	if err != nil {
+		t.Fatalf("read postgres_migrations.go: %v", err)
+	}
+	joined := string(source)
+
+	mustContainAll(t, joined,
+		"CREATE UNIQUE INDEX IF NOT EXISTS idx_watch_section_report ON topic_watch_hits(watch_id, section_id, report_id)",
+		"DROP INDEX IF EXISTS idx_watch_section_report;",
+	)
+}
+
 func TestQualityBreakdownMigrationRegistered(t *testing.T) {
 	migration := mustFindMigration(t, postgresMigrations(), "20260625_0001")
 	if !strings.Contains(strings.ToLower(migration.Description), "quality_breakdown") {

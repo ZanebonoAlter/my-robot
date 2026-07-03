@@ -46,15 +46,15 @@ func NormalizeReportDate(date time.Time) time.Time {
 
 // SectionTimelineNode represents a section in a timeline view.
 type SectionTimelineNode struct {
-	ID               uint              `json:"id"`
-	ReportID         uint              `json:"report_id"`
-	PeriodDate       time.Time         `json:"period_date"`
-	ClusterLabel     string            `json:"cluster_label"`
-	Status           string            `json:"status"`
-	ArticleCount     int               `json:"article_count"`
-	ThreadCount      int               `json:"thread_count"`
-	ImageURL         string            `json:"image_url"`
-	QualityBreakdown json.RawMessage   `json:"quality_breakdown"`
+	ID               uint            `json:"id"`
+	ReportID         uint            `json:"report_id"`
+	PeriodDate       time.Time       `json:"period_date"`
+	ClusterLabel     string          `json:"cluster_label"`
+	Status           string          `json:"status"`
+	ArticleCount     int             `json:"article_count"`
+	ThreadCount      int             `json:"thread_count"`
+	ImageURL         string          `json:"image_url"`
+	QualityBreakdown json.RawMessage `json:"quality_breakdown"`
 	// Persistent topic assignment. All optional so historical / unmatched
 	// sections (persistent_topic_id IS NULL) still serialize cleanly.
 	PersistentTopicID    *uint                 `json:"persistent_topic_id,omitempty"`
@@ -71,6 +71,7 @@ type PersistentTopicBrief struct {
 	Label           string `json:"label"`
 	Status          string `json:"status"`
 	Color           string `json:"color"`
+	HitCount        int    `json:"hit_count"`
 	ConsecutiveHits int    `json:"consecutive_hits"`
 	CanActivate     bool   `json:"can_activate"`
 }
@@ -380,10 +381,11 @@ func (r *TopicGraphRepository) SaveThreads(tx *gorm.DB, reportID, sectionID uint
 
 // GetBoardSectionTimeline fetches all sections and their relations for a board within a date range.
 func (r *TopicGraphRepository) GetBoardSectionTimeline(boardID uint, days int) (SectionTimelineResponse, error) {
+	// days <= 0 表示"全部历史"：跳过 90 天窗口上限，用一个远超真实数据跨度的
+	// 窗口等效"不按天过滤"（保留单条大 SELECT，避免重写易错的 SQL 字面量）。
 	if days <= 0 {
-		days = 30
-	}
-	if days > 90 {
+		days = 100000
+	} else if days > 90 {
 		days = 90
 	}
 	var nodes []SectionTimelineNode
@@ -616,8 +618,8 @@ func loadTopicBriefMap(db *gorm.DB, ids []uint) map[uint]PersistentTopicBrief {
 	for _, t := range topics {
 		briefByID[t.ID] = PersistentTopicBrief{
 			ID: t.ID, Label: t.Label, Status: t.Status,
-			Color: PersistentTopicColor(t.ID), ConsecutiveHits: t.ConsecutiveHits,
-			CanActivate: t.Status == TopicStatusCandidate && t.ConsecutiveHits >= cfg.UpgradeThreshold,
+			Color: PersistentTopicColor(t.ID), HitCount: t.HitCount, ConsecutiveHits: t.ConsecutiveHits,
+			CanActivate: t.Status == TopicStatusCandidate && t.HitCount >= cfg.UpgradeThreshold,
 		}
 	}
 	return briefByID
@@ -874,6 +876,118 @@ func (r *TopicGraphRepository) BackfillAllRelations() (map[uint]int, error) {
 		logging.Infof("BackfillAllRelations: board %d rebuilt %d relations", b.BoardID, rebuilt)
 	}
 	return results, nil
+}
+
+// =============================================================================
+// ListTopicRecentBriefs — 泳道上下文注入（切片 D）
+// =============================================================================
+
+// ListTopicRecentBriefs fetches, for every active persistent topic on the board,
+// sections from the last `sinceDays` days with up to 2 representative thread
+// titles per section. Sections are sorted by period_date DESC and trimmed to
+// `perTopicLimit` per topic. Returns map[topicID][]TopicRecentBrief.
+//
+// Degradation contract: when the query fails (DB down etc.), the caller SHALL
+// fall back to label-only injection — the briefs are purely an information
+// enrichment layer and SHALL NOT block ClusterTags.
+func (r *TopicGraphRepository) ListTopicRecentBriefs(boardID uint, sinceDays int, perTopicLimit int) (map[uint][]TopicRecentBrief, error) {
+	cutoff := time.Now().AddDate(0, 0, -sinceDays).Truncate(24 * time.Hour)
+
+	// 1) Collect active topic IDs on this board.
+	type topicRow struct {
+		ID     uint
+		Status string
+	}
+	var topics []topicRow
+	err := r.db.Model(&BoardPersistentTopic{}).
+		Select("id, status").
+		Where("semantic_board_id = ? AND status = ?", boardID, TopicStatusActive).
+		Find(&topics).Error
+	if err != nil {
+		return nil, fmt.Errorf("listTopicRecentBriefs: load active topics: %w", err)
+	}
+	if len(topics) == 0 {
+		return nil, nil
+	}
+
+	activeIDs := make([]uint, len(topics))
+	for i, t := range topics {
+		activeIDs[i] = t.ID
+	}
+
+	// 2) Raw query: sections + threads joined, ordered for downstream grouping.
+	type row struct {
+		TopicID      uint      `gorm:"column:persistent_topic_id"`
+		SectionID    uint      `gorm:"column:section_id"`
+		SectionLabel string    `gorm:"column:section_label"`
+		PeriodDate   time.Time `gorm:"column:period_date"`
+		ThreadTitle  *string   `gorm:"column:thread_title"`
+		FitDistance  *float64  `gorm:"column:fit_distance"`
+	}
+
+	var rows []row
+	err = r.db.Raw(`
+		SELECT
+			ds.persistent_topic_id,
+			ds.id AS section_id,
+			ds.cluster_label AS section_label,
+			bdr.period_date,
+			t.title AS thread_title,
+			t.fit_distance
+		FROM daily_report_sections ds
+		JOIN board_daily_reports bdr ON bdr.id = ds.report_id
+		LEFT JOIN LATERAL (
+			SELECT d.title, d.fit_distance
+			FROM daily_report_threads d
+			WHERE d.section_id = ds.id
+			ORDER BY COALESCE(d.fit_distance, 999999) ASC, d.id ASC
+			LIMIT 2
+		) t ON true
+		WHERE ds.persistent_topic_id IN ?
+		  AND bdr.period_date >= ?
+		ORDER BY ds.persistent_topic_id, bdr.period_date DESC, ds.id ASC
+	`, activeIDs, cutoff).Scan(&rows).Error
+	if err != nil {
+		return nil, fmt.Errorf("listTopicRecentBriefs: query sections+threads: %w", err)
+	}
+
+	// 3) Group rows by topic → section → threads.
+	// Because the query is ordered by (topic_id, period_date DESC, section_id),
+	// a streaming assembly is straightforward.
+	result := make(map[uint][]TopicRecentBrief)
+	type sectionKey struct {
+		TopicID   uint
+		SectionID uint
+	}
+	seenSec := make(map[sectionKey]*TopicRecentBrief)
+
+	for _, row := range rows {
+		sk := sectionKey{row.TopicID, row.SectionID}
+		_, exists := seenSec[sk]
+		if !exists {
+			// Enforce per-topic section cap.
+			if len(result[row.TopicID]) >= perTopicLimit {
+				continue
+			}
+			brief := &TopicRecentBrief{
+				TopicID:      row.TopicID,
+				SectionID:    row.SectionID,
+				SectionLabel: row.SectionLabel,
+				PeriodDate:   row.PeriodDate,
+			}
+			seenSec[sk] = brief
+			result[row.TopicID] = append(result[row.TopicID], *brief)
+		}
+		// Append thread title (up to 2 per section per query LIMIT).
+		if row.ThreadTitle != nil && *row.ThreadTitle != "" {
+			// Since we modify the slice element in-place, update the result map entry.
+			idx := len(result[row.TopicID]) - 1
+			result[row.TopicID][idx].ThreadTitles = append(
+				result[row.TopicID][idx].ThreadTitles, *row.ThreadTitle)
+		}
+	}
+
+	return result, nil
 }
 
 // =============================================================================

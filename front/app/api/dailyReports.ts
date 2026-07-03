@@ -29,6 +29,7 @@ export interface PersistentTopicBrief {
   status: string  // 'candidate' | 'active' | 'archived'
   /** Stable colour derived from the topic id by the backend; same topic → same colour across renders. */
   color: string
+  hit_count?: number
   consecutive_hits: number
   can_activate: boolean
 }
@@ -166,7 +167,8 @@ export function useDailyReportsApi() {
   }
 
   async function getBoardSectionTimeline(boardId: number, days?: number): Promise<ApiResponse<{ sections: SectionTimelineNode[], relations: SectionRelation[] }>> {
-    const query = days ? `?days=${days}` : ''
+    // days 传 0 表示"全部历史"（显式 ?days=0，后端 <=0 即不限天）；省略则走后端默认。
+    const query = days != null ? `?days=${days}` : ''
     return apiClient.get(`/semantic-boards/${boardId}/section-timeline${query}`)
   }
 

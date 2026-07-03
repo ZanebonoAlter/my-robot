@@ -1,0 +1,311 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="editorial">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>话题专注视图 · Mockup</title>
+<style>
+  /* === 主题 token（与 main.css 对齐）=== */
+  :root {
+    --raw-red-500:#d94a4a; --raw-red-600:#c12f2f;
+    --raw-blue-400:#63b3ed;
+  }
+  [data-theme="editorial"]{
+    --color-bg-base:#faf7f2; --color-bg-elevated:#f5f0e6; --color-bg-sunken:#e8dfd1;
+    --color-bg-hover:rgba(255,255,255,.85); --color-bg-active:rgba(255,255,255,.6);
+    --color-text-primary:#1a1a1a; --color-text-secondary:#5a5a5a; --color-text-muted:#8a8a8a;
+    --color-border-subtle:rgba(26,26,26,.08); --color-border-medium:rgba(26,26,26,.15); --color-border-strong:rgba(26,26,26,.25);
+    --color-accent:#d94a4a; --color-accent-subtle:rgba(217,74,74,.08);
+    --color-accent-soft:#d0dde8; --shadow-medium:0 2px 8px rgba(26,26,26,.08);
+    --serif:"Noto Serif SC","Source Han Serif SC",Georgia,serif;
+    --sans:system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;
+    --node-fill:#d94a4a;
+  }
+  [data-theme="dark"]{
+    --color-bg-base:#080c12; --color-bg-elevated:rgba(17,27,38,.98); --color-bg-sunken:#0e161d;
+    --color-bg-hover:rgba(255,255,255,.06); --color-bg-active:rgba(255,255,255,.08);
+    --color-text-primary:rgba(255,255,255,.9); --color-text-secondary:rgba(255,255,255,.6); --color-text-muted:rgba(255,255,255,.35);
+    --color-border-subtle:rgba(255,255,255,.06); --color-border-medium:rgba(255,255,255,.10); --color-border-strong:rgba(255,255,255,.18);
+    --color-accent:rgba(240,138,75,.85); --color-accent-subtle:rgba(240,138,75,.08);
+    --color-accent-soft:rgba(255,255,255,.12); --shadow-medium:0 2px 8px rgba(0,0,0,.4);
+    --serif:"Noto Serif SC","Source Han Serif SC",Georgia,serif;
+    --sans:system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;
+    --node-fill:rgba(240,138,75,.85);
+  }
+
+  *{box-sizing:border-box}
+  html,body{margin:0;background:var(--color-bg-base);color:var(--color-text-primary);font-family:var(--sans)}
+
+  .mock-bar{position:sticky;top:0;z-index:50;display:flex;align-items:center;gap:.75rem;
+    padding:.6rem 1.25rem;background:var(--color-bg-sunken);border-bottom:1px solid var(--color-border-medium);
+    font-size:.78rem;color:var(--color-text-secondary)}
+  .mock-bar b{color:var(--color-text-primary)}
+  .spacer{flex:1}
+  .seg{display:inline-flex;border:1px solid var(--color-border-medium);border-radius:6px;overflow:hidden}
+  .seg button{appearance:none;border:0;background:transparent;color:var(--color-text-secondary);
+    padding:.3rem .7rem;font-size:.74rem;cursor:pointer;font-family:var(--sans)}
+  .seg button.on{background:var(--color-accent);color:#fff}
+  [data-theme="dark"] .seg button.on{color:#080c12}
+
+  /* ====== 专注视图容器 ====== */
+  .focus{position:relative}
+
+  /* sticky 话题标题（"标题始终显示在最上方"）*/
+  .focus-head{position:sticky;top:38px;z-index:20;background:var(--color-bg-base);
+    border-bottom:1px solid var(--color-border-medium);
+    padding:1rem 1.5rem .9rem;backdrop-filter:saturate(1.1)}
+  .focus-head__top{display:flex;align-items:center;gap:.6rem}
+  .back{appearance:none;border:1px solid var(--color-border-medium);background:var(--color-bg-elevated);
+    color:var(--color-text-secondary);padding:.32rem .7rem;border-radius:6px;font-size:.74rem;
+    cursor:pointer;font-family:var(--sans);display:inline-flex;align-items:center;gap:.3rem}
+  .back:hover{border-color:var(--color-accent);color:var(--color-accent)}
+  .back svg{width:13px;height:13px}
+  .topic-status{display:inline-flex;align-items:center;gap:.35rem;font-size:.66rem;letter-spacing:.1em;
+    text-transform:uppercase;font-family:var(--sans);color:var(--color-accent);
+    padding:.18rem .5rem;border:1px solid var(--color-accent);border-radius:10px;background:var(--color-accent-subtle)}
+  .topic-status .dot{width:6px;height:6px;border-radius:50%;background:var(--color-accent)}
+  .focus-head__title{margin:.7rem 0 0;font-family:var(--serif);font-size:1.85rem;font-weight:800;
+    letter-spacing:-.01em;line-height:1.2}
+  .focus-head__meta{margin-top:.4rem;display:flex;flex-wrap:wrap;gap:1.1rem;color:var(--color-text-muted);
+    font-size:.72rem;font-family:ui-monospace,monospace;letter-spacing:.04em}
+  .focus-head__meta b{color:var(--color-text-secondary);font-family:var(--serif);font-size:.82rem}
+
+  /* ====== 横向时间轴（可拖拽 pan）====== */
+  .timeline-wrap{position:relative;overflow:hidden;cursor:grab;user-select:none;
+    border-bottom:1px solid var(--color-border-subtle);background:
+      linear-gradient(90deg,var(--color-bg-base),var(--color-bg-elevated) 50%,var(--color-bg-base))}
+  .timeline-wrap.dragging{cursor:grabbing}
+  .timeline-wrap::before,.timeline-wrap::after{content:'';position:absolute;top:0;bottom:0;width:40px;z-index:3;pointer-events:none}
+  .timeline-wrap::before{left:0;background:linear-gradient(90deg,var(--color-bg-base),transparent)}
+  .timeline-wrap::after{right:0;background:linear-gradient(270deg,var(--color-bg-base),transparent)}
+
+  .timeline{display:flex;align-items:flex-start;gap:0;padding:1.2rem 0 1.6rem;width:max-content;min-width:100%}
+  .tcol{flex:none;width:170px;padding:0 .5rem;text-align:center;position:relative}
+
+  /* 日期轴 */
+  .tcol__date{font-family:var(--serif);font-size:.78rem;color:var(--color-text-muted);letter-spacing:.05em;
+    padding-bottom:.7rem;border-bottom:1px solid var(--color-border-subtle);margin-bottom:.9rem}
+  .tcol__date b{display:block;color:var(--color-text-secondary);font-size:1rem;margin-bottom:.1rem}
+
+  /* 时间连接线（话题延续主线，穿过节点）*/
+  .tcol.has-node::before{content:'';position:absolute;left:50%;top:3.2rem;bottom:0;width:2px;
+    background:linear-gradient(180deg,var(--color-accent),color-mix(in srgb,var(--color-accent) 30%,transparent));
+    transform:translateX(-50%);z-index:0;opacity:.5}
+  .tcol.has-node.next-has::before{bottom:auto;height:60px}
+  /* 相邻节点间顶部连线（横向延续感）—— 用伪元素在两列之间补横线较难，改在节点间用绝对定位线 */
+
+  /* 节点 */
+  .node{position:relative;z-index:1;width:44px;height:44px;margin:0 auto;border-radius:50%;
+    background:var(--color-bg-base);border:3px solid var(--node-fill);
+    display:flex;align-items:center;justify-content:center;cursor:pointer;
+    transition:transform .15s,background .15s}
+  .node:hover{transform:scale(1.08)}
+  .node__inner{width:18px;height:18px;border-radius:50%;background:var(--node-fill);opacity:.85}
+  .node.selected{background:var(--node-fill);box-shadow:0 0 0 4px var(--color-accent-subtle),0 4px 12px var(--color-accent-subtle)}
+  .node.selected .node__inner{background:var(--color-bg-base);opacity:1}
+  .node-label{margin-top:.5rem;font-family:var(--serif);font-size:.72rem;line-height:1.35;color:var(--color-text-secondary);
+    max-width:150px;margin-left:auto;margin-right:auto}
+  .node.selected~.node-label,.node-row.selected .node-label{color:var(--color-accent);font-weight:700}
+
+  /* 空列（该日无该话题 section）*/
+  .tcol.empty .tcol__date{opacity:.45}
+  .tcol.empty::before{display:none}
+  .empty-dot{width:10px;height:10px;margin:14px auto 0;border-radius:50%;border:1px solid var(--color-border-medium);
+    background:transparent}
+
+  /* 拖拽提示 */
+  .pan-hint{text-align:center;padding:.5rem;color:var(--color-text-muted);font-size:.7rem;font-style:italic;
+    font-family:var(--serif);background:var(--color-bg-elevated);border-bottom:1px solid var(--color-border-subtle)}
+
+  /* ====== 就地展开的事件列表（取代弹窗）====== */
+  .inline{padding:1.5rem 1.5rem 3rem;max-width:48rem;margin:0 auto;
+    animation:slideIn .25s cubic-bezier(.2,.7,.3,1)}
+  @keyframes slideIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+  .inline__date{font-family:var(--sans);font-size:.7rem;letter-spacing:.14em;text-transform:uppercase;
+    color:var(--color-accent);margin-bottom:.3rem}
+  .inline__title{font-family:var(--serif);font-size:1.4rem;font-weight:700;margin:0 0 .3rem;line-height:1.3}
+  .inline__sub{color:var(--color-text-muted);font-size:.76rem;font-family:ui-monospace,monospace;margin-bottom:1.1rem}
+
+  .thread{border-top:1px solid var(--color-border-subtle)}
+  .thread:first-of-type{border-top:0}
+  .thread__head{display:flex;align-items:flex-start;gap:.6rem;padding:.85rem .2rem;cursor:pointer}
+  .thread__chev{width:13px;height:13px;color:var(--color-text-muted);flex:none;margin-top:.25rem;transition:transform .2s}
+  .thread.open .thread__chev{transform:rotate(90deg);color:var(--color-accent)}
+  .thread__body{flex:1;min-width:0}
+  .thread__title{font-family:var(--serif);font-size:1rem;font-weight:600;color:var(--color-text-primary);line-height:1.5}
+  .thread:hover .thread__title{color:var(--color-accent)}
+  .thread__summary{margin:.25rem 0 0;font-family:var(--serif);font-size:.82rem;line-height:1.7;color:var(--color-text-secondary)}
+  .thread__count{flex:none;font-size:.64rem;color:var(--color-text-muted);font-family:ui-monospace,monospace;
+    background:var(--color-accent-subtle);padding:.12rem .45rem;border-radius:10px;margin-top:.2rem}
+  .thread__articles{display:none;padding:.2rem 0 .6rem 1.9rem}
+  .thread.open .thread__articles{display:block}
+  .art{display:flex;gap:.5rem;align-items:baseline;padding:.35rem .2rem;font-size:.78rem;color:var(--color-text-secondary);
+    font-family:var(--serif);border-left:2px solid var(--color-border-subtle);padding-left:.7rem;margin-left:.2rem}
+  .art::before{content:'§';color:var(--color-text-muted);font-style:italic}
+
+  .note{max-width:48rem;margin:1.5rem auto 3rem;padding:1rem 1.5rem;font-size:.74rem;line-height:1.7;
+    color:var(--color-text-muted);font-family:var(--sans);border-top:1px solid var(--color-border-subtle)}
+  .note b{color:var(--color-text-secondary)}
+</style>
+</head>
+<body>
+
+<div class="mock-bar">
+  <b>话题专注视图 · Mockup</b>
+  <span>点泳道 → 专注单话题 · sticky 标题 · 横向拖拽 · 就地展开</span>
+  <span class="spacer"></span>
+  <div class="seg" id="seg-state">
+    <button data-state="collapsed">收起态</button>
+    <button data-state="expanded" class="on">展开某日</button>
+  </div>
+  <div class="seg" id="seg-theme">
+    <button data-theme="editorial" class="on">Editorial</button>
+    <button data-theme="dark">Dark</button>
+  </div>
+</div>
+
+<section class="focus">
+  <!-- sticky 标题 -->
+  <div class="focus-head">
+    <div class="focus-head__top">
+      <button class="back">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 18l-6-6 6-6"/></svg>
+        返回总览
+      </button>
+      <span class="topic-status"><span class="dot"></span>Active · 持续演进</span>
+    </div>
+    <h1 class="focus-head__title">以黎冲突升级</h1>
+    <div class="focus-head__meta">
+      <span><b>9</b> 个动态</span>
+      <span>跨度 <b>14 天</b></span>
+      <span>最近 <b>2026-06-29</b></span>
+      <span>关系主线 · 同话题延续</span>
+    </div>
+  </div>
+
+  <!-- 横向时间轴（拖拽 pan）-->
+  <div class="timeline-wrap" id="tl">
+    <div class="timeline" id="track">
+      <!-- 一组列：06-16 ~ 06-29，部分日有节点，部分空列 -->
+      <div class="tcol empty"><div class="tcol__date"><b>06-16</b>周一</div><div class="empty-dot"></div></div>
+      <div class="tcol empty"><div class="tcol__date"><b>06-17</b>周二</div><div class="empty-dot"></div></div>
+      <div class="tcol has-node"><div class="tcol__date"><b>06-18</b>周三</div>
+        <div class="node" data-day="06-18"><div class="node__inner"></div></div>
+        <div class="node-label">真主党越境打击</div></div>
+      <div class="tcol empty"><div class="tcol__date"><b>06-19</b>周四</div><div class="empty-dot"></div></div>
+      <div class="tcol has-node"><div class="tcol__date"><b>06-20</b>周五</div>
+        <div class="node" data-day="06-20"><div class="node__inner"></div></div>
+        <div class="node-label">以军空袭黎南部</div></div>
+      <div class="tcol empty"><div class="tcol__date"><b>06-21</b>周六</div><div class="empty-dot"></div></div>
+      <div class="tcol empty"><div class="tcol__date"><b>06-22</b>周日</div><div class="empty-dot"></div></div>
+      <div class="tcol has-node"><div class="tcol__date"><b>06-23</b>周一</div>
+        <div class="node" data-day="06-23"><div class="node__inner"></div></div>
+        <div class="node-label">联合国紧急磋商</div></div>
+      <div class="tcol empty"><div class="tcol__date"><b>06-24</b>周二</div><div class="empty-dot"></div></div>
+      <div class="tcol empty"><div class="tcol__date"><b>06-25</b>周三</div><div class="empty-dot"></div></div>
+      <div class="tcol empty"><div class="tcol__date"><b>06-26</b>周四</div><div class="empty-dot"></div></div>
+      <div class="tcol has-node"><div class="tcol__date"><b>06-27</b>周五</div>
+        <div class="node" data-day="06-27"><div class="node__inner"></div></div>
+        <div class="node-label">黎方提停火框架</div></div>
+      <div class="tcol has-node"><div class="tcol__date"><b>06-28</b>周六</div>
+        <div class="node" data-day="06-28"><div class="node__inner"></div></div>
+        <div class="node-label">以方有条件回应</div></div>
+      <div class="tcol has-node"><div class="tcol__date"><b>06-29</b>周日</div>
+        <div class="node selected" data-day="06-29"><div class="node__inner"></div></div>
+        <div class="node-label">斡旋方提交新方案</div></div>
+    </div>
+  </div>
+  <div class="pan-hint">← 按住拖拽查看更多日期 · 点击节点展开当日线索 →</div>
+
+  <!-- 就地展开的事件列表（点 06-29 节点）-->
+  <div class="inline" id="inline">
+    <div class="inline__date">2026 · 06 · 29 · 周日</div>
+    <h2 class="inline__title">斡旋方提交新方案，停火谈判进入实质阶段</h2>
+    <div class="inline__sub">5 篇文章 · 3 条线索 · 锚定距离 0.18</div>
+
+    <div class="thread open">
+      <div class="thread__head" onclick="this.parentElement.classList.toggle('open')">
+        <svg class="thread__chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M9 6l6 6-6 6"/></svg>
+        <div class="thread__body">
+          <div class="thread__title">卡塔尔提交 7 点停火框架，含人质交换与撤军时间表</div>
+          <p class="thread__summary">新方案首次将人质释放与以军分阶段撤军绑定，给出 21 天实施窗口，被视为近一月来最具操作性的提案。</p>
+        </div>
+        <span class="thread__count">3 篇</span>
+      </div>
+      <div class="thread__articles">
+        <div class="art">路透：多哈斡旋方散发框架文本，呼吁各方两周内表态</div>
+        <div class="art">半岛：哈马斯初步回应"框架可谈"，待研究撤军细则</div>
+        <div class="art">法新：以方称"审慎评估"，强调安全红线不变</div>
+      </div>
+    </div>
+
+    <div class="thread">
+      <div class="thread__head" onclick="this.parentElement.classList.toggle('open')">
+        <svg class="thread__chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M9 6l6 6-6 6"/></svg>
+        <div class="thread__body">
+          <div class="thread__title">黎巴嫩总理：有条件接受谈判，要求以军停止越境</div>
+          <p class="thread__summary">黎方立场出现松动，但设定了"停止越境打击"的前置条件，谈判能否启动仍取决于以方回应。</p>
+        </div>
+        <span class="thread__count">1 篇</span>
+      </div>
+    </div>
+
+    <div class="thread">
+      <div class="thread__head" onclick="this.parentElement.classList.toggle('open')">
+        <svg class="thread__chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M9 6l6 6-6 6"/></svg>
+        <div class="thread__body">
+          <div class="thread__title">以色列安全内阁推迟表决，内部分歧公开化</div>
+          <p class="thread__summary">极右翼部长威胁退出执政联盟，表决推迟显示以方内部对"谈还是打"尚无共识。</p>
+        </div>
+        <span class="thread__count">1 篇</span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<p class="note">
+  <b>设计要点：</b>① 进入方式——在「话题泳道」视图点某条泳道（标签或背景），切到这个专注视图；非节点点击。② sticky 标题始终在顶（含状态/动态数/跨度/最近日期），滚动事件列表时不丢上下文。③ 横向时间轴是该话题的单一主线（贯穿节点的竖线 + 大节点），<b>按住拖拽</b>平移看不同日期。④ 点节点 → 下方就地展开当日 section 的 thread 列表（accordion），<b>不弹窗</b>，符合"话题下展示的列表"。⑤ 全语义 token，双主题自洽，editorial 红 / dark 琥珀。
+</p>
+
+<script>
+  // 主题切换
+  document.querySelectorAll('#seg-theme button').forEach(b=>{
+    b.onclick=()=>{
+      document.documentElement.setAttribute('data-theme', b.dataset.theme);
+      document.querySelectorAll('#seg-theme button').forEach(x=>x.classList.toggle('on', x===b));
+    };
+  });
+  // 状态：收起 / 展开
+  document.querySelectorAll('#seg-state button').forEach(b=>{
+    b.onclick=()=>{
+      document.querySelectorAll('#seg-state button').forEach(x=>x.classList.toggle('on', x===b));
+      document.getElementById('inline').style.display = (b.dataset.state==='expanded')?'block':'none';
+    };
+  });
+  // 节点点击切换 selected + 跳到展开区
+  document.querySelectorAll('.node').forEach(n=>{
+    n.onclick=()=>{
+      document.querySelectorAll('.node').forEach(x=>x.classList.remove('selected'));
+      n.classList.add('selected');
+      document.getElementById('inline').style.display='block';
+      document.getElementById('inline').scrollIntoView({behavior:'smooth',block:'start'});
+      // 同步 state 按钮态
+      document.querySelectorAll('#seg-state button').forEach(x=>x.classList.toggle('on', x.dataset.state==='expanded'));
+    };
+  });
+  // 横向拖拽 pan
+  const wrap=document.getElementById('tl'), track=document.getElementById('track');
+  let down=false,startX=0,startScroll=0,moved=false;
+  wrap.addEventListener('pointerdown',e=>{
+    if(e.target.closest('.node')) return;
+    down=true;moved=false;startX=e.pageX;startScroll=wrap.scrollLeft;wrap.classList.add('dragging');
+    wrap.setPointerCapture(e.pointerId);
+  });
+  wrap.addEventListener('pointermove',e=>{
+    if(!down)return; const dx=e.pageX-startX; if(Math.abs(dx)>3)moved=true; wrap.scrollLeft=startScroll-dx;
+  });
+  wrap.addEventListener('pointerup',e=>{down=false;wrap.classList.remove('dragging');});
+  wrap.addEventListener('pointercancel',()=>{down=false;wrap.classList.remove('dragging');});
+</script>
+</body>
+</html>

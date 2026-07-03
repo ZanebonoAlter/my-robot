@@ -274,6 +274,8 @@ describe('DailyReportTopicSection — candidate badge removal (two-zone model)',
         },
       })]),
     })
+    // 双轨命名：大标题用当天 cluster_label，规范名作锚点小字。
+    expect(wrapper.text()).toContain('板块100')
     expect(wrapper.text()).toContain('候选话题')
     expect(wrapper.text()).toContain('其他动态')
   })

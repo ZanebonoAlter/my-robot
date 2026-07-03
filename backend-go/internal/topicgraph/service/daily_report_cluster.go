@@ -12,7 +12,7 @@ import (
 	"syntopica-backend/internal/topicgraph/repository"
 )
 
-func buildClusterSystemPrompt(tagCount int, existingTopics []repository.BoardPersistentTopic) string {
+func buildClusterSystemPrompt(tagCount int, existingTopics []repository.BoardPersistentTopic, briefs map[uint][]repository.TopicRecentBrief) string {
 	base := `你是一名专业的新闻叙事分析师。你的任务是将一组事件标签按"同一叙事框架"进行分组。
 
 分组规则：
@@ -43,17 +43,56 @@ func buildClusterSystemPrompt(tagCount int, existingTopics []repository.BoardPer
 	// Inject existing narrative frames so the LLM reuses them instead of
 	// minting a new label for the same ongoing story (root cause A: the
 	// cluster step had no memory, so labels drifted day to day).
+	//
+	// Slice D (lane context injection): for active topics, append recent
+	// section/thread content so the LLM can disambiguate topics by actual
+	// substance, not just label surface similarity.
 	if len(existingTopics) > 0 {
 		base += "\n\n## 该板块已有的叙事框架\n"
 		base += "请优先将标签归入下列已有框架：仅当该组事件确实延续某框架的核心议题时，才把该框架 id 填入该组的 matched_topic_id，group_name 沿用或微调该框架标题。不要仅因语境沾边（如人物、地点、时间相同）就把语义不相关的事件并入。若一组标签明显属于尚未覆盖的新叙事，开新组并让 matched_topic_id 为 null。\n"
+		// Guidance: when recent content is provided for active topics, the LLM
+		// must base its attribution on actual narrative substance, not just title
+		// surface similarity.
+		hasActiveContent := false
+		if briefs != nil {
+			for _, t := range existingTopics {
+				if t.Status == repository.TopicStatusActive && len(briefs[t.ID]) > 0 {
+					hasActiveContent = true
+					break
+				}
+			}
+		}
+		if hasActiveContent {
+			base += "\n⚠️ 重要：对于标注了「近期内容」的正式话题，请依据框架近期实际内容判断归属，而非仅凭标题字面沾边。两个话题即使标题字面相似，若各自近期内容分属不同叙事，应视为不同框架。\n"
+		}
 		for _, t := range existingTopics {
 			statusLabel := "正式"
 			if t.Status == repository.TopicStatusCandidate {
 				statusLabel = "观察中"
 			}
-			base += fmt.Sprintf("- [id:%d] %s（状态:%s，最近命中:%s，累计%d天）\n",
+			base += fmt.Sprintf("- [id:%d] %s（状态:%s，最近命中:%s，累计%d天）",
 				t.ID, t.Label, statusLabel,
 				t.LastSeenDate.Format("2006-01-02"), t.HitCount)
+
+			// Slice D: inject recent section/thread content for active topics only.
+			// candidate topics remain label-only (too unstable for content injection).
+			if t.Status == repository.TopicStatusActive && briefs != nil && len(briefs[t.ID]) > 0 {
+				base += "\n  近期实际内容:"
+				for _, item := range briefs[t.ID] {
+					base += fmt.Sprintf("\n  - section \"%s\" (%s)",
+						item.SectionLabel, item.PeriodDate.Format("2006-01-02"))
+					if len(item.ThreadTitles) > 0 {
+						base += ": "
+						for j, tt := range item.ThreadTitles {
+							if j > 0 {
+								base += ", "
+							}
+							base += fmt.Sprintf("thread \"%s\"", tt)
+						}
+					}
+				}
+			}
+			base += "\n"
 		}
 	}
 
@@ -71,7 +110,7 @@ func buildClusterSystemPrompt(tagCount int, existingTopics []repository.BoardPer
 // existingTopics supplies the board's durable narrative frames so the LLM
 // reuses them; each returned group carries the topic id it matched (validated
 // against this set, nil when new). Pass nil/empty to cluster from scratch.
-func ClusterTags(ctx context.Context, tags []repository.TagInput, existingTopics []repository.BoardPersistentTopic) ([]repository.ClusterGroup, error) {
+func ClusterTags(ctx context.Context, tags []repository.TagInput, existingTopics []repository.BoardPersistentTopic, briefs map[uint][]repository.TopicRecentBrief) ([]repository.ClusterGroup, error) {
 	if len(tags) == 0 {
 		return nil, nil
 	}
@@ -94,7 +133,7 @@ func ClusterTags(ctx context.Context, tags []repository.TagInput, existingTopics
 	result, err := airouter.NewRouter().Chat(ctx, airouter.ChatRequest{
 		Capability: airouter.CapabilityDigestPolish,
 		Messages: []airouter.Message{
-			{Role: "system", Content: buildClusterSystemPrompt(len(tags), existingTopics)},
+			{Role: "system", Content: buildClusterSystemPrompt(len(tags), existingTopics, briefs)},
 			{Role: "user", Content: prompt},
 		},
 		Temperature: &temperature,

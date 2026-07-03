@@ -1,0 +1,675 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="editorial">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>话题总览工作台 · Mockup</title>
+<style>
+  /* === 主题 token（与 main.css 对齐）=== */
+  [data-theme="editorial"]{
+    --color-bg-base:#faf7f2; --color-bg-elevated:#f5f0e6; --color-bg-sunken:#e8dfd1;
+    --color-bg-hover:rgba(255,255,255,.85); --color-bg-active:rgba(255,255,255,.6);
+    --color-text-primary:#1a1a1a; --color-text-secondary:#5a5a5a; --color-text-muted:#8a8a8a;
+    --color-border-subtle:rgba(26,26,26,.08); --color-border-medium:rgba(26,26,26,.15); --color-border-strong:rgba(26,26,26,.25);
+    --color-accent:#d94a4a; --color-accent-hover:#c12f2f; --color-accent-subtle:rgba(217,74,74,.08);
+    --color-accent-soft:#d0dde8;
+    --color-warn:#d4883c; --color-warn-subtle:rgba(212,136,60,.14);
+    --color-ok:#2d8a7a; --color-ok-subtle:rgba(45,138,122,.12);
+    --color-cand:#60a5fa; --color-cand-subtle:rgba(96,165,250,.14);
+    --color-arch:rgba(138,138,138,.5);
+    --shadow-medium:0 2px 8px rgba(26,26,26,.08);
+    --serif:"Noto Serif SC","Source Han Serif SC",Georgia,serif;
+    --sans:system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;
+    --node-fill:#d94a4a;
+  }
+  [data-theme="dark"]{
+    --color-bg-base:#080c12; --color-bg-elevated:rgba(17,27,38,.98); --color-bg-sunken:#0e161d;
+    --color-bg-hover:rgba(255,255,255,.06); --color-bg-active:rgba(255,255,255,.08);
+    --color-text-primary:rgba(255,255,255,.9); --color-text-secondary:rgba(255,255,255,.6); --color-text-muted:rgba(255,255,255,.35);
+    --color-border-subtle:rgba(255,255,255,.06); --color-border-medium:rgba(255,255,255,.10); --color-border-strong:rgba(255,255,255,.18);
+    --color-accent:rgba(240,138,75,.85); --color-accent-hover:rgba(240,138,75,1); --color-accent-subtle:rgba(240,138,75,.08);
+    --color-accent-soft:rgba(255,255,255,.12);
+    --color-warn:#f0a24b; --color-warn-subtle:rgba(240,162,75,.14);
+    --color-ok:#4ea68f; --color-ok-subtle:rgba(78,166,143,.14);
+    --color-cand:#63b3ed; --color-cand-subtle:rgba(99,179,237,.14);
+    --color-arch:rgba(255,255,255,.25);
+    --shadow-medium:0 2px 8px rgba(0,0,0,.4);
+    --serif:"Noto Serif SC","Source Han Serif SC",Georgia,serif;
+    --sans:system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;
+    --node-fill:rgba(240,138,75,.85);
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;background:var(--color-bg-base);color:var(--color-text-primary);font-family:var(--sans)}
+
+  .mock-bar{position:sticky;top:0;z-index:60;display:flex;align-items:center;gap:.75rem;
+    padding:.5rem 1rem;background:var(--color-bg-sunken);border-bottom:1px solid var(--color-border-medium);
+    font-size:.76rem;color:var(--color-text-secondary)}
+  .mock-bar b{color:var(--color-text-primary)}
+  .mock-bar .spacer{flex:1}
+  .seg{display:inline-flex;border:1px solid var(--color-border-medium);border-radius:6px;overflow:hidden}
+  .seg button{appearance:none;border:0;background:transparent;color:var(--color-text-secondary);
+    padding:.28rem .65rem;font-size:.72rem;cursor:pointer;font-family:var(--sans)}
+  .seg button.on{background:var(--color-accent);color:#fff}
+  [data-theme="dark"] .seg button.on{color:#080c12}
+
+  /* ============ 真实页面容器（tags.vue 全屏）============ */
+  .app{display:flex;flex-direction:column;height:calc(100vh - 38px);min-height:780px;overflow:hidden}
+
+  .tags-topbar{flex:none;height:46px;display:flex;align-items:center;padding:0 1rem;
+    background:var(--color-bg-sunken);border-bottom:1px solid var(--color-border-medium);gap:.6rem}
+  .tags-topbar .back-btn{display:inline-flex;align-items:center;justify-content:center;
+    width:28px;height:28px;border-radius:6px;color:var(--color-text-secondary);text-decoration:none}
+  .tags-topbar .back-btn:hover{background:var(--color-bg-hover);color:var(--color-accent)}
+  .tags-topbar h1{margin:0;font-size:.95rem;font-weight:700}
+  .tags-topbar .sep{flex:1}
+  .tags-topbar .tb-op{width:28px;height:28px;border-radius:6px;display:inline-flex;align-items:center;
+    justify-content:center;color:var(--color-text-muted);cursor:pointer}
+  .tags-topbar .tb-op:hover{background:var(--color-bg-hover);color:var(--color-text-secondary)}
+
+  .tags-main{flex:1;display:flex;min-height:0}
+
+  /* 左侧版块栏 */
+  .sidebar{flex:none;width:248px;display:flex;flex-direction:column;
+    background:var(--color-bg-elevated);border-right:1px solid var(--color-border-medium)}
+  .sidebar__head{flex:none;padding:.7rem .85rem;display:flex;align-items:center;gap:.4rem;
+    border-bottom:1px solid var(--color-border-subtle)}
+  .sidebar__head .t{font-size:.72rem;letter-spacing:.12em;text-transform:uppercase;color:var(--color-text-muted)}
+  .sidebar__add{margin-left:auto;width:22px;height:22px;border-radius:5px;display:inline-flex;
+    align-items:center;justify-content:center;border:1px solid var(--color-border-medium);color:var(--color-text-secondary);cursor:pointer;background:transparent}
+  .sidebar__add:hover{border-color:var(--color-accent);color:var(--color-accent)}
+  .sidebar__list{flex:1;overflow:auto;padding:.35rem 0}
+  .board{display:flex;align-items:center;gap:.5rem;padding:.45rem .85rem;cursor:pointer;
+    border-left:3px solid transparent;color:var(--color-text-secondary)}
+  .board:hover{background:var(--color-bg-hover)}
+  .board.active{background:var(--color-bg-active);border-left-color:var(--color-accent);color:var(--color-text-primary)}
+  .board__ico{width:18px;height:18px;flex:none;color:var(--color-text-muted)}
+  .board.active .board__ico{color:var(--color-accent)}
+  .board__label{flex:1;font-size:.82rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .board__count{font-size:.64rem;font-family:ui-monospace,monospace;color:var(--color-text-muted);
+    background:var(--color-bg-sunken);padding:.05rem .35rem;border-radius:8px}
+  .board.active .board__count{color:var(--color-accent);background:var(--color-accent-subtle)}
+  .sidebar__foot{flex:none;padding:.5rem;border-top:1px solid var(--color-border-subtle);
+    display:grid;grid-template-columns:1fr 1fr;gap:.35rem}
+  .sidebar__foot button{appearance:none;border:1px solid var(--color-border-subtle);background:transparent;
+    color:var(--color-text-muted);border-radius:5px;padding:.4rem .3rem;font-size:.66rem;cursor:pointer;
+    font-family:var(--sans);display:inline-flex;align-items:center;justify-content:center;gap:.25rem}
+  .sidebar__foot button:hover{border-color:var(--color-border-medium);color:var(--color-text-secondary)}
+
+  /* 右侧内容区 */
+  .content{flex:1;display:flex;flex-direction:column;min-width:0;min-height:0}
+  .tabs{flex:none;display:flex;gap:.15rem;padding:.55rem 1rem 0;border-bottom:1px solid var(--color-border-subtle)}
+  .tab{appearance:none;border:0;background:transparent;color:var(--color-text-muted);cursor:pointer;
+    padding:.4rem .75rem;font-size:.8rem;font-family:var(--sans);display:inline-flex;align-items:center;gap:.3rem;
+    border-bottom:2px solid transparent;border-radius:4px 4px 0 0}
+  .tab:hover{color:var(--color-text-secondary)}
+  .tab.on{color:var(--color-accent);border-bottom-color:var(--color-accent)}
+
+  /* ============ 工作台（占满 content）============ */
+  .workbench{flex:1;display:flex;flex-direction:column;min-height:0;overflow:hidden}
+
+  /* 工具条（总览/编排两态共享，内容随状态变）*/
+  .wb-bar{flex:none;display:flex;align-items:center;gap:.5rem;padding:.6rem 1rem;
+    background:var(--color-bg-elevated);border-bottom:1px solid var(--color-border-medium);flex-wrap:wrap}
+  .wb-title{display:flex;align-items:center;gap:.45rem}
+  .wb-title svg{width:18px;height:18px;color:var(--color-text-secondary)}
+  .wb-title b{font-size:.9rem;font-weight:700}
+  .wb-title .sub{font-size:.68rem;color:var(--color-text-muted);font-family:ui-monospace,monospace}
+  .wb-sep{flex:1}
+  .wb-select{appearance:none;border:1px solid var(--color-border-medium);background:var(--color-bg-base);
+    color:var(--color-text-secondary);padding:.32rem .7rem;font-size:.74rem;border-radius:6px;cursor:pointer;font-family:var(--sans);
+    display:inline-flex;align-items:center;gap:.3rem}
+  .wb-select:hover{border-color:var(--color-text-secondary)}
+  .wb-btn{appearance:none;border:1px solid var(--color-border-medium);background:var(--color-bg-base);
+    color:var(--color-text-secondary);padding:.32rem .7rem;font-size:.74rem;border-radius:6px;cursor:pointer;font-family:var(--sans);
+    display:inline-flex;align-items:center;gap:.3rem}
+  .wb-btn:hover{border-color:var(--color-text-secondary);color:var(--color-text-primary)}
+  .wb-btn svg{width:14px;height:14px}
+  .wb-btn.pri{background:var(--color-accent);color:#fff;border-color:var(--color-accent);font-weight:600}
+  [data-theme="dark"] .wb-btn.pri{color:#080c12}
+  .wb-btn.pri:hover{background:var(--color-accent-hover)}
+  /* 视图模式分段 */
+  .wb-view{display:inline-flex;border:1px solid var(--color-border-medium);border-radius:6px;overflow:hidden}
+  .wb-view button{appearance:none;border:0;background:transparent;color:var(--color-text-muted);
+    padding:.32rem .55rem;font-size:.72rem;cursor:pointer;font-family:var(--sans);display:inline-flex;align-items:center;gap:.25rem}
+  .wb-view button svg{width:13px;height:13px}
+  .wb-view button.on{background:var(--color-bg-active);color:var(--color-accent)}
+
+  /* 编排态工具条专用 */
+  .wb-back{appearance:none;border:1px solid var(--color-border-medium);background:var(--color-bg-base);
+    color:var(--color-text-secondary);padding:.32rem .65rem;border-radius:6px;font-size:.74rem;cursor:pointer;
+    font-family:var(--sans);display:inline-flex;align-items:center;gap:.3rem}
+  .wb-back:hover{border-color:var(--color-accent);color:var(--color-accent)}
+  .wb-badge{display:inline-flex;align-items:center;gap:.35rem;font-size:.64rem;letter-spacing:.1em;
+    text-transform:uppercase;font-family:var(--sans);color:var(--color-accent);
+    padding:.18rem .5rem;border:1px solid var(--color-accent);border-radius:10px;background:var(--color-accent-subtle)}
+  .wb-badge .dot{width:6px;height:6px;border-radius:50%;background:var(--color-accent)}
+  .wb-src{font-size:.66rem;color:var(--color-text-muted);font-family:ui-monospace,monospace}
+  .wb-name{flex:1;font-family:var(--serif);font-size:1.15rem;font-weight:800;color:var(--color-text-primary);
+    background:transparent;border:0;border-bottom:1px dashed var(--color-border-medium);padding:.15rem .2rem;outline:none;min-width:120px}
+  .wb-name:focus{border-bottom-color:var(--color-accent)}
+
+  /* ============ 总览态：lanes 视图（占满）============ */
+  .overview{flex:1;display:flex;flex-direction:column;min-height:0;overflow:hidden}
+  /* 日期表头 */
+  .ov-head{flex:none;display:flex;border-bottom:1px solid var(--color-border-medium);background:var(--color-bg-elevated)}
+  .ov-head__label{flex:none;width:170px;padding:.5rem .85rem;font-size:.66rem;letter-spacing:.1em;
+    text-transform:uppercase;color:var(--color-text-muted);font-family:var(--sans);border-right:1px solid var(--color-border-subtle);
+    display:flex;align-items:center;gap:.3rem}
+  .ov-head__days{flex:1;display:grid;grid-template-columns:repeat(14,1fr)}
+  .ov-head__day{padding:.4rem 0;text-align:center;font-size:.64rem;color:var(--color-text-muted);
+    font-family:ui-monospace,monospace;border-right:1px solid var(--color-border-subtle);line-height:1.3}
+  .ov-head__day:last-child{border-right:0}
+  .ov-head__day b{display:block;color:var(--color-text-secondary);font-size:.74rem}
+  .ov-head__day.today{background:var(--color-accent-subtle)}
+  .ov-head__day.today b{color:var(--color-accent)}
+
+  /* 泳道列表 */
+  .ov-body{flex:1;overflow:auto}
+  .lane{display:flex;border-bottom:1px solid var(--color-border-subtle);min-height:74px;transition:background .12s}
+  .lane:hover{background:var(--color-bg-hover)}
+  .lane.active-row{background:var(--color-bg-active)}
+  .lane.archived{opacity:.55}
+  /* 泳道左标签 */
+  .lane__label{flex:none;width:170px;padding:.5rem .85rem;border-right:1px solid var(--color-border-subtle);
+    display:flex;flex-direction:column;justify-content:center;gap:.2rem;position:relative;cursor:pointer}
+  .lane__label:hover .lane__ops{opacity:1}
+  .lane__lt{display:flex;align-items:center;gap:.4rem}
+  .lane__dot{width:8px;height:8px;border-radius:50%;flex:none}
+  .lane__dot.active{background:var(--color-accent)}
+  .lane__dot.cand{background:var(--color-cand);border:1.5px solid var(--color-cand);box-shadow:0 0 0 2px var(--color-cand-subtle)}
+  .lane__dot.arch{background:transparent;border:1.5px dashed var(--color-arch)}
+  .lane__name{font-family:var(--serif);font-size:.84rem;font-weight:600;color:var(--color-text-primary);
+    white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:1}
+  .lane__ct{font-size:.62rem;font-family:ui-monospace,monospace;color:var(--color-text-muted);
+    background:var(--color-bg-sunken);padding:.05rem .35rem;border-radius:8px;flex:none}
+  .lane.active-row .lane__ct{color:var(--color-accent);background:var(--color-accent-subtle)}
+  .lane__meta{font-size:.62rem;color:var(--color-text-muted);font-family:ui-monospace,monospace;letter-spacing:.02em}
+  .lane__ops{position:absolute;right:.4rem;top:.4rem;display:flex;gap:.15rem;opacity:0;transition:opacity .12s}
+  .lane__op{width:20px;height:20px;border-radius:4px;border:0;background:transparent;color:var(--color-text-muted);
+    cursor:pointer;display:inline-flex;align-items:center;justify-content:center}
+  .lane__op:hover{background:var(--color-bg-base);color:var(--color-text-secondary)}
+  .lane__op svg{width:13px;height:13px}
+
+  /* 泳道时间轴（14列网格）*/
+  .lane__track{flex:1;display:grid;grid-template-columns:repeat(14,1fr);grid-auto-rows:24px;align-content:center;position:relative;
+    background-image:linear-gradient(90deg,var(--color-border-subtle) 1px,transparent 1px);
+    background-size:calc(100%/14) 100%}
+  /* 节点定位（grid-column）*/
+  .lnode{align-self:center;justify-self:center;width:18px;height:18px;border-radius:50%;
+    background:var(--color-bg-base);border:2.5px solid var(--node-fill);cursor:pointer;
+    display:flex;align-items:center;justify-content:center;z-index:1;transition:transform .12s}
+  .lnode:hover{transform:scale(1.18);box-shadow:0 0 0 3px var(--color-accent-subtle)}
+  .lnode i{width:7px;height:7px;border-radius:50%;background:var(--node-fill);opacity:.85}
+  .lnode.boundary{border-style:dashed}
+  .lnode.boundary i{opacity:.4}
+  .lnode.arch{border-color:var(--color-arch);border-style:dashed}
+  .lnode.arch i{background:var(--color-arch);opacity:.4}
+  /* 选中高亮（编排时被选中的节点）*/
+  .lnode.picked{box-shadow:0 0 0 3px var(--color-warn);border-color:var(--color-warn)}
+  .lnode.picked i{background:var(--color-warn)}
+  /* 同话题延续连线（用伪元素横向连线，相邻节点间）*/
+  .lseg{align-self:center;height:2px;background:linear-gradient(90deg,var(--node-fill),color-mix(in srgb,var(--node-fill) 35%,transparent));
+    opacity:.45;z-index:0;pointer-events:none}
+  .lane.archived .lseg{background:linear-gradient(90deg,var(--color-arch),transparent);opacity:.3}
+
+  /* 未归类泳道 */
+  .lane.unassigned .lane__name{color:var(--color-text-muted);font-style:italic;font-weight:400}
+
+  /* 泳道空提示 */
+  .ov-empty{flex:1;display:flex;align-items:center;justify-content:center;color:var(--color-text-muted);
+    font-family:var(--serif);font-style:italic;font-size:.85rem}
+
+  /* ============ 编排态：候选池 + 体检（复用）============ */
+  .composer{flex:1;display:flex;flex-direction:column;min-height:0;overflow:hidden}
+  /* 编排态预览泳道时间轴 */
+  .cp-tl-wrap{flex:none;position:relative;overflow:hidden;cursor:grab;user-select:none;
+    border-bottom:1px solid var(--color-border-subtle);background:
+      linear-gradient(90deg,var(--color-bg-base),var(--color-bg-elevated) 50%,var(--color-bg-base))}
+  .cp-tl-wrap.dragging{cursor:grabbing}
+  .cp-tl-wrap::before,.cp-tl-wrap::after{content:'';position:absolute;top:0;bottom:0;width:32px;z-index:3;pointer-events:none}
+  .cp-tl-wrap::before{left:0;background:linear-gradient(90deg,var(--color-bg-base),transparent)}
+  .cp-tl-wrap::after{right:0;background:linear-gradient(270deg,var(--color-bg-base),transparent)}
+  .cp-tl{display:flex;align-items:flex-start;gap:0;padding:.85rem 0 1.1rem;width:max-content;min-width:100%}
+  .cp-col{flex:none;width:140px;padding:0 .4rem;text-align:center;position:relative;display:flex;flex-direction:column;align-items:center;gap:.4rem}
+  .cp-node-grp{display:flex;flex-direction:column;align-items:center;gap:.25rem}
+  .cp-col__date{font-family:var(--serif);font-size:.72rem;color:var(--color-text-muted);
+    padding-bottom:.5rem;border-bottom:1px solid var(--color-border-subtle);margin-bottom:.7rem}
+  .cp-col__date b{display:block;color:var(--color-text-secondary);font-size:.9rem}
+  .cp-col.has-node::before{content:'';position:absolute;left:50%;top:2.6rem;bottom:0;width:2px;
+    background:linear-gradient(180deg,var(--color-accent),color-mix(in srgb,var(--color-accent) 30%,transparent));
+    transform:translateX(-50%);z-index:0;opacity:.5}
+  .cp-node{position:relative;z-index:1;width:34px;height:34px;margin:0 auto;border-radius:50%;
+    background:var(--color-bg-base);border:3px solid var(--node-fill);cursor:pointer;
+    display:flex;align-items:center;justify-content:center;transition:transform .12s}
+  .cp-node:hover{transform:scale(1.08)}
+  .cp-node i{width:13px;height:13px;border-radius:50%;background:var(--node-fill);opacity:.85}
+  .cp-node.boundary{border-style:dashed}
+  .cp-node.boundary i{opacity:.4}
+  .cp-node.outlier{border-color:var(--color-warn);border-style:dashed}
+  .cp-node.outlier i{background:var(--color-warn);opacity:.5}
+  .cp-node.picked{box-shadow:0 0 0 4px var(--color-accent-subtle)}
+  .cp-nlabel{font-family:var(--serif);font-size:.66rem;line-height:1.3;color:var(--color-text-secondary);
+    max-width:120px}
+  .cp-col.empty .cp-col__date{opacity:.4}
+  .cp-edot{width:7px;height:7px;margin:11px auto 0;border-radius:50%;border:1px solid var(--color-border-medium)}
+  .cp-tl-hint{text-align:center;padding:.38rem;color:var(--color-text-muted);font-size:.66rem;font-style:italic;
+    font-family:var(--serif);background:var(--color-bg-elevated);border-bottom:1px solid var(--color-border-subtle)}
+
+  /* 双栏 */
+  .cp-cols{flex:1;display:flex;gap:1px;background:var(--color-border-subtle);min-height:0;overflow:hidden}
+  .cp-col-l,.cp-col-r{background:var(--color-bg-base);overflow:auto;display:flex;flex-direction:column}
+  .cp-col-l{flex:1.4}
+  .cp-col-r{flex:1}
+  .cp-sub{flex:none;position:sticky;top:0;background:var(--color-bg-elevated);
+    padding:.55rem .9rem;border-bottom:1px solid var(--color-border-subtle);
+    font-size:.74rem;color:var(--color-text-secondary);display:flex;align-items:center;gap:.4rem;z-index:2}
+  .cp-sub b{color:var(--color-text-primary)}
+  .cp-sub .hint{color:var(--color-text-muted);font-size:.7rem}
+  .cp-sub .sort{margin-left:auto;font-size:.66rem;color:var(--color-text-muted);font-family:ui-monospace,monospace}
+
+  .cand{display:flex;align-items:flex-start;gap:.55rem;padding:.6rem .9rem;border-bottom:1px solid var(--color-border-subtle);cursor:pointer}
+  .cand:hover{background:var(--color-bg-hover)}
+  .cand__box{flex:none;width:16px;height:16px;margin-top:.15rem;border:1.5px solid var(--color-border-medium);
+    border-radius:4px;display:inline-flex;align-items:center;justify-content:center;background:var(--color-bg-base)}
+  .cand.checked .cand__box{background:var(--color-accent);border-color:var(--color-accent)}
+  .cand__box svg{width:11px;height:11px;color:#fff;opacity:0}
+  [data-theme="dark"] .cand__box svg{color:#080c12}
+  .cand.checked .cand__box svg{opacity:1}
+  .cand__body{flex:1;min-width:0}
+  .cand__title{font-family:var(--serif);font-size:.82rem;font-weight:600;color:var(--color-text-primary);line-height:1.45}
+  .cand__sub{margin-top:.2rem;display:flex;align-items:center;gap:.4rem;flex-wrap:wrap}
+  .cand__dist{font-family:ui-monospace,monospace;font-size:.64rem;color:var(--color-text-muted)}
+  .cand__dist.good{color:var(--color-ok)}
+  .cand__dist.warn{color:var(--color-warn)}
+  .cand__tag{font-size:.6rem;font-family:ui-monospace,monospace;color:var(--color-text-muted);
+    background:var(--color-bg-sunken);padding:.06rem .32rem;border-radius:8px}
+  .cand__warn{font-size:.62rem;font-style:italic;font-family:var(--serif);color:var(--color-warn)}
+  .cand.outlier{background:var(--color-warn-subtle)}
+  .cand.outlier:hover{background:color-mix(in srgb,var(--color-warn-subtle) 70%,var(--color-bg-hover))}
+
+  .hcard{margin:.55rem .75rem;padding:.65rem .8rem;border:1px solid var(--color-border-medium);border-radius:6px;background:var(--color-bg-elevated)}
+  .hcard__t{font-size:.72rem;font-weight:700;color:var(--color-text-secondary);display:flex;align-items:center;gap:.35rem;margin-bottom:.35rem}
+  .hcard__t .ico{width:15px;height:15px}
+  .hcard.warn{border-color:var(--color-warn);background:var(--color-warn-subtle)}
+  .hcard.warn .hcard__t{color:var(--color-warn)}
+  .hcard.ok{border-color:var(--color-ok)}
+  .hcard.ok .hcard__t{color:var(--color-ok)}
+  .hcard__row{font-size:.72rem;color:var(--color-text-secondary);line-height:1.55;font-family:var(--sans)}
+  .hcard__row b{color:var(--color-text-primary);font-family:ui-monospace,monospace}
+  .hcard__bar{margin-top:.4rem;height:5px;border-radius:3px;background:var(--color-bg-sunken);overflow:hidden}
+  .hcard__bar i{display:block;height:100%;background:var(--color-ok)}
+  .hcard__act{margin-top:.5rem;display:flex;gap:.4rem;flex-wrap:wrap}
+  .hbtn{appearance:none;border:1px solid var(--color-border-medium);background:transparent;color:var(--color-text-secondary);
+    padding:.28rem .55rem;border-radius:5px;font-size:.66rem;cursor:pointer;font-family:var(--sans)}
+  .hbtn:hover{border-color:var(--color-accent);color:var(--color-accent)}
+  .hbtn.pri{background:var(--color-accent);color:#fff;border-color:var(--color-accent)}
+  [data-theme="dark"] .hbtn.pri{color:#080c12}
+  .hcard.dim{opacity:.5}
+  .hcard.dim .hcard__t::after{content:'规划中';font-size:.56rem;font-weight:400;color:var(--color-text-muted);
+    margin-left:auto;font-style:italic}
+
+  .note{padding:1rem 1.25rem;font-size:.74rem;line-height:1.7;color:var(--color-text-muted);font-family:var(--sans);
+    border-top:1px solid var(--color-border-subtle)}
+  .note b{color:var(--color-text-secondary)}
+</style>
+</head>
+<body>
+
+<div class="mock-bar">
+  <b>话题总览工作台 · Mockup</b>
+  <span>全局编排 · 占满右侧 · 弹窗能力并入工具条</span>
+  <span class="spacer"></span>
+  <div class="seg" id="seg-state">
+    <button data-state="overview" class="on">总览态(默认)</button>
+    <button data-state="compose">编排态(新建中)</button>
+  </div>
+  <div class="seg" id="seg-theme">
+    <button data-theme="editorial" class="on">Editorial</button>
+    <button data-theme="dark">Dark</button>
+  </div>
+</div>
+
+<!-- ============ 真实页面容器 ============ -->
+<div class="app">
+  <div class="tags-topbar">
+    <a class="back-btn"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 18l-6-6 6-6"/></svg></a>
+    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" style="color:var(--color-text-muted)"><path d="M3 3h18v18H3z"/><path d="M3 9h18M9 21V9"/></svg>
+    <h1>叙事工坊</h1>
+    <span class="sep"></span>
+    <span class="tb-op"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><path d="M9 15c0-1 1.5-2 3-2s3 1 3 2M9 9h.01M15 9h.01"/></svg></span>
+    <span class="tb-op"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M21 12.8A9 9 0 1111.2 3 7 7 0 0021 12.8z"/></svg></span>
+  </div>
+
+  <div class="tags-main">
+    <!-- 左侧版块栏 -->
+    <aside class="sidebar">
+      <div class="sidebar__head">
+        <span class="t">板块</span>
+        <span class="sidebar__add"><svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M12 5v14M5 12h14"/></svg></span>
+      </div>
+      <div class="sidebar__list">
+        <div class="board active">
+          <svg class="board__ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M2 7l10-4 10 4-10 4z"/><path d="M2 7v10l10 4 10-4V7"/></svg>
+          <span class="board__label">地缘周报</span><span class="board__count">12</span>
+        </div>
+        <div class="board">
+          <svg class="board__ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="4" y="6" width="16" height="12" rx="2"/><path d="M8 6V4M16 6V4M4 11h16"/></svg>
+          <span class="board__label">科技与AI</span><span class="board__count">8</span>
+        </div>
+        <div class="board">
+          <svg class="board__ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 9h6v6H9z"/></svg>
+          <span class="board__label">半导体观察</span><span class="board__count">5</span>
+        </div>
+        <div class="board">
+          <svg class="board__ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 18l4-9 4 5 4-12 6 16"/></svg>
+          <span class="board__label">宏观经济</span><span class="board__count">7</span>
+        </div>
+        <div class="board">
+          <svg class="board__ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 3v18M5 8h14M5 16h14"/></svg>
+          <span class="board__label">AI 监管</span><span class="board__count">3</span>
+        </div>
+      </div>
+      <div class="sidebar__foot">
+        <button><svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2l3 7h7l-5.5 4.5L18 21l-6-4-6 4 1.5-7.5L2 9h7z"/></svg>升级建议</button>
+        <button><svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2"><path d="M7 7h10v10H7z"/><path d="M10 10h4v4h-4z"/></svg>合并预览</button>
+        <button><svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 13a7.4 7.4 0 000-2l2-1.5-2-3.4-2.4 1a7.4 7.4 0 00-2.8-1.6L11 2h-2l-.6 2.9a7.4 7.4 0 00-2.8 1.6l-2.4-1-2 3.4 2 1.5a7.4 7.4 0 000 2l-2 1.5 2 3.4 2.4-1a7.4 7.4 0 002.8 1.6L9 22h2l.6-2.9a7.4 7.4 0 002.8-1.6l2.4 1 2-3.4z"/></svg>匹配配置</button>
+        <button><svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16v12H4z"/><path d="M8 20h8M12 16v4"/></svg>生成叙事</button>
+      </div>
+    </aside>
+
+    <!-- 右侧内容区 -->
+    <main class="content">
+      <div class="tabs">
+        <button class="tab"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>板块内容</button>
+        <button class="tab on"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M6 2h9l5 5v15H6z"/><path d="M15 2v5h5"/></svg>日报</button>
+        <button class="tab"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 4h16v16H4z"/><path d="M8 8h8M8 12h8M8 16h5"/></svg>文章</button>
+      </div>
+
+      <!-- ===== 工作台 ===== -->
+      <div class="workbench">
+
+        <!-- ====== 总览态工具条 ====== -->
+        <div class="wb-bar" id="bar-overview">
+          <div class="wb-title">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 7l10-4 10 4-10 4z"/><path d="M3 7v10l10 4 10-4V7"/></svg>
+            <b>话题总览</b>
+            <span class="sub">12 条泳道 · 48 section</span>
+          </div>
+          <span class="wb-sep"></span>
+          <!-- 时间范围选择器（默认14天）-->
+          <select class="wb-select" id="rangeSel">
+            <option>最近 7 天</option>
+            <option selected>最近 14 天</option>
+            <option>最近 30 天</option>
+            <option>全部</option>
+          </select>
+          <!-- 视图模式 -->
+          <div class="wb-view" id="viewSeg">
+            <button data-v="timeline"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12h4l3-8 4 16 3-8h4"/></svg>时间线</button>
+            <button data-v="lanes" class="on"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M3 12h18M3 18h18"/></svg>泳道</button>
+          </div>
+          <!-- 弹窗能力并入：回刷 / 合并预览 -->
+          <button class="wb-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 11-3-6.7M21 3v6h-6"/></svg>回刷归属</button>
+          <button class="wb-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M7 7h10v10H7z"/><path d="M10 10h4v4h-4z"/></svg>合并预览</button>
+          <!-- 新建泳道入口 -->
+          <button class="wb-btn pri" id="goCompose"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M12 5v14M5 12h14"/></svg>新建泳道</button>
+        </div>
+
+        <!-- ====== 编排态工具条 ====== -->
+        <div class="wb-bar" id="bar-compose" style="display:none">
+          <button class="wb-back" id="backOverview"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 18l-6-6 6-6"/></svg>返回总览</button>
+          <span class="wb-badge"><span class="dot"></span>新建 · 待保存</span>
+          <input class="wb-name" id="laneName" value="美伊博弈" />
+          <span class="wb-src">将保存为 Active · 来源：手动串联</span>
+          <span class="wb-sep"></span>
+          <button class="wb-btn" id="cancelCompose">取消</button>
+          <button class="wb-btn pri">保存为新泳道</button>
+        </div>
+
+        <!-- ====== 总览态主体：lanes 占满 ====== -->
+        <div class="overview" id="pane-overview">
+          <!-- 日期表头（14天）-->
+          <div class="ov-head">
+            <div class="ov-head__label"><svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M3 12h18M3 18h18"/></svg>话题 / 日期</div>
+            <div class="ov-head__days" id="ovDays"></div>
+          </div>
+          <!-- 泳道列表 -->
+          <div class="ov-body" id="ovBody"></div>
+        </div>
+
+        <!-- ====== 编排态主体 ====== -->
+        <div class="composer" id="pane-compose" style="display:none">
+          <!-- 预览泳道时间轴 -->
+          <div class="cp-tl-wrap" id="tl">
+            <div class="cp-tl" id="track"></div>
+          </div>
+          <div class="cp-tl-hint">← 拖拽查看更多日期 · 节点三态同话题泳道（实心=贴合 · 虚线=边界 · 黄框=离群建议剔除）→</div>
+
+          <div class="cp-cols">
+            <!-- 左：全局候选池（14天）-->
+            <div class="cp-col-l">
+              <div class="cp-sub">
+                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M9 11l3 3 8-8"/><path d="M20 12v7a1 1 0 01-1 1H5a1 1 0 01-1-1V5a1 1 0 011-1h11"/></svg>
+                <b>最近 14 天的 section</b>
+                <span class="hint">勾选要串联进新泳道的</span>
+                <span class="sort">按距离 ↑</span>
+              </div>
+              <div id="candList"></div>
+            </div>
+            <!-- 右：体检报告 -->
+            <div class="cp-col-r">
+              <div class="cp-sub"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 12h4l3 8 4-16 3 8h4"/></svg><b>这条泳道的体检报告</b></div>
+              <div class="hcard ok">
+                <div class="hcard__t"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 11-5.93-9.14"/><path d="M22 4L12 14l-3-3"/></svg>① 聚类质量</div>
+                <div class="hcard__row">选中 15 条，平均两两距离 <b>0.22</b>，主体紧凑。</div>
+                <div class="hcard__row" style="color:var(--color-warn);margin-top:.2rem">但有 <b style="color:var(--color-warn)">2 条离群</b>，剔除后质量更优。</div>
+                <div class="hcard__bar"><i style="width:72%"></i></div>
+                <div class="hcard__act"><button class="hbtn" id="kickOut">一键剔除 2 个离群</button></div>
+              </div>
+              <div class="hcard warn">
+                <div class="hcard__t"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><path d="M12 9v4M12 17h.01"/></svg>③ 撞车检查</div>
+                <div class="hcard__row">选中 15 条中 <b>6 条</b>当前属「<b>中东局势</b>」。</div>
+                <div class="hcard__row" style="margin-top:.3rem">保存后这 <b style="color:var(--color-warn)">6 条将从原话题移出</b>、归入新泳道（单值覆盖）。</div>
+                <div class="hcard__act"><button class="hbtn">看对比</button><button class="hbtn pri">坚持新建</button></div>
+              </div>
+              <div class="hcard dim">
+                <div class="hcard__t"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>④ 未来预期</div>
+                <div class="hcard__row">约 <b>8</b> 条历史 section 满足自动归属阈值，建后将逐步吸入。</div>
+                <div class="hcard__act"><button class="hbtn" disabled>预览这些</button></div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </main>
+  </div>
+</div>
+
+<p class="note">
+  <b>定位转变：</b>本版从"创建向导"改为<b>「话题总览工作台」</b>——话题总览本身就是全局编排入口，占满右侧容器（含版块栏 + tabs）。<br>
+  <b>总览态（默认）：</b>① 工具条取代旧 <code>TopicManageDialog</code> 弹窗——时间范围选择器（默认 14 天，可改 7/30/全部）+ 视图模式（时间线/泳道）+ <b>回刷归属</b>/<b>合并预览</b>（弹窗能力并入）+ <b>新建泳道</b>。② lanes 视图占满：左侧泳道标签列（状态点 + 名 + 计数 + hover 操作菜单：重命名/归档/删除）+ 右侧 14 天时间网格，每条泳道一行，节点带 observability 三态。③ hover 泳道出现操作（重命名/归档/删除/合并），全局可编排。<br>
+  <b>编排态（点新建后）：</b>工具条换成泳道名输入 + 保存/取消；主体为预览泳道时间轴 + 双栏（左：最近 14 天全局 section 池，右：体检三卡）。<b>所见即所得</b>——预览泳道复用总览 lanes 的节点视觉。<br>
+  <b>弃弹窗：</b>原 <code>TopicManageDialog</code>（回刷/重命名/归档/合并）全部能力并入工作台工具条与泳道 hover 操作，不再有独立弹窗。全程语义 token。
+</p>
+
+<script>
+  // ---------- 主题 ----------
+  document.querySelectorAll('#seg-theme button').forEach(b=>{b.onclick=()=>{
+    document.documentElement.setAttribute('data-theme',b.dataset.theme);
+    document.querySelectorAll('#seg-theme button').forEach(x=>x.classList.toggle('on',x===b));};});
+
+  // ---------- 日期表头（14天 06-16~06-29）----------
+  const days=[
+    ['06-16','周一'],['06-17','周二'],['06-18','周三'],['06-19','周四'],['06-20','周五'],
+    ['06-21','周六'],['06-22','周日'],['06-23','周一'],['06-24','周二'],['06-25','周三'],
+    ['06-26','周四'],['06-27','周五'],['06-28','周六'],['06-29','周日']
+  ];
+  const todayIdx=13;
+  document.getElementById('ovDays').innerHTML=days.map((d,i)=>
+    `<div class="ov-head__day${i===todayIdx?' today':''}"><b>${d[0]}</b>${d[1]}</div>`).join('');
+
+  // ---------- 泳道数据 ----------
+  // lanes: [{name, status, count, meta, nodes:[{day(1-14),kind}], segs:[[from,to]]}]
+  const lanes=[
+    {name:'以黎冲突升级',status:'active',count:9,meta:'跨度14天·最近06-29',
+      nodes:[{d:3,k:''},{d:5,k:''},{d:8,k:''},{d:12,k:''},{d:13,k:''},{d:14,k:''}],
+      segs:[[3,5],[8,12],[12,14]]},
+    {name:'中东局势',status:'active',count:11,meta:'跨度14天·最近06-29·6条将被移出',
+      nodes:[{d:2,k:''},{d:4,k:''},{d:4,k:''},{d:6,k:'boundary'},{d:9,k:''},{d:11,k:''},{d:11,k:''},{d:14,k:''}],
+      segs:[[2,4],[4,6],[9,11],[11,14]], activeRow:true},
+    {name:'美伊博弈',status:'cand',count:0,meta:'待保存（编排中）',nodes:[],segs:[],isNew:true},
+    {name:'半导体出口管制',status:'active',count:7,meta:'跨度12天·最近06-29',
+      nodes:[{d:1,k:''},{d:5,k:''},{d:9,k:''},{d:12,k:''},{d:14,k:''}],segs:[[1,5],[9,12],[12,14]]},
+    {name:'AI 监管立法',status:'active',count:4,meta:'跨度10天·最近06-28',
+      nodes:[{d:4,k:''},{d:7,k:''},{d:13,k:''}],segs:[[4,7]]},
+    {name:'俄乌战线僵持',status:'active',count:6,meta:'跨度14天·最近06-27',
+      nodes:[{d:2,k:''},{d:6,k:''},{d:10,k:''},{d:12,k:'boundary'}],segs:[[2,6],[6,10]]},
+    {name:'半岛沙伊和解',status:'archived',count:3,meta:'已归档·06-20最后命中',
+      nodes:[{d:1,k:'arch'},{d:5,k:'arch'}],segs:[[1,5]],archived:true},
+    {name:'（未归类）',status:'unassigned',count:8,meta:'散落 section',nodes:[
+      {d:3,k:''},{d:7,k:''},{d:11,k:''},{d:14,k:''}],segs:[],unassigned:true}
+  ];
+
+  function renderLanes(){
+    const body=document.getElementById('ovBody');
+    body.innerHTML=lanes.map((L,idx)=>{
+      const dotClass=L.archived?'arch':(L.status==='cand'?'cand':'active');
+      const rowClass=(L.activeRow?' active-row':'')+(L.archived?' archived':'')+(L.unassigned?' unassigned':'');
+      // 节点 + 连线渲染到 14 列网格
+      let trackContent='';
+      for(let col=1;col<=14;col++){
+        const node=L.nodes.find(n=>n.d===col);
+        const seg=L.segs.find(s=>col>s[0]&&col<s[1]);
+        if(node) trackContent+=`<div class="lnode ${node.k}" style="grid-column:${col}"><i></i></div>`;
+        else if(seg) trackContent+=`<div class="lseg" style="grid-column:${col}"></div>`;
+      }
+      const ops = L.unassigned ? '' : `
+        <div class="lane__ops">
+          <button class="lane__op" title="重命名"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9M16.5 3.5a2.1 2.1 0 013 3L7 19l-4 1 1-4z"/></svg></button>
+          <button class="lane__op" title="${L.archived?'恢复':'归档'}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7v13a1 1 0 001 1h16a1 1 0 001-1V7M1 3h22v4H1zM10 12h4"/></svg></button>
+          <button class="lane__op" title="删除"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6"/></svg></button>
+        </div>`;
+      return `<div class="lane${rowClass}">
+        <div class="lane__label">
+          <div class="lane__lt"><span class="lane__dot ${dotClass}"></span><span class="lane__name">${L.name}</span><span class="lane__ct">${L.count}</span></div>
+          <div class="lane__meta">${L.meta}</div>
+          ${ops}
+        </div>
+        <div class="lane__track">${trackContent}</div>
+      </div>`;
+    }).join('');
+  }
+  renderLanes();
+
+  // ---------- 编排态预览泳道（真实密度，同天纵向堆叠）----------
+  const composeDays=[
+    ['06-16','周一'],['06-17','周二'],['06-18','周三'],['06-19','周四'],['06-20','周五'],
+    ['06-21','周六'],['06-22','周日'],['06-23','周一'],['06-24','周二'],['06-25','周三'],
+    ['06-26','周四'],['06-27','周五'],['06-28','周六'],['06-29','周日']
+  ];
+  // 美伊博弈：15 个 section，跨 06-18~06-29，部分天有 2 条同天堆叠
+  const composeNodes=[
+    {d:3,label:'霍尔木兹油轮遇袭·油价跳涨 4%',kind:''},
+    {d:3,label:'草卫队：保留封锁海峡选项',kind:''},
+    {d:5,label:'IAEA：伊朗浓缩铀纯度破 90%',kind:''},
+    {d:5,label:'美财政部新增制裁 18 家伊朗实体',kind:'boundary'},
+    {d:7,label:'美伊外长阿曼秘密会晤',kind:''},
+    {d:8,label:'以色列警告：不排除先发打击',kind:'boundary'},
+    {d:9,label:'五角大楼：增派航母战斗群',kind:''},
+    {d:10,label:'布伦特原油破 95 美元',kind:''},
+    {d:10,label:'OPEC+ 紧急磋商增产',kind:''},
+    {d:11,label:'伊朗议会通过核活动推进法案',kind:''},
+    {d:12,label:'荷兰扩 ASML 限制',kind:'outlier'},
+    {d:12,label:'中国镓锗反制许可',kind:'outlier'},
+    {d:13,label:'俄伊外长通话协调立场',kind:'boundary'},
+    {d:14,label:'斡旋方提交停火新框架',kind:''},
+    {d:14,label:'美军宙斯盾舰抵达波斯湾',kind:''}
+  ];
+  function renderCompose(){
+    const byDay=new Map();
+    composeNodes.forEach(n=>{if(!byDay.has(n.d))byDay.set(n.d,[]);byDay.get(n.d).push(n);});
+    document.getElementById('track').innerHTML=composeDays.map((dd,i)=>{
+      const d=i+1; const ns=byDay.get(d)||[];
+      const cls=ns.length?'has-node':'empty';
+      const inner=ns.length
+        ? ns.map(n=>`<div class="cp-node-grp"><div class="cp-node ${n.kind}"><i></i></div><div class="cp-nlabel">${n.label}</div></div>`).join('')
+        : '<div class="cp-edot"></div>';
+      return `<div class="cp-col ${cls}"><div class="cp-col__date"><b>${dd[0]}</b>${dd[1]}</div>${inner}</div>`;
+    }).join('');
+  }
+  renderCompose();
+
+  // ---------- 候选池（全局 14 天 section）----------
+  const cands=[
+    {t:'霍尔木兹海峡油轮遇袭，油价单日跳涨 4%',d:'0.16',k:'good',o:'中东局势',c:true},
+    {t:'草卫队发言人：保留封锁海峡的选项',d:'0.19',k:'good',o:'中东局势',c:true},
+    {t:'IAEA 报告：伊朗浓缩铀纯度突破 90%',d:'0.14',k:'good',o:'中东局势',c:true},
+    {t:'美财政部新增制裁 18 家伊朗实体',d:'0.27',k:'',o:'中东局势',c:true},
+    {t:'美伊外长在阿曼秘密会晤，沟通避险通道',d:'0.18',k:'good',o:'无',c:true},
+    {t:'以色列安全内阁警告：不排除先发打击',d:'0.29',k:'',o:'以黎冲突',c:true},
+    {t:'五角大楼：向中东增派航母战斗群',d:'0.21',k:'good',o:'中东局势',c:true},
+    {t:'布伦特原油破 95 美元，市场恐慌',d:'0.20',k:'good',o:'宏观经济',c:true},
+    {t:'OPEC+ 紧急磋商增产方案',d:'0.24',k:'',o:'宏观经济',c:true},
+    {t:'伊朗议会通过核活动推进法案',d:'0.17',k:'good',o:'中东局势',c:true},
+    {t:'荷兰扩大 ASML 对华 DUV 设备出口限制',d:'0.41',k:'warn',o:'半导体博弈',c:true,outlier:true},
+    {t:'中国对镓锗出口实施新一轮反制许可',d:'0.43',k:'warn',o:'半导体博弈',c:true,outlier:true},
+    {t:'俄伊外长通话协调伊核立场',d:'0.30',k:'',o:'中东局势',c:true},
+    {t:'斡旋方提交停火新框架',d:'0.19',k:'good',o:'以黎冲突',c:true},
+    {t:'美军宙斯盾舰抵达波斯湾',d:'0.22',k:'good',o:'中东局势',c:true},
+    {t:'以色列空袭黎南部，真主党反击',d:'0.62',k:'far',o:'以黎冲突',c:false},
+    {t:'沙特与伊朗外长在北京会晤',d:'0.55',k:'far',o:'中东局势',c:false},
+    {t:'卡塔尔提交 7 点停火框架',d:'0.58',k:'far',o:'以黎冲突',c:false}
+  ];
+  function renderCands(){
+    document.getElementById('candList').innerHTML=cands.map(c=>{
+      const lab=c.k==='good'?'贴合':c.k==='warn'?'离群':c.k==='far'?'远':'边界';
+      return `<div class="cand${c.c?' checked':''}${c.outlier?' outlier':''}">
+        <span class="cand__box"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M5 12l5 5 9-11"/></svg></span>
+        <div class="cand__body">
+          <div class="cand__title">${c.t}</div>
+          <div class="cand__sub">
+            <span class="cand__dist ${c.k==='far'?'':c.k}">↳ ${c.d} · ${lab}</span>
+            <span class="cand__tag">原属：${c.o}</span>
+            ${c.outlier?'<span class="cand__warn">⚠ 建议剔除</span>':''}
+          </div>
+        </div>
+      </div>`;
+    }).join('');
+  }
+  renderCands();
+
+  // ---------- 总览 ↔ 编排 切换 ----------
+  const barO=document.getElementById('bar-overview'),barC=document.getElementById('bar-compose');
+  const paneO=document.getElementById('pane-overview'),paneC=document.getElementById('pane-compose');
+  function show(state){
+    const isCompose=state==='compose';
+    barO.style.display=isCompose?'none':'flex';
+    barC.style.display=isCompose?'flex':'none';
+    paneO.style.display=isCompose?'none':'flex';
+    paneC.style.display=isCompose?'flex':'none';
+    document.querySelectorAll('#seg-state button').forEach(b=>b.classList.toggle('on',b.dataset.state===state));
+  }
+  document.getElementById('goCompose').onclick=()=>show('compose');
+  document.getElementById('backOverview').onclick=()=>show('overview');
+  document.getElementById('cancelCompose').onclick=()=>show('overview');
+  document.querySelectorAll('#seg-state button').forEach(b=>b.onclick=()=>show(b.dataset.state));
+
+  // 候选勾选
+  document.querySelectorAll('.cand').forEach(c=>c.onclick=(e)=>{
+    if(e.target.closest('.hbtn'))return;c.classList.toggle('checked');});
+
+  // 一键剔离群
+  document.getElementById('kickOut').onclick=()=>{
+    document.querySelectorAll('.cand.outlier.checked').forEach(c=>c.classList.remove('checked'));};
+
+  // 拖拽 pan
+  const wrap=document.getElementById('tl');let down=false,startX=0,startScroll=0;
+  wrap.addEventListener('pointerdown',e=>{if(e.target.closest('.cp-node'))return;
+    down=true;startX=e.pageX;startScroll=wrap.scrollLeft;wrap.classList.add('dragging');wrap.setPointerCapture(e.pointerId);});
+  wrap.addEventListener('pointermove',e=>{if(!down)return;wrap.scrollLeft=startScroll-(e.pageX-startX);});
+  wrap.addEventListener('pointerup',()=>{down=false;wrap.classList.remove('dragging');});
+  wrap.addEventListener('pointercancel',()=>{down=false;wrap.classList.remove('dragging');});
+</script>
+</body>
+</html>

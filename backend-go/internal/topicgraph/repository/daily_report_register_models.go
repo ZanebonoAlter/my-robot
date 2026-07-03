@@ -12,6 +12,8 @@ func init() {
 		&DailyReportThread{},
 		&SectionRelation{},
 		&BoardPersistentTopic{},
+		&BoardTopicWatch{},
+		&TopicWatchHit{},
 	)
 	tagging.RegisterVectorDimEnsurer(ensureSectionEmbeddingDimension)
 	tagging.RegisterVectorDimEnsurer(ensurePersistentTopicEmbeddingDimension)

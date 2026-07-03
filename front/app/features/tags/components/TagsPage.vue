@@ -249,7 +249,7 @@ onMounted(() => {
 .tags-page-title { font-family: serif; font-size: 1.1rem; font-weight: 600; color: var(--color-text-primary); letter-spacing: 0.02em; }
 .tags-guide-btn { display: flex; align-items: center; justify-content: center; width: 28px; height: 28px; border: 1px solid var(--color-border-medium); border-radius: 8px; background: none; color: var(--color-text-muted); cursor: pointer; transition: all 0.12s ease; }
 .tags-guide-btn:hover { border-color: var(--color-border-strong); color: var(--color-text-secondary); background: var(--color-bg-hover); }
-.tags-main { display: flex; flex: 1; min-height: 0; max-width: min(1800px, 95vw); width: 100%; margin: 0 auto; }
+.tags-main { display: flex; flex: 1; min-height: 0; width: 100%; }
 .tags-content { flex: 1; min-width: 0; padding: 1.25rem 1.5rem 3.5rem; overflow-y: auto; }
 .tags-content-tabs { display: flex; gap: 0.25rem; padding: 0 0 0.75rem; margin-bottom: 1rem; border-bottom: 1px solid var(--color-border-subtle); }
 .tags-content-tab { display: flex; align-items: center; gap: 0.35rem; padding: 0.4rem 0.75rem; border: none; border-radius: 8px 8px 0 0; background: none; color: var(--color-text-muted); font-size: 0.75rem; cursor: pointer; transition: all 0.12s ease; position: relative; }

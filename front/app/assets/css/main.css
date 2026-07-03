@@ -119,6 +119,11 @@
   --color-error:   var(--raw-error);
   --color-info:    var(--raw-info);
 
+  /* Subtle (translucent) variants for soft backgrounds (health cards, outlier
+     highlights in the compose workbench). Mirror the accent-subtle convention. */
+  --color-success-subtle: rgba(61, 138, 74, 0.12);
+  --color-warning-subtle: rgba(196, 136, 60, 0.14);
+
   --color-input-bg:    rgba(255, 255, 255, 0.6);
   --color-input-border: rgba(26, 26, 26, 0.12);
   --color-input-focus:  var(--raw-red-500);
@@ -191,6 +196,11 @@
   --color-warning: var(--raw-warning);
   --color-error:   var(--raw-error);
   --color-info:    var(--raw-info);
+
+  /* Subtle (translucent) variants for soft backgrounds (health cards, outlier
+     highlights in the compose workbench). Mirror the accent-subtle convention. */
+  --color-success-subtle: rgba(78, 166, 143, 0.14);
+  --color-warning-subtle: rgba(240, 162, 75, 0.14);
 
   --color-input-bg:    rgba(255, 255, 255, 0.04);
   --color-input-border: rgba(255, 255, 255, 0.10);

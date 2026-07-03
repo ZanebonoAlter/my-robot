@@ -154,11 +154,11 @@ func TestQualityBreakdownRollbackReversible(t *testing.T) {
 	reportID := seedTestReport(t, db, boardID, now)
 
 	section := DailyReportSection{
-		ReportID:      reportID,
-		ClusterLabel:  "post-rollback-section",
-		ArticleCount:  1,
-		BestTier:      0,
-		Embedding:     FloatsToPgVector([]float64{0}),
+		ReportID:     reportID,
+		ClusterLabel: "post-rollback-section",
+		ArticleCount: 1,
+		BestTier:     0,
+		Embedding:    FloatsToPgVector([]float64{0}),
 	}
 	err = db.Create(&section).Error
 	require.NoError(t, err)
@@ -267,4 +267,3 @@ func TestTimelineAPIExposesQualityBreakdown(t *testing.T) {
 	require.NotNil(t, lcResp.Sections[0].QualityBreakdown)
 	assert.JSONEq(t, string(breakdownJSON), string(lcResp.Sections[0].QualityBreakdown))
 }
-

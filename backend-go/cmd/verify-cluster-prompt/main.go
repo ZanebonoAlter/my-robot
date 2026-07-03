@@ -79,7 +79,7 @@ func main() {
 	fmt.Println()
 
 	// Run the updated ClusterTags with the real LLM.
-	groups, err := service.ClusterTags(context.Background(), tagInputs, existing)
+	groups, err := service.ClusterTags(context.Background(), tagInputs, existing, nil)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "cluster: %v\n", err)
 		os.Exit(1)

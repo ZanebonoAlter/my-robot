@@ -21,4 +21,5 @@ var (
 	CollectBoardIDsForDate = service.CollectBoardIDsForDate
 	GenerateDailyReport    = service.GenerateDailyReport
 	SaveReport             = service.SaveReport
+	GenerateAndSaveReport  = service.GenerateAndSaveReport
 )

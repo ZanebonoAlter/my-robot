@@ -82,12 +82,45 @@ func TestBackfill_SeparatesDistinctNarratives(t *testing.T) {
 	boardID := seedTestBoard(t, db)
 	d := NormalizeReportDate(time.Now())
 	r := seedTestReport(t, db, boardID, d)
-	seedTopicSection(t, db, r, "AI 编程", vecStr(1.0, 0.0, 0.0))
-	seedTopicSection(t, db, r, "中东局势", vecStr(0.0, 1.0, 0.0)) // orthogonal
+	// Each orthogonal narrative has >= 2 near-identical sections so the
+	// complete-link cluster clears the min-size gate (>= 2 members). A single
+	// section per narrative would now be left unassigned — see
+	// TestBackfill_SingleMemberDoesNotSeed.
+	seedTopicSection(t, db, r, "AI 编程·a", vecStr(1.0, 0.0, 0.0))
+	seedTopicSection(t, db, r, "AI 编程·b", vecStr(0.99, 0.01, 0.0))
+	seedTopicSection(t, db, r, "中东局势·a", vecStr(0.0, 1.0, 0.0)) // orthogonal
+	seedTopicSection(t, db, r, "中东局势·b", vecStr(0.01, 0.99, 0.0))
 
 	created, err := repo.BackfillPersistentTopics(boardID)
 	require.NoError(t, err)
-	assert.Equal(t, 2, created, "orthogonal narratives must seed separate topics")
+	assert.Equal(t, 2, created, "orthogonal narratives (>=2 members each) must seed separate topics")
+}
+
+// TestBackfill_SingleMemberDoesNotSeed verifies the min-size gate: a section
+// that clusters with nothing else (single-member cluster) must NOT seed an
+// active topic. It stays unassigned, left for the daily candidate path to
+// observe over consecutive days. Single-section topics would bypass the
+// consecutive-hits observation window and produce noise lanes.
+func TestBackfill_SingleMemberDoesNotSeed(t *testing.T) {
+	db := testutil.SetupTestDB(t)
+	repo := NewTopicGraphRepository(db)
+	Repo = repo
+
+	boardID := seedTestBoard(t, db)
+	d := NormalizeReportDate(time.Now())
+	r := seedTestReport(t, db, boardID, d)
+	seedTopicSection(t, db, r, "孤立项 A", vecStr(1.0, 0.0, 0.0))
+	seedTopicSection(t, db, r, "孤立项 B", vecStr(0.0, 1.0, 0.0)) // orthogonal, no cluster joins
+
+	created, err := repo.BackfillPersistentTopics(boardID)
+	require.NoError(t, err)
+	assert.Equal(t, 0, created, "single-member clusters must not seed topics")
+
+	var orphan int64
+	db.Raw(`SELECT count(*) FROM daily_report_sections s
+		JOIN board_daily_reports r ON r.id=s.report_id
+		WHERE r.semantic_board_id=? AND s.persistent_topic_id IS NULL`, boardID).Scan(&orphan)
+	assert.Equal(t, int64(2), orphan, "both single sections must stay unassigned")
 }
 
 // TestIdentityEdge_SurvivesLabelDrift verifies the root-cause-B fix end to end:
@@ -409,14 +442,14 @@ func TestCleanup_PruneUnderqualifiedCandidates(t *testing.T) {
 	tid4 := topics[3].ID
 	statusAtReport := TopicStatusCandidate
 	sec := DailyReportSection{
-		ReportID:            report.ID,
-		ClusterLabel:        "test section",
-		ArticleCount:        1,
-		Embedding:           emb,
-		PersistentTopicID:   &tid4,
-		TopicMatchDistance:  0.15,
+		ReportID:             report.ID,
+		ClusterLabel:         "test section",
+		ArticleCount:         1,
+		Embedding:            emb,
+		PersistentTopicID:    &tid4,
+		TopicMatchDistance:   0.15,
 		TopicMatchConfidence: TopicConfAnchorHit,
-		TopicStatusAtReport: &statusAtReport,
+		TopicStatusAtReport:  &statusAtReport,
 	}
 	require.NoError(t, db.Create(&sec).Error)
 
@@ -557,4 +590,156 @@ func TestCleanup_PruneRebuildsRelations(t *testing.T) {
 	require.NotNil(t, sec1.PersistentTopicID)
 	assert.Equal(t, activeTopic.ID, *sec1.PersistentTopicID,
 		"section under active topic must retain its assignment")
+}
+
+// TestManualTopic_CreateAndReassign is the zero-side-effect integration test
+// for CreateManualTopic. It proves:
+//  1. New topic is source=manual, status=active
+//  2. Selected sections get confidence=manual, persistent_topic_id=new topic
+//  3. Original topic's consecutive_hits NOT affected by sections moving out
+//  4. Identity edges follow the new ownership after RebuildBoardRelations
+func TestManualTopic_CreateAndReassign(t *testing.T) {
+	db := testutil.SetupTestDB(t)
+	repo := NewTopicGraphRepository(db)
+	Repo = repo
+
+	boardID := seedTestBoard(t, db)
+	d1 := NormalizeReportDate(time.Now().AddDate(0, 0, -2))
+	d2 := NormalizeReportDate(time.Now().AddDate(0, 0, -1))
+	r1 := seedTestReport(t, db, boardID, d1)
+	r2 := seedTestReport(t, db, boardID, d2)
+
+	// Two sections with different embeddings belonging to the same original topic.
+	s1 := seedTopicSection(t, db, r1, "orig-s1", vecStr(1.0, 0.0, 0.0))
+	s2 := seedTopicSection(t, db, r2, "orig-s2", vecStr(0.9, 0.1, 0.0))
+	// One section that stays with the original topic.
+	sStay := seedTopicSection(t, db, r2, "orig-stay", vecStr(1.0, 0.0, 0.0))
+
+	// Create original active topic with 3 sections.
+	origTopic := BoardPersistentTopic{
+		SemanticBoardID: boardID, Label: "original",
+		Embedding: vecStr(1.0, 0.0, 0.0), Status: TopicStatusActive,
+		FirstSeenDate: d1, LastSeenDate: d2, HitCount: 3, ConsecutiveHits: 3,
+	}
+	require.NoError(t, db.Create(&origTopic).Error)
+	for _, sid := range []uint{s1, s2, sStay} {
+		require.NoError(t, db.Model(&DailyReportSection{}).Where("id = ?", sid).
+			Updates(map[string]interface{}{
+				"persistent_topic_id":    origTopic.ID,
+				"topic_match_confidence": TopicConfAnchorHit,
+			}).Error)
+	}
+
+	// Build initial relations so we can later verify they are rebuilt.
+	require.NoError(t, RebuildBoardRelations(db, boardID))
+
+	// Now create a manual topic taking s1 and s2.
+	topic, skipped, err := repo.CreateManualTopic(boardID, "manual-topic", []uint{s1, s2})
+	require.NoError(t, err)
+	require.NotNil(t, topic)
+	assert.Empty(t, skipped, "both sections have valid embeddings")
+
+	// Check ①: new topic source=manual, status=active.
+	assert.Equal(t, TopicSourceManual, topic.Source)
+	assert.Equal(t, TopicStatusActive, topic.Status)
+	assert.Equal(t, 2, topic.HitCount)
+	assert.Equal(t, 2, topic.ConsecutiveHits)
+
+	// Check ②: selected sections are reassigned with confidence=manual.
+	for _, sid := range []uint{s1, s2} {
+		var sec DailyReportSection
+		require.NoError(t, db.First(&sec, sid).Error)
+		require.NotNil(t, sec.PersistentTopicID)
+		assert.Equal(t, topic.ID, *sec.PersistentTopicID, "section %d must be reassigned to new manual topic", sid)
+		assert.Equal(t, TopicConfManual, sec.TopicMatchConfidence, "section %d confidence must be manual", sid)
+	}
+
+	// Check: section that stayed keeps original topic.
+	var secStay DailyReportSection
+	require.NoError(t, db.First(&secStay, sStay).Error)
+	require.NotNil(t, secStay.PersistentTopicID)
+	assert.Equal(t, origTopic.ID, *secStay.PersistentTopicID, "staying section must retain original topic")
+
+	// Check ③: original topic's consecutive_hits NOT affected.
+	var reloadedOrig BoardPersistentTopic
+	require.NoError(t, db.First(&reloadedOrig, origTopic.ID).Error)
+	assert.Equal(t, 3, reloadedOrig.ConsecutiveHits,
+		"original topic consecutive_hits must be unchanged by manual topic creation")
+
+	// Check ④: identity edge rebuilt — moved sections now share identity with
+	// each other (same topic) but NOT with the staying section (different topic).
+	var relNew SectionRelation
+	errNew := db.Where("from_section_id = ? AND to_section_id = ?", s1, s2).
+		Where("relation_type = ?", "identity").First(&relNew).Error
+	assert.NoError(t, errNew, "identity edge must exist between sections in the same manual topic")
+
+	// s1→sStay should NOT have an identity edge (different topics).
+	var relOld SectionRelation
+	errOld := db.Where("from_section_id = ? AND to_section_id = ?", s1, sStay).
+		Where("relation_type = ?", "identity").First(&relOld).Error
+	assert.Error(t, errOld, "identity edge must NOT exist between sections in different topics")
+}
+
+// TestManualTopic_MigrationIdempotent verifies the source column migration
+// can be executed repeatedly without error.
+func TestManualTopic_MigrationIdempotent(t *testing.T) {
+	db := testutil.SetupTestDB(t)
+
+	// Run migration twice — must not error.
+	for i := 0; i < 2; i++ {
+		require.NoError(t, db.Exec(`
+				ALTER TABLE board_persistent_topics
+				ADD COLUMN IF NOT EXISTS source VARCHAR(10) NOT NULL DEFAULT 'auto'
+			`).Error, "add source column (run %d)", i)
+
+			require.NoError(t, db.Exec(`
+				DO $$ BEGIN
+					IF NOT EXISTS (
+						SELECT 1 FROM information_schema.table_constraints
+						WHERE constraint_name = 'chk_board_persistent_topics_source'
+						  AND table_name = 'board_persistent_topics'
+					) THEN
+						ALTER TABLE board_persistent_topics
+							ADD CONSTRAINT chk_board_persistent_topics_source
+							CHECK (source IN ('auto', 'manual'));
+					END IF;
+				END $$
+			`).Error, "add source CHECK (run %d)", i)
+	}
+
+	// Verify the column exists and has the right default.
+	var hasSourceCol bool
+	require.NoError(t, db.Raw(`
+		SELECT EXISTS (
+			SELECT 1 FROM information_schema.columns
+			WHERE table_name = 'board_persistent_topics' AND column_name = 'source'
+		)
+	`).Scan(&hasSourceCol).Error)
+	assert.True(t, hasSourceCol, "source column must exist after migration")
+}
+
+// TestManualTopic_HistoricalDefaultsToAuto ensures existing topics
+// get source='auto' after the migration.
+func TestManualTopic_HistoricalDefaultsToAuto(t *testing.T) {
+	db := testutil.SetupTestDB(t)
+	repo := NewTopicGraphRepository(db)
+	Repo = repo
+
+	boardID := seedTestBoard(t, db)
+	d := NormalizeReportDate(time.Now())
+	r := seedTestReport(t, db, boardID, d)
+	seedTopicSection(t, db, r, "hist", vecStr(1.0, 0.0, 0.0))
+
+	// Create a topic without explicit Source (simulating pre-migration creation).
+	err := db.Exec(`
+		INSERT INTO board_persistent_topics
+			(semantic_board_id, label, embedding, status, first_seen_date, last_seen_date, hit_count, consecutive_hits, created_at, updated_at)
+		VALUES (?, 'hist-topic', ?, 'active', ?, ?, 1, 1, NOW(), NOW())
+	`, boardID, vecStr(1.0, 0.0, 0.0), d, d).Error
+	require.NoError(t, err)
+
+	var topic BoardPersistentTopic
+	require.NoError(t, db.Where("label = ?", "hist-topic").First(&topic).Error)
+	assert.Equal(t, TopicSourceAuto, topic.Source,
+		"topic created without explicit source must default to 'auto'")
 }

@@ -54,7 +54,32 @@ func GenerateDailyReport(ctx context.Context, boardID uint, date time.Time) (*re
 			boardID, anchorStats.ActiveCount, anchorStats.CandidateCount,
 			anchorStats.FilteredByWindow, anchorStats.TruncatedByLimit)
 	}
-	clusters, err := ClusterTags(ctx, tags, existingTopics)
+
+	// Step 3.5: Load recent briefs for active topics (Slice D — lane context
+	// injection). On failure, degrade to label-only injection — briefs are
+	// purely an enrichment layer and SHALL NOT block ClusterTags.
+	const (
+		briefsSinceDays   = 7
+		briefsPerTopicCap = 5
+	)
+	var topicBriefs map[uint][]repository.TopicRecentBrief
+	if existingTopics != nil {
+		briefs, briefsErr := repository.Repo.ListTopicRecentBriefs(boardID, briefsSinceDays, briefsPerTopicCap)
+		if briefsErr != nil {
+			logging.Warnf("daily-report: load topic briefs for board %d failed (degrading to label-only): %v", boardID, briefsErr)
+		} else {
+			topicBriefs = briefs
+			activeWithBriefs := 0
+			for _, items := range briefs {
+				if len(items) > 0 {
+					activeWithBriefs++
+				}
+			}
+			logging.Infof("daily-report: board %d topic briefs loaded: %d active topics have recent content",
+				boardID, activeWithBriefs)
+		}
+	}
+	clusters, err := ClusterTags(ctx, tags, existingTopics, topicBriefs)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("cluster tags: %w", err)
 	}

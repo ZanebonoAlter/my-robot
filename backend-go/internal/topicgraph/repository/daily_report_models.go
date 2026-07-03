@@ -67,6 +67,13 @@ const (
 	TopicConfAnchorHit = "anchor_hit" // matched an existing topic via dual confirmation
 	TopicConfAutoNew   = "auto_new"   // dual confirmation failed → opened a new candidate
 	TopicConfUnmatched = "unmatched"  // section has no embedding, cannot assign
+	TopicConfManual    = "manual"     // user manually assigned (manual topic lane)
+)
+
+// PersistentTopic source values.
+const (
+	TopicSourceAuto   = "auto"
+	TopicSourceManual = "manual"
 )
 
 // BoardPersistentTopic is a durable narrative frame within a SemanticBoard.
@@ -80,6 +87,7 @@ type BoardPersistentTopic struct {
 	Description     string    `gorm:"type:text" json:"description"`
 	Embedding       string    `gorm:"type:vector" json:"-"`
 	Status          string    `gorm:"size:20;not null;default:candidate;index:idx_persistent_topics_board_status,priority:2" json:"status"`
+	Source          string    `gorm:"size:10;not null;default:auto" json:"source"`
 	FirstSeenDate   time.Time `gorm:"type:date;not null" json:"first_seen_date"`
 	LastSeenDate    time.Time `gorm:"type:date;not null" json:"last_seen_date"`
 	HitCount        int       `gorm:"not null;default:1" json:"hit_count"`
@@ -152,6 +160,17 @@ type DailyReportThread struct {
 
 func (DailyReportThread) TableName() string {
 	return "daily_report_threads"
+}
+
+// TopicRecentBrief captures a section's recent content for context injection
+// (Slice D: lane context injection). Carried transiently between repository and
+// service — never persisted directly.
+type TopicRecentBrief struct {
+	TopicID      uint      `json:"topic_id"`
+	SectionID    uint      `json:"section_id"`
+	SectionLabel string    `json:"section_label"`
+	PeriodDate   time.Time `json:"period_date"`
+	ThreadTitles []string  `json:"thread_titles"` // 1-2 representative thread titles
 }
 
 // JSON is a custom type for GORM jsonb columns.
@@ -370,3 +389,43 @@ func ensurePersistentTopicEmbeddingDimension(dim int) {
 		}
 	}
 }
+
+// ── Topic Watch entities ────────────────────────────────────────────────────
+
+// TopicWatchStatus values.
+const (
+	WatchStatusActive = "active"
+	WatchStatusPaused = "paused"
+)
+
+// BoardTopicWatch is a user-declared watch label on a SemanticBoard.
+// It is deliberately independent from BoardPersistentTopic: no shared
+// foreign keys, no shared lifecycle. A watch is a single-signal AI detector
+// that fires at daily-report end without affecting any topic state.
+type BoardTopicWatch struct {
+	ID              uint      `gorm:"primarykey" json:"id"`
+	SemanticBoardID uint      `gorm:"not null;index" json:"semantic_board_id"`
+	Label           string    `gorm:"size:200;not null" json:"label"`
+	Status          string    `gorm:"size:20;not null;default:active" json:"status"`
+	CreatedAt       time.Time `json:"created_at"`
+	UpdatedAt       time.Time `json:"updated_at"`
+
+	Hits []TopicWatchHit `gorm:"foreignKey:WatchID;constraint:OnDelete:CASCADE" json:"hits,omitempty"`
+}
+
+func (BoardTopicWatch) TableName() string { return "board_topic_watches" }
+
+// TopicWatchHit records a single AI-detected match between a watch and a
+// daily-report section. Each row is a read-only overlay that SHALL NOT
+// change any section's persistent_topic_id or any topic's status.
+type TopicWatchHit struct {
+	ID         uint      `gorm:"primarykey" json:"id"`
+	WatchID    uint      `gorm:"not null;uniqueIndex:idx_watch_section_report" json:"watch_id"`
+	SectionID  uint      `gorm:"not null;uniqueIndex:idx_watch_section_report" json:"section_id"`
+	ReportID   uint      `gorm:"not null;uniqueIndex:idx_watch_section_report" json:"report_id"`
+	PeriodDate time.Time `gorm:"type:date;not null" json:"period_date"`
+	Reason     string    `gorm:"type:text" json:"reason"`
+	CreatedAt  time.Time `json:"created_at"`
+}
+
+func (TopicWatchHit) TableName() string { return "topic_watch_hits" }

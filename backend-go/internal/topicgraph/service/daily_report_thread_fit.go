@@ -55,7 +55,9 @@ func computeThreadFitDistances(
 
 	// 2. Batch embed thread titles.
 	result, err := embed(ctx, airouter.EmbeddingRequest{
-		Input: texts,
+		Input:     texts,
+		Operation: "section.embedding",
+		SessionID: SessionIDFromContext(ctx),
 		Metadata: map[string]any{
 			"operation": "daily_report_thread_embedding",
 			"board_id":  boardID,

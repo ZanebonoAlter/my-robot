@@ -121,6 +121,11 @@ if [ -d "openspec/changes/archive" ]; then
     if [[ "$arch_date" < "$CUTOFF" ]]; then
       continue
     fi
+    # §12.2 豁免：tasks.md「文档」节声明「无 flow 影响」的 change 不触及任何业务 flow，免溯源校验
+    if [ -f "$d/tasks.md" ] && grep -q "无 flow 影响" "$d/tasks.md" 2>/dev/null; then
+      ok "豁免溯源 $name（tasks.md 声明无 flow 影响）"
+      continue
+    fi
     if grep -rq "$name" "$FLOW_DIR"/*.md 2>/dev/null; then
       ok "已溯源 $name"
     else

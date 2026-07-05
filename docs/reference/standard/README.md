@@ -13,6 +13,7 @@
 | Lint 工具配置（ESLint / golangci-lint） | `frontend/lint.md` / `backend/lint.md` |
 | 测试框架、运行方式、编写约定 | `frontend/testing.md` / `backend/testing.md` |
 | 后端包结构 / domain 白名单 | `backend/package-layout.md` |
+| AI 调用记录（LLM 调用必须记什么、编排 session 串联） | `backend/ai-logging.md` |
 | 提交前检查、Branch/PR | `shared/commit-pr.md` |
 
 **不装什么**：业务流程链路 → 去 `flow/`；架构骨架 → 去 `architecture/`；执行流程/门禁/归档 → 去 `开发执行规范.md`。
@@ -31,6 +32,7 @@ standard/
 ├── backend/
 │   ├── package-layout.md      # 三层包结构 + domain 白名单
 │   ├── code-style.md          # 命名/错误处理/分层
+│   ├── ai-logging.md          # AI 调用记录规范（prompt/session/token 必记）
 │   ├── lint.md                # golangci-lint 配置
 │   └── testing.md             # testing + testcontainer + DSN 安全红线
 └── shared/

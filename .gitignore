@@ -41,3 +41,4 @@ backups/
 /.*
 pgvector-pg18-arm64.tar
 syntopica-demo-arm64.tar
+tests

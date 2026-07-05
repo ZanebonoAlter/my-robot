@@ -178,6 +178,11 @@ func (s *Store) LogCall(ctx context.Context, logEntry *models.AICallLog) {
 	if spanCtx := trace.SpanContextFromContext(ctx); spanCtx.HasTraceID() {
 		logEntry.TraceID = spanCtx.TraceID().String()
 	}
+	// token_usage 列是 JSONB，空串不是合法 JSON；空值时省略该列让 DB 置 NULL。
+	if logEntry.TokenUsage == "" {
+		_ = s.db.Omit("token_usage").Create(logEntry).Error
+		return
+	}
 	_ = s.db.Create(logEntry).Error
 }
 

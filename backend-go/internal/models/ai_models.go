@@ -121,17 +121,22 @@ func (AIRouteProvider) TableName() string {
 
 type AICallLog struct {
 	ID              uint      `gorm:"primaryKey" json:"id"`
+	Operation       string    `gorm:"type:varchar(80);index:idx_call_logs_op_time,priority:1" json:"operation"`
 	Capability      string    `gorm:"size:50;not null;index" json:"capability"`
 	RouteName       string    `gorm:"size:100;not null" json:"route_name"`
 	ProviderName    string    `gorm:"size:100;not null" json:"provider_name"`
+	Model           string    `gorm:"size:100" json:"model,omitempty"`
 	Success         bool      `gorm:"not null;index" json:"success"`
 	IsFallback      bool      `gorm:"not null;default:false" json:"is_fallback"`
 	LatencyMs       int       `json:"latency_ms"`
 	ErrorCode       string    `gorm:"size:100" json:"error_code"`
 	ErrorMessage    string    `gorm:"type:text" json:"error_message"`
+	Prompt          string    `gorm:"type:text" json:"prompt,omitempty"`
 	RequestMeta     string    `gorm:"type:text" json:"request_meta"`
 	ResponseSnippet string    `gorm:"type:text" json:"response_snippet"`
+	TokenUsage      string    `gorm:"type:jsonb" json:"token_usage,omitempty"`
 	TraceID         string    `gorm:"size:64" json:"trace_id,omitempty"`
+	SessionID       string    `gorm:"type:varchar(120);index:idx_call_logs_session" json:"session_id,omitempty"`
 	CreatedAt       time.Time `gorm:"index:idx_ai_call_logs_created_at" json:"created_at"`
 }
 

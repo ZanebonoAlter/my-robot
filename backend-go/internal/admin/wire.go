@@ -53,6 +53,9 @@ var (
 	GetTasksStatus          = handler.GetTasksStatus
 )
 
+// AI call log handlers
+var ListCallLogs = handler.ListCallLogs
+
 // Reading behavior handlers
 var (
 	TrackReadingBehavior      = handler.TrackReadingBehavior

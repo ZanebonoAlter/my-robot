@@ -773,7 +773,8 @@ func (r *TopicGraphRepository) BackfillSectionEmbeddings(ctx context.Context) (e
 		}
 
 		result, embedErr := airouter.NewRouter().Embed(ctx, airouter.EmbeddingRequest{
-			Input: texts,
+			Input:     texts,
+			Operation: "section.embedding_backfill",
 			Metadata: map[string]any{
 				"operation": "daily_report_section_backfill",
 			},

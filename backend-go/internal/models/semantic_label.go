@@ -3,9 +3,9 @@ package models
 import "time"
 
 type SemanticLabel struct {
-	ID             uint      `gorm:"primaryKey" json:"id"`
-	Label          string    `gorm:"size:160;not null" json:"label"`
-	Slug           string    `gorm:"size:160;not null;uniqueIndex:idx_semantic_labels_slug" json:"slug"`
+	ID    uint   `gorm:"primaryKey" json:"id"`
+	Label string `gorm:"size:160;not null" json:"label"`
+	Slug  string `gorm:"size:160;not null;uniqueIndex:idx_semantic_labels_slug" json:"slug"`
 	// Vector columns are declared without a fixed dimension. The actual dimension is
 	// determined at runtime by the configured embedder (see auxlabel.EnsureVectorDimensionOnce)
 	// and may differ across deployments, so hardcoding it here would race AutoMigrate.

@@ -254,7 +254,9 @@ func GenerateDailyReport(ctx context.Context, boardID uint, date time.Time) (*re
 	}
 	if len(embedTexts) > 0 {
 		embedResult, embedErr := airouter.NewRouter().Embed(ctx, airouter.EmbeddingRequest{
-			Input: embedTexts,
+			Input:     embedTexts,
+			Operation: "section.embedding",
+			SessionID: SessionIDFromContext(ctx),
 			Metadata: map[string]any{
 				"operation": "daily_report_section_embedding",
 				"board_id":  boardID,

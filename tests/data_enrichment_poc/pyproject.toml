@@ -1,0 +1,9 @@
+[project]
+name = "data-enrichment-poc"
+version = "0.1.0"
+description = "Add your description here"
+requires-python = ">=3.13"
+dependencies = [
+    "akshare>=1.18.64",
+    "requests>=2.34.2",
+]

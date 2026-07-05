@@ -67,7 +67,8 @@ func (s *EmbeddingService) GenerateEmbedding(ctx context.Context, tag *models.To
 
 	// Use router with failover to generate embedding
 	req := airouter.EmbeddingRequest{
-		Input: []string{text},
+		Input:     []string{text},
+		Operation: "tagmanagement.embedding",
 		Metadata: map[string]any{
 			"tag_id":    tag.ID,
 			"tag_label": tag.Label,
@@ -101,8 +102,9 @@ func (s *EmbeddingService) GenerateEmbeddingForText(ctx context.Context, tagID u
 	textHash := hashText(embeddingType + "\n" + text)
 
 	req := airouter.EmbeddingRequest{
-		Input:    []string{text},
-		Metadata: map[string]any{"tag_id": tagID},
+		Input:     []string{text},
+		Operation: "tagmanagement.embedding",
+		Metadata:  map[string]any{"tag_id": tagID},
 	}
 	result, err := s.router.Embed(ctx, req, airouter.CapabilityEmbedding)
 	if err != nil {

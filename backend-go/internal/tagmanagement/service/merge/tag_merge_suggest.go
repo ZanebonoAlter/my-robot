@@ -396,6 +396,7 @@ func runEvaluation(ctx context.Context) {
 		maxTokens := 4000
 		temperature := 0.2
 		resp, err := router.Chat(ctx, airouter.ChatRequest{
+			Operation:  "tagmanagement.tag_merge_suggest",
 			Capability: airouter.CapabilityTopicTagging,
 			Messages: []airouter.Message{
 				{Role: "system", Content: "你是标签合并专家。只输出合法 JSON，不要额外解释。"},

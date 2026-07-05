@@ -117,6 +117,30 @@ SQLite（内存单测）对 GROUP BY 语义、类型、约束都宽松；Postgre
 - 判定法：改的 SQL 换成 PG 跑会不会和 SQLite 表现不同？会 → 必须补 PG 集成测试。
 - 回归守卫样本：`TestCollectBoardTags_PGHonorsDowngradedColumn`（`internal/topicgraph/service/collect_board_tags_test.go`）。
 
+### ⚠️ JSONB 列空串陷阱（token_usage 事故）
+
+非指针 `string` 字段写 JSONB 列时，零值 `""` 不是合法 JSON，PostgreSQL 拒绝；SQLite 把 jsonb 当 text、空串合法——SQLite 单测全绿，生产 INSERT 报错。同类于上面的 vector 空串（都是 PG 严格类型列拒绝空串）。
+
+| 模型 | 字段 | 类型 | 零值行为 |
+|------|------|------|----------|
+| `models.AICallLog` | `TokenUsage` | `string` + `gorm:"type:jsonb"` | `""` → **报错** ❌ |
+
+**症状**：`invalid input syntax for type json: "" (SQLSTATE 22P02)`，每次写日志失败。
+**根因（事故）**：`ai-call-logging-schema` change 给 `AICallLog` 加 `token_usage jsonb`，Embed 调用没 token 时字段零值 `""`；SQLite 单测不报，生产 PG 拒。
+**修复**：入库前判断空值用 `db.Omit("token_usage").Create()` 跳过该列（DB 置 NULL），或字段改 `*string`/`datatypes.JSON`。
+**硬约束**：凡 model 有 `gorm:"type:jsonb"` 的 `string` 字段，写入路径必须处理空值（Omit 或指针），且**必须有 testcontainer PG 用例覆盖空值写入**（SQLite 测了等于没测）。
+**判定法**：这个字段会不会在某些调用路径下是零值 `""`？会 → 必须处理 + PG 测。
+
+### ⚠️ schema 迁移要在 testcontainer PG + 历史数据下测（AutoMigrate NOT NULL 竞争）
+
+SQLite 内存测试每次新建**空库**，迁移在有数据时的行为（回填、NOT NULL 约束）完全不测；生产 PG 有历史数据，迁移行为不同。
+
+**症状**：生产启动报 `column "..." of relation "..." contains null values (SQLSTATE 23502)`，本地 SQLite 单测全绿。
+**根因（事故）**：`ai-call-logging-schema` change 给 `ai_call_logs` 加 `operation`，model tag 写了 `not null`，GORM AutoMigrate 启动时先尝试 `ADD COLUMN operation NOT NULL`，生产表有 20 万行历史数据（新列 null）→ AutoMigrate 失败（non-fatal warning，污染日志）；显式迁移随后回填 + SET NOT NULL 才补上。SQLite 空库 AutoMigrate ADD NOT NULL 直接成功，测不出。
+**修复**：显式迁移管的表，model tag 不写 `not null`/`default`（让显式迁移唯一管约束，见 code-style.md「GORM model tag 与迁移」）；迁移本身用"ADD NULL → 回填 → SET NOT NULL"三步。
+**硬约束**：凡 change 涉及 schema migration（新列/约束/回填），**门禁必须包含 testcontainer PG 迁移测试**——先插历史行（新列 null）→ 跑迁移 → 验证回填 + NOT NULL + 数据完整 + 索引；SQLite 空库迁移**不算**覆盖。或本地起 PG（`docker compose -f docker-compose.pg.yml up -d`）跑一次迁移看启动 SQL 日志。
+**判定法**：迁移在有数据的库上跑，会不会和空库表现不同？会 → 必须补 PG + 历史数据迁移测试。
+
 ### ⚠️ 绿灯 ≠ 功能有效：测试通过后必须用真实数据核对"效果是否达预期"
 
 测试断言的是**契约**（函数返回了非空 `ArticleContext`），不是**业务效果**（日报头条是否不再混淆）。二者之间隔着数据质量、依赖覆盖率、LLM 实际行为——这些测试抓不到。

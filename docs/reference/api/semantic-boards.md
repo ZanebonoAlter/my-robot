@@ -458,3 +458,61 @@ Response `data`：
   "total": 1
 }
 ```
+
+## 持久话题手动编排
+
+### POST `/semantic-boards/:id/persistent-topics/manual`
+
+手动新建一条持久话题（用户编排的"泳道"），将选中的一组 section 聚合成一条 active 话题。后端不走 LLM/AI，纯向量运算 + 单事务。配合前端编排态（`BoardThreadBrowser` 的 `compose` 视图）使用：候选池来自 GET `/semantic-boards/:id/persistent-topics/compose-candidates`，自然语言筛选向量来自 POST `/semantic-boards/:id/persistent-topics/embed-query`。
+
+Request：
+
+```json
+{
+  "label": "美伊博弈与油价联动",
+  "section_ids": [101, 102, 105]
+}
+```
+
+- `label` 必填，新话题展示名。
+- `section_ids` 必填，选中的 section ID 列表；无 embedding 或维度不一致的 section 会被跳过（不计入失败）。
+
+事务语义（任一步失败全部回滚，不留半建话题）：
+
+1. **聚合**：解析每个选中 section 的 embedding，按维度一致性筛选可用集合，对可用向量做 mean pooling 得到聚合锚点。
+2. **建话题**：`CreateTopic(status="active", source="manual")`，`embedding` 写聚合向量，`hit_count` / `consecutive_hits` 初始化为可用 section 数，`first_seen_date` / `last_seen_date` 取可用 section 报告期的最远 / 最近日期。手动话题直接 active，绕过 candidate→active 的连续命中门禁。
+3. **改归属**：对每个可用 section 调 `UpdateSectionTopicAssignment(persistent_topic_id=新话题, topic_match_confidence="manual")`，覆盖原归属（`persistent_topic_id` 为单值外键，"移动"即覆盖，非共享）。
+4. **重建关系**：`RebuildBoardRelations`，幂等清空并重建该 board 全部 similarity + identity 边，保证血统一致。
+
+Response `data`：
+
+```json
+{
+  "topic": {
+    "id": 42,
+    "semantic_board_id": 7,
+    "label": "美伊博弈与油价联动",
+    "description": "",
+    "status": "active",
+    "source": "manual",
+    "first_seen_date": "2026-06-20",
+    "last_seen_date": "2026-07-01",
+    "hit_count": 3,
+    "consecutive_hits": 3,
+    "created_at": "2026-07-04T...",
+    "updated_at": "2026-07-04T..."
+  },
+  "skipped": []
+}
+```
+
+`skipped` 列出因无 embedding 或维度不一致被跳过的 section ID；非空时响应额外带 `message` 字段说明跳过数量（如 `"3 条 section 因无向量被跳过"`）。
+
+错误情况（均返回 400）：
+
+- `label` 为空。
+- `section_ids` 为空。
+- 可用 section 数为 0（所有选中 section 都无可用向量）—— 事务不提交，返回错误。
+- 事务任一步失败（含 `RebuildBoardRelations` 失败）—— 整事务回滚。
+
+**与日报生成的关系**：手动建泳道是用户即时操作，不在 `SaveReport` 日报生成流程内；建好的 active topic 在下一期日报生成时被 `ListAnchorableTopicsByBoard` 纳入 AND-gate，与算法生成的 active topic 一视同仁。

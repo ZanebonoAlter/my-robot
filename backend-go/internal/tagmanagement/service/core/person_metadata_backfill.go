@@ -56,6 +56,7 @@ Extract:
 Respond with JSON: {"country": "...", "organization": "...", "role": "...", "domains": [...]}`, tag.Label, tag.Description)
 
 	result, err := router.Chat(ctx, airouter.ChatRequest{
+		Operation:  "tagmanagement.person_metadata_backfill",
 		Capability: airouter.CapabilityTopicTagging,
 		Messages: []airouter.Message{
 			{Role: "system", Content: "你是一个人物属性提取助手，只输出合法JSON。"},

@@ -158,11 +158,11 @@ func ImportOPML(c *gin.Context) {
 				// Update status to refreshing
 				now := time.Now()
 				repository.Repo.DB().Model(&models.Feed{}).Where("id = ?", feedID).Updates(map[string]interface{}{
-					"refresh_status": "refreshing",
+					"refresh_status":  "refreshing",
 					"last_refresh_at": &now,
 				})
 				// Refresh feed to fetch icon and articles
-				feedService.RefreshFeed(context.Background(), feedID)
+				_ = feedService.RefreshFeed(context.Background(), feedID) // best-effort async refresh (OPML 导入响应已完成，单 feed 刷新失败不阻断)
 			}
 		}()
 	}

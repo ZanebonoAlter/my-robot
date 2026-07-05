@@ -311,6 +311,6 @@ tracing.TraceSchedulerTick("auto_refresh", "cron", func(ctx context.Context) {
 
 如果继续往下推进，优先级建议是：
 
-1. 给 `FirecrawlService.ScrapePage`、`Router.Chat`、`FeedService.RefreshFeed` 补关键 attributes / events
+1. 给 `FirecrawlService.ScrapePage`、`Router.Chat`、`FeedService.RefreshFeed` 补关键 attributes / events（注：`ai-call-logging-schema` change 已把 `Router.Chat`/`Router.Embed` 的 `ai.operation`/`ai.session_id`/`ai.capability` attribute 改为从 `ChatRequest`/`EmbeddingRequest` 一等字段注入；日报编排业务 span、events、其他外部调用 attributes 仍待补，见 `otel-tracing-completion` change）
 2. 明确哪些外部调用要手动补 `SpanKind=CLIENT`
 3. 再决定是否把 `go-instrument` 接入 `go generate` 或脚本化流程

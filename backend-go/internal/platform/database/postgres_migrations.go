@@ -954,6 +954,31 @@ func postgresMigrations() []Migration {
 			},
 		},
 
+		// ── AI call log schema补齐 (ai-logging R2 必记字段) ──────
+		{
+			Version:     "20260704_0001",
+			Description: "为 ai_call_logs 补 R2 必记字段: operation/prompt/token_usage/session_id/model 五列 + 索引.",
+			Up: func(db *gorm.DB) error {
+				stmts := []string{
+					"ALTER TABLE ai_call_logs ADD COLUMN IF NOT EXISTS operation VARCHAR(80)",
+					"ALTER TABLE ai_call_logs ADD COLUMN IF NOT EXISTS prompt TEXT",
+					"ALTER TABLE ai_call_logs ADD COLUMN IF NOT EXISTS token_usage JSONB",
+					"ALTER TABLE ai_call_logs ADD COLUMN IF NOT EXISTS session_id VARCHAR(120)",
+					"ALTER TABLE ai_call_logs ADD COLUMN IF NOT EXISTS model VARCHAR(100)",
+					"UPDATE ai_call_logs SET operation='unknown' WHERE operation IS NULL",
+					"ALTER TABLE ai_call_logs ALTER COLUMN operation SET NOT NULL",
+					"CREATE INDEX IF NOT EXISTS idx_call_logs_session ON ai_call_logs(session_id)",
+					"CREATE INDEX IF NOT EXISTS idx_call_logs_op_time ON ai_call_logs(operation, created_at)",
+				}
+				for _, s := range stmts {
+					if err := db.Exec(s).Error; err != nil {
+						return fmt.Errorf("ai_call_logs schema migration: %w", err)
+					}
+				}
+				return nil
+			},
+		},
+
 		// ── Manual topic lane source column ───────────────────────────
 		{
 			Version:     "20260702_0001",

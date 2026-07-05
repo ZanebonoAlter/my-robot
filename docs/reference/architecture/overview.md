@@ -77,6 +77,14 @@ Feed 管理（`backend-go/internal/reader/`）和文章管理构成系统的基�
 
 叙事摘要子系统（`backend-go/internal/topicgraph/`），基于活跃主题标签生成每日叙事摘要。由 `daily_report` 调度器定时触发，支持按日期查询、历史版本回溯。前端通过 `/api/narratives` 接口读取。
 
+### 4.5 话题总览工作台
+
+话题总览工作台（`front/app/features/tags/components/BoardThreadBrowser.vue`）是叙事摘要的前端编排入口，把持久话题（persistent topic）从纯算法产物升级为用户可干预的编排对象。工作台占满 content：顶部工具条（时间范围选择器 / 视图模式切换 / 回刷归属 / 合并 / 新建泳道）+ 主体 lanes 总览（话题标签列 + 时间网格），泳道 hover 出操作菜单（重命名 / 归档 / 删除）。原 `TopicManageDialog.vue` 弹窗能力（回刷 / 重命名 / 归档 / 合并）已并入工具条与 hover 菜单，弹窗弃用。
+
+视图模式四态：`timeline`（匈牙利相似度 DAG，默认）、`lanes`（按话题分泳道，identity 驱动）、`focus`（单话题专注）、`compose`（手动建泳道编排态，预览 + 候选池 + 体检报告）。
+
+手动建泳道是用户即时操作（独立 API + 事务，不在 `SaveReport` 日报生成流程内）。后端 `topicgraph/repository.CreateManualTopic` 在单事务内：聚合选中 section 的 embedding（mean pooling 纯向量，不走 AI）→ `CreateTopic(status=active, source=manual)` 绕过 candidate 门禁 → 批量 `UpdateSectionTopicAssignment(confidence=manual)` 覆盖单值归属 → `RebuildBoardRelations` 幂等重建该 board 全部关系（含 identity 边）。任一步失败整事务回滚。建好的 active topic 在下一期日报被 `ListAnchorableTopicsByBoard` 纳入 AND-gate，与算法生成的 active topic 一视同仁。`board_persistent_topics.source` 区分 `auto`（算法）/ `manual`（人工），`daily_report_sections.topic_match_confidence` 第四态 `manual` 标记人工归属（不套用算法三态样式）。
+
 ### 5. 阅读偏好
 
 行为追踪与偏好分析（`backend-go/internal/admin/`），前端批量上报阅读事件，后端计算偏好分数并更新排序权重。

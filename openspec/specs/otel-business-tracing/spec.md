@@ -1,25 +1,35 @@
 ## Purpose
 
 在 OpenTelemetry trace 中注入业务上下文（capability、operation），使 LLM 调用可按业务流程区分；将 AICallLog 与 trace 链路关联；为关键 tag-processing 流程建立端到端 span 父子拓扑。
-
 ## Requirements
-
 ### Requirement: LLM span carries business attributes
-Every `Router.Chat` and `Router.Embed` span SHALL include the following attributes extracted from the request:
-- `ai.capability`: the capability string from `ChatRequest.Capability` (e.g., `topic_tagging`, `article_completion`, `embedding`)
-- `ai.operation`: the operation string from `ChatRequest.Metadata["operation"]` when present
 
-#### Scenario: Article tagging LLM call creates tagged span
-- **WHEN** `Router.Chat` is called with `Capability: "topic_tagging"` and `Metadata: {"operation": "tag_judgment"}`
-- **THEN** the resulting span has attribute `ai.capability=topic_tagging` and `ai.operation=tag_judgment`
+Every `Router.Chat` and `Router.Embed` span SHALL include the following business attributes, sourced from the request's first-class fields (**NOT** from `ChatRequest.Metadata`):
 
-#### Scenario: Cleanup LLM call creates tagged span
-- **WHEN** `Router.Chat` is called with `Capability: "topic_tagging"` and `Metadata: {"operation": "tag_flat_merge"}`
-- **THEN** the resulting span has attribute `ai.capability=topic_tagging` and `ai.operation=tag_flat_merge`
+- `ai.capability`: from `ChatRequest.Capability` (Chat) / the `capability` parameter (Embed)
+- `ai.operation`: from `ChatRequest.Operation` (mandatory, non-empty — enforced by the `ai-logging` capability's forced-Operation requirement)
+- `ai.session_id`: from `ChatRequest.SessionID` (set when non-empty; omitted only for non-orchestrated single calls)
 
-#### Scenario: LLM call without operation metadata still works
-- **WHEN** `Router.Chat` is called without an `operation` key in Metadata
-- **THEN** the span still has `ai.capability` set and does not panic
+`Router.Embed` SHALL be brought to parity with `Router.Chat` — previously (`router.go:191`) Embed spans only carried `ai.capability` and lacked `ai.operation`.
+
+airouter SHALL NOT source these attributes from `ChatRequest.Metadata["operation"]` anymore (deprecates the old `router.go:111-113` weak-read path). Callers transition to passing `Operation`/`SessionID` as first-class fields; this is exercised by the `ai-logging` capability's "现有 AI 调用补齐 Operation 与 SessionID" requirement.
+
+> **为什么 MODIFY 而非 ADD**：现行 spec（`openspec/specs/otel-business-tracing/spec.md`）已要求 Chat span 带 `ai.operation`，只是来源是 `Metadata["operation"]` 且 Operation 非强制。本 delta 把来源改为一等字段、补 session_id、补 Embed parity、并把"漏填静默通过"升级为"airouter 强制拒绝"。属于同一 requirement 的收紧，不新增并列 requirement。
+
+#### Scenario: Chat span carries first-class operation and session_id
+
+- **WHEN** `Router.Chat` is called with `Operation: "daily_report.cluster_tags"` and `SessionID: "daily_report_42_ab12cd34"`
+- **THEN** the resulting span has attributes `ai.operation=daily_report.cluster_tags` and `ai.session_id=daily_report_42_ab12cd34`, sourced from the fields, not from Metadata
+
+#### Scenario: Embed span parity with Chat
+
+- **WHEN** `Router.Embed` is called with `Operation: "section.embedding"` and `SessionID` set
+- **THEN** the resulting span has `ai.operation` and `ai.session_id` set (previously Embed only carried `ai.capability`)
+
+#### Scenario: Empty operation no longer silently produces untagged span
+
+- **WHEN** `Router.Chat` is called with an empty `Operation`
+- **THEN** the call is rejected by airouter (per the `ai-logging` forced-Operation requirement) and no span/LogCall is created — supersedes the prior "LLM call without operation metadata still works" scenario
 
 ### Requirement: AICallLog records trace context
 The `AICallLog` model SHALL include a `TraceID` field of type `string` (NULLABLE), and when writing a log entry, the system SHALL populate it from the current span context's trace ID. The `AICallLog` model SHALL also have a btree index on `created_at` for efficient retention-based cleanup.
@@ -63,3 +73,4 @@ The `Router.Chat` method SHALL propagate baggage values from the current context
 #### Scenario: Separate workflows produce distinct trace trees
 - **WHEN** a hierarchy cleanup runs concurrently with an article tagging job
 - **THEN** their respective `Router.Chat` spans are grouped under different parent spans (different trace IDs or parent span IDs)
+

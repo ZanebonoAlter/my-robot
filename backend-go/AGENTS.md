@@ -54,6 +54,15 @@ internal/<domain>/
 
 → 完整代码规范：`docs/reference/standard/backend/code-style.md`
 
+## AI 调用记录红线
+
+- 🛑 **所有 LLM 调用必须经 `airouter.Router.Chat` / `Router.Embed`**，禁止直接打 `/chat/completions`——绕过 airouter = 绕过日志 = 不可观测
+- 每次 AI 调用的 `AICallLog` 必须记：`operation`（业务名）、完整 `prompt`、`response`、`token_usage`、`latency`、`success`
+- 编排类（日报管线、未来的 agent loop）多次调用必须共享 `session_id`，否则无法重建一次编排的全过程
+- 现状缺口：日报等现有功能只存了响应摘要，**prompt 完全不记**——这是"看不见 prompts"的根因，需按规范排期补齐
+
+→ 完整规范 + 已接入功能清单 + 补齐跟踪表：`docs/reference/standard/backend/ai-logging.md`
+
 ## 测试与 Lint
 
 - 测试：标准 `testing` + `testify`，`*_test.go` 与源同包，偏好表驱动

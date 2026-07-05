@@ -116,6 +116,16 @@ ClusterTags 注入（Step3）与双重确认归属（§2）**共享同一个可�
 
 > 参数默认：`MatchThreshold` 0.30、`UpgradeThreshold` 3（兼管理 UI 可见门槛）、`CandidateDecayWindow` 7 天（仅 prompt 卫生过滤，不触发归档）、`CandidatePromptLimit` 20，运行时可由 `ai_settings` 覆盖（`PersistentTopicConfig`）。话题自身的 candidate→active→archived 生命周期（全人工归档）与关系双轨见 `topic-graph.md`，此处不重复。
 
+### 手动建泳道：用户主权声明，次期接入 AND-gate
+
+手动建泳道（`POST /semantic-boards/:id/persistent-topics/manual`，body：`label` + `section_ids[]`）是用户的**即时编排操作**——独立事务、不在 `SaveReport` 日报生成管线内：
+
+1. 后端事务：聚合选中 section 的 embedding（mean pooling 纯向量）→ `CreateTopic(status=active, source='manual')`（跳过 candidate 阶段与 `upgrade_threshold` 连续命中门禁）→ 批量改写选中 section 的 `persistent_topic_id`（覆盖原值，单值外键）+ `topic_match_confidence='manual'`（人工归属第四态，非算法三态）→ `RebuildBoardRelations`（幂等重建该 board 全部关系含 identity 边，保证血统一致）。
+2. 建好的 active topic 立即被 `ListAnchorableTopicsByBoard` 纳入可锚定集合——`source='manual'` 仅标记来源、不影响入选（active 无条件入选见上文第 1 条）。
+3. **下一期日报**生成时，手动 active topic 与自动 active topic 一样参与 AND-gate（聚类命中 + embedding 锚定双重确认）；其锚点 embedding = 选中 section 的聚合向量。
+
+> 用户主权声明语义：用户手动挑了 N 条 section 即内容支撑，不需像自动 candidate 凭单期聚类连续命中 3 天才转 active。`source` 字段区分来源便于观察「手动 vs 自动」归属质量差异，不混入算法统计。手动建泳道的后端事务/前端工作台（弃 `TopicManageDialog`、能力并入 `BoardThreadBrowser`）详见 `architecture/overview.md`，端点见 `api/semantic-boards.md`。
+
 ## 3. 前端：Digest 预览/查看链路
 
 ```text
@@ -152,3 +162,9 @@ DigestListView
 
 - 互补：`flow/topic-graph.md`（持久话题生命周期 candidate→active→archived、关系相似度/身份双轨）、`flow/semantic-board.md`（版块）、`architecture/tracing.md`。
 - 迁自原 `architecture/data-flow.md`（Digest 流 / 叙事数据流·每日叙事生成）。
+
+## 变更溯源
+
+| 日期 | 变更 | 摘要 | 归档位置 |
+|------|------|------|----------|
+| 2026-07-05 | manual-topic-lane | 手动建泳道：用户主动建 active topic（`source=manual`），次期接入 AND-gate；新增 `board_persistent_topics.source` 列 + `topic_match_confidence=manual` 第四态；前端工作台化（弃 `TopicManageDialog`） | [`openspec/changes/archive/2026-07-05-manual-topic-lane`](../../../openspec/changes/archive/2026-07-05-manual-topic-lane) |

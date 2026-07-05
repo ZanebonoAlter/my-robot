@@ -257,6 +257,7 @@ Respond with JSON: {"description": "your answer"}`, label, category, articleCont
 	}
 
 	req := airouter.ChatRequest{
+		Operation:  "tagmanagement.tag_description",
 		Capability: airouter.CapabilityTopicTagging,
 		Messages: []airouter.Message{
 			{Role: "system", Content: "你是一个标签分类助手，只输出合法JSON。"},

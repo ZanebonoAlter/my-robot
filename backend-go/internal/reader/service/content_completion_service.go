@@ -382,6 +382,7 @@ func (s *ContentCompletionService) summarizeContent(articleID uint, feedID uint,
 	if s.router != nil {
 		maxTokens := 16000
 		result, err := s.router.Chat(context.Background(), airouter.ChatRequest{
+			Operation:  "reader.content_completion",
 			Capability: airouter.CapabilitySummary,
 			Messages: []airouter.Message{
 				{Role: "system", Content: s.aiService.GetSystemPrompt("zh")},

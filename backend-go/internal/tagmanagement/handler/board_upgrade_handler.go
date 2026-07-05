@@ -149,6 +149,7 @@ func (h *semanticBoardHandler) backfillBoardEmbeddings(c *gin.Context) {
 }
 func (airouterSemanticBoardUpgradeLLM) SuggestSemanticBoardUpgrades(ctx context.Context, prompt string) ([]service.SemanticBoardUpgradeSuggestion, error) {
 	result, err := airouter.NewRouter().Chat(ctx, airouter.ChatRequest{
+		Operation:  "tagmanagement.board_upgrade_suggest",
 		Capability: airouter.CapabilityTopicTagging,
 		Messages: []airouter.Message{
 			{Role: "system", Content: "Return JSON only in this shape: {\"suggestions\":[{\"decision\":\"create_new|skip\",\"board_label\":\"\",\"description\":\"\",\"auxiliary_label_ids\":[1],\"reason\":\"\"}]}"},

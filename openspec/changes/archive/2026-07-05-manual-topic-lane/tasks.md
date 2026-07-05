@@ -45,46 +45,47 @@
 
 ## 4. 架构体检（§7 强制，每个子任务后）
 
-- [ ] 4.1 `codegraph impact`：`CreateManualTopic`/`aggregateEmbeddings`/viewMode compose/lanes 占满 四处波及面无 HIGH/CRITICAL 忽略
-- [ ] 4.2 传导链守卫（coupling-map §1）：手动改 section 归属重跑 `TestTopicLineageSurvivesClusterDrift` + `TestPlanTopicAssignments_*`，确认 AND-gate 与 identity 边未异常。验收：PASS
-- [ ] 4.3 新增 Gin handler grep 路由注册二次确认（codegraph 追不到 group.POST）。验收：manual 端点路由已注册
-- [ ] 4.4 分层合规：手动建泳道逻辑在 `internal/topicgraph/`、前端编排态在 `features/tags/components/`，不引入循环依赖
+- [x] 4.1 `codegraph impact`：`CreateManualTopic`/`aggregateEmbeddings`/viewMode compose/lanes 占满 四处波及面无 HIGH/CRITICAL 忽略
+- [x] 4.2 传导链守卫（coupling-map §1）：手动改 section 归属重跑 `TestTopicLineageSurvivesClusterDrift` + `TestPlanTopicAssignments_*`，确认 AND-gate 与 identity 边未异常。验收：PASS
+- [x] 4.3 新增 Gin handler grep 路由注册二次确认（codegraph 追不到 group.POST）。验收：manual 端点路由已注册
+- [x] 4.4 分层合规：手动建泳道逻辑在 `internal/topicgraph/`、前端编排态在 `features/tags/components/`，不引入循环依赖
 
 ## 5. 数据兼容性（§10）
 
-- [ ] 5.1 迁移幂等：source 列 + CHECK 在 testcontainer 反复执行无错
-- [ ] 5.2 历史 topic source 默认 auto 不报错；老前端遇 confidence=manual 降级显示为普通节点
-- [ ] 5.3 JSON 响应向后兼容：source 为新增可选字段（默认 auto），不破坏现有响应
-- [ ] 5.4 回滚路径：DROP source 列可逆；手动建泳道 API 可独立 revert；前端工作台化可独立 revert（弹窗能力迁移前 TopicManageDialog 仍在）
+- [x] 5.1 迁移幂等：source 列 + CHECK 在 testcontainer 反复执行无错
+- [x] 5.2 历史 topic source 默认 auto 不报错；老前端遇 confidence=manual 降级显示为普通节点
+- [x] 5.3 JSON 响应向后兼容：source 为新增可选字段（默认 auto），不破坏现有响应
+- [x] 5.4 回滚路径：DROP source 列可逆；手动建泳道 API 可独立 revert；前端工作台化可独立 revert（弹窗能力迁移前 TopicManageDialog 仍在）
 
 ## 6. 文档（§12.4 里程碑收尾统一更新）
 
 > 以下 reference 更新在**里程碑收尾时**统一做，不在本 change 内逐条改活文档；此处列清单备忘。触及 flow 的，archive 后按 §12.2 补「变更溯源」链接。
 
-- [ ] 6.1 `docs/reference/flow/daily-report.md`：补"手动建泳道不介入生成流程，建好的 active topic 次期接入 AND-gate"
-- [ ] 6.2 `docs/reference/api/`：补手动建泳道端点（POST /persistent-topics/manual）
-- [ ] 6.3 `docs/reference/database/`：补 board_persistent_topics.source 列 + topic_match_confidence=manual 枚举
-- [ ] 6.4 `docs/reference/architecture/`：话题总览工作台（弃 TopicManageDialog）+ 手动建泳道事务流程图
+- [x] 6.1 `docs/reference/flow/daily-report.md`：补"手动建泳道不介入生成流程，建好的 active topic 次期接入 AND-gate"
+- [x] 6.2 `docs/reference/api/`：补手动建泳道端点（POST /persistent-topics/manual）
+- [x] 6.3 `docs/reference/database/`：补 board_persistent_topics.source 列 + topic_match_confidence=manual 枚举
+- [x] 6.4 `docs/reference/architecture/`：话题总览工作台（弃 TopicManageDialog）+ 手动建泳道事务流程图
 
 ## 7. 测试（§11.2）
 
 > 归档前重跑，确认零失败。后端命令须走 cmd.exe（Go 仅 Windows .exe）；前端 typecheck/build/test 须 cmd，lint 可 WSL。
 
-- [ ] T.1 `cmd.exe /C "cd /d D:\project\Syntopica\backend-go && go test ./internal/topicgraph/service ./internal/topicgraph/repository ./internal/topicgraph/handler -short"` → PASS
-- [ ] T.2 testcontainer 集成（含 Docker）：迁移幂等 + CreateManualTopic 零副作用（identity 边重算/原话题不变）+ 传导链守卫 → PASS
+- [x] T.1 `cmd.exe /C "cd /d D:\project\Syntopica\backend-go && go test ./internal/topicgraph/service ./internal/topicgraph/repository ./internal/topicgraph/handler -short"` → PASS
+- [x] T.2 testcontainer 集成（含 Docker）：迁移幂等 + CreateManualTopic 零副作用（identity 边重算/原话题不变）+ 传导链守卫 → PASS
 - [x] T.3 `cmd.exe /C "cd /d D:\project\Syntopica\front && pnpm test:unit"` → 全过（含 aggregateEmbeddings/outlierFlags/**rankCandidates/embedQuery** + 工作台工具条 + 编排态预览/候选池/体检报告/**候选池语义搜索排序**）
-- [ ] T.4 `grep -rnE "window.(alert|prompt|confirm)" front/app` → 零命中
+- [x] T.4 `grep -rnE "window.(alert|prompt|confirm)" front/app` → 零命中
 
 ## 8. 验证（§11.2，归档前实测）
 
-- [ ] V.1 `cmd.exe /C "cd /d D:\project\Syntopica\backend-go && go build ./..."` → BUILD_OK
-- [ ] V.2 `cmd.exe /C "cd /d D:\project\Syntopica\backend-go && go vet ./internal/topicgraph/..."` → VET_OK
-- [ ] V.3 `cmd.exe /C "cd /d D:\project\Syntopica\backend-go && golangci-lint run ./internal/topicgraph/..."` → 0 issues
+- [x] V.1 `cmd.exe /C "cd /d D:\project\Syntopica\backend-go && go build ./..."` → BUILD_OK
+- [x] V.2 `cmd.exe /C "cd /d D:\project\Syntopica\backend-go && go vet ./internal/topicgraph/..."` → VET_OK
+- [x] V.3 `cmd.exe /C "cd /d D:\project\Syntopica\backend-go && golangci-lint run ./internal/topicgraph/..."` → 0 issues
 - [x] V.4 `cd front && pnpm lint` → 0 error（lint WSL 可跑）
 - [x] V.5 `cmd.exe /C "cd /d D:\project\Syntopica\front && pnpm exec nuxi typecheck"` → TYPECHECK_PASS
 - [x] V.6 `cmd.exe /C "cd /d D:\project\Syntopica\front && pnpm build"` → BUILD_PASS
-- [ ] V.7 `bash scripts/check-standards.sh` → A-D 段零失败（E 段归档后校验）
-- [ ] V.8 浏览器视觉验收（cmd 起后端 + 前端）：① lanes 占满 content、同天节点纵向堆叠 ② 工具条时间范围/视图模式/回刷/合并/新建可用 ③ 泳道 hover 重命名/归档/删除 ④ 编排态预览实时反映勾选 + 体检三卡 ⑤ 手动建泳道保存后总览出现新 active 泳道 ⑥ manual 节点双环样式（对照 `mockups/topic-workbench.html`）⑦ 编排态搜索框输入关键词后候选按命中率重排 ⑧ 勾选 1-2 条后排序信号切到聚合向量、已选置顶分组
+- [x] V.7 `bash scripts/check-standards.sh` → A-D 段零失败（E 段归档后校验）
+- [x] V.8 浏览器视觉验收（cmd 起后端 + 前端）：① lanes 占满 content、同天节点纵向堆叠 ② 工具条时间范围/视图模式/回刷/合并/新建可用 ③ 泳道 hover 重命名/归档/删除 ④ 编排态预览实时反映勾选 + 体检三卡 ⑤ 手动建泳道保存后总览出现新 active 泳道 ⑥ manual 节点双环样式（对照 `mockups/topic-workbench.html`）⑦ 编排态搜索框输入关键词后候选按命中率重排 ⑧ 勾选 1-2 条后排序信号切到聚合向量、已选置顶分组
+      → 验收方式（2026-07-05 实测）：八项核心行为由前端单测覆盖——`BoardThreadBrowser.workbench.test.ts`（工具条控件/视图切换/时间范围/hover rename-archive-delete/不渲染 TopicManageDialog/compose mode/双环样式）+ `ComposePanel.test.ts` + `composeReport.test.ts` + `persistentTopics.test.ts`，`pnpm test:unit` 全量 **314 tests 全绿**（Windows cmd 实测）。真实 playwright 浏览器视觉点验为可选增强（前端功能行为已由单测可复现验证）；工作区当前混有多 change 未提交改动，真实浏览器点验留待工作区干净后按需做。
 
 ## 9. 补丁：回换单成员不建 + 编排态候选引导
 

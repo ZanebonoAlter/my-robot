@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"gorm.io/gorm/clause"
 
 	"syntopica-backend/internal/platform/airouter"
@@ -15,11 +16,35 @@ import (
 	"syntopica-backend/internal/topicgraph/repository"
 )
 
+// sessionCtxKey is the context key for the daily report SessionID.
+type sessionCtxKey struct{}
+
+// WithSessionID injects a daily report SessionID into the context.
+func WithSessionID(ctx context.Context, sessionID string) context.Context {
+	return context.WithValue(ctx, sessionCtxKey{}, sessionID)
+}
+
+// SessionIDFromContext extracts the daily report SessionID from context.
+// Returns empty string when no SessionID is present.
+func SessionIDFromContext(ctx context.Context) string {
+	if ctx == nil {
+		return ""
+	}
+	sid, _ := ctx.Value(sessionCtxKey{}).(string)
+	return sid
+}
+
 // GenerateAndSaveReport is the unified entry point for daily report generation.
 // It replaces the older pattern: GenerateDailyReport → SaveReport.
 // After saving the report (and its sections), it runs EvaluateWatchHits
 // OUTSIDE the SaveReport transaction as a read-only overlay.
 func GenerateAndSaveReport(ctx context.Context, boardID uint, date time.Time) (*repository.BoardDailyReport, error) {
+	// Generate a SessionID BEFORE the LLM calls so all calls within
+	// this orchestration share the same session_id. boardID + uuid8
+	// gives a unique key even before SaveReport fills report.ID.
+	sessionID := fmt.Sprintf("daily_report_%d_%s", boardID, uuid.New().String()[:8])
+	ctx = WithSessionID(ctx, sessionID)
+
 	report, sections, threadBatches, err := GenerateDailyReport(ctx, boardID, date)
 	if err != nil {
 		return nil, fmt.Errorf("generate daily report: %w", err)
@@ -92,6 +117,8 @@ func evaluateWatchHitsWithChat(
 	temperature := 0.1
 	maxTokens := 4096
 	result, err := chat(ctx, airouter.ChatRequest{
+		Operation:  "topic_watch.evaluate",
+		SessionID:  SessionIDFromContext(ctx),
 		Capability: airouter.CapabilityDigestPolish,
 		Messages: []airouter.Message{
 			{Role: "system", Content: watchHitSystemPrompt()},

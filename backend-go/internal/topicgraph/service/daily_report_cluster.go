@@ -131,6 +131,8 @@ func ClusterTags(ctx context.Context, tags []repository.TagInput, existingTopics
 	temperature := 0.1
 	maxTokens := 8192
 	result, err := airouter.NewRouter().Chat(ctx, airouter.ChatRequest{
+		Operation:  "daily_report.cluster_tags",
+		SessionID:  SessionIDFromContext(ctx),
 		Capability: airouter.CapabilityDigestPolish,
 		Messages: []airouter.Message{
 			{Role: "system", Content: buildClusterSystemPrompt(len(tags), existingTopics, briefs)},

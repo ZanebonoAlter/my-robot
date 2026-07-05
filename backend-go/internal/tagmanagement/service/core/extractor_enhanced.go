@@ -136,6 +136,7 @@ func (te *TagExtractor) extractBranchCandidates(ctx context.Context, input Extra
 	var lastErr error
 	for attempt := 1; attempt <= maxRetries; attempt++ {
 		result, err := te.router.Chat(ctx, airouter.ChatRequest{
+			Operation:  "tagmanagement.extractor_enhanced",
 			Capability: airouter.CapabilityTopicTagging,
 			Messages: []airouter.Message{
 				{Role: "system", Content: systemPrompt},

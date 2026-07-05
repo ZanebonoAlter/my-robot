@@ -40,6 +40,8 @@ type SchemaProperty struct {
 
 type ChatRequest struct {
 	Capability  Capability
+	Operation   string // 必填，业务操作名（如 daily_report.cluster_tags）
+	SessionID   string // 可选，编排分组键
 	Messages    []Message
 	Temperature *float64
 	MaxTokens   *int
@@ -49,16 +51,30 @@ type ChatRequest struct {
 }
 
 type ChatResult struct {
-	Content      string `json:"content"`
-	ProviderID   uint   `json:"provider_id"`
-	ProviderName string `json:"provider_name"`
-	RouteName    string `json:"route_name"`
-	UsedFallback bool   `json:"used_fallback"`
-	AttemptCount int    `json:"attempt_count"`
+	Content      string      `json:"content"`
+	ProviderID   uint        `json:"provider_id"`
+	ProviderName string      `json:"provider_name"`
+	RouteName    string      `json:"route_name"`
+	UsedFallback bool        `json:"used_fallback"`
+	AttemptCount int         `json:"attempt_count"`
+	Usage        *TokenUsage `json:"usage,omitempty"`
+}
+
+// TokenUsage mirrors the OpenAI usage block.
+type TokenUsage struct {
+	PromptTokens     int `json:"prompt"`
+	CompletionTokens int `json:"completion"`
+	TotalTokens      int `json:"total"`
+}
+
+// ChatResponse is the return of ProviderClient.Chat (replaces bare string).
+type ChatResponse struct {
+	Content string      `json:"content"`
+	Usage   *TokenUsage `json:"usage,omitempty"`
 }
 
 type ProviderClient interface {
-	Chat(ctx context.Context, provider models.AIProvider, req ChatRequest) (string, error)
+	Chat(ctx context.Context, provider models.AIProvider, req ChatRequest) (*ChatResponse, error)
 	Embed(ctx context.Context, provider models.AIProvider, req EmbeddingRequest) (*EmbeddingResult, error)
 }
 
@@ -81,17 +97,17 @@ func NewOpenAICompatibleClient() ProviderClient {
 	return &openAICompatibleClient{}
 }
 
-func (c *openAICompatibleClient) Chat(ctx context.Context, provider models.AIProvider, req ChatRequest) (string, error) {
+func (c *openAICompatibleClient) Chat(ctx context.Context, provider models.AIProvider, req ChatRequest) (*ChatResponse, error) {
 	payload := buildPayload(provider, req)
 	body, err := json.Marshal(payload)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 
 	endpoint := strings.TrimRight(provider.BaseURL, "/") + "/chat/completions"
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 	if provider.APIKey != "" {
@@ -104,13 +120,13 @@ func (c *openAICompatibleClient) Chat(ctx context.Context, provider models.AIPro
 	}
 	resp, err := (&http.Client{Timeout: timeout}).Do(httpReq)
 	if err != nil {
-		return "", &ProviderError{Message: err.Error(), Code: "network_error", Retryable: true}
+		return nil, &ProviderError{Message: err.Error(), Code: "network_error", Retryable: true}
 	}
 	defer func() { _ = resp.Body.Close() }()
 
 	responseBody, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return "", &ProviderError{Message: err.Error(), Code: "read_error", Retryable: true}
+		return nil, &ProviderError{Message: err.Error(), Code: "read_error", Retryable: true}
 	}
 	// logging.Infof("openai: message=%s ", req.Messages)
 	// logging.Infof("openai_chat_raw: provider=%s model=%s status=%d body=%s", provider.Name, provider.Model, resp.StatusCode, truncateDebugBody(string(responseBody)))
@@ -127,9 +143,10 @@ func (c *openAICompatibleClient) Chat(ctx context.Context, provider models.AIPro
 			Type    string      `json:"type"`
 			Code    interface{} `json:"code"`
 		} `json:"error,omitempty"`
+		Usage *TokenUsage `json:"usage,omitempty"`
 	}
 	if err := json.Unmarshal(responseBody, &parsed); err != nil {
-		return "", &ProviderError{Message: fmt.Sprintf("failed to parse response: %v", err), Code: "parse_error", Retryable: resp.StatusCode >= 500}
+		return nil, &ProviderError{Message: fmt.Sprintf("failed to parse response: %v", err), Code: "parse_error", Retryable: resp.StatusCode >= 500}
 	}
 
 	if resp.StatusCode >= 400 {
@@ -143,18 +160,18 @@ func (c *openAICompatibleClient) Chat(ctx context.Context, provider models.AIPro
 				code = codeStr
 			}
 		}
-		return "", &ProviderError{Message: message, Code: code, Retryable: retryable}
+		return nil, &ProviderError{Message: message, Code: code, Retryable: retryable}
 	}
 
 	if parsed.Error != nil {
-		return "", &ProviderError{Message: parsed.Error.Message, Code: fmt.Sprintf("%v", parsed.Error.Code), Retryable: false}
+		return nil, &ProviderError{Message: parsed.Error.Message, Code: fmt.Sprintf("%v", parsed.Error.Code), Retryable: false}
 	}
 	if len(parsed.Choices) == 0 {
-		return "", &ProviderError{Message: "no response from AI", Code: "no_response", Retryable: true}
+		return nil, &ProviderError{Message: "no response from AI", Code: "no_response", Retryable: true}
 	}
 
 	content := strings.TrimSpace(parsed.Choices[0].Message.Content)
-	return content, nil
+	return &ChatResponse{Content: content, Usage: parsed.Usage}, nil
 }
 
 // buildPayload constructs the OpenAI-compatible request payload from provider settings and chat request.

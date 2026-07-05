@@ -640,7 +640,8 @@ func DefaultAuxiliaryLabelEmbedder(ctx context.Context, input string, mode Auxil
 	}
 	router := airouter.NewRouter()
 	result, err := router.Embed(ctx, airouter.EmbeddingRequest{
-		Input: []string{input},
+		Input:     []string{input},
+		Operation: "tagmanagement.auxlabel_embedding",
 		Metadata: map[string]any{
 			"operation": opName,
 			"label":     input,

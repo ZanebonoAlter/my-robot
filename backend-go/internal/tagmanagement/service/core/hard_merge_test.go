@@ -161,10 +161,10 @@ func TestHardMergeTags_EmbeddingsDeleted(t *testing.T) {
 	target := seedTag(t, db, "target-emb", "llm")
 
 	require.NoError(t, db.Create(&models.TopicTagEmbedding{
-		TopicTagID: source.ID, Dimension: 2, Model: "test",
+		TopicTagID: source.ID, EmbeddingType: EmbeddingTypeIdentity, EmbeddingVec: makeValidVector(4096), Dimension: 4096, Model: "test", TextHash: "source",
 	}).Error)
 	require.NoError(t, db.Create(&models.TopicTagEmbedding{
-		TopicTagID: target.ID, Dimension: 2, Model: "test",
+		TopicTagID: target.ID, EmbeddingType: EmbeddingTypeIdentity, EmbeddingVec: makeValidVector(4096), Dimension: 4096, Model: "test", TextHash: "target",
 	}).Error)
 
 	err := HardMergeTags(db, source.ID, target.ID)

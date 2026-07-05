@@ -254,16 +254,25 @@
 | 字段名 | 类型 | 用途 |
 |--------|------|------|
 | `id` | SERIAL PK | 主键 |
+| `operation` | VARCHAR(80) NOT NULL | 业务操作名（如 `daily_report.cluster_tags`） |
 | `capability` | VARCHAR(50) NOT NULL | 能力标识 |
 | `route_name` | VARCHAR(100) NOT NULL | 路由名称 |
 | `provider_name` | VARCHAR(100) NOT NULL | 供应商名称 |
+| `model` | VARCHAR(100) | 实际调用的模型名 |
 | `success` | BOOLEAN NOT NULL | 是否成功 |
 | `is_fallback` | BOOLEAN DEFAULT false | 是否为降级调用 |
 | `latency_ms` | INTEGER | 延迟（毫秒） |
 | `error_code` | VARCHAR(100) | 错误码 |
 | `error_message` | TEXT | 错误信息 |
+| `prompt` | TEXT | 完整 messages 文本（超 20000 runes 截断标注） |
 | `request_meta` | TEXT | 请求元数据 |
+| `response_snippet` | TEXT | 响应片段（截取前 10000 runes） |
+| `token_usage` | JSONB | prompt/completion/total token 用量 JSON |
+| `trace_id` | VARCHAR(64) | OpenTelemetry trace ID |
+| `session_id` | VARCHAR(120) | 编排分组键（同一次编排内共享） |
 | `created_at` | TIMESTAMP | 创建时间 |
+
+索引：`idx_call_logs_session(session_id)`、`idx_call_logs_op_time(operation, created_at)`
 
 ---
 
@@ -749,10 +758,11 @@ HNSW 索引：`idx_topic_tag_embeddings_embedding USING hnsw (embedding vector_c
 | `label` / `description` | TEXT | 持久叙事标题与描述 |
 | `embedding` | vector | 归属匹配与历史回刷聚类 |
 | `status` | VARCHAR | `candidate` / `active` / `archived`；candidate 需满足连续天数并人工确认 |
+| `source` | VARCHAR(10) NOT NULL DEFAULT `'auto'` | 来源：`auto`（算法聚类产生）/ `manual`（用户手动建泳道产生，绕过 candidate 阶段直接 active）。CHECK 约束 `source IN ('auto','manual')`，历史行默认 `auto` 不回填 |
 | `first_seen_date` / `last_seen_date` | DATE | 首次与最近命中日期 |
 | `hit_count` / `consecutive_hits` | BIGINT | 总命中数与连续命中天数 |
 
-`daily_report_sections` 通过 `persistent_topic_id`、`topic_match_distance`、`topic_match_confidence` 记录归属，并通过可空字段 `topic_status_at_report`（VARCHAR(20)）记录报告生成时的话题状态快照（`candidate` / `active` / `NULL`），该值与归属在同一事务内写入，不随后续 topic 状态变化回填。历史数据统一为 `NULL`。`daily_report_section_relations.relation_type` 区分 `similarity`（匈牙利时间线）与 `identity`（持久话题连续性），唯一约束为 `(from_section_id, to_section_id, relation_type)`。
+`daily_report_sections` 通过 `persistent_topic_id`、`topic_match_distance`、`topic_match_confidence` 记录归属。`topic_match_confidence` 取四态：`anchor_hit`（双确认命中既有 topic）/ `auto_new`（双确认失败，新开 candidate）/ `unmatched`（section 无 embedding，无法归属）/ `manual`（用户手动建泳道覆盖归属，非算法三态）。`manual` 态由手动建泳道事务写入，前端以独立样式区分不套用算法三态。`topic_status_at_report`（VARCHAR(20)）可空字段记录报告生成时的话题状态快照（`candidate` / `active` / `NULL`），该值与归属在同一事务内写入，不随后续 topic 状态变化回填。历史数据统一为 `NULL`。`daily_report_section_relations.relation_type` 区分 `similarity`（匈牙利时间线）与 `identity`（持久话题连续性），唯一约束为 `(from_section_id, to_section_id, relation_type)`。
 
 **排序与窗口边界**：可锚定话题选择器（`ListAnchorableTopicsByBoard`）选出全部 active 及 `last_seen_date` 在 `persistent_topic_candidate_decay_window`（默认 7 天）内的 candidate，按 `last_seen_date DESC, hit_count DESC, id ASC` 排序，candidate 最多保留 `persistent_topic_candidate_prompt_limit`（默认 20）条。`candidate_decay_window` 仅用于 prompt 卫生过滤，不触发任何状态变更；所有 status → archived 的转换仅由用户在话题管理界面手动操作。
 
@@ -822,6 +832,11 @@ HNSW 索引：`idx_topic_tag_embeddings_embedding USING hnsw (embedding vector_c
 ---
 
 ## 更新日志
+
+### 2026-07-04
+
+- `board_persistent_topics` 新增 `source` 字段（VARCHAR(10) NOT NULL DEFAULT `'auto'`，CHECK `source IN ('auto','manual')`），区分算法话题与手动建泳道话题
+- `daily_report_sections.topic_match_confidence` 枚举新增第四态 `manual`（人工归属，非算法三态 anchor_hit/auto_new/unmatched）
 
 ### 2026-06-28
 

@@ -41,6 +41,8 @@ func GenerateHighlights(ctx context.Context, tags []repository.TagInput, cluster
 	temperature := 0.3
 	maxTokens := 2000
 	result, err := airouter.NewRouter().Chat(ctx, airouter.ChatRequest{
+		Operation:  "daily_report.highlights",
+		SessionID:  SessionIDFromContext(ctx),
 		Capability: airouter.CapabilityDigestPolish,
 		Messages: []airouter.Message{
 			{Role: "system", Content: highlightsSystemPrompt},
@@ -156,6 +158,8 @@ func GenerateClusterThreads(ctx context.Context, cluster repository.ClusterGroup
 	temperature := 0.3
 	maxTokens := 2000
 	result, err := airouter.NewRouter().Chat(ctx, airouter.ChatRequest{
+		Operation:  "daily_report.threads",
+		SessionID:  SessionIDFromContext(ctx),
 		Capability: airouter.CapabilityDigestPolish,
 		Messages: []airouter.Message{
 			{Role: "system", Content: threadsSystemPrompt},
@@ -285,6 +289,8 @@ func llmArbitrateMerges(ctx context.Context, sections []repository.DailyReportSe
 	temperature := 0.1
 	maxTokens := 2048
 	result, err := airouter.NewRouter().Chat(ctx, airouter.ChatRequest{
+		Operation:  "daily_report.merge_arbitration",
+		SessionID:  SessionIDFromContext(ctx),
 		Capability: airouter.CapabilityDigestPolish,
 		Messages: []airouter.Message{
 			{Role: "system", Content: "你是一名专业的新闻叙事分析师。你的任务是判断两个叙事分组是否描述的是同一个更大的故事/叙事框架。只返回应该合并的配对索引。"},

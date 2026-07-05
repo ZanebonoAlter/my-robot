@@ -713,7 +713,8 @@ func composeCandidates(c *gin.Context) {
 // mirrors the embedFunc injection pattern in daily_report_thread_fit.go.
 var embedText = func(ctx context.Context, query string) ([]float64, error) {
 	result, err := airouter.NewRouter().Embed(ctx, airouter.EmbeddingRequest{
-		Input: []string{query},
+		Input:     []string{query},
+		Operation: "section.embedding",
 	}, airouter.CapabilityEmbedding)
 	if err != nil {
 		return nil, fmt.Errorf("embed query: %w", err)

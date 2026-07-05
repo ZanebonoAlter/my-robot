@@ -48,7 +48,7 @@ func postgresMigrations() []Migration {
 		// ── Column type adjustments ─────────────────────────────────
 		{
 			Version:     "20260403_0003",
-			Description: "Set topic_tag_embeddings.embedding column type to vector(4096).",
+			Description: "Staged rollout: set topic_tag_embeddings.embedding column type to vector(4096); runtime dimension configured via embedding_config JSON (embedding_dimension).",
 			Up: func(db *gorm.DB) error {
 				if err := db.Exec("ALTER TABLE topic_tag_embeddings ADD COLUMN IF NOT EXISTS embedding vector(4096)").Error; err != nil {
 					return fmt.Errorf("add topic_tag_embeddings.embedding column: %w", err)

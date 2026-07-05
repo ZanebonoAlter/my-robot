@@ -89,6 +89,19 @@ type AuxiliaryLabelService struct {
 // package-level cache for AuxiliaryLabelService — shared across instances
 var packageAuxLabelCache = &auxLabelCache{}
 
+// InvalidateAuxLabelCache clears the package-level auxiliary label cache.
+// Tests that mutate semantic_labels (or whose ResetTestData truncates tables)
+// must call this so stale cached labels do not span test boundaries —
+// ResetTestData clears the DB but not this in-memory cache.
+func InvalidateAuxLabelCache() {
+	packageAuxLabelCache.mu.Lock()
+	packageAuxLabelCache.activeLabels = nil
+	packageAuxLabelCache.mergeEmbeddings = nil
+	packageAuxLabelCache.activeLabelsAt = time.Time{}
+	packageAuxLabelCache.mergeEmbeddingsAt = time.Time{}
+	packageAuxLabelCache.mu.Unlock()
+}
+
 func NewAuxiliaryLabelService(db *gorm.DB, embedder AuxiliaryLabelEmbedder) *AuxiliaryLabelService {
 	if db == nil {
 		db = repository.Repo.DB()

@@ -143,12 +143,12 @@ CREATE TABLE topic_lifeline_context (
 ### 2.2 触发：定时 + 检查自愈 + 手动
 
 - **定时**：week 每周一次、month 每月一次、year 每年一次。循环 B 实时已有 14 天详情，循环 A 只负责"沉淀"更早的历史，不必每天跑。
-- **检查自愈**：定时任务跑时顺带扫描所有活跃 topic 的 context 缺口（topic 新建从没生成过、宕机漏跑的周/月、`as_of_date` 滞后超过阈值）→ 补生成。合并进定时逻辑，非独立巡检。
+- **检查自愈**：定时任务跑时顺带扫描所有活跃 topic 的 context 缺口（`as_of_date` 滞后的 topic）→ **从 `as_of_date` 次周期起，按 granularity 的周期分块逐个补**（每块 = 该周期 sections + 旧汇总合并），直到 `as_of_date` 追上当前。**补的是遗漏的周期，不是覆盖当前周期**——例如隔一周再触发，先补上周遗漏的 week，再补本周，`as_of_date` 顺序推进。合并进定时逻辑，非独立巡检。
 - **手动触发**：CRUD 界面能手动重生成任意 granularity（用户改完新闻想立即刷新）。
 
 ### 2.3 汇总算法
 
-- **week**：直接读"最近 7 天 sections"重算。数据量小（实测单 topic 14 天 ≤13 sections），重算最稳，**不走增量合并**（例外）。
+- **week**：按周块处理。**正常定时时**直接汇总当前周（数据小，实测单 topic ≤13 sections）；**检查自愈补遗漏时**从 `as_of_date` 次周起逐周块增量合并补齐（不跳过历史周期，as_of_date 顺序推进）。
 - **month / year / all**：**增量 + 旧汇总合并**——读「自上次汇总以来的增量 sections」+「该 granularity 旧汇总」→ LLM 合并生成新汇总。避免每月重读全年、每年重读多年。
 
 不搞 week→month→year 层层金字塔合并（误差会累积）；各 granularity 平行维护自己的滚动窗口。
@@ -211,11 +211,11 @@ for step in 1..maxLoops:
 CREATE TABLE topic_enrichment_result (
   id              BIGSERIAL PRIMARY KEY,
   persistent_topic_id BIGINT NOT NULL REFERENCES board_persistent_topics(id) ON DELETE CASCADE,
-  report_id       BIGINT REFERENCES board_daily_reports(id) ON DELETE CASCADE,
   evolution_assessment TEXT,
   sectors         JSONB,        -- 分析员结论
   causal_chain    TEXT,
   tool_calls      JSONB,        -- 工具调用记录（名/参数/返回摘要/耗时）
+  input_snapshot  JSONB,        -- 编排元数据（读的context层/as_of/section范围/引用review）可追溯
   session_id      VARCHAR(120), -- 关联 ai_call_logs，便于回放
   created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
 );
@@ -257,20 +257,24 @@ Operation: data_enrichment.review_judge
 should_review=true 才写 review 行（避免噪音）；false 跳过。
 ```
 
-**第一次增强无 prev_result** → 跳过 review，等第二次才有对比。
+**第一次增强无 prev_result** → 跳过自动 review，等第二次才有对比。
+
+**用户手动批注**：除 review_judge 自动生成外，用户可在 CRUD 界面手动写一条 review（对某 result 批注）。手动批注的 review：`source='manual'`，`prev_result_id` 可空，`deviation_summary` 由用户填写，`applied` 默认 true（用户自写，视为已采纳）。
 
 ### 4.4 applied 语义（关键：不回写表1）
 
 `applied=true` **不触发回写表1**。表1 永远只随循环 A 新闻汇总变（保持新闻事实客观）。`applied` 仅标记"这条认知已被纳入"，下次增强（解读员）会读历史 applied review，避免重蹈已知偏差（如"上次因 X 误判黄金跌，这次别再犯"）。review 在自己的轨道上迭代，跟新闻记忆隔离。
 
-## 5. 日报管线插入点 + 手动触发
+## 5. 手动触发（仅手动，不挂日报管线）
 
-遵循 TopicWatch 只读覆盖层范式（`daily_report_watch.go`）：
+**循环 B 仅手动触发**——不是所有板块对金融数据产生影响（如"开发工具"板块），自动挂日报管线会产生无意义增强 + 浪费 LLM 成本。用户在 CRUD 界面点"重新分析某话题"才跑。
 
-- 日报 `SaveReport` 事务**外**、报告存完后跑（失败只 Warnf 不阻断）。
-- 对当期活跃 topic 跑演进版增强，结果写 `topic_enrichment_result`（独立表，不改 section.persistent_topic_id，不动 topic 状态）。
-- **手动触发**：CRUD 界面支持"重新分析这个话题"——用户点按钮即跑一次增强（不依赖日报管线）。
-- 调度：可配置开关（默认关，板块启用 `enrichment_enabled` 后才跑）。
+- 触发：CRUD 界面按钮，不依赖日报管线。
+- 结果写 `topic_enrichment_result`（独立表，不含 report_id，不改 section.persistent_topic_id，不动 topic 状态）。
+- 调度：板块级 `enrichment_enabled` 开关（默认关）。
+- 失败处理：增强失败只记日志告警，手动触发天然隔离，无"阻断日报"问题。
+
+> 设计余量：将来若要加回日报管线自动触发，可作为可选开关扩展，不影响当前手动路径。
 
 ## 6. 可观测性
 
@@ -289,6 +293,14 @@ should_review=true 才写 review 行（避免噪音）；false 跳过。
 - SessionID（循环B）：`data_enrichment_{topic_id}_{uuid8}`，一次增强内所有调用共享。
 - SessionID（循环A）：`lifeline_context_{topic_id}_{granularity}_{uuid8}`。
 - 工具调用（非 LLM）记 jsonb 存 `topic_enrichment_result.tool_calls`（跟增强结果绑定）。
+
+**可追溯性（变更大，强化）**：所有切片的输入输出 SHALL 可查：
+- 每次 LLM 调用的输入（messages）+ 输出（content）→ `ai_call_logs`（按 session_id 重建）。
+- 每次工具调用的参数 + 返回摘要 + 耗时 → `topic_enrichment_result.tool_calls`。
+- 编排元数据（本次增强读了哪些 context 层 + as_of、14 天详情的 section 范围、引用的历史 review id）→ `topic_enrichment_result.input_snapshot`（新增 jsonb 字段）。
+- 三表本身（context/result/review）持久化全部中间结论。
+
+排查路径：`result.session_id` → `GET /api/ai/call-logs?session_id=` 重建该次增强的全部 LLM 调用；`result.tool_calls` + `result.input_snapshot` 补齐工具与输入上下文。
 
 ## 7. 前端：板块 tab 下的 CRUD 界面（第一版）
 
@@ -326,7 +338,7 @@ should_review=true 才写 review 行（避免噪音）；false 跳过。
 前置：表1 week（as_of 06-28）+ month（as_of 06-30）；表2 result #2（07-01，"局势暂时缓和，原油承压"）；表3 review #1（applied=true）。
 
 ```
-日报管线触发增强 → session_id=data_enrichment_1_a1b2c3d4
+手动触发增强（CRUD界面"重新分析"） → session_id=data_enrichment_1_a1b2c3d4
 [解读员] 全层读表1+14天详情+历史review → 提炼查"美伊停火进展""避险联动"
 [查询员] 主题1: list_etf("原油")→get_quote; 主题2: list_etf("避险")命中0→换"黄金"→get_quote
 [分析员] 输出 result #3: "再趋紧张,原油强化(+4.2%),黄金强化(+1.8%)"

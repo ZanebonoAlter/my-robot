@@ -50,19 +50,11 @@ func TestSemanticLabelBoardSystemMigrationDocumentsSchemaCutover(t *testing.T) {
 	}
 	joined := string(source)
 
+	// 表与列由 AutoMigrate（migrator.go 注册 SemanticLabel/TopicTagSemanticLabel 等）负责；显式迁移只验证索引 / seed / 历史 DROP。
 	mustContainAll(t, joined,
-		"CREATE TABLE IF NOT EXISTS semantic_labels",
-		"embedding vector(4096)",
-		"merge_embedding vector(4096)",
-		"label_type VARCHAR(20) NOT NULL",
-		"aliases JSONB NOT NULL DEFAULT '[]'::jsonb",
 		"CREATE UNIQUE INDEX IF NOT EXISTS idx_semantic_labels_slug",
 		"CREATE INDEX IF NOT EXISTS idx_semantic_labels_label_type",
 		"CREATE INDEX IF NOT EXISTS idx_semantic_labels_status",
-		"CREATE TABLE IF NOT EXISTS topic_tag_semantic_labels",
-		"CREATE TABLE IF NOT EXISTS topic_tag_board_labels",
-		"CREATE TABLE IF NOT EXISTS board_composition",
-		"ALTER TABLE narrative_boards ADD COLUMN IF NOT EXISTS semantic_board_id",
 		"CREATE INDEX IF NOT EXISTS idx_narrative_boards_semantic_board_id",
 		"CREATE INDEX IF NOT EXISTS idx_topic_tag_board_labels_topic_tag_id",
 		"CREATE INDEX IF NOT EXISTS idx_topic_tag_board_labels_semantic_board_id",
@@ -82,7 +74,6 @@ func TestSemanticLabelBoardSystemMigrationDocumentsSchemaCutover(t *testing.T) {
 		`{"semantic_board_upgrade_cotag_hard_limit", "15"`,
 	)
 	mustContainAll(t, joined,
-		"ALTER TABLE semantic_labels ADD COLUMN IF NOT EXISTS merge_embedding vector(4096)",
 		"ALTER TABLE topic_tags DROP COLUMN IF EXISTS concept_id",
 		"DROP TABLE IF EXISTS board_concepts CASCADE",
 		"DROP TABLE IF EXISTS hierarchy_configs CASCADE",

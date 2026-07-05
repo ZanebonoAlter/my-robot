@@ -17,6 +17,7 @@ import (
 func setupSemanticBoardMatchingTestDB(t *testing.T) *gorm.DB {
 	db := testutil.SetupTestDB(t)
 	repository.InitRepository(db)
+	InvalidateBoardCache() // 避免包级缓存跨测试残留（ResetTestData 清 db 但不清内存缓存）
 	return db
 }
 

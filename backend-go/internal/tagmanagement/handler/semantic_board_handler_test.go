@@ -253,7 +253,7 @@ func TestSemanticBoardHandlerAuxiliaryGovernanceAndTagAssociations(t *testing.T)
 
 func TestSemanticBoardHandlerUpgradeBackfillAndConfig(t *testing.T) {
 	db, router := setupSemanticBoardHandlerRouter(t)
-	require.NoError(t, db.Create(&models.AISettings{Key: "semantic_board_upgrade_ref_count_threshold", Value: "1"}).Error)
+	require.NoError(t, db.Where(models.AISettings{Key: "semantic_board_upgrade_ref_count_threshold"}).Assign(models.AISettings{Value: "1"}).FirstOrCreate(&models.AISettings{}).Error)
 	auxiliary := createHandlerSemanticLabel(t, db, "OpenAI", "openai", "auxiliary", "active", 5, []float64{1, 0, 0})
 	tag := createHandlerTopicTag(t, db, "GPT-5", models.TagCategoryEvent)
 	require.NoError(t, db.Create(&models.TopicTagSemanticLabel{TopicTagID: tag.ID, SemanticLabelID: auxiliary.ID}).Error)

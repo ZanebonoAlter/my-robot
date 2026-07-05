@@ -64,24 +64,24 @@
 
 ### Requirement: 循环 A 触发与汇总算法
 
-循环 A SHALL 定时触发（week 每周、month 每月、year 每年），SHALL 内置检查自愈机制（扫描 `as_of_date` 滞后或缺失的 topic 补生成），SHALL 支持手动重生成任意 granularity。
+循环 A SHALL 定时触发（week 每周、month 每月、year 每年），SHALL 内置检查自愈机制（扫描 `as_of_date` 滞后的 topic，**从 `as_of_date` 次周期起按 granularity 周期逐块补遗漏，非覆盖当前周期**），SHALL 支持手动重生成任意 granularity。
 
-汇总算法：`week` SHALL 直接读"最近 7 天 sections"重算（例外，不走增量合并）；`month`/`year`/`all` SHALL 用「自上次汇总以来的增量 sections + 该 granularity 旧汇总」LLM 合并生成。各 granularity SHALL 平行维护自己的滚动窗口，不搞 week→month→year 层层金字塔合并（避免误差累积）。
+汇总算法：`week` 正常定时时 SHALL 直接汇总当前周（数据小）；**检查自愈补遗漏时** SHALL 从 `as_of_date` 次周起逐周块增量合并补齐（不跳过历史周期）。`month`/`year`/`all` SHALL 用「自上次汇总以来的增量 sections + 该 granularity 旧汇总」LLM 合并生成。各 granularity SHALL 平行维护自己的滚动窗口，不搞 week→month→year 层层金字塔合并（避免误差累积）。
 
-#### Scenario: week 直接重算
+#### Scenario: week 正常定时直接汇总
 
-- **WHEN** 每周定时刷新某 topic 的 week
-- **THEN** SHALL 读最近 7 天全部 sections 重算，SHALL NOT 依赖旧 week 汇总
+- **WHEN** 每周定时准时刷新某 topic 的 week
+- **THEN** SHALL 读当前周 sections 直接汇总，SHALL NOT 依赖旧 week 汇总
 
 #### Scenario: month 增量合并
 
 - **WHEN** 每月定时刷新某 topic 的 month
 - **THEN** SHALL 读自上次汇总以来的增量 sections + 旧 month 汇总，LLM 合并生成新 month
 
-#### Scenario: 检查自愈补漏
+#### Scenario: 检查自愈补遗漏周期
 
-- **WHEN** 定时任务发现某 topic 的 month 从未生成（或宕机漏跑某周）
-- **THEN** SHALL 补生成该缺口的汇总
+- **WHEN** 系统隔了一周再触发，某 topic 的 week 滞后（漏跑上周）
+- **THEN** SHALL 先补上周遗漏的 week，再补本周，`as_of_date` 顺序推进（非直接覆盖当前周）
 
 ### Requirement: 分层上下文驱动的数据增强编排
 
@@ -130,6 +130,8 @@
 
 每次增强产出 result 后，系统 SHALL 触发 review judge（一次 LLM 半自动调用），对比上次 result 与本次 result，输出 JSON `{should_review, reason, deviation_summary, affected_context, confidence}`。`should_review=true` 时 SHALL 写入 `topic_enrichment_review` 表；`false` 时 SHALL 跳过（避免噪音）。review SHALL 关联 `prev_result_id` 与 `curr_result_id`。`deviation_summary` SHALL 支持 LLM 生成基底 + 人工调整。第一次增强（无 prev_result）SHALL 跳过 review judge。
 
+**用户手动批注**：除 review_judge 自动生成外，用户 SHALL 能在 CRUD 界面手动创建 review（对某 result 批注）。手动批注的 review：`source='manual'`，`prev_result_id` 可空，`deviation_summary` 由用户填写，`applied` 默认 true。
+
 #### Scenario: 半自动判断避免噪音
 
 - **WHEN** review judge 判断 `should_review=false`（如仅置信度微调、无核心判断变化）
@@ -139,6 +141,11 @@
 
 - **WHEN** result 从"原油承压"变为"原油强化"
 - **THEN** review SHALL 记录 `deviation_summary` 说明为什么核心判断反转
+
+#### Scenario: 用户手动批注
+
+- **WHEN** 用户在 CRUD 界面对某 result 手动写一条批注
+- **THEN** SHALL 创建 review（source=manual，prev_result_id 可空，applied 默认 true），不依赖 review_judge
 
 ### Requirement: review 不回写新闻记忆
 
@@ -154,35 +161,36 @@ review 的 `applied` 标记 SHALL NOT 触发对 `topic_lifeline_context` 的任�
 - **WHEN** 下次增强解读员读取输入
 - **THEN** SHALL 包含历史 `applied=true` 的 review（如"上次因 X 误判黄金跌"）
 
-### Requirement: 日报管线只读覆盖层 + 手动触发
+### Requirement: 仅手动触发（不挂日报管线）
 
-数据增强 SHALL 作为日报管线的可选只读步骤，遵循 TopicWatch 范式：
+数据增强（循环 B）SHALL **仅由用户手动触发**（CRUD 界面"重新分析某话题"），SHALL NOT 自动挂载到日报管线。理由：不是所有板块对金融数据有影响（如"开发工具"板块），自动增强无意义且浪费成本。
 
-- SHALL 在日报 `SaveReport` 事务**外**执行（报告存完后跑），失败 SHALL 只记录告警不阻断日报生成。
-- SHALL 只对 `enrichment_enabled=true` 的板块的活跃 topic 执行。
-- 增强结果 SHALL 写入独立的 `topic_enrichment_result` 表（快照不可变），**不得修改** `daily_report_sections.persistent_topic_id` 或任何 topic 的 status/lifecycle。
-- SHALL 支持手动触发（CRUD 界面"重新分析某话题"），不依赖日报管线。
+- SHALL 只对 `enrichment_enabled=true` 的板块允许触发。
+- 增强结果 SHALL 写入独立的 `topic_enrichment_result` 表（快照不可变，不含 report_id），**不得修改** `daily_report_sections.persistent_topic_id` 或任何 topic 的 status/lifecycle。
+- 增强失败 SHALL 只记日志告警，不影响其他（手动触发天然隔离）。
 
-#### Scenario: 失败不阻断日报
+#### Scenario: 仅手动触发
 
-- **WHEN** 数据增强编排因 LLM 超时或数据源不可用失败
-- **THEN** 日报 SHALL 正常生成保存，增强失败只记 Warnf 日志
+- **WHEN** 用户在 CRUD 界面对某 topic 点"重新分析"
+- **THEN** SHALL 立即跑一次增强，不依赖任何日报管线调度
 
 #### Scenario: 只读不污染主数据
 
 - **WHEN** 数据增强完成
 - **THEN** `daily_report_sections` 与 `board_persistent_topics` 的所有字段 SHALL 不被增强流程修改
 
-#### Scenario: 手动触发
+### Requirement: 数据增强全程可观测与可追溯
 
-- **WHEN** 用户在 CRUD 界面对某 topic 点"重新分析"
-- **THEN** SHALL 立即跑一次增强，不依赖日报管线调度
-
-### Requirement: 数据增强全程可观测
-
-数据增强的所有 LLM 调用 SHALL 经 airouter 并带 `Operation` 与统一 `SessionID`，写入 `ai_call_logs`。`Operation` SHALL 至少包含：`data_enrichment.interpret` / `data_enrichment.tool_use` / `data_enrichment.analyze` / `data_enrichment.review_judge` / `data_enrichment.summarize_context`。工具调用（非 LLM）SHALL 记录工具名/参数/返回摘要/耗时，存入 `topic_enrichment_result.tool_calls`（jsonb）。
+数据增强的所有 LLM 调用 SHALL 经 airouter 并带 `Operation` 与统一 `SessionID`，写入 `ai_call_logs`。`Operation` SHALL 至少包含：`data_enrichment.interpret` / `data_enrichment.tool_use` / `data_enrichment.analyze` / `data_enrichment.review_judge` / `data_enrichment.summarize_context`。
 
 可观测基础（`ai_call_logs` 表 + `airouter/store.go` 写日志 + `SessionIDFromContext`）SHALL 视为已就绪——不阻塞本 change 开工。
+
+**可追溯（变更大、易出错，强化）**：所有切片的输入输出 SHALL 可查、可重建：
+
+- 每次 LLM 调用的输入（messages）+ 输出（content）→ `ai_call_logs`。
+- 每次工具调用的参数 + 返回摘要 + 耗时 → `topic_enrichment_result.tool_calls`（jsonb）。
+- 编排元数据（本次增强读了哪些 context 层 + 各层 `as_of_date`、14 天详情的 section 范围、引用的历史 review id 列表）→ `topic_enrichment_result.input_snapshot`（jsonb）。
+- 三表（context/result/review）SHALL 持久化全部中间结论。
 
 一次循环 B 增强内的全部 LLM 调用 SHALL 能通过 `session_id` 在 `GET /api/ai/call-logs` 重建（含解读 + N 次工具循环 + 分析 + review_judge）。
 
@@ -190,6 +198,11 @@ review 的 `applied` 标记 SHALL NOT 触发对 `topic_lifeline_context` 的任�
 
 - **WHEN** 查询 `GET /api/ai/call-logs?session_id=data_enrichment_7_<uuid>`
 - **THEN** SHALL 返回该 topic 增强期间的全部 LLM 调用（解读 + N 次工具循环 + 分析 + review_judge），按时间正序
+
+#### Scenario: input_snapshot 记录编排上下文
+
+- **WHEN** 一次增强完成
+- **THEN** `topic_enrichment_result.input_snapshot` SHALL 记录读了哪些 context 层、各层 as_of、section 范围、引用的 review id
 
 ### Requirement: 板块 tab CRUD 界面
 

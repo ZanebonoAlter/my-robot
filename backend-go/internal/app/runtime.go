@@ -8,6 +8,7 @@ import (
 
 	"syntopica-backend/internal/admin"
 	"syntopica-backend/internal/admin/scheduler"
+	"syntopica-backend/internal/dataenrichment"
 	"syntopica-backend/internal/models"
 	"syntopica-backend/internal/platform/database"
 	"syntopica-backend/internal/platform/logging"
@@ -172,6 +173,43 @@ func StartRuntime() *Runtime {
 		StatusDetail: admin.FirecrawlStatusEnricher(),
 		Persistence: admin.NewTaskPersistence("firecrawl",
 			"自动爬取文章全文"),
+	}))
+
+	// ── Lifeline context schedulers (cycle A) ──────────────────────────────────
+	// The repository, cycle-A service, cycle-B orchestrator, and HTTP handler
+	// singleton are all wired by dataenrichment.Init in main.go (which runs
+	// BEFORE SetupRoutes). StartRuntime only registers the schedulers below.
+	lifelineSvc := dataenrichment.GetLifelineService()
+	lister := dataenrichment.GetTopicLister()
+
+	// Weekly lifeline: every Monday 03:00 Asia/Shanghai.
+	weeklyNextRun := dataenrichment.NextWeeklyLifelineTime
+	registry.Register("lifeline_weekly", scheduler.New(scheduler.Config{
+		Name:    "Lifeline Weekly Refresh",
+		NextRun: weeklyNextRun,
+		Job:     dataenrichment.WeeklyLifelineJob(lifelineSvc, lister),
+		Persistence: admin.NewTaskPersistenceWithNextRun("lifeline_weekly",
+			"每周一刷新所有活跃话题的周度新闻汇总上下文", weeklyNextRun),
+	}))
+
+	// Monthly lifeline: every 1st of month 03:30 Asia/Shanghai.
+	monthlyNextRun := dataenrichment.NextMonthlyLifelineTime
+	registry.Register("lifeline_monthly", scheduler.New(scheduler.Config{
+		Name:    "Lifeline Monthly Refresh",
+		NextRun: monthlyNextRun,
+		Job:     dataenrichment.MonthlyLifelineJob(lifelineSvc, lister),
+		Persistence: admin.NewTaskPersistenceWithNextRun("lifeline_monthly",
+			"每月1号刷新所有活跃话题的月度新闻汇总上下文", monthlyNextRun),
+	}))
+
+	// Yearly lifeline: every Jan 1 04:00 Asia/Shanghai.
+	yearlyNextRun := dataenrichment.NextYearlyLifelineTime
+	registry.Register("lifeline_yearly", scheduler.New(scheduler.Config{
+		Name:    "Lifeline Yearly Refresh",
+		NextRun: yearlyNextRun,
+		Job:     dataenrichment.YearlyLifelineJob(lifelineSvc, lister),
+		Persistence: admin.NewTaskPersistenceWithNextRun("lifeline_yearly",
+			"每年1月1号刷新所有活跃话题的年度新闻汇总上下文", yearlyNextRun),
 	}))
 
 	// Set global registry for handler access

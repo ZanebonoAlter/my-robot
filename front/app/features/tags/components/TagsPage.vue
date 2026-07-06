@@ -13,6 +13,7 @@ import BoardDailyReportTimeline from './BoardDailyReportTimeline.vue'
 import TagMergePreview from './TagMergePreview.vue'
 import BoardListSidebar from './BoardListSidebar.vue'
 import BoardTimelinePanel from './BoardTimelinePanel.vue'
+import BoardEnrichmentPanel from './BoardEnrichmentPanel.vue'
 import BoardEditDialog from './BoardEditDialog.vue'
 import ArticlePreviewModal from './ArticlePreviewModal.vue'
 import { useTagsPage } from '~/features/tags/composables/useTagsPage'
@@ -21,7 +22,9 @@ const {
   // Board CRUD
   boards, selectedBoardId, boardsLoading, boardsError,
   compositionLabels, compositionLoading,
-  editingBoard, editLabel, editDescription, editSaving, editError,
+  editingBoard, editLabel, editDescription,
+  editEnrichmentEnabled, editWindowDays, editContextLayers,
+  editSaving, editError,
   showAddDialog,
   // Timeline
   timelineArticles, timelineLoading, timelineHasMore,
@@ -119,6 +122,9 @@ onMounted(() => {
             <button type="button" class="tags-content-tab" :class="{ 'tags-content-tab--active': contentTab === 'articles' }" @click="contentTab = 'articles'">
               <Icon icon="mdi:newspaper-variant-outline" width="14" /> 文章
             </button>
+            <button type="button" class="tags-content-tab" :class="{ 'tags-content-tab--active': contentTab === 'enrichment' }" @click="contentTab = 'enrichment'">
+              <Icon icon="mdi:database-plus-outline" width="14" /> 数据增强
+            </button>
           </div>
 
           <BoardCompositionPanel
@@ -128,6 +134,11 @@ onMounted(() => {
             :loading="compositionLoading"
             @remove="handleRemoveComposition"
             @refresh="() => loadComposition(selectedBoardId!)"
+          />
+
+          <BoardEnrichmentPanel
+            v-if="contentTab === 'enrichment'"
+            :board-id="selectedBoardId"
           />
 
           <BoardDailyReportTimeline
@@ -199,10 +210,16 @@ onMounted(() => {
       :editing-board="!!editingBoard"
       :edit-label="editLabel"
       :edit-description="editDescription"
+      :edit-enrichment-enabled="editEnrichmentEnabled"
+      :edit-window-days="editWindowDays"
+      :edit-context-layers="editContextLayers"
       :edit-saving="editSaving"
       :edit-error="editError"
       @update:edit-label="(v: string) => editLabel = v"
       @update:edit-description="(v: string) => editDescription = v"
+      @update:edit-enrichment-enabled="(v: boolean) => editEnrichmentEnabled = v"
+      @update:edit-window-days="(v: number) => editWindowDays = v"
+      @update:edit-context-layers="(v: string[]) => editContextLayers = v"
       @save="handleSaveBoardEdit"
       @close="closeEditBoard"
     />

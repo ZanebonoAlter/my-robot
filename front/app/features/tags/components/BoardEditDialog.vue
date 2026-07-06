@@ -1,10 +1,14 @@
 <script setup lang="ts">
 import { computed } from 'vue'
+import { Icon } from '@iconify/vue'
 
 const props = defineProps<{
   editingBoard: boolean
   editLabel: string
   editDescription: string
+  editEnrichmentEnabled: boolean
+  editWindowDays: number
+  editContextLayers: string[]
   editSaving: boolean
   editError: string | null
 }>()
@@ -14,16 +18,32 @@ const emit = defineEmits<{
   save: []
   'update:edit-label': [val: string]
   'update:edit-description': [val: string]
+  'update:edit-enrichment-enabled': [val: boolean]
+  'update:edit-window-days': [val: number]
+  'update:edit-context-layers': [val: string[]]
 }>()
 
 const show = computed({
   get: () => props.editingBoard,
-  set: (val: boolean) => { if (!val) emit('close') }
+  set: (val: boolean) => { if (!val) emit('close') },
 })
+
+const LAYER_OPTIONS = ['week', 'month', 'year', 'all'] as const
+const LAYER_LABEL: Record<string, string> = { week: '周', month: '月', year: '年', all: '总' }
+
+function toggleLayer(layer: string) {
+  const current = props.editContextLayers
+  const next = current.includes(layer)
+    ? current.filter(l => l !== layer)
+    : [...current, layer]
+  // 保持 week/month/year/all 的固定顺序，便于后端消费
+  const ordered = LAYER_OPTIONS.filter(l => next.includes(l))
+  emit('update:edit-context-layers', ordered)
+}
 </script>
 
 <template>
-  <AppDialog v-model="show" title="编辑板块" width="480px">
+  <AppDialog v-model="show" title="编辑板块" width="520px">
     <form class="board-form" @submit.prevent="emit('save')">
       <label class="form-field">
         <span class="form-label">名称 <span class="required-mark">*</span></span>
@@ -44,6 +64,52 @@ const show = computed({
           @input="emit('update:edit-description', ($event.target as HTMLTextAreaElement).value)"
         />
       </label>
+
+      <div class="form-field">
+        <span class="form-label">分析配置</span>
+        <div class="enrichment-config">
+          <label class="enrichment-toggle">
+            <AppToggle
+              :model-value="editEnrichmentEnabled"
+              @update:model-value="emit('update:edit-enrichment-enabled', $event as boolean)"
+            />
+            <span class="enrichment-toggle-text">
+              <span class="enrichment-toggle-label">开启数据增强</span>
+              <span class="enrichment-toggle-hint">关闭时「数据增强」tab 不能触发循环 B</span>
+            </span>
+          </label>
+
+          <label class="form-subfield">
+            <span class="form-sublabel">实时详情窗口（window_days）</span>
+            <AppInput
+              :model-value="editWindowDays"
+              type="number"
+              min="1"
+              max="90"
+              @update:model-value="emit('update:edit-window-days', ($event as number) || 14)"
+            />
+          </label>
+
+          <div class="form-subfield">
+            <span class="form-sublabel">解读员读取的上下文层（context_layers）</span>
+            <div class="layer-chips">
+              <button
+                v-for="layer in LAYER_OPTIONS"
+                :key="layer"
+                type="button"
+                class="layer-chip"
+                :class="{ 'layer-chip--on': editContextLayers.includes(layer) }"
+                @click="toggleLayer(layer)"
+              >
+                <Icon :icon="editContextLayers.includes(layer) ? 'mdi:check' : 'mdi:plus'" width="11" />
+                {{ LAYER_LABEL[layer] }}（{{ layer }}）
+              </button>
+            </div>
+            <p class="layer-hint">去掉某层后解读员不再读它（可省 token）；year/all 未生成会自动跳过。</p>
+          </div>
+        </div>
+      </div>
+
       <p v-if="editError" class="error-text">{{ editError }}</p>
     </form>
 
@@ -109,5 +175,90 @@ const show = computed({
 .error-text {
   font-size: 0.72rem;
   color: var(--color-accent);
+}
+
+/* enrichment config */
+.enrichment-config {
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+  padding: 0.7rem 0.8rem;
+  border: 1px solid var(--color-border-subtle);
+  border-radius: 8px;
+  background: var(--color-bg-hover);
+}
+
+.enrichment-toggle {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.55rem;
+  cursor: pointer;
+}
+
+.enrichment-toggle-text {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+}
+
+.enrichment-toggle-label {
+  font-size: 0.78rem;
+  color: var(--color-text-primary);
+}
+
+.enrichment-toggle-hint {
+  font-size: 0.64rem;
+  color: var(--color-text-muted);
+  line-height: 1.4;
+}
+
+.form-subfield {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.form-sublabel {
+  font-size: 0.68rem;
+  color: var(--color-text-secondary);
+}
+
+.layer-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.layer-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+  padding: 0.2rem 0.5rem;
+  border-radius: 999px;
+  border: 1px solid var(--color-border-medium);
+  background: var(--color-bg-sunken);
+  color: var(--color-text-muted);
+  font-size: 0.68rem;
+  cursor: pointer;
+  transition: all 0.12s ease;
+  font-family: inherit;
+}
+
+.layer-chip:hover {
+  border-color: var(--color-border-strong);
+  color: var(--color-text-secondary);
+}
+
+.layer-chip--on {
+  border-color: var(--color-accent);
+  background: var(--color-accent-subtle);
+  color: var(--color-accent);
+}
+
+.layer-hint {
+  font-size: 0.62rem;
+  color: var(--color-text-muted);
+  margin: 0.15rem 0 0;
+  line-height: 1.4;
 }
 </style>

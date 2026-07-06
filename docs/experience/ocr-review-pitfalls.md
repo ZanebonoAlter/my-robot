@@ -1,9 +1,25 @@
-# ocr（open-code-review）调用避坑与 token 纪律
+# ocr（open-code-review）弃用记录 + 人工 review 纪律
 
+> ⚠️ **已弃用**：ocr 在本仓库因路径幻觉不可用（见末尾「弃用决策 2026-07-06」），《开发执行规范》§0.6 步骤4 已改走**人工聚焦 review**。本文件保留历史教训作为「为什么不用 ocr」的证据 + token 纪律（人工 review 跑 LLM 辅助时同样适用）。
+>
 > 活文档。踩到一次就补一条，避免重复交学费。
-> 适用：openspec `开发执行规范.md` §0.6 步骤4（code review）调用 ocr 时。
+> 历史适用：openspec `开发执行规范.md` §0.6 步骤4（code review）调用 ocr 时。
 
-## 为什么有这份
+## 弃用决策（2026-07-06）
+
+`data-enrichment-orchestration` change 的 review 连跑两次 ocr（主线程 + 子线程），模式完全一致：
+- ocr 的 LLM 在 review 时为理解上下文，主动去读它**幻觉出的依赖文件路径**（猜 `internal/admin/scheduler/scheduler.go`，实际是 `base.go`；猜 `platform/database/database.go`，实际是 `migrator.go`），连珠报 `file_read failed`。
+- 全部 tool-call 轮数烧在路径解析失败上，1800s 超时、**零有效 comment**，白烧一批 token。
+
+根因不是配置（`ocr llm test` 通过），而是 ocr 自身的上下文文件解析机制与本项目实际文件名不匹配。两次重试（降并发 / 补业务上下文 / 换 json 格式）均无效。
+
+**结论**：本仓库不再用 ocr 跑步骤4。改用「人工聚焦 review + grep 验证不变量」（见 `开发执行规范.md` §0.6「review 执行要点」），实测更可靠、零 token 浪费。下面历史教训保留供参考（人工跑 LLM 辅助 review 时同样适用）。
+
+---
+
+## 历史教训（保留）
+
+### 为什么有这份
 
 ocr（`@alibaba-group/open-code-review`）做 AI 代码审查，**单次 review = N 个文件 × 并发 LLM 调用**，很贵。一次 topic-watchlist-observability change 的 review 实测：21 文件并发 × glm-5.2，一次就烧一批 token；为"格式化输出"重跑又撞限流空烧。本文件把调用前必须确认的事固化为纪律。
 

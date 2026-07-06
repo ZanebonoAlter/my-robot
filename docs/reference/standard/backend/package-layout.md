@@ -33,6 +33,7 @@ internal/<domain>/
 | `reader` | 订阅与文章域 |
 | `tagmanagement` | 标签系统域 |
 | `topicgraph` | 主题图谱域 |
+| `dataenrichment` | 数据增强编排域（板块↔数据源配置、分层新闻汇总循环A、三角色增强循环B、review judge 认知循环） |
 
 > 新增 domain 时必须先在本表登记，再创建包；脚本会拦截未登记的 `internal/<新名>/`。
 

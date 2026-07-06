@@ -9,18 +9,24 @@ type SemanticLabel struct {
 	// Vector columns are declared without a fixed dimension. The actual dimension is
 	// determined at runtime by the configured embedder (see auxlabel.EnsureVectorDimensionOnce)
 	// and may differ across deployments, so hardcoding it here would race AutoMigrate.
-	Embedding      *string   `gorm:"type:vector;column:embedding" json:"-"`
-	MergeEmbedding *string   `gorm:"type:vector;column:merge_embedding" json:"-"`
-	LabelType      string    `gorm:"size:20;not null;index:idx_semantic_labels_label_type" json:"label_type"`
-	Aliases        []string  `gorm:"type:jsonb;serializer:json;default:'[]'" json:"aliases"`
-	RefCount       int       `gorm:"not null;default:0" json:"ref_count"`
-	Description    string    `gorm:"type:text" json:"description"`
-	DisplayOrder   int       `gorm:"not null;default:0" json:"display_order"`
-	Source         string    `gorm:"size:50;not null;default:llm_extract" json:"source"`
-	Status         string    `gorm:"size:20;not null;default:active;index:idx_semantic_labels_status" json:"status"`
-	Protected      bool      `gorm:"not null;default:false" json:"protected"`
-	CreatedAt      time.Time `json:"created_at"`
-	UpdatedAt      time.Time `json:"updated_at"`
+	Embedding      *string  `gorm:"type:vector;column:embedding" json:"-"`
+	MergeEmbedding *string  `gorm:"type:vector;column:merge_embedding" json:"-"`
+	LabelType      string   `gorm:"size:20;not null;index:idx_semantic_labels_label_type" json:"label_type"`
+	Aliases        []string `gorm:"type:jsonb;serializer:json;default:'[]'" json:"aliases"`
+	RefCount       int      `gorm:"not null;default:0" json:"ref_count"`
+	Description    string   `gorm:"type:text" json:"description"`
+	DisplayOrder   int      `gorm:"not null;default:0" json:"display_order"`
+	Source         string   `gorm:"size:50;not null;default:llm_extract" json:"source"`
+	Status         string   `gorm:"size:20;not null;default:active;index:idx_semantic_labels_status" json:"status"`
+	Protected      bool     `gorm:"not null;default:false" json:"protected"`
+	// EnrichmentEnabled — whether cycle-B enrichment is enabled for this board (default false).
+	EnrichmentEnabled bool `gorm:"not null;default:false" json:"enrichment_enabled"`
+	// WindowDays — real-time detail window for cycle-B (default 14).
+	WindowDays int `gorm:"not null;default:14" json:"window_days"`
+	// ContextLayers — which granularity layers the interpreter reads (default ["week","month","year","all"]).
+	ContextLayers []string  `gorm:"type:jsonb;serializer:json;default:'[\"week\",\"month\",\"year\",\"all\"]'" json:"context_layers"`
+	CreatedAt     time.Time `json:"created_at"`
+	UpdatedAt     time.Time `json:"updated_at"`
 }
 
 func (SemanticLabel) TableName() string {

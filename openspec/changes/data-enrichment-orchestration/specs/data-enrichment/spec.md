@@ -50,7 +50,7 @@
 
 ### Requirement: 分层新闻汇总上下文（循环 A）
 
-系统 SHALL 维护一个独立于分析的新闻汇总循环（循环 A），产出每个持久话题的分层上下文。新表 `topic_lifeline_context` SHALL 存 week/month/year/all 四粒度的新闻叙事汇总（含相关数据波动快照），每行 SHALL 带 `as_of_date`（汇总截止日，用于时效判断与检查自愈）。新闻汇总 SHALL 只基于话题的 sections（新闻原文），SHALL NOT 消费 `topic_enrichment_result` 或 `topic_enrichment_review`。
+系统 SHALL 维护一个独立于分析的新闻汇总循环（循环 A），产出每个持久话题的分层上下文。新表 `topic_lifeline_context` SHALL 存 week/month/year 四粒度的新闻叙事汇总（含相关数据波动快照），**按 `period` 档案式存储**（每周期独立一行，历史可翻，不再滚动覆盖；UNIQUE 为 `(topic_id, granularity, period)`）。每行 SHALL 带 `as_of_date`（汇总截止日，用于时效判断与检查自愈）。新闻汇总 SHALL 只基于话题的 sections（新闻原文），SHALL NOT 消费 `topic_enrichment_result` 或 `topic_enrichment_review`。
 
 #### Scenario: 汇总独立于分析
 
@@ -64,24 +64,24 @@
 
 ### Requirement: 循环 A 触发与汇总算法
 
-循环 A SHALL 定时触发（week 每周、month 每月、year 每年），SHALL 内置检查自愈机制（扫描 `as_of_date` 滞后的 topic，**从 `as_of_date` 次周期起按 granularity 周期逐块补遗漏，非覆盖当前周期**），SHALL 支持手动重生成任意 granularity。
+循环 A SHALL 定时触发（week 每周、month 每月、year 每年），**每个周期各产一条独立 period 行（新周期不覆盖旧周期）**。SHALL 内置检查自愈机制（扫描缺失历史 period 的 topic，按 period 逐个补），SHALL 支持手动重生成任意 period，SHALL 归档清理超期行（week>8 周、month>12 月）。
 
-汇总算法：`week` 正常定时时 SHALL 直接汇总当前周（数据小）；**检查自愈补遗漏时** SHALL 从 `as_of_date` 次周起逐周块增量合并补齐（不跳过历史周期）。`month`/`year`/`all` SHALL 用「自上次汇总以来的增量 sections + 该 granularity 旧汇总」LLM 合并生成。各 granularity SHALL 平行维护自己的滚动窗口，不搞 week→month→year 层层金字塔合并（避免误差累积）。
+汇总算法：**每个 period 独立汇总成一条**——读「该 period 范围内的 sections」一次性汇总，SHALL NOT 与旧汇总合并覆盖。`all`（`period='all'`）为例外，滚动单行，读全部历史 sections + 旧 all 汇总增量合并。各 period SHALL 平行独立维护，不搞 week→month→year 层层金字塔合并（避免误差累积）。
 
-#### Scenario: week 正常定时直接汇总
+#### Scenario: 每 period 独立汇总
 
-- **WHEN** 每周定时准时刷新某 topic 的 week
-- **THEN** SHALL 读当前周 sections 直接汇总，SHALL NOT 依赖旧 week 汇总
+- **WHEN** 每月定时刷新某 topic 的 month（period=2026-06）
+- **THEN** SHALL 读 2026-06 范围内 sections 独立汇总成一条，SHALL NOT 覆盖 2026-05 的 month 汇总
 
-#### Scenario: month 增量合并
+#### Scenario: 历史周期可翻
 
-- **WHEN** 每月定时刷新某 topic 的 month
-- **THEN** SHALL 读自上次汇总以来的增量 sections + 旧 month 汇总，LLM 合并生成新 month
+- **WHEN** 用户在前端按周期筛选查看 2026-05 的 month
+- **THEN** 系统 SHALL 返回该 period 独立存的汇总行（未被新周期合并覆盖）
 
-#### Scenario: 检查自愈补遗漏周期
+#### Scenario: 检查自愈补遗漏 period
 
-- **WHEN** 系统隔了一周再触发，某 topic 的 week 滞后（漏跑上周）
-- **THEN** SHALL 先补上周遗漏的 week，再补本周，`as_of_date` 顺序推进（非直接覆盖当前周）
+- **WHEN** 某 topic 从未生成过 2026-05 的 month 汇总
+- **THEN** 检查自愈 SHALL 补生成该 period，`as_of_date` 顺序推进
 
 ### Requirement: 分层上下文驱动的数据增强编排
 
@@ -89,7 +89,7 @@
 
 1. **解读员**：全层读分层上下文（按板块 `context_layers`，未生成的层跳过），提炼需补数据的产业主题（JSON）。
 2. **查询员（agent loop）**：对每个主题用板块绑定数据源工具链式查询，支持换词（命中 0 时换宽泛词）。
-3. **分析员**：结合分层上下文 + 实时数据，判断"最新进展在演进中的意义"（强化/转折/扩散），引用对应层作对比基准；`as_of_date` 滞后时以 14 天详情为准。
+3. **分析员**：结合分层上下文 + 实时数据，判断"最新进展在演进中的意义"（强化/转折/扩散），引用对应 period 作对比基准；`as_of_date` 滞后时以 14 天详情为准。每个板块 SHALL 输出走向预测（`direction`/`confidence`/`horizon`）+ 凭什么判断（`reasoning`：信号→机制）+ **原始依据（`evidence`：引用的 context 原话 + context 指针，供前端 tooltip 展示）** + 板块专属触发条件（`trigger_up`/`trigger_down`）。SHALL NOT 下沉到个股买卖建议。
 
 编排 SHALL 对单次 LLM 调用设 max_loops 上限（默认 6）防止无限循环。解读员 SHALL 读取历史 applied review 以避免重蹈已知偏差。
 
@@ -128,7 +128,7 @@
 
 ### Requirement: 分析认知循环 review judge
 
-每次增强产出 result 后，系统 SHALL 触发 review judge（一次 LLM 半自动调用），对比上次 result 与本次 result，输出 JSON `{should_review, reason, deviation_summary, affected_context, confidence}`。`should_review=true` 时 SHALL 写入 `topic_enrichment_review` 表；`false` 时 SHALL 跳过（避免噪音）。review SHALL 关联 `prev_result_id` 与 `curr_result_id`。`deviation_summary` SHALL 支持 LLM 生成基底 + 人工调整。第一次增强（无 prev_result）SHALL 跳过 review judge。
+每次增强产出 result 后，系统 SHALL 触发 review judge（一次 LLM 半自动调用），**对照上次预测方向 vs 期间实际走势**，逐板块结算兑现度（`verdict`：`[{sector, predicted_dir, actual, mark: hit|part|miss}]`），输出 JSON `{should_review, reason, verdict, deviation_summary, affected_context, confidence}`。`should_review=true` 时 SHALL 写入 `topic_enrichment_review` 表；`false` 时 SHALL 跳过（避免噪音）。review SHALL 关联 `prev_result_id` 与 `curr_result_id`。`deviation_summary` SHALL 支持 LLM 生成基底 + 人工调整。第一次增强（无 prev_result）或 prev 无 `direction` 字段（旧格式）SHALL 跳过或降级为描述对比。
 
 **用户手动批注**：除 review_judge 自动生成外，用户 SHALL 能在 CRUD 界面手动创建 review（对某 result 批注）。手动批注的 review：`source='manual'`，`prev_result_id` 可空，`deviation_summary` 由用户填写，`applied` 默认 true。
 
@@ -137,14 +137,14 @@
 - **WHEN** review judge 判断 `should_review=false`（如仅置信度微调、无核心判断变化）
 - **THEN** SHALL 不写 review 行
 
-#### Scenario: 偏差记录
+#### Scenario: 兑现度结算
 
-- **WHEN** result 从"原油承压"变为"原油强化"
-- **THEN** review SHALL 记录 `deviation_summary` 说明为什么核心判断反转
+- **WHEN** 上次预测"原油上行(高)"，期间实际 +4.2%
+- **THEN** review.verdict SHALL 记录该板块 mark=hit（兑现），并附 deviation_summary 说明
 
 #### Scenario: 用户手动批注
 
-- **WHEN** 用户在 CRUD 界面对某 result 手动写一条批注
+- **WHEN** 用户在前端对某 result 手动写一条批注
 - **THEN** SHALL 创建 review（source=manual，prev_result_id 可空，applied 默认 true），不依赖 review_judge
 
 ### Requirement: review 不回写新闻记忆
@@ -204,22 +204,33 @@ review 的 `applied` 标记 SHALL NOT 触发对 `topic_lifeline_context` 的任�
 - **WHEN** 一次增强完成
 - **THEN** `topic_enrichment_result.input_snapshot` SHALL 记录读了哪些 context 层、各层 as_of、section 范围、引用的 review id
 
-### Requirement: 板块 tab CRUD 界面
+### Requirement: 板块 tab 「认知工作台」界面
 
-板块详情页 SHALL 新增「数据增强」tab（与"板块内容/日报/文章"并列），提供三表 CRUD：
+板块详情页 SHALL 新增「数据增强」tab（与"板块内容/日报/文章"并列），按**用户认知任务流**组织（不再四张表平铺 CRUD），含四步：
 
-- **表1 `topic_lifeline_context`**：查看 week/month/year/all + 手动重生成某 granularity + 人工编辑 content。
-- **表2 `topic_enrichment_result`**：查看（含 LLM 调用 trace，点 session_id 可回放）+ 手动触发增强。
-- **表3 `topic_enrichment_review`**：查看认知演进史 + 人工调整 deviation_summary + 采纳（applied）。
+- **① 最近怎么了（新闻记忆 / context）**：SHALL 提供**周期筛选器**（粒度下拉 + period 翻页）翻历史 + 结构化叙事段落 inline 编辑。
+- **② 会往哪走（走向预测 / result.sectors）**：SHALL 提供**板块可展开卡片**（凭什么判断[信号→机制] + 支撑数据 + 板块专属触发条件）+ **证据链 tooltip**（悬停显示 `evidence.quote` 原话，**原地展示不跳转**）。
+- **③ 猜得准吗（预测兑现复盘 / review）**：SHALL 提供时间轴 + 逐条兑现结算（hit/part/miss）+ 采纳。
+- **④ 数据源/参数（board_data_sources）**：折叠高级区。
 
-CRUD 的数据契约（API 形状）SHALL 设计为侦探墙重构时可直接复用，避免替换时返工。侦探墙（`TopicDetectiveWall.client.vue`）重构不在本 change 范围。
+界面 SHALL 禁用后端术语（granularity/session_id/evolution_assessment 等），用人话。SHALL 提供完整交互态（loading/empty/error）+ 双主题（editorial/dark）。数据契约 SHALL 设计为侦探墙重构时可直接复用。
 
-#### Scenario: 三表 CRUD 可用
+#### Scenario: 周期筛选翻历史
 
-- **WHEN** 用户打开某板块的「数据增强」tab
-- **THEN** SHALL 能查看/编辑/触发三表内容
+- **WHEN** 用户在①选粒度"月"+ 翻到 period 2026-05
+- **THEN** SHALL 展示该 period 独立存的新闻汇总（非当前周期覆盖）
+
+#### Scenario: 证据链 tooltip 不跳转
+
+- **WHEN** 用户在②悬停某板块的判断信号
+- **THEN** SHALL 原地 tooltip 显示引用的新闻原话（来自 evidence.quote），SHALL NOT 跳转到其他区域
+
+#### Scenario: 兑现度复盘可见
+
+- **WHEN** 用户打开③
+- **THEN** SHALL 看到每条历史预测对照实际走势的 hit/part/miss 结算
 
 #### Scenario: 契约为侦探墙铺路
 
-- **WHEN** 设计 CRUD 的 API 形状
+- **WHEN** 设计 API 形状
 - **THEN** 数据结构 SHALL 可被侦探墙重构直接复用

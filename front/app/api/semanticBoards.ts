@@ -13,6 +13,12 @@ export interface SemanticBoard {
   source: string
   status: string
   protected: boolean
+  /** 循环 B 增强开关（板块级，默认 false）。 */
+  enrichment_enabled: boolean
+  /** 循环 B 实时详情窗口（默认 14）。 */
+  window_days: number
+  /** 解读员读取的上下文层（默认 week/month/year/all）。 */
+  context_layers: string[]
   created_at: string
   updated_at: string
 }
@@ -223,6 +229,9 @@ export function useSemanticBoardsApi() {
     display_order?: number
     protected?: boolean
     status?: string
+    enrichment_enabled?: boolean
+    window_days?: number
+    context_layers?: string[]
   }): Promise<ApiResponse<{ id: number }>> {
     return apiClient.put(`/semantic-boards/${id}`, data)
   }

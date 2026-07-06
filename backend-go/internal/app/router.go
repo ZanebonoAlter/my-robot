@@ -3,6 +3,7 @@ package app
 import (
 	"github.com/gin-gonic/gin"
 	"syntopica-backend/internal/admin"
+	"syntopica-backend/internal/dataenrichment"
 	"syntopica-backend/internal/platform/database"
 	"syntopica-backend/internal/platform/middleware"
 	"syntopica-backend/internal/platform/tracing"
@@ -38,6 +39,7 @@ func SetupRoutes(r *gin.Engine) {
 		admin.RegisterRoutes(api)
 
 		tagmanagement.RegisterRoutes(api)
+		dataenrichment.RegisterRoutes(api)
 
 		traceHandler := tracing.NewTraceHandler(database.DB)
 		traces := api.Group("/traces")

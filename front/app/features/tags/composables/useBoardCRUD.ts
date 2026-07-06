@@ -15,10 +15,15 @@ export function useBoardCRUD() {
   const editingBoard = ref<SemanticBoard | null>(null)
   const editLabel = ref('')
   const editDescription = ref('')
+  const editEnrichmentEnabled = ref(false)
+  const editWindowDays = ref(14)
+  const editContextLayers = ref<string[]>(['week', 'month', 'year', 'all'])
   const editSaving = ref(false)
   const editError = ref<string | null>(null)
 
   const showAddDialog = ref(false)
+
+  const DEFAULT_CONTEXT_LAYERS = ['week', 'month', 'year', 'all']
 
   async function loadBoards() {
     boardsLoading.value = true
@@ -56,6 +61,11 @@ export function useBoardCRUD() {
     editingBoard.value = board
     editLabel.value = board.label
     editDescription.value = board.description || ''
+    editEnrichmentEnabled.value = board.enrichment_enabled ?? false
+    editWindowDays.value = board.window_days ?? 14
+    editContextLayers.value = Array.isArray(board.context_layers) && board.context_layers.length > 0
+      ? [...board.context_layers]
+      : [...DEFAULT_CONTEXT_LAYERS]
     editError.value = null
   }
 
@@ -64,6 +74,9 @@ export function useBoardCRUD() {
     editingBoard.value = null
     editLabel.value = ''
     editDescription.value = ''
+    editEnrichmentEnabled.value = false
+    editWindowDays.value = 14
+    editContextLayers.value = [...DEFAULT_CONTEXT_LAYERS]
     editError.value = null
   }
 
@@ -74,7 +87,13 @@ export function useBoardCRUD() {
     editSaving.value = true
     editError.value = null
     try {
-      const res = await sbApi.updateBoard(board.id, { label, description: editDescription.value.trim() })
+      const res = await sbApi.updateBoard(board.id, {
+        label,
+        description: editDescription.value.trim(),
+        enrichment_enabled: editEnrichmentEnabled.value,
+        window_days: editWindowDays.value,
+        context_layers: [...editContextLayers.value],
+      })
       if (res.success) {
         await loadBoards()
         editSaving.value = false
@@ -138,7 +157,9 @@ export function useBoardCRUD() {
   return {
     boards, selectedBoardId, boardsLoading, boardsError,
     compositionLabels, compositionLoading,
-    editingBoard, editLabel, editDescription, editSaving, editError,
+    editingBoard, editLabel, editDescription,
+    editEnrichmentEnabled, editWindowDays, editContextLayers,
+    editSaving, editError,
     showAddDialog,
     loadBoards, loadComposition, handleSelectBoard,
     openEditBoard, closeEditBoard, handleSaveBoardEdit,

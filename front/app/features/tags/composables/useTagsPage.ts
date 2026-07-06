@@ -16,7 +16,7 @@ export function useTagsPage() {
   const articlesApi = useArticlesApi()
 
   // Tab / dialog state
-  const contentTab = ref<'composition' | 'daily-reports' | 'articles'>('composition')
+  const contentTab = ref<'composition' | 'daily-reports' | 'articles' | 'enrichment'>('composition')
   const showUpgradeDialog = ref(false)
   const showMatchingConfigDialog = ref(false)
   const showGenerateDialog = ref(false)
@@ -198,6 +198,9 @@ export function useTagsPage() {
     editingBoard: boardCRUD.editingBoard,
     editLabel: boardCRUD.editLabel,
     editDescription: boardCRUD.editDescription,
+    editEnrichmentEnabled: boardCRUD.editEnrichmentEnabled,
+    editWindowDays: boardCRUD.editWindowDays,
+    editContextLayers: boardCRUD.editContextLayers,
     editSaving: boardCRUD.editSaving,
     editError: boardCRUD.editError,
     showAddDialog: boardCRUD.showAddDialog,

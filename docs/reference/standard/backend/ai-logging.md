@@ -74,9 +74,15 @@ agent loop 里的**工具调用**（非 LLM 调用）也必须留痕，至少记
 | 日报-合并仲裁 | `daily_report.merge_arbitration` | ✅ | ✅ | ✅ | ✅ | 已补齐 |
 | section 向量化 | `section.embedding` | ✅ | N/A | ✅ | ✅ | 已补齐 |
 | 话题关注评估 | `topic_watch.evaluate` | ✅ | ✅ | ✅ | ✅ | 已补齐 |
-| 数据增强编排（规划中） | `data_enrichment.*` | 待接入 | 待接入 | 待接入 | 必须带 | 未实现 |
+| 循环A-新闻汇总 | `data_enrichment.summarize_context` | ✅ | ✅ | ✅ | ✅ | 已补齐 |
+| 循环B-解读员 | `data_enrichment.interpret` | ✅ | ✅ | ✅ | ✅ | 已补齐 |
+| 循环B-查询员每轮 | `data_enrichment.tool_use` | ✅ | ✅ | ✅ | ✅ | 已补齐 |
+| 循环B-分析员 | `data_enrichment.analyze` | ✅ | ✅ | ✅ | ✅ | 已补齐 |
+| 循环B-review对比 | `data_enrichment.review_judge` | ✅ | ✅ | ✅ | ✅ | 已补齐 |
 
 **补齐状态**：以上日报管线 6 处调用已由 [`ai-call-logging-schema`](../../../../openspec/changes/ai-call-logging-schema) change 全部补齐（prompt/token/session_id 落地，operation 升级为一等字段且 airouter 强制校验非空），从"待补齐"转为 ✅。其他调用方（reader/tagmanagement）也已补 operation 字段。
+
+**数据增强 SessionID 规则**：循环B（`data_enrichment.interpret` / `tool_use` / `analyze` / `review_judge`）同一次增强内所有 LLM 调用共享 `data_enrichment_{topic_id}_{uuid8}`；循环A（`data_enrichment.summarize_context`）一次汇总共享 `lifeline_context_{topic_id}_{granularity}_{uuid8}`。
 
 ## 查询入口（规范要求，实现可排期）
 

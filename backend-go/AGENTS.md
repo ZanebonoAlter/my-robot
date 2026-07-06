@@ -37,7 +37,7 @@ internal/<domain>/
 ```
 
 - 根包**只**放 `routes.go` + `wire.go`
-- **Domain 白名单**：`admin` / `reader` / `tagmanagement` / `topicgraph`（新增 domain 必须先登记）
+- **Domain 白名单**：`admin` / `reader` / `tagmanagement` / `topicgraph` / `dataenrichment`（新增 domain 必须先登记）
 
 → 完整结构 + 白名单表 + Anti-Patterns：`docs/reference/standard/backend/package-layout.md`
 

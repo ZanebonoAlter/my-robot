@@ -33,12 +33,15 @@ type semanticBoardHandler struct {
 }
 
 type semanticBoardRequest struct {
-	Label           string `json:"label"`
-	Description     string `json:"description"`
-	DisplayOrder    *int   `json:"display_order"`
-	Protected       *bool  `json:"protected"`
-	Status          string `json:"status"`
-	AuxiliaryLabels []uint `json:"auxiliary_labels"`
+	Label             string   `json:"label"`
+	Description       string   `json:"description"`
+	DisplayOrder      *int     `json:"display_order"`
+	Protected         *bool    `json:"protected"`
+	Status            string   `json:"status"`
+	AuxiliaryLabels   []uint   `json:"auxiliary_labels"`
+	EnrichmentEnabled *bool    `json:"enrichment_enabled"`
+	WindowDays        *int     `json:"window_days"`
+	ContextLayers     []string `json:"context_layers"`
 }
 
 type suggestedAuxiliaryDTO struct {
@@ -268,6 +271,15 @@ func (h *semanticBoardHandler) updateSemanticBoard(c *gin.Context) {
 	}
 	if req.Status == "active" || req.Status == "disabled" {
 		board.Status = req.Status
+	}
+	if req.EnrichmentEnabled != nil {
+		board.EnrichmentEnabled = *req.EnrichmentEnabled
+	}
+	if req.WindowDays != nil && *req.WindowDays >= 1 {
+		board.WindowDays = *req.WindowDays
+	}
+	if req.ContextLayers != nil {
+		board.ContextLayers = req.ContextLayers
 	}
 	if err := h.db.WithContext(c.Request.Context()).Save(&board).Error; err != nil {
 		respondError(c, http.StatusBadRequest, err)

@@ -55,7 +55,7 @@ echo "== B. 后端结构 =="
 check_file backend-go/.golangci.yml
 
 # domain 白名单（权威：standard/backend/package-layout.md）
-WHITELIST="admin reader tagmanagement topicgraph"
+WHITELIST="admin dataenrichment reader tagmanagement topicgraph"
 
 # 1) 每个"业务 domain 签名"（同时有 routes.go + handler/）必须在白名单内
 for d in backend-go/internal/*/; do

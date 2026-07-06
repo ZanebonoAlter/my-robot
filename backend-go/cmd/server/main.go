@@ -9,6 +9,7 @@ import (
 	"go.opentelemetry.io/contrib/instrumentation/github.com/gin-gonic/gin/otelgin"
 	"syntopica-backend/internal/admin"
 	appbootstrap "syntopica-backend/internal/app"
+	"syntopica-backend/internal/dataenrichment"
 	"syntopica-backend/internal/platform/config"
 	"syntopica-backend/internal/platform/database"
 	"syntopica-backend/internal/platform/logging"
@@ -48,6 +49,11 @@ func main() {
 	reader.InitRepository(database.DB)
 	taggingdomain.InitRepository(database.DB)
 	topicgraph.InitRepository(database.DB)
+
+	// Wire data-enrichment domain (repo + cycle-A/B services + HTTP handler)
+	// BEFORE SetupRoutes: handler.RegisterRoutes dereferences the handler
+	// singleton and panics if Init hasn't run. StartRuntime is too late.
+	dataenrichment.Init(database.DB)
 
 	// Ensure semantic_labels.embedding vector dimension matches the embedder model.
 	// Runs once at startup on the global DB (not inside any transaction) to avoid DDL lock contention.

@@ -180,3 +180,31 @@ AI 相关配置不存储在文件或环境变量中 — 通过 Web UI 管理并�
 
 > 历史语义提示：该字段曾表示「事后剥离 `<think>` 标签」，migration `20260626_0001` 已将所有 provider 的该字段重置为 `false` 以兜底语义反转。升级后请按需手动开启日报 provider 的思考。
 
+### 数据增强（Data Enrichment）
+
+数据增强功能（循环A新闻汇总 + 循环B三角色编排）依赖以下部署配置：
+
+#### 1. `ai_routes` 表 seed 两条 Capability
+
+| capability | 路由建议名 | 说明 |
+|------------|-----------|------|
+| `data_enrichment_news` | `data-enrichment-news` | 循环A新闻汇总（`summarize_context`），量大可配便宜模型 |
+| `data_enrichment_analysis` | `data-enrichment-analysis` | 循环B分析认知（`interpret` / `tool_use` / `analyze` / `review_judge`） |
+
+两条路由均需在 `ai_routes` 表 seed 为启用状态，并绑定到 `ai_route_providers` 中的至少一个 provider。
+
+#### 2. Provider 需配 `enable_thinking=false`
+
+根据设计决策（design.md §11 决策①），`data_enrichment_news` 和 `data_enrichment_analysis` 路由指向的 provider 必须设置 `enable_thinking=false`。Qwen3 等带思考模板的模型在 thinking 模式下会烧光 token 导致 `content` 为空——当前 agent loop 的 system prompt + 低 max_tokens 设计不兼容 thinking 模式。
+
+> **注意**：此配置是 provider 级别的（`ai_providers` 表 `enable_thinking` 字段），不是 per-request 参数。domain 代码不做特殊处理，照常调用 `airouter.Router.Chat`。airouter 请求层始终透传 `chat_template_kwargs.enable_thinking = provider.EnableThinking`（参见 `openai_compatible.go:206` `buildPayload`）。
+
+#### 3. 板块编辑需开 `enrichment_enabled=true`
+
+循环B增强仅对 `enrichment_enabled=true` 的板块（SemanticLabel）允许触发。用户需先在板块详情页的「分析」tab 中：
+1. 绑定至少一个数据源（`board_data_sources`）
+2. 开启 `enrichment_enabled` 开关（默认 false）
+3. （可选）调整 `window_days`（默认 14）和 `context_layers`（默认 `["week","month","year","all"]`）
+
+管理员无需额外配置；以上操作均可通过 Web UI 完成。
+

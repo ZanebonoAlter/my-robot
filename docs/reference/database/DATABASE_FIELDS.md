@@ -1,6 +1,6 @@
 # 数据库字段说明文档
 
-本文档详细说明了 Syntopica 项目中所有数据库表（35 张）的字段用途、数据流向和工作流程。
+本文档详细说明了 Syntopica 项目中所有数据库表（39 张）的字段用途、数据流向和工作流程。
 
 ---
 
@@ -41,6 +41,10 @@
 | `narrative_boards` | 叙事板块 | `models.NarrativeBoard` |
 | `otel_spans` | OpenTelemetry 链路追踪 | `tracing.OtelSpan` |
 | `digest_configs` | Digest 推送配置 | （已废弃） |
+| `board_data_sources` | 板块数据源绑定 | `repository.BoardDataSource` |
+| `topic_lifeline_context` | 话题分层新闻汇总上下文（循环A） | `repository.TopicLifelineContext` |
+| `topic_enrichment_result` | 数据增强结果快照（不可变） | `repository.TopicEnrichmentResult` |
+| `topic_enrichment_review` | 数据增强认知演进反思 | `repository.TopicEnrichmentReview` |
 | `schema_migrations` | 迁移版本追踪 | （框架管理） |
 
 ---
@@ -609,6 +613,9 @@ HNSW 索引：`idx_topic_tag_embeddings_embedding USING hnsw (embedding vector_c
 | `source` | VARCHAR(20) DEFAULT 'llm_extract' | 来源：`llm_extract`（LLM 提取）/ `llm_suggest`（LLM 建议升级）/ `manual`（手动创建） |
 | `status` | VARCHAR(20) DEFAULT 'active' | 状态：`active` / `disabled` |
 | `protected` | BOOLEAN DEFAULT false | 是否受保护（不可自动删除） |
+| `enrichment_enabled` | BOOLEAN DEFAULT false | 循环B增强开关（默认关，耗资源需先绑数据源） |
+| `window_days` | INTEGER DEFAULT 14 | 循环B实时详情窗口天数（默认14天，范围1-365） |
+| `context_layers` | JSONB DEFAULT '["week","month","year","all"]' | 解读员读取的分层粒度配置，可关闭年/总以省token |
 | `created_at` | TIMESTAMP | 创建时间 |
 | `updated_at` | TIMESTAMP | 更新时间 |
 
@@ -831,7 +838,82 @@ HNSW 索引：`idx_topic_tag_embeddings_embedding USING hnsw (embedding vector_c
 
 ---
 
+### 16. 数据增强相关表
+
+#### board_data_sources（板块数据源绑定）
+
+绑定板块可用的实时数据源。UNIQUE(semantic_board_id, source_type)。
+
+| 字段名 | 类型 | 用途 |
+|--------|------|------|
+| `id` | BIGSERIAL PK | 主键 |
+| `semantic_board_id` | BIGINT NOT NULL FK → semantic_labels(id) ON DELETE CASCADE | 所属板块ID，外键CASCADE删除 |
+| `source_type` | VARCHAR(40) NOT NULL | 数据源类型：`etf_quote`（ETF行情）/ `exchange_rate`（汇率）/ `gdelt_event`（GDELT事件） |
+| `config` | JSONB DEFAULT '{}' | 板块级参数，如 `{"keywords":["半导体"],"default_codes":["512480"]}`，schema由source_type决定 |
+| `enabled` | BOOLEAN DEFAULT true | 是否启用该数据源 |
+| `created_at` | TIMESTAMPTZ | 创建时间 |
+| `updated_at` | TIMESTAMPTZ | 更新时间 |
+
+#### topic_lifeline_context（话题分层新闻汇总上下文）
+
+循环A产物，按 granularity 存储各周期的新闻叙事汇总。UNIQUE(persistent_topic_id, granularity)。
+
+| 字段名 | 类型 | 用途 |
+|--------|------|------|
+| `id` | BIGSERIAL PK | 主键 |
+| `persistent_topic_id` | BIGINT NOT NULL FK → board_persistent_topics(id) ON DELETE CASCADE | 持久话题ID，外键CASCADE删除 |
+| `granularity` | VARCHAR(10) NOT NULL | 粒度：`week` / `month` / `year` / `all` |
+| `content` | TEXT NOT NULL | 新闻叙事汇总 + 数据波动快照 |
+| `as_of_date` | DATE NOT NULL | 汇总截止日，双用途：时效判断 + 检查自愈扫描缺口的依据 |
+| `source` | VARCHAR(12) DEFAULT 'manual' | 来源：`manual`（人工修正/初始）/ `llm_assisted`（LLM汇总生成） |
+| `created_at` | TIMESTAMPTZ | 创建时间 |
+| `updated_at` | TIMESTAMPTZ | 更新时间 |
+
+#### topic_enrichment_result（数据增强结果快照）
+
+循环B产物，一次增强一行，**不可变**——存档不修改，确保 review 有对比基准。
+
+| 字段名 | 类型 | 用途 |
+|--------|------|------|
+| `id` | BIGSERIAL PK | 主键 |
+| `persistent_topic_id` | BIGINT NOT NULL FK → board_persistent_topics(id) ON DELETE CASCADE | 持久话题ID，外键CASCADE删除 |
+| `evolution_assessment` | TEXT | 分析员结论：演进评估文本 |
+| `sectors` | JSONB | 分析员推导的受影响产业方向JSON：[{sector, evolution_role, current_signal, vs_history, judgment, confidence}] |
+| `causal_chain` | TEXT | 因果链文本 |
+| `tool_calls` | JSONB | 工具调用记录（名/参数/返回摘要/耗时），可追溯 |
+| `input_snapshot` | JSONB | 编排元数据（读的context层/as_of/section范围/引用review ID），可追溯 |
+| `session_id` | VARCHAR(120) | 编排分组键，关联 `ai_call_logs.session_id`，用于回放该次增强全部LLM调用 |
+| `created_at` | TIMESTAMPTZ | 创建时间 |
+
+**关键约束**：写入后不修改（不可变快照）。不含 `report_id`（循环B不挂日报管线）。
+
+#### topic_enrichment_review（数据增强认知演进反思）
+
+两次 result 快照间的偏差记录，追加写入。`applied` 不回写表1，仅标记认知已纳入。
+
+| 字段名 | 类型 | 用途 |
+|--------|------|------|
+| `id` | BIGSERIAL PK | 主键 |
+| `persistent_topic_id` | BIGINT NOT NULL FK → board_persistent_topics(id) ON DELETE CASCADE | 持久话题ID，外键CASCADE删除 |
+| `prev_result_id` | BIGINT FK → topic_enrichment_result(id) ON DELETE CASCADE（可空） | 上次 result ID（可空，手动批注时无 prev 对比） |
+| `curr_result_id` | BIGINT NOT NULL FK → topic_enrichment_result(id) ON DELETE CASCADE | 本次 result ID |
+| `deviation_summary` | TEXT NOT NULL | 偏差说明（为什么变了，LLM基底+人工可调） |
+| `affected_context` | VARCHAR(10) | 建议关注的粒度层：`week` / `month` / `year` |
+| `confidence` | REAL | review_judge 置信度 |
+| `applied` | BOOLEAN DEFAULT false | 用户采纳标记。**不回写表1**，仅标示认知已纳入，下次增强解读员读 applied review 避免重蹈已知偏差 |
+| `source` | VARCHAR(12) DEFAULT 'llm_assisted' | 来源：`llm_assisted`（review_judge 自动生成）/ `manual`（用户手动批注） |
+| `created_at` | TIMESTAMPTZ | 创建时间 |
+| `updated_at` | TIMESTAMPTZ | 更新时间 |
+
+---
+
 ## 更新日志
+
+### 2026-07-06
+
+- 新增 4 张数据增强相关表：`board_data_sources` / `topic_lifeline_context` / `topic_enrichment_result` / `topic_enrichment_review`（见 §16）
+- `semantic_labels` 新增 3 列：`enrichment_enabled`（bool默认false）/ `window_days`（int默认14）/ `context_layers`（jsonb默认`["week","month","year","all"]`）
+- 完整表清单扩充至 39 张（原 35 张）
 
 ### 2026-07-04
 
@@ -903,7 +985,7 @@ HNSW 索引：`idx_topic_tag_embeddings_embedding USING hnsw (embedding vector_c
 
 ## 相关文档
 
-- [全局实体关系图](ER_DIAGRAM.md) — 35 张表的 FK 关系图（ASCII + Mermaid）和约束矩阵
+- [全局实体关系图](ER_DIAGRAM.md) — 39 张表的 FK 关系图（ASCII + Mermaid）和约束矩阵
 - [数据生命周期](DATA_LIFECYCLE.md) — 6 条数据链路的状态字段流转说明
 - [业务流程](../reference/flow/README.md) — 链路概要设计、函数调用链、前后端协作
 - [数据库运维说明](../../operations/database-operations.md) — 数据库运维说明

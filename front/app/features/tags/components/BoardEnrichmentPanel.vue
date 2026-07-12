@@ -1,33 +1,53 @@
 <script setup lang="ts">
-import { ref, watch, computed } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { Icon } from '@iconify/vue'
 import { useBoardEnrichment } from '~/features/tags/composables/useBoardEnrichment'
-import { useBoardEnrichmentApi, type ContextGranularity, type ContextRow, type ResultDetailRow, type ResultSector, type ReviewRow, type DataSourceRow } from '~/api/boardEnrichment'
+import type { ContextGranularity, DataSourceRow } from '~/api/boardEnrichment'
 import { useNotify } from '~/composables/useNotify'
+import EvolutionReport from './EvolutionReport.vue'
+import DebateSection from './DebateSection.vue'
 
+/**
+ * 数据增强 · 认知工作台。
+ *
+ * 主线重定位后（金融涨跌 → 演进定位），面板分两个子区块：
+ *  - 「新闻背景」：循环A 新闻记忆（周期分层 contexts），只随新闻变，分析不回写。
+ *  - 「演进报告」：EvolutionReport，消费最新 result 详情 + reviews，报刊式呈现
+ *    四档定位（强化/转折/扩散/衰减）+ 跨泳道信号 + 双类引用。
+ *
+ * 旧的「走向预测卡片」（sectors direction/trigger）与「兑现复盘」（review verdict
+ * hit/part/miss）已被演进报告取代并移除。DebateSection（FinGenius 个股辩论）作为
+ * 「金融可选模块 · 独立于演进主线」默认折叠保留（tasks 4b.7 降级标注）。
+ */
 const props = defineProps<{
   boardId: number
 }>()
 
 const {
   // topic selector
-  topics, topicsLoading, selectedTopicId, loadTopics, selectTopic,
+  topics, topicsLoading, selectedTopicId, loadTopics,
   // table 1
   contexts, contextsLoading, regenerating, saveContext, regenerateContext,
   // table 2
-  results, resultsLoading, triggering, loadResults, triggerEnrichment,
+  results, triggering, triggerEnrichment,
+  latestResultId, latestResultDetail, latestResultDetailLoading,
   // table 3
-  reviews, reviewsLoading, loadReviews, saveReviewDeviation, applyReview, createReview,
+  reviews,
   // data sources
-  dataSources, dataSourcesLoading, loadDataSources, saveDataSource, removeDataSource,
+  dataSources, loadDataSources, saveDataSource, removeDataSource,
+  // stock debates
+  debates, debateTriggering, debateError, debateStage, loadDebates, triggerDebate,
+  // workbench UI
+  selectedGran, selectedPeriodIdx, periodList, currentContext,
+  setGran, shiftPeriod,
   // misc
   loadAllTopicTables,
 } = useBoardEnrichment()
 
-const api = useBoardEnrichmentApi()
 const { success: notifySuccess, error: notifyError } = useNotify()
 
-const GRANS: ContextGranularity[] = ['week', 'month', 'year', 'all']
+// ── 子区块切换：新闻背景 | 演进报告 ─────────────────────────────────────
+const subtab = ref<'news' | 'evolution'>('evolution')
 
 // ── lifecycle: board switch ──────────────────────────────────────────────
 async function bootstrap(boardId: number) {
@@ -36,112 +56,71 @@ async function bootstrap(boardId: number) {
     await loadAllTopicTables(selectedTopicId.value)
   }
 }
-
 void bootstrap(props.boardId)
 watch(() => props.boardId, (id) => { void bootstrap(id) })
-watch(selectedTopicId, (id) => {
-  if (id !== null) void loadAllTopicTables(id)
+watch(selectedTopicId, (id) => { if (id !== null) void loadAllTopicTables(id) })
+
+const selectedTopic = computed(() => topics.value.find((t) => t.id === selectedTopicId.value) ?? null)
+const hasTopic = computed(() => selectedTopicId.value !== null)
+
+// ── ① 周期筛选器 helpers ─────────────────────────────────────────────────
+type PickerGran = 'week' | 'month' | 'year'
+const GRANS: { id: PickerGran; label: string }[] = [
+  { id: 'week', label: '按周' },
+  { id: 'month', label: '按月' },
+  { id: 'year', label: '按年' },
+]
+
+function formatPeriod(period: string | undefined, gran: string): string {
+  if (!period) return '—'
+  if (gran === 'week') {
+    const m = /^(\d{4})-W(\d{1,2})$/.exec(period)
+    if (m) return `${m[1] ?? ''} 第 ${parseInt(m[2] ?? '', 10)} 周`
+    return period
+  }
+  if (gran === 'month') return period
+  if (gran === 'year') return period
+  return period
+}
+const periodLabel = computed(() => formatPeriod(currentContext.value?.period, selectedGran.value))
+const isLatest = computed(() => selectedPeriodIdx.value === 0)
+
+// ── ① narrative 内联编辑 ─────────────────────────────────────────────────
+const editingNarrative = ref(false)
+const narrativeDraft = ref('')
+function startEditNarrative() {
+  narrativeDraft.value = currentContext.value?.content ?? ''
+  editingNarrative.value = true
+}
+async function saveNarrative() {
+  if (selectedTopicId.value === null || !currentContext.value) return
+  const ok = await saveContext(selectedTopicId.value, selectedGran.value as ContextGranularity, currentContext.value.period, narrativeDraft.value)
+  if (ok) editingNarrative.value = false
+}
+function cancelNarrative() { editingNarrative.value = false }
+
+async function handleRegenerate() {
+  if (selectedTopicId.value === null || regenerating.value) return
+  const period = currentContext.value?.period
+  if (!confirm(`重新汇总「${periodLabel.value}」？\n（约 10-30 秒，调用 LLM 重读新闻）`)) return
+  await regenerateContext(selectedTopicId.value, selectedGran.value as ContextGranularity, period)
+}
+
+// ①narrative 被演进报告引用次数：统计 result.sectors.evidence 里命中当前 context 的条数
+const narrativeCiteCount = computed(() => {
+  const ctx = currentContext.value
+  if (!ctx) return 0
+  const evList = latestResultDetail.value?.sectors?.evidence
+  if (!Array.isArray(evList)) return 0
+  let n = 0
+  for (const ev of evList) {
+    if (ev.context_id != null && String(ev.context_id) === String(ctx.id)) n++
+    else if (ev.period && ev.period === ctx.period) n++
+  }
+  return n
 })
 
-// ── helpers ──────────────────────────────────────────────────────────────
-function granularityLabel(g: ContextGranularity): string {
-  return { week: '本周', month: '本月', year: '本年', all: '全部' }[g]
-}
-function sourceLabel(s: string | undefined): string {
-  if (!s) return ''
-  return ({ manual: '手动', llm_assisted: 'LLM', auto: '自动' } as Record<string, string>)[s] ?? s
-}
-function sourceIcon(s: string | undefined): string {
-  if (s === 'manual') return 'mdi:hand-editing-outline'
-  if (s === 'llm_assisted') return 'mdi:robot-outline'
-  return 'mdi:flash-outline'
-}
-function formatDate(s: string | undefined): string {
-  if (!s) return '—'
-  const d = new Date(s)
-  if (Number.isNaN(d.getTime())) return s
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
-}
-function preview(text: string | undefined | null, n = 140): string {
-  if (!text) return ''
-  return text.length > n ? text.slice(0, n) + '…' : text
-}
-async function copyText(text: string) {
-  try {
-    await navigator.clipboard.writeText(text)
-    notifySuccess('已复制')
-  } catch {
-    notifyError('复制失败')
-  }
-}
-function contextOf(g: ContextGranularity): ContextRow | undefined {
-  return contexts.value.find(c => c.granularity === g)
-}
-
-// ── Table 1: context edit dialog ─────────────────────────────────────────
-const editingContext = ref<{ granularity: ContextGranularity; content: string } | null>(null)
-function openEditContext(row: ContextRow) {
-  editingContext.value = { granularity: row.granularity, content: row.content }
-}
-async function saveEditingContext() {
-  if (!editingContext.value || selectedTopicId.value === null) return
-  const { granularity, content } = editingContext.value
-  const ok = await saveContext(selectedTopicId.value, granularity, content)
-  if (ok) editingContext.value = null
-}
-
-// ── Table 2: result detail dialog ────────────────────────────────────────
-const viewingResult = ref<{ id: number; loading: boolean; detail: ResultDetailRow | null } | null>(null)
-async function openResultDetail(id: number) {
-  if (selectedTopicId.value === null) return
-  viewingResult.value = { id, loading: true, detail: null }
-  const res = await api.getResult(selectedTopicId.value, id)
-  if (viewingResult.value) {
-    viewingResult.value.loading = false
-    if (res.success && res.data) viewingResult.value.detail = res.data
-    else notifyError(res.error || '加载详情失败')
-  }
-}
-function sectorCount(sectors: ResultSector[] | null | undefined): number {
-  return Array.isArray(sectors) ? sectors.length : 0
-}
-function jsonString(v: unknown): string {
-  if (v == null) return '—'
-  try { return JSON.stringify(v, null, 2) } catch { return String(v) }
-}
-
-// ── Table 3: review edit / create dialogs ────────────────────────────────
-const editingReview = ref<{ id: number; deviation: string } | null>(null)
-function openEditReview(row: ReviewRow) {
-  editingReview.value = { id: row.id, deviation: row.deviation_summary }
-}
-async function saveEditingReview() {
-  if (!editingReview.value || selectedTopicId.value === null) return
-  const { id, deviation } = editingReview.value
-  const ok = await saveReviewDeviation(selectedTopicId.value, id, deviation)
-  if (ok) editingReview.value = null
-}
-
-const creatingReview = ref<{ curr_result_id: number | null; deviation: string; prev_result_id: number | null } | null>(null)
-function openCreateReview() {
-  const first = results.value[0]
-  creatingReview.value = { curr_result_id: first?.id ?? null, deviation: '', prev_result_id: null }
-}
-async function saveCreatingReview() {
-  if (!creatingReview.value || selectedTopicId.value === null) return
-  const { curr_result_id, deviation, prev_result_id } = creatingReview.value
-  if (curr_result_id === null || !deviation.trim()) {
-    notifyError('请选择关联结果并填写偏差说明')
-    return
-  }
-  const body = prev_result_id !== null
-    ? { curr_result_id, deviation_summary: deviation, prev_result_id }
-    : { curr_result_id, deviation_summary: deviation }
-  const ok = await createReview(selectedTopicId.value, body)
-  if (ok) creatingReview.value = null
-}
-
-// ── Board data source edit dialog ────────────────────────────────────────
+// ── dialogs：数据源 ──────────────────────────────────────────────────────
 const editingSource = ref<{ source_type: string; config_text: string; enabled: boolean; isNew: boolean } | null>(null)
 const SOURCE_TYPE_OPTIONS = ['etf_quote', 'exchange_rate', 'gdelt_event'] as const
 function openEditSource(row?: DataSourceRow) {
@@ -154,357 +133,249 @@ function openEditSource(row?: DataSourceRow) {
 async function saveEditingSource() {
   if (!editingSource.value) return
   let config: Record<string, unknown> = {}
-  try {
-    config = editingSource.value.config_text.trim() ? JSON.parse(editingSource.value.config_text) : {}
-  } catch {
-    notifyError('config 不是合法 JSON')
-    return
-  }
-  const ok = await saveDataSource(props.boardId, {
-    source_type: editingSource.value.source_type,
-    config,
-    enabled: editingSource.value.enabled,
-  })
+  try { config = editingSource.value.config_text.trim() ? JSON.parse(editingSource.value.config_text) : {} }
+  catch { notifyError('config 不是合法 JSON'); return }
+  const ok = await saveDataSource(props.boardId, { source_type: editingSource.value.source_type, config, enabled: editingSource.value.enabled })
   if (ok) editingSource.value = null
 }
-function confirmDeleteSource(row: DataSourceRow) {
-  if (!confirm(`删除数据源「${row.source_type}」？`)) return
-  void removeDataSource(props.boardId, row.source_type)
+function confirmDeleteSource(sourceType: string) {
+  if (!confirm(`删除数据源「${sourceType}」？`)) return
+  void removeDataSource(props.boardId, sourceType)
 }
 
-// ── trigger / regenerate guards ──────────────────────────────────────────
+// ── 触发增强 / session_id 复制 ───────────────────────────────────────────
 async function handleTrigger() {
   if (selectedTopicId.value === null || triggering.value) return
   if (!confirm('手动触发数据增强？\n（约 10-30 秒，需板块已开启增强开关）')) return
   await triggerEnrichment(selectedTopicId.value)
 }
-async function handleRegenerate(g: ContextGranularity) {
-  if (selectedTopicId.value === null || regenerating.value !== null) return
-  if (!confirm(`重生成「${granularityLabel(g)}」上下文？\n（约 10-30 秒，调用 LLM 重读新闻）`)) return
-  await regenerateContext(selectedTopicId.value, g)
+async function copySession() {
+  const sid = latestResultDetail.value?.session_id
+  if (!sid) return
+  try { await navigator.clipboard.writeText(sid); notifySuccess('session_id 已复制') }
+  catch { notifyError('复制失败') }
 }
 
-const hasTopic = computed(() => selectedTopicId.value !== null)
-// silence unused for selectTopic (used via v-model)
-void selectTopic
+// ── ④ debate 触发（挂在最新 result） ─────────────────────────────────────
+async function handleDebateTrigger() {
+  if (selectedTopicId.value === null || latestResultId.value === null) return
+  await triggerDebate(latestResultId.value)
+}
+async function handleDebateRetry() {
+  if (latestResultId.value === null) return
+  await loadDebates(latestResultId.value)
+}
 </script>
 
 <template>
-  <div class="bep-panel">
-    <!-- ── topic selector toolbar ─────────────────────────────────────── -->
-    <div class="bep-toolbar">
-      <Icon icon="mdi:database-plus-outline" width="15" class="bep-toolbar-icon" />
-      <span class="bep-toolbar-title">数据增强</span>
-      <span class="bep-divider" />
-      <span class="bep-field-label">话题</span>
+  <div class="ew-panel">
+    <!-- ── topic 选择条（板下多话题，挑一个进工作台） ───────────────────── -->
+    <div class="ew-toolbar">
+      <Icon icon="mdi:database-plus-outline" width="15" class="ew-toolbar-icon" />
+      <span class="ew-toolbar-title">数据增强 · 认知工作台</span>
+      <span class="ew-divider" />
+      <span class="ew-field-label">话题</span>
       <select
         v-if="!topicsLoading"
         v-model.number="selectedTopicId"
-        class="bep-select"
+        class="ew-select"
         :disabled="topics.length === 0"
       >
         <option :value="null" disabled>选择话题…</option>
-        <option v-for="t in topics" :key="t.id" :value="t.id">
-          {{ t.label }}（{{ t.status }}）
-        </option>
+        <option v-for="t in topics" :key="t.id" :value="t.id">{{ t.label }}（{{ t.status }}）</option>
       </select>
-      <span v-else class="bep-muted">加载话题…</span>
-      <div class="bep-spacer" />
-      <button type="button" class="bep-ghost-btn" title="刷新" @click="bootstrap(boardId)">
+      <span v-else class="ew-muted">加载话题…</span>
+      <span class="ew-spacer" />
+      <button type="button" class="ew-ghost-btn" title="刷新" @click="bootstrap(boardId)">
         <Icon icon="mdi:refresh" width="14" />
       </button>
     </div>
 
-    <p v-if="topics.length === 0 && !topicsLoading" class="bep-empty-hint">
+    <p v-if="topics.length === 0 && !topicsLoading" class="ew-empty-hint">
       该板块暂无持久话题。先在「日报」tab 孵化话题后再做数据增强。
     </p>
 
-    <!-- ── topic-dimension tables (only when a topic is selected) ──────── -->
     <template v-if="hasTopic">
-      <!-- Table 1: lifeline contexts -->
-      <section class="bep-section">
-        <header class="bep-section-head">
-          <Icon icon="mdi:layers-outline" width="14" />
-          <span class="bep-section-title">分层新闻汇总上下文</span>
-          <span class="bep-section-meta">只随新闻更新，分析不回写</span>
-        </header>
-        <div v-if="contextsLoading" class="bep-loading">加载中…</div>
-        <div v-else class="bep-cards">
-          <div v-for="g in GRANS" :key="g" class="bep-card">
-            <template v-if="contextOf(g)">
-              <div class="bep-card-head">
-                <span class="bep-card-title">{{ granularityLabel(g) }}</span>
-                <span class="bep-card-tag">{{ g }}</span>
-                <span class="bep-card-spacer" />
-                <span class="bep-card-asof">截止 {{ formatDate(contextOf(g)?.as_of_date) }}</span>
-                <span class="bep-card-source">
-                  <Icon :icon="sourceIcon(contextOf(g)?.source)" width="11" />
-                  {{ sourceLabel(contextOf(g)?.source) }}
+      <!-- 紧凑刊头：topic + 状态 + 触发按钮（演进报告自带完整 masthead，此处只作操作入口） -->
+      <header class="masthead">
+        <div class="eyebrow">持久话题 #{{ selectedTopicId }}</div>
+        <h1 class="serif masthead-title">{{ selectedTopic?.label ?? '未命名话题' }}</h1>
+        <div class="lede">
+          <span v-if="selectedTopic?.status === 'active'" class="status-pill evolving"><span class="dot" />演进中</span>
+          <span v-else class="status-pill static">{{ selectedTopic?.status ?? '—' }}</span>
+          <span>最近一次分析 <b>{{ latestResultDetail?.created_at ? new Date(latestResultDetail.created_at).toISOString().slice(0, 10) : '—' }}</b></span>
+          <span class="muted">·</span>
+          <span class="muted">第 {{ results.length }} 轮 · 已复盘 {{ reviews.length }} 条</span>
+          <span class="trigger-wrap">
+            <button type="button" class="btn btn-primary" :disabled="triggering" @click="handleTrigger">
+              <Icon icon="mdi:play" width="13" />
+              {{ triggering ? '分析中…' : '▶ 重新分析' }}
+            </button>
+          </span>
+        </div>
+      </header>
+
+      <!-- 子区块切换：新闻背景 | 演进报告 -->
+      <nav class="subtabs">
+        <button type="button" class="subtab" :class="{ active: subtab === 'evolution' }" @click="subtab = 'evolution'">
+          <Icon icon="mdi:newspaper-variant-multiple-outline" width="14" /> 演进报告
+        </button>
+        <button type="button" class="subtab" :class="{ active: subtab === 'news' }" @click="subtab = 'news'">
+          <Icon icon="mdi:archive-outline" width="14" /> 新闻背景
+        </button>
+      </nav>
+
+      <!-- ── 演进报告（主线） ─────────────────────────────────────────── -->
+      <section v-if="subtab === 'evolution'" class="block">
+        <EvolutionReport
+          :result="latestResultDetail"
+          :reviews="reviews"
+          :topic-label="selectedTopic?.label ?? undefined"
+          :loading="latestResultDetailLoading"
+        />
+        <div v-if="latestResultDetail" class="outlook-meta">
+          <span class="link-btn" @click="copySession">
+            <Icon icon="mdi:content-copy" width="12" /> session_id：{{ latestResultDetail.session_id ?? '—' }}
+          </span>
+        </div>
+      </section>
+
+      <!-- ── 新闻背景（循环A 新闻记忆） ──────────────────────────────── -->
+      <section v-else-if="subtab === 'news'" id="sec1" class="block">
+        <div class="block-head">
+          <h2 class="serif">新闻背景</h2>
+          <span class="helper">新闻记忆 · 只随新闻变，分析不回写</span>
+        </div>
+
+        <!-- 周期筛选器 -->
+        <div class="period-picker">
+          <div class="gran-select">
+            <button
+              v-for="g in GRANS"
+              :key="g.id"
+              type="button"
+              :class="{ on: selectedGran === g.id }"
+              @click="setGran(g.id)"
+            >{{ g.label }}</button>
+          </div>
+          <div class="period-nav">
+            <button type="button" title="上一周期" :disabled="selectedPeriodIdx >= periodList.length - 1" @click="shiftPeriod(1)">‹</button>
+            <span class="cur">{{ periodList.length ? periodLabel : '无历史周期' }}</span>
+            <button type="button" title="下一周期" :disabled="selectedPeriodIdx <= 0" @click="shiftPeriod(-1)">›</button>
+          </div>
+          <span v-if="periodList.length" class="fresh-tag" :class="isLatest ? 'fresh-latest' : 'fresh-stale'">
+            {{ isLatest ? '最新周期' : '历史周期' }}
+          </span>
+          <span class="muted ew-period-count">共 {{ periodList.length }} 个历史周期可翻</span>
+        </div>
+
+        <!-- 叙事 -->
+        <div class="narrative">
+          <div id="seg-narrative" class="seg">
+            <template v-if="contextsLoading">
+              <div class="seg-h-row"><div class="seg-h serif">叙事脉络</div></div>
+              <div class="seg-b muted">加载中…</div>
+            </template>
+            <template v-else-if="!currentContext">
+              <div class="seg-h-row"><div class="seg-h serif">该周期尚未生成汇总</div></div>
+              <div class="seg-b muted">没有这一周期的新闻汇总。点「重新汇总」让 AI 重读新闻生成。</div>
+            </template>
+            <template v-else-if="!editingNarrative">
+              <div class="seg-h-row">
+                <div class="seg-h serif">叙事脉络</div>
+                <span class="seg-cited" :class="{ empty: narrativeCiteCount === 0 }">
+                  {{ narrativeCiteCount > 0 ? `被演进报告引用 ${narrativeCiteCount} 处` : '未被报告引用' }}
                 </span>
               </div>
-              <p class="bep-card-preview">{{ preview(contextOf(g)?.content) }}</p>
-              <div class="bep-card-actions">
-                <button type="button" class="bep-link-btn" @click="openEditContext(contextOf(g)!)">
-                  <Icon icon="mdi:pencil-outline" width="12" /> 编辑
-                </button>
-                <button
-                  type="button"
-                  class="bep-link-btn"
-                  :disabled="regenerating !== null"
-                  @click="handleRegenerate(g)"
-                >
-                  <Icon icon="mdi:refresh-auto" width="12" />
-                  {{ regenerating === g ? '重生成中…' : '重生成' }}
-                </button>
-              </div>
+              <div class="seg-b">{{ currentContext.content }}</div>
+              <span class="seg-edit" title="编辑" @click="startEditNarrative">✎</span>
             </template>
             <template v-else>
-              <div class="bep-card-head">
-                <span class="bep-card-title bep-muted">{{ granularityLabel(g) }}</span>
-                <span class="bep-card-spacer" />
-                <span class="bep-card-source bep-muted">未生成</span>
-              </div>
-              <p class="bep-card-preview bep-muted">该层尚未生成，可手动重生成。</p>
-              <div class="bep-card-actions">
-                <button
-                  type="button"
-                  class="bep-link-btn"
-                  :disabled="regenerating !== null"
-                  @click="handleRegenerate(g)"
-                >
-                  <Icon icon="mdi:refresh-auto" width="12" />
-                  {{ regenerating === g ? '重生成中…' : '重生成' }}
-                </button>
+              <div class="seg-h-row"><div class="seg-h serif">编辑叙事</div></div>
+              <textarea v-model="narrativeDraft" class="seg-textarea" />
+              <div class="seg-actions">
+                <button type="button" class="btn btn-primary btn-sm" @click="saveNarrative">保存</button>
+                <button type="button" class="btn btn-ghost btn-sm" @click="cancelNarrative">取消</button>
               </div>
             </template>
           </div>
-        </div>
-      </section>
 
-      <!-- Table 2: enrichment results -->
-      <section class="bep-section">
-        <header class="bep-section-head">
-          <Icon icon="mdi:chart-line-variant" width="14" />
-          <span class="bep-section-title">增强结果历史</span>
-          <span class="bep-section-meta">快照不可变</span>
-          <span class="bep-card-spacer" />
-          <button
-            type="button"
-            class="bep-accent-btn"
-            :disabled="triggering"
-            :title="triggering ? '增强中…' : '手动触发数据增强（约 10-30 秒）'"
-            @click="handleTrigger"
-          >
-            <Icon icon="mdi:play-circle-outline" width="13" />
-            {{ triggering ? '增强中…' : '触发增强' }}
-          </button>
-        </header>
-        <div v-if="resultsLoading" class="bep-loading">加载中…</div>
-        <div v-else-if="results.length === 0" class="bep-empty-row">暂无增强结果，点「触发增强」生成第一次。</div>
-        <div v-else class="bep-rows">
-          <button v-for="r in results" :key="r.id" type="button" class="bep-row" @click="openResultDetail(r.id)">
-            <span class="bep-row-date">{{ formatDate(r.created_at) }}</span>
-            <span class="bep-row-text">{{ preview(r.evolution_assessment, 120) || '（无演进判断）' }}</span>
-            <span class="bep-row-badge">{{ sectorCount(r.sectors) }} 板块</span>
-            <span class="bep-row-badge">{{ r.tool_calls_count ?? 0 }} 次工具</span>
-            <Icon icon="mdi:chevron-right" width="14" class="bep-row-chev" />
-          </button>
-        </div>
-      </section>
-
-      <!-- Table 3: enrichment reviews -->
-      <section class="bep-section">
-        <header class="bep-section-head">
-          <Icon icon="mdi:compare-horizontal" width="14" />
-          <span class="bep-section-title">认知演进史</span>
-          <span class="bep-section-meta">偏差记录，不回写表1</span>
-          <span class="bep-card-spacer" />
-          <button type="button" class="bep-ghost-btn" @click="openCreateReview">
-            <Icon icon="mdi:plus" width="13" /> 添加批注
-          </button>
-        </header>
-        <div v-if="reviewsLoading" class="bep-loading">加载中…</div>
-        <div v-else-if="reviews.length === 0" class="bep-empty-row">暂无认知偏差记录。</div>
-        <div v-else class="bep-rows">
-          <div v-for="rv in reviews" :key="rv.id" class="bep-row bep-row--review">
-            <div class="bep-row-main">
-              <span class="bep-row-date">{{ formatDate(rv.created_at) }}</span>
-              <span class="bep-row-text">{{ preview(rv.deviation_summary, 160) }}</span>
-              <span class="bep-row-tags">
-                <span class="bep-pill" :class="rv.applied ? 'bep-pill--success' : 'bep-pill--muted'">
-                  {{ rv.applied ? '已采纳' : '未采纳' }}
-                </span>
-                <span class="bep-pill bep-pill--muted">
-                  <Icon :icon="sourceIcon(rv.source)" width="10" />{{ sourceLabel(rv.source) }}
-                </span>
-              </span>
-            </div>
-            <div class="bep-row-actions">
-              <button type="button" class="bep-link-btn" @click="openEditReview(rv)">
-                <Icon icon="mdi:pencil-outline" width="12" /> 编辑
+          <div v-if="currentContext" class="narrative-foot">
+            <span>来源：{{ currentContext.source === 'manual' ? '手动' : (currentContext.source === 'llm_assisted' ? 'AI 汇总' : currentContext.source) }}</span>
+            <span>·</span>
+            <span>截止 {{ currentContext.as_of_date ? new Date(currentContext.as_of_date).toISOString().slice(0, 10) : '—' }}</span>
+            <span style="margin-left:auto">
+              <button type="button" class="btn btn-ghost btn-sm" :disabled="regenerating !== null" @click="handleRegenerate">
+                <Icon icon="mdi:refresh" width="12" />
+                {{ regenerating !== null ? '汇总中…' : '↻ 重新汇总' }}
               </button>
-              <button
-                v-if="!rv.applied"
-                type="button"
-                class="bep-link-btn"
-                @click="applyReview(selectedTopicId!, rv.id)"
-              >
-                <Icon icon="mdi:check-circle-outline" width="12" /> 采纳
-              </button>
-            </div>
+            </span>
           </div>
         </div>
+      </section>
+
+      <!-- ── 金融可选模块：FinGenius 个股辩论（默认折叠 · 独立于演进主线） ── -->
+      <section class="block">
+        <details class="debate-fold">
+          <summary>
+            <span class="df-tag">金融可选模块</span>
+            <span class="df-title">FinGenius 个股辩论</span>
+            <span class="df-note-inline">独立于演进主线 · 仅金融话题</span>
+          </summary>
+          <div class="df-body">
+            <p class="df-hint">该模块接 FinGenius 对个股做 6 角色辩论，属金融可选能力，<b>不参与演进主线定位</b>。仅金融话题有意义。</p>
+            <DebateSection
+              :stage="debateStage"
+              :debates="debates"
+              :sectors="null"
+              :triggering="debateTriggering"
+              :error-msg="debateError"
+              @trigger="handleDebateTrigger"
+              @retry="handleDebateRetry"
+            />
+          </div>
+        </details>
+      </section>
+
+      <!-- ── 数据源与参数（折叠高级） ─────────────────────────────────── -->
+      <section class="block">
+        <details class="adv">
+          <summary>数据源与参数（高级 · 一般不用动）</summary>
+          <div class="adv-body">
+            <div class="adv-row">
+              <span class="kv" style="margin-right:.4rem">已绑数据源：</span>
+              <template v-if="dataSources.length">
+                <span v-for="ds in dataSources" :key="ds.id" class="src-chip" @click="openEditSource(ds)">
+                  {{ ds.source_type }} <span :class="ds.enabled ? 'ok' : 'muted'">{{ ds.enabled ? '✓' : '✕' }}</span>
+                </span>
+              </template>
+              <span v-else class="muted">未绑定</span>
+              <button type="button" class="btn btn-ghost btn-sm" @click="openEditSource()">+ 绑定</button>
+            </div>
+            <div class="kv">话题状态：<b>{{ selectedTopic?.status ?? '—' }}</b> · 历史上下文：周 {{ contexts.filter(c => c.granularity==='week').length }} / 月 {{ contexts.filter(c => c.granularity==='month').length }} / 年 {{ contexts.filter(c => c.granularity==='year').length }}</div>
+          </div>
+        </details>
       </section>
     </template>
 
-    <!-- ── board-dimension: data sources ──────────────────────────────── -->
-    <section class="bep-section">
-      <header class="bep-section-head">
-        <Icon icon="mdi:connection" width="14" />
-        <span class="bep-section-title">板块数据源</span>
-        <span class="bep-section-meta">板块级参数，agent 查询工具</span>
-        <span class="bep-card-spacer" />
-        <button type="button" class="bep-ghost-btn" @click="openEditSource()">
-          <Icon icon="mdi:plus" width="13" /> 绑定数据源
-        </button>
-      </header>
-      <div v-if="dataSourcesLoading" class="bep-loading">加载中…</div>
-      <div v-else-if="dataSources.length === 0" class="bep-empty-row">未绑定数据源。</div>
-      <div v-else class="bep-rows">
-        <div v-for="ds in dataSources" :key="ds.id" class="bep-row bep-row--source">
-          <div class="bep-row-main">
-            <span class="bep-row-badge">{{ ds.source_type }}</span>
-            <span class="bep-row-text bep-row-text--mono">{{ preview(jsonString(ds.config), 120) }}</span>
-            <span class="bep-pill" :class="ds.enabled ? 'bep-pill--success' : 'bep-pill--muted'">
-              {{ ds.enabled ? '启用' : '停用' }}
-            </span>
-          </div>
-          <div class="bep-row-actions">
-            <button type="button" class="bep-link-btn" @click="openEditSource(ds)">
-              <Icon icon="mdi:pencil-outline" width="12" /> 编辑
-            </button>
-            <button type="button" class="bep-link-btn bep-link-btn--danger" @click="confirmDeleteSource(ds)">
-              <Icon icon="mdi:trash-can-outline" width="12" /> 删除
-            </button>
-          </div>
-        </div>
-      </div>
-    </section>
-
-    <!-- ── Dialog: edit context ────────────────────────────────────────── -->
-    <AppDialog :model-value="editingContext !== null" title="编辑分层上下文" width="640px" @update:model-value="(v) => { if (!v) editingContext = null }">
-      <div v-if="editingContext" class="bep-dialog-form">
-        <p class="bep-dialog-hint">编辑后 source 标记为「手动」。原 LLM 汇总将被覆盖。</p>
-        <label class="bep-field">
-          <span class="bep-field-label">content</span>
-          <textarea v-model="editingContext.content" class="bep-textarea" rows="14" />
-        </label>
-      </div>
-      <template #footer>
-        <AppButton variant="ghost" size="sm" @click="editingContext = null">取消</AppButton>
-        <AppButton variant="primary" size="sm" @click="saveEditingContext">保存</AppButton>
-      </template>
-    </AppDialog>
-
-    <!-- ── Dialog: result detail ───────────────────────────────────────── -->
-    <AppDialog :model-value="viewingResult !== null" title="增强结果详情" width="720px" @update:model-value="(v) => { if (!v) viewingResult = null }">
-      <div v-if="viewingResult?.loading" class="bep-loading">加载中…</div>
-      <div v-else-if="viewingResult?.detail" class="bep-dialog-form">
-        <p class="bep-dialog-section-label">演进判断</p>
-        <p class="bep-dialog-text">{{ viewingResult.detail.evolution_assessment || '（无）' }}</p>
-
-        <template v-if="sectorCount(viewingResult.detail.sectors) > 0">
-          <p class="bep-dialog-section-label">产业切片（{{ sectorCount(viewingResult.detail.sectors) }}）</p>
-          <ul class="bep-sectors">
-            <li v-for="(s, i) in (viewingResult.detail.sectors as ResultSector[])" :key="i" class="bep-sector">
-              <span class="bep-sector-name">{{ s.sector || '未命名' }}</span>
-              <span v-if="s.evolution_role" class="bep-sector-role">{{ s.evolution_role }}</span>
-              <span v-if="s.current_signal" class="bep-sector-sig">{{ s.current_signal }}</span>
-              <span v-if="typeof s.confidence === 'number'" class="bep-sector-conf">置信 {{ s.confidence.toFixed(2) }}</span>
-            </li>
-          </ul>
-        </template>
-
-        <p v-if="viewingResult.detail.causal_chain" class="bep-dialog-section-label">因果链</p>
-        <p v-if="viewingResult.detail.causal_chain" class="bep-dialog-text">{{ viewingResult.detail.causal_chain }}</p>
-
-        <p class="bep-dialog-section-label">session_id（点击复制，可在 ai-call-logs 回放）</p>
-        <button type="button" class="bep-session" @click="copyText(viewingResult.detail.session_id)">
-          <Icon icon="mdi:content-copy" width="12" />
-          <span>{{ viewingResult.detail.session_id }}</span>
-        </button>
-
-        <details class="bep-details">
-          <summary class="bep-dialog-section-label">input_snapshot / tool_calls（原始 JSON）</summary>
-          <pre class="bep-pre">{{ jsonString(viewingResult.detail.input_snapshot) }}</pre>
-          <pre class="bep-pre">{{ jsonString(viewingResult.detail.tool_calls) }}</pre>
-        </details>
-      </div>
-      <template #footer>
-        <AppButton variant="ghost" size="sm" @click="viewingResult = null">关闭</AppButton>
-      </template>
-    </AppDialog>
-
-    <!-- ── Dialog: edit review deviation ───────────────────────────────── -->
-    <AppDialog :model-value="editingReview !== null" title="编辑偏差说明" width="560px" @update:model-value="(v) => { if (!v) editingReview = null }">
-      <div v-if="editingReview" class="bep-dialog-form">
-        <label class="bep-field">
-          <span class="bep-field-label">deviation_summary</span>
-          <textarea v-model="editingReview.deviation" class="bep-textarea" rows="6" />
-        </label>
-      </div>
-      <template #footer>
-        <AppButton variant="ghost" size="sm" @click="editingReview = null">取消</AppButton>
-        <AppButton variant="primary" size="sm" @click="saveEditingReview">保存</AppButton>
-      </template>
-    </AppDialog>
-
-    <!-- ── Dialog: create review ───────────────────────────────────────── -->
-    <AppDialog :model-value="creatingReview !== null" title="手动添加批注" width="560px" @update:model-value="(v) => { if (!v) creatingReview = null }">
-      <div v-if="creatingReview" class="bep-dialog-form">
-        <p class="bep-dialog-hint">手动批注 source=manual，applied 默认 true。</p>
-        <label class="bep-field">
-          <span class="bep-field-label">关联结果（curr_result_id）<span class="bep-req">*</span></span>
-          <select v-model.number="creatingReview.curr_result_id" class="bep-select">
-            <option :value="null" disabled>选择结果…</option>
-            <option v-for="r in results" :key="r.id" :value="r.id">#{{ r.id }} · {{ formatDate(r.created_at) }}</option>
-          </select>
-        </label>
-        <label class="bep-field">
-          <span class="bep-field-label">上一次结果（prev_result_id，可选）</span>
-          <select v-model.number="creatingReview.prev_result_id" class="bep-select">
-            <option :value="null">无</option>
-            <option v-for="r in results" :key="r.id" :value="r.id">#{{ r.id }} · {{ formatDate(r.created_at) }}</option>
-          </select>
-        </label>
-        <label class="bep-field">
-          <span class="bep-field-label">偏差说明 <span class="bep-req">*</span></span>
-          <textarea v-model="creatingReview.deviation" class="bep-textarea" rows="5" placeholder="为什么变了 / 用户观察…" />
-        </label>
-      </div>
-      <template #footer>
-        <AppButton variant="ghost" size="sm" @click="creatingReview = null">取消</AppButton>
-        <AppButton variant="primary" size="sm" @click="saveCreatingReview">添加</AppButton>
-      </template>
-    </AppDialog>
-
-    <!-- ── Dialog: edit/upsert data source ─────────────────────────────── -->
+    <!-- ── Dialog: 绑定/编辑数据源 ─────────────────────────────────────── -->
     <AppDialog :model-value="editingSource !== null" :title="editingSource?.isNew ? '绑定数据源' : '编辑数据源'" width="560px" @update:model-value="(v) => { if (!v) editingSource = null }">
-      <div v-if="editingSource" class="bep-dialog-form">
-        <label class="bep-field">
-          <span class="bep-field-label">source_type</span>
-          <select v-model="editingSource.source_type" class="bep-select" :disabled="!editingSource.isNew">
+      <div v-if="editingSource" class="ew-dialog-form">
+        <label class="ew-field">
+          <span class="ew-field-label">source_type</span>
+          <select v-model="editingSource.source_type" class="ew-select" :disabled="!editingSource.isNew">
             <option v-for="opt in SOURCE_TYPE_OPTIONS" :key="opt" :value="opt">{{ opt }}</option>
           </select>
         </label>
-        <label class="bep-field">
-          <span class="bep-field-label">config（JSON）</span>
-          <textarea v-model="editingSource.config_text" class="bep-textarea bep-textarea--mono" rows="8" spellcheck="false" />
+        <label class="ew-field">
+          <span class="ew-field-label">config（JSON）</span>
+          <textarea v-model="editingSource.config_text" class="ew-textarea ew-textarea--mono" rows="8" spellcheck="false" />
         </label>
-        <label class="bep-field bep-field--row">
+        <label class="ew-field ew-field--row">
           <AppToggle v-model="editingSource.enabled" />
-          <span class="bep-field-label">启用</span>
+          <span class="ew-field-label">启用</span>
         </label>
+        <button v-if="!editingSource.isNew" type="button" class="btn btn-ghost btn-sm" @click="confirmDeleteSource(editingSource.source_type)">删除该数据源</button>
       </div>
       <template #footer>
         <AppButton variant="ghost" size="sm" @click="editingSource = null">取消</AppButton>
@@ -515,94 +386,129 @@ void selectTopic
 </template>
 
 <style scoped>
-.bep-panel { display: flex; flex-direction: column; gap: 1rem; }
+.ew-panel { display: flex; flex-direction: column; gap: 1rem; max-width: 960px; margin: 0 auto; }
 
-/* toolbar */
-.bep-toolbar { display: flex; align-items: center; gap: 0.5rem; padding: 0.6rem 0.75rem; border: 1px solid var(--color-border-subtle); border-radius: 12px; background: var(--color-bg-elevated); }
-.bep-toolbar-icon { color: var(--color-text-muted); }
-.bep-toolbar-title { font-size: 0.82rem; font-weight: 600; color: var(--color-text-primary); letter-spacing: 0.02em; }
-.bep-divider { width: 1px; height: 14px; background: var(--color-border-medium); margin: 0 0.25rem; }
-.bep-field-label { font-size: 0.68rem; color: var(--color-text-secondary); letter-spacing: 0.02em; }
-.bep-select { padding: 0.25rem 0.5rem; font-size: 0.78rem; border: 1px solid var(--color-input-border); border-radius: 6px; background: var(--color-input-bg); color: var(--color-text-primary); outline: none; max-width: 240px; }
-.bep-select:focus { border-color: var(--color-input-focus); }
-.bep-spacer { flex: 1; }
-.bep-muted { color: var(--color-text-muted); }
+/* topic 工具条 */
+.ew-toolbar { display: flex; align-items: center; gap: 0.5rem; padding: 0.6rem 0.75rem; border: 1px solid var(--color-border-subtle); border-radius: 12px; background: var(--color-bg-elevated); }
+.ew-toolbar-icon { color: var(--color-text-muted); }
+.ew-toolbar-title { font-size: 0.82rem; font-weight: 600; color: var(--color-text-primary); }
+.ew-divider { width: 1px; height: 14px; background: var(--color-border-medium); margin: 0 0.25rem; }
+.ew-field-label { font-size: 0.68rem; color: var(--color-text-secondary); }
+.ew-select { padding: 0.25rem 0.5rem; font-size: 0.78rem; border: 1px solid var(--color-input-border); border-radius: 6px; background: var(--color-input-bg); color: var(--color-text-primary); outline: none; max-width: 320px; }
+.ew-select:focus { border-color: var(--color-input-focus); }
+.ew-spacer { flex: 1; }
+.ew-muted { color: var(--color-text-muted); }
+.ew-ghost-btn { display: inline-flex; align-items: center; gap: 0.25rem; padding: 0.2rem 0.5rem; border-radius: 6px; border: 1px solid var(--color-border-medium); background: var(--color-bg-sunken); color: var(--color-text-primary); font-size: 0.68rem; cursor: pointer; font-family: inherit; }
+.ew-ghost-btn:hover { background: var(--color-bg-hover); }
+.ew-empty-hint { font-size: 0.78rem; color: var(--color-text-muted); padding: 0.5rem 0.75rem; }
 
-.bep-ghost-btn { display: inline-flex; align-items: center; gap: 0.25rem; padding: 0.2rem 0.5rem; border-radius: 6px; border: 1px solid var(--color-border-medium); background: var(--color-bg-sunken); color: var(--color-text-primary); font-size: 0.68rem; cursor: pointer; transition: all 0.12s ease; font-family: inherit; }
-.bep-ghost-btn:hover { background: var(--color-bg-hover); border-color: var(--color-border-strong); }
-.bep-ghost-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+/* 紧凑刊头 */
+.masthead { border-bottom: 2px solid var(--color-text-primary); padding-bottom: 1rem; margin-bottom: 0.5rem; }
+.masthead .eyebrow { font-size: 11px; letter-spacing: 0.18em; text-transform: uppercase; color: var(--color-accent); font-weight: 600; margin-bottom: 0.4rem; }
+.masthead-title { font-size: 1.6rem; line-height: 1.2; margin: 0 0 0.6rem; font-weight: 700; letter-spacing: -0.01em; color: var(--color-text-primary); }
+.lede { display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; font-size: 13px; color: var(--color-text-secondary); }
+.lede b { color: var(--color-text-primary); }
+.status-pill { display: inline-flex; align-items: center; gap: 5px; padding: 2px 9px; border-radius: 999px; font-size: 11px; font-weight: 600; }
+.status-pill.evolving { background: var(--color-warning-subtle); color: var(--color-warning); }
+.status-pill.static { background: var(--color-bg-sunken); color: var(--color-text-muted); }
+.status-pill .dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; animation: ew-pulse 1.6s infinite; }
+@keyframes ew-pulse { 0%,100%{opacity:1;} 50%{opacity:.35;} }
+.trigger-wrap { margin-left: auto; }
 
-.bep-accent-btn { display: inline-flex; align-items: center; gap: 0.25rem; padding: 0.25rem 0.6rem; border-radius: 6px; border: 1px solid var(--color-accent); background: var(--color-accent-subtle); color: var(--color-accent); font-size: 0.7rem; cursor: pointer; transition: all 0.12s ease; font-family: inherit; }
-.bep-accent-btn:hover:not(:disabled) { border-color: var(--color-accent-hover); }
-.bep-accent-btn:disabled { opacity: 0.6; cursor: not-allowed; }
+/* 子区块切换 */
+.subtabs { display: flex; gap: 0.25rem; padding: 0.35rem; background: var(--color-bg-elevated); border: 1px solid var(--color-border-subtle); border-radius: 10px; box-shadow: var(--shadow-subtle); }
+.subtab { flex: 1; display: inline-flex; align-items: center; justify-content: center; gap: 0.35rem; padding: 0.5rem 0.8rem; border: none; background: none; color: var(--color-text-muted); font-size: 13px; font-weight: 600; cursor: pointer; border-radius: 7px; transition: background 0.15s, color 0.15s; font-family: inherit; }
+.subtab:hover { background: var(--color-bg-hover); color: var(--color-text-secondary); }
+.subtab.active { background: var(--color-accent); color: #fff; }
 
-/* sections */
-.bep-section { display: flex; flex-direction: column; gap: 0.5rem; padding: 0.85rem 0.95rem; border: 1px solid var(--color-border-subtle); border-radius: 12px; background: var(--color-bg-hover); }
-.bep-section-head { display: flex; align-items: center; gap: 0.4rem; color: var(--color-text-secondary); }
-.bep-section-title { font-size: 0.78rem; font-weight: 600; color: var(--color-text-secondary); }
-.bep-section-meta { font-size: 0.65rem; color: var(--color-text-muted); }
+/* 通用 btn */
+.btn { display: inline-flex; align-items: center; gap: 6px; font-family: inherit; cursor: pointer; border: none; border-radius: 8px; font-weight: 600; font-size: 13px; padding: 7px 14px; transition: background 0.15s, opacity 0.15s, transform 0.1s; }
+.btn:active { transform: translateY(1px); }
+.btn-primary { background: var(--color-accent); color: #fff; }
+.btn-primary:hover { background: var(--color-accent-hover); }
+.btn-ghost { background: transparent; color: var(--color-text-secondary); border: 1px solid var(--color-border-medium); }
+.btn-ghost:hover { background: var(--color-bg-hover); color: var(--color-text-primary); }
+.btn-sm { padding: 4px 10px; font-size: 12px; }
+.btn:disabled { opacity: 0.4; cursor: not-allowed; }
 
-.bep-loading { font-size: 0.72rem; color: var(--color-text-muted); padding: 0.5rem 0; }
-.bep-empty-hint { font-size: 0.75rem; color: var(--color-text-muted); padding: 0.5rem 0.75rem; }
-.bep-empty-row { font-size: 0.72rem; color: var(--color-text-muted); padding: 0.5rem 0; }
+/* 区块 */
+.block { margin-bottom: 1.5rem; }
+.block-head { display: flex; align-items: baseline; gap: 0.6rem; margin-bottom: 0.9rem; padding-bottom: 0.4rem; border-bottom: 1px solid var(--color-border-subtle); }
+.block-head h2 { font-size: 1.1rem; margin: 0; font-weight: 700; color: var(--color-text-primary); }
+.block-head .helper { font-size: 12px; color: var(--color-text-muted); }
 
-/* context cards */
-.bep-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 0.5rem; }
-.bep-card { display: flex; flex-direction: column; gap: 0.35rem; padding: 0.6rem 0.7rem; border: 1px solid var(--color-border-medium); border-radius: 8px; background: var(--color-bg-elevated); transition: border-color 0.12s ease; }
-.bep-card:hover { border-color: var(--color-border-strong); }
-.bep-card-head { display: flex; align-items: center; gap: 0.3rem; }
-.bep-card-title { font-size: 0.72rem; font-weight: 600; color: var(--color-text-primary); }
-.bep-card-tag { font-size: 0.58rem; color: var(--color-text-muted); padding: 0 0.3rem; border-radius: 999px; background: var(--color-bg-sunken); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
-.bep-card-spacer { flex: 1; }
-.bep-card-asof { font-size: 0.62rem; color: var(--color-text-muted); }
-.bep-card-source { display: inline-flex; align-items: center; gap: 0.2rem; font-size: 0.62rem; color: var(--color-text-muted); }
-.bep-card-preview { font-size: 0.72rem; line-height: 1.5; color: var(--color-text-secondary); margin: 0; flex: 1; }
-.bep-card-actions { display: flex; gap: 0.4rem; }
+/* ① 周期筛选器 */
+.period-picker { display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap; background: var(--color-bg-elevated); border: 1px solid var(--color-border-subtle); border-radius: 12px; padding: 0.6rem 0.9rem; margin-bottom: 1.1rem; box-shadow: var(--shadow-subtle); }
+.gran-select { display: inline-flex; border: 1px solid var(--color-border-medium); border-radius: 8px; overflow: hidden; }
+.gran-select button { border: none; background: var(--color-bg-base); color: var(--color-text-secondary); font-size: 12.5px; padding: 5px 14px; cursor: pointer; font-family: inherit; font-weight: 600; }
+.gran-select button.on { background: var(--color-accent); color: #fff; }
+.period-nav { display: inline-flex; align-items: center; gap: 0.5rem; }
+.period-nav .cur { font-size: 14px; font-weight: 600; min-width: 120px; text-align: center; color: var(--color-text-primary); }
+.period-nav button { width: 26px; height: 26px; border: 1px solid var(--color-border-medium); background: var(--color-bg-base); color: var(--color-text-secondary); border-radius: 6px; cursor: pointer; font-family: inherit; }
+.period-nav button:hover:not(:disabled) { border-color: var(--color-accent); color: var(--color-accent); }
+.period-nav button:disabled { opacity: 0.3; cursor: not-allowed; }
+.fresh-tag { font-size: 11px; padding: 2px 8px; border-radius: 999px; }
+.fresh-latest { background: var(--color-success-subtle); color: var(--color-success); }
+.fresh-stale { background: var(--color-warning-subtle); color: var(--color-warning); }
+.ew-period-count { font-size: 11.5px; }
 
-.bep-link-btn { display: inline-flex; align-items: center; gap: 0.2rem; padding: 0.15rem 0.35rem; border: none; background: none; color: var(--color-text-muted); font-size: 0.66rem; cursor: pointer; border-radius: 4px; transition: all 0.12s ease; font-family: inherit; }
-.bep-link-btn:hover:not(:disabled) { color: var(--color-accent); background: var(--color-accent-subtle); }
-.bep-link-btn:disabled { opacity: 0.5; cursor: not-allowed; }
-.bep-link-btn--danger:hover:not(:disabled) { color: var(--color-error); background: var(--color-warning-subtle); }
+/* 叙事 */
+.narrative { background: var(--color-bg-elevated); border: 1px solid var(--color-border-subtle); border-left: 3px solid var(--color-accent); border-radius: 0 8px 8px 0; padding: 1.1rem 1.3rem; box-shadow: var(--shadow-print); }
+.seg { position: relative; padding: 0.35rem 0.5rem 0.35rem 0; margin: 0 -0.5rem; border-radius: 6px; transition: background 0.12s; }
+.seg:hover { background: var(--color-bg-hover); }
+.seg .seg-h { font-weight: 600; font-size: 13.5px; margin-bottom: 0.2rem; color: var(--color-text-primary); }
+.seg .seg-b { font-size: 13px; color: var(--color-text-secondary); line-height: 1.65; white-space: pre-wrap; }
+.seg .seg-b.muted { color: var(--color-text-muted); }
+.seg .seg-edit { position: absolute; right: 6px; top: 6px; opacity: 0; transition: opacity 0.12s; cursor: pointer; padding: 3px 6px; border-radius: 5px; color: var(--color-text-muted); }
+.seg:hover .seg-edit { opacity: 1; }
+.seg .seg-edit:hover { background: var(--color-accent-subtle); color: var(--color-accent); }
+.seg-textarea { width: 100%; min-height: 90px; resize: vertical; font-family: inherit; font-size: 13px; line-height: 1.6; background: var(--color-input-bg); border: 1px solid var(--color-input-border); border-radius: 6px; color: var(--color-text-primary); padding: 0.5rem 0.6rem; outline: none; box-sizing: border-box; }
+.seg-textarea:focus { border-color: var(--color-input-focus); }
+.seg-actions { display: flex; gap: 0.4rem; margin-top: 0.4rem; }
+.seg-h-row { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.2rem; }
+.seg-cited { font-size: 10px; color: var(--color-accent); background: var(--color-accent-subtle); padding: 1px 7px; border-radius: 999px; font-weight: 600; white-space: nowrap; }
+.seg-cited.empty { color: var(--color-text-muted); background: var(--color-bg-sunken); }
+.narrative-foot { display: flex; align-items: center; gap: 0.6rem; margin-top: 0.9rem; padding-top: 0.7rem; border-top: 1px solid var(--color-dialog-divider); font-size: 11.5px; color: var(--color-text-muted); }
 
-/* rows (results / reviews / data sources) */
-.bep-rows { display: flex; flex-direction: column; gap: 0.35rem; }
-.bep-row { display: flex; align-items: center; gap: 0.5rem; padding: 0.5rem 0.65rem; border: 1px solid var(--color-border-subtle); border-radius: 8px; background: var(--color-bg-elevated); cursor: pointer; transition: border-color 0.12s ease; text-align: left; width: 100%; font-family: inherit; }
-.bep-row:hover { border-color: var(--color-border-medium); }
-.bep-row--review, .bep-row--source { flex-wrap: wrap; cursor: default; }
-.bep-row--review:hover, .bep-row--source:hover { border-color: var(--color-border-subtle); }
-.bep-row-main { display: flex; align-items: center; gap: 0.5rem; flex: 1; min-width: 0; flex-wrap: wrap; }
-.bep-row-actions { display: flex; gap: 0.2rem; }
-.bep-row-date { font-size: 0.62rem; color: var(--color-text-muted); white-space: nowrap; }
-.bep-row-text { font-size: 0.74rem; color: var(--color-text-secondary); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.bep-row-text--mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.68rem; }
-.bep-row-badge { font-size: 0.6rem; color: var(--color-text-muted); padding: 0.05rem 0.4rem; border-radius: 999px; background: var(--color-bg-sunken); white-space: nowrap; }
-.bep-row-tags { display: inline-flex; gap: 0.25rem; }
-.bep-row-chev { color: var(--color-text-muted); }
-.bep-pill { display: inline-flex; align-items: center; gap: 0.2rem; font-size: 0.58rem; padding: 0.05rem 0.4rem; border-radius: 999px; }
-.bep-pill--success { color: var(--color-success); background: var(--color-success-subtle); }
-.bep-pill--muted { color: var(--color-text-muted); background: var(--color-bg-sunken); }
+/* 演进报告 meta */
+.outlook-meta { margin-top: 0.8rem; font-size: 11.5px; }
+.link-btn { display: inline-flex; align-items: center; gap: 3px; padding: 2px 7px; border: none; background: none; color: var(--color-text-muted); font-size: 11.5px; cursor: pointer; border-radius: 5px; font-family: inherit; }
+.link-btn:hover { color: var(--color-accent); background: var(--color-accent-subtle); }
+
+/* 金融可选模块 · DebateSection 折叠 */
+.debate-fold { background: var(--color-bg-elevated); border: 1px solid var(--color-border-subtle); border-radius: 12px; padding: 0.7rem 0.95rem; }
+.debate-fold > summary { cursor: pointer; font-size: 13px; font-weight: 600; color: var(--color-text-secondary); list-style: none; display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
+.debate-fold > summary::-webkit-details-marker { display: none; }
+.debate-fold > summary::before { content: '▸ '; color: var(--color-text-muted); }
+.debate-fold[open] > summary::before { content: '▾ '; }
+.df-tag { font-size: 10px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--color-warning); background: var(--color-warning-subtle); padding: 2px 8px; border-radius: 4px; }
+.df-title { color: var(--color-text-primary); }
+.df-note-inline { font-size: 11px; color: var(--color-text-muted); font-weight: 400; }
+.df-body { padding: 0.7rem 0 0; }
+.df-hint { font-size: 12px; color: var(--color-text-muted); margin: 0 0 0.8rem; padding: 0.5rem 0.7rem; background: var(--color-bg-sunken); border-radius: 6px; line-height: 1.6; }
+.df-hint b { color: var(--color-text-secondary); }
+
+/* 数据源折叠高级 */
+details.adv { background: var(--color-bg-elevated); border: 1px solid var(--color-border-subtle); border-radius: 10px; padding: 0.6rem 0.9rem; }
+details.adv > summary { cursor: pointer; font-size: 13px; font-weight: 600; color: var(--color-text-secondary); list-style: none; }
+details.adv > summary::-webkit-details-marker { display: none; }
+details.adv > summary::before { content: "▸ "; color: var(--color-text-muted); }
+details.adv[open] > summary::before { content: "▾ "; }
+.adv-body { padding: 0.6rem 0 0; font-size: 12.5px; color: var(--color-text-secondary); }
+.adv-row { display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: center; margin-bottom: 0.5rem; }
+.src-chip { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 8px; background: var(--color-bg-base); border: 1px solid var(--color-border-medium); font-size: 12px; cursor: pointer; }
+.src-chip .ok { color: var(--color-success); }
+.kv { font-size: 12px; color: var(--color-text-secondary); }
+.kv b { color: var(--color-text-primary); }
 
 /* dialogs */
-.bep-dialog-form { display: flex; flex-direction: column; gap: 0.75rem; }
-.bep-dialog-hint { font-size: 0.68rem; color: var(--color-text-muted); margin: 0; }
-.bep-dialog-section-label { font-size: 0.66rem; font-weight: 600; color: var(--color-text-secondary); letter-spacing: 0.04em; text-transform: uppercase; margin: 0.25rem 0 0.2rem; }
-.bep-dialog-text { font-size: 0.78rem; line-height: 1.55; color: var(--color-text-primary); margin: 0; white-space: pre-wrap; }
-.bep-field { display: flex; flex-direction: column; gap: 0.3rem; }
-.bep-field--row { flex-direction: row; align-items: center; gap: 0.5rem; }
-.bep-req { color: var(--color-accent); }
-.bep-textarea { width: 100%; box-sizing: border-box; border: 1px solid var(--color-input-border); border-radius: 8px; background: var(--color-input-bg); color: var(--color-text-primary); font-size: 0.78rem; padding: 0.5rem 0.7rem; outline: none; resize: vertical; font-family: inherit; line-height: 1.5; }
-.bep-textarea:focus { border-color: var(--color-input-focus); }
-.bep-textarea--mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.72rem; }
-.bep-session { display: inline-flex; align-items: center; gap: 0.3rem; padding: 0.3rem 0.5rem; border: 1px dashed var(--color-border-medium); border-radius: 6px; background: var(--color-bg-sunken); color: var(--color-text-secondary); font-size: 0.68rem; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; cursor: pointer; max-width: 100%; overflow: hidden; }
-.bep-session span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.bep-session:hover { border-color: var(--color-accent); color: var(--color-accent); }
-.bep-sectors { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.3rem; }
-.bep-sector { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem; padding: 0.35rem 0.5rem; border: 1px solid var(--color-border-subtle); border-radius: 6px; }
-.bep-sector-name { font-size: 0.74rem; font-weight: 600; color: var(--color-text-primary); }
-.bep-sector-role { font-size: 0.62rem; color: var(--color-accent); }
-.bep-sector-sig { font-size: 0.66rem; color: var(--color-text-secondary); }
-.bep-sector-conf { font-size: 0.6rem; color: var(--color-text-muted); margin-left: auto; }
-.bep-details { border: 1px solid var(--color-border-subtle); border-radius: 6px; padding: 0.4rem 0.55rem; }
-.bep-details summary { cursor: pointer; }
-.bep-pre { font-size: 0.66rem; line-height: 1.5; color: var(--color-text-secondary); background: var(--color-bg-sunken); padding: 0.4rem 0.55rem; border-radius: 6px; overflow-x: auto; margin: 0.3rem 0 0; max-height: 200px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.ew-dialog-form { display: flex; flex-direction: column; gap: 0.75rem; }
+.ew-field { display: flex; flex-direction: column; gap: 0.3rem; }
+.ew-field--row { flex-direction: row; align-items: center; gap: 0.5rem; }
+.ew-textarea { width: 100%; box-sizing: border-box; border: 1px solid var(--color-input-border); border-radius: 8px; background: var(--color-input-bg); color: var(--color-text-primary); font-size: 0.78rem; padding: 0.5rem 0.7rem; outline: none; resize: vertical; font-family: inherit; line-height: 1.5; }
+.ew-textarea:focus { border-color: var(--color-input-focus); }
+.ew-textarea--mono { font-family: ui-monospace, "Cascadia Code", Menlo, monospace; font-size: 0.72rem; }
+
+.muted { color: var(--color-text-muted); }
+.serif { font-family: Georgia, "Songti SC", "SimSun", "Source Serif 4", serif; }
 </style>

@@ -141,5 +141,5 @@
 
 ### 11.5 数据清理
 
-- [ ] 11.5.1 重定位前的旧 result（sectors 涨跌语义）和旧 review（verdict 涨跌兑现）清空重跑（不可复用）
-- [ ] 11.5.2 清理迁移脚本（幂等，TRUNCATE topic_enrichment_result / topic_enrichment_review）
+- [x] 11.5.1 重定位前的旧 result（sectors 涨跌语义）和旧 review（verdict 涨跌兑现）清空重跑（不可复用）—— 迁移 `20260712_0001` 在下次迁移运行（部署/服务启动）时执行 TRUNCATE，重跑随下次增强自动产生
+- [x] 11.5.2 清理迁移脚本（幂等，TRUNCATE topic_enrichment_result / topic_enrichment_review / stock_debate_result，CASCADE + RESTART IDENTITY）—— `postgres_migrations.go` 版本 `20260712_0001`

@@ -1043,6 +1043,26 @@ func postgresMigrations() []Migration {
 				return nil
 			},
 		},
+
+		// ── Data-enrichment §11.5: clear pre-演进定位 schema data ──
+		// 旧 result.sectors 用涨跌(direction/trigger)语义、旧 review.verdict 用兑现度(hit/part/miss)，
+		// 与 §11.2/§11.3 的演进定位(position/signals、position_change)不兼容，不可复用，清空重跑。
+		// stock_debate_result FK 引用 result，一并清。幂等：TRUNCATE 本身幂等 + 框架按 Version 去重。
+		{
+			Version:     "20260712_0001",
+			Description: "TRUNCATE topic_enrichment_result/topic_enrichment_review/stock_debate_result — old 涨跌+兑现 schema incompatible with 演进定位 rewrite (§11.5). Idempotent.",
+			Up: func(db *gorm.DB) error {
+				// 三张表由 AutoMigrate 在版本迁移前一并创建；result 表不存在则无需清理。
+				if !tableExists(db, "topic_enrichment_result") {
+					return nil
+				}
+				// CASCADE 断开 FK 子表引用；RESTART IDENTITY 复位 BIGSERIAL 序列。TRUNCATE 本身幂等。
+				if err := db.Exec("TRUNCATE TABLE topic_enrichment_result, topic_enrichment_review, stock_debate_result RESTART IDENTITY CASCADE").Error; err != nil {
+					return fmt.Errorf("truncate enrichment stale data: %w", err)
+				}
+				return nil
+			},
+		},
 	}
 }
 

@@ -27,6 +27,47 @@ func FormatYear(t time.Time) string {
 	return strconv.Itoa(t.Year())
 }
 
+// FormatPeriodLabel converts a period string + granularity to a human-readable label.
+// "2026-W27" with "week" → "2026年第27周（6月29日-7月5日）"
+// "2026-06" with "month" → "2026年6月"
+// "2026" with "year" → "2026年"
+// "all" → "全部周期（滚动汇总）"
+func FormatPeriodLabel(period, granularity string) string {
+	switch granularity {
+	case "week":
+		matches := weekRegex.FindStringSubmatch(period)
+		if matches == nil {
+			return "本周期"
+		}
+		year, _ := strconv.Atoi(matches[1])
+		week, _ := strconv.Atoi(matches[2])
+		from, to, err := ParsePeriodRange(period, "week")
+		if err != nil {
+			return "本周期"
+		}
+		// to is exclusive; the last day is to-1.
+		lastDay := to.AddDate(0, 0, -1)
+		return fmt.Sprintf("%d年第%d周（%s-%s）", year, week,
+			from.Format("1月2日"), lastDay.Format("1月2日"))
+	case "month":
+		if _, err := time.Parse("2006-01", period); err != nil {
+			return "本周期"
+		}
+		t, _ := time.Parse("2006-01", period)
+		return fmt.Sprintf("%d年%d月", t.Year(), t.Month())
+	case "year":
+		y, err := strconv.Atoi(period)
+		if err != nil || y < 2000 || y > 2100 {
+			return "本周期"
+		}
+		return fmt.Sprintf("%d年", y)
+	case "all":
+		return "全部周期（滚动汇总）"
+	default:
+		return "本周期"
+	}
+}
+
 // PeriodForGranularity computes the period string for the given granularity + time.
 func PeriodForGranularity(t time.Time, granularity string) string {
 	switch granularity {

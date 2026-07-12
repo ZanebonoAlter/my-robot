@@ -71,17 +71,26 @@ func (m *mockAirouter) Chat(ctx context.Context, req airouter.ChatRequest) (*air
 
 // mockSectionReader returns canned section text for topic+range queries.
 type mockSectionReader struct {
-	byRange map[string]string // key: "topicID|from|to"
+	byRange      map[string]string    // key: "topicID|from|to"
+	datesByTopic map[uint][]time.Time // topicID → distinct section dates
 }
 
 func newMockSectionReader() *mockSectionReader {
 	return &mockSectionReader{
-		byRange: make(map[string]string),
+		byRange:      make(map[string]string),
+		datesByTopic: make(map[uint][]time.Time),
 	}
 }
 
 func (m *mockSectionReader) add(topicID uint, from, to time.Time, text string) {
 	m.byRange[fmt.Sprintf("%d|%s|%s", topicID, from.Format("2006-01-02"), to.Format("2006-01-02"))] = text
+}
+
+func (m *mockSectionReader) SectionDates(ctx context.Context, topicID uint) ([]time.Time, error) {
+	if dates, ok := m.datesByTopic[topicID]; ok {
+		return dates, nil
+	}
+	return nil, nil
 }
 
 func (m *mockSectionReader) ReadSections(ctx context.Context, topicID uint, from, to time.Time) (string, error) {
@@ -219,8 +228,11 @@ func TestRefreshWeek_NoOldContext(t *testing.T) {
 	if strings.Contains(prompt, "已有汇总") || strings.Contains(prompt, "旧汇总") {
 		t.Fatal("week prompt should not contain old context reference")
 	}
-	if !strings.Contains(prompt, "本周") {
-		t.Fatal("week prompt should mention 本周")
+	if strings.Contains(prompt, "本周") {
+		t.Fatal("week prompt should NOT contain hardcoded 本周; should use period-specific label")
+	}
+	if !strings.Contains(prompt, "2026年第28周") {
+		t.Errorf("week prompt should contain period-specific label 2026年第28周, got: %s", prompt)
 	}
 }
 
@@ -266,8 +278,11 @@ func TestRefreshMonth_StandaloneSummary(t *testing.T) {
 	if strings.Contains(prompt, "6月摘要") || strings.Contains(prompt, "已有汇总") {
 		t.Fatal("month prompt should NOT contain old summary (standalone period)")
 	}
-	if !strings.Contains(prompt, "本月") {
-		t.Fatal("month prompt should mention 本月")
+	if strings.Contains(prompt, "本月") {
+		t.Fatal("month prompt should NOT contain hardcoded 本月; should use period-specific label")
+	}
+	if !strings.Contains(prompt, "2026年7月") {
+		t.Errorf("month prompt should contain period-specific label 2026年7月, got: %s", prompt)
 	}
 
 	// Verify: new row with period 2026-07 created (June row still exists).
@@ -299,6 +314,14 @@ func TestHealMissing_SkipOneWeekThenCatchUp(t *testing.T) {
 
 	now := fixedMonday() // Monday Jul 6, 2026
 	topicID := uint(5)
+
+	// Mock SectionDates: data exists for W26, W27, W28 (oldWeek=W26, now=W28).
+	var dates []time.Time
+	for _, wp := range []string{"2026-W26", "2026-W27", "2026-W28"} {
+		from, _, _ := service.ParsePeriodRange(wp, "week")
+		dates = append(dates, from.AddDate(0, 0, 3))
+	}
+	sr.datesByTopic[topicID] = dates
 
 	// Seed an old week context (2 weeks ago — "2026-W25", which is June 15-21 2026)
 	// Actually let's use fixedMonday minus 14 days which gives a period that's 2 weeks before W27
@@ -359,6 +382,9 @@ func TestHealMissing_NoStaleContexts(t *testing.T) {
 	currentPeriod := service.FormatWeek(now)
 	topicID := uint(6)
 
+	// Mock SectionDates: only dates within current period.
+	sr.datesByTopic[topicID] = []time.Time{now}
+
 	// Seed current week context.
 	freshCtx := &repository.TopicLifelineContext{
 		PersistentTopicID: topicID,
@@ -390,6 +416,14 @@ func TestHealMissing_AsOfDateAdvancesSequentially(t *testing.T) {
 
 	now := time.Date(2026, 7, 6, 10, 0, 0, 0, time.UTC)
 	topicID := uint(7)
+
+	// Mock SectionDates: data exists for months 4-7.
+	sr.datesByTopic[topicID] = []time.Time{
+		time.Date(2026, 4, 15, 0, 0, 0, 0, time.UTC),
+		time.Date(2026, 5, 15, 0, 0, 0, 0, time.UTC),
+		time.Date(2026, 6, 15, 0, 0, 0, 0, time.UTC),
+		time.Date(2026, 7, 15, 0, 0, 0, 0, time.UTC),
+	}
 
 	// Seed old month context (April 2026).
 	oldPeriod := "2026-04"
@@ -520,6 +554,216 @@ func TestRefreshAll_IncrementalMerge(t *testing.T) {
 	}
 	if !strings.Contains(prompt, "增量") {
 		t.Fatal("all prompt should contain incremental sections")
+	}
+}
+
+// ── Tests: HealMissing backward fill (historical backfill) ─────────────────
+
+func TestHealMissing_BackfillsHistoricalPeriods(t *testing.T) {
+	setupLifelineTestDB(t)
+	ar := newMockAirouter()
+	sr := newMockSectionReader()
+	svc := newTestService(ar, sr)
+
+	now := fixedMonday() // Monday Jul 6, 2026 = W28
+	topicID := uint(10)
+
+	// No seeded context at all — simulating a topic that has W23-W28 data
+	// but never had lifeline_context rows generated.
+	var dates []time.Time
+	for w := 23; w <= 28; w++ {
+		from, _, _ := service.ParsePeriodRange(fmt.Sprintf("2026-W%02d", w), "week")
+		dates = append(dates, from.AddDate(0, 0, 3))
+	}
+	sr.datesByTopic[topicID] = dates
+
+	lister := &mockTopicLister{ids: []uint{topicID}}
+	err := svc.HealMissing(context.Background(), string(repository.GranularityWeek), now, lister)
+	if err != nil {
+		t.Fatalf("HealMissing: %v", err)
+	}
+
+	// Should have 6 LLM calls (W23-W28), all ≤ current W28.
+	if len(ar.calls) != 6 {
+		t.Fatalf("expected 6 Chat calls for W23-W28 backfill, got %d", len(ar.calls))
+	}
+
+	// Verify all 6 periods exist in DB.
+	for w := 23; w <= 28; w++ {
+		period := fmt.Sprintf("2026-W%02d", w)
+		ctx, err := repository.Repo.GetTopicLifelineContext(context.Background(), topicID, string(repository.GranularityWeek), period)
+		if err != nil {
+			t.Fatalf("get context for %s: %v", period, err)
+		}
+		if ctx.Period != period {
+			t.Fatalf("expected period %s, got %s", period, ctx.Period)
+		}
+	}
+}
+
+func TestHealMissing_BackfillsIncludesOldThreshold(t *testing.T) {
+	setupLifelineTestDB(t)
+	ar := newMockAirouter()
+	sr := newMockSectionReader()
+	svc := newTestService(ar, sr)
+
+	now := fixedMonday() // W28
+	topicID := uint(11)
+
+	// Seed only W28 (current) context.
+	currentPeriod := service.FormatWeek(now)
+	freshCtx := &repository.TopicLifelineContext{
+		PersistentTopicID: topicID,
+		Granularity:       string(repository.GranularityWeek),
+		Period:            currentPeriod,
+		Content:           "current",
+		AsOfDate:          now,
+		Source:            "llm_assisted",
+	}
+	repository.Repo.UpsertTopicLifelineContext(context.Background(), freshCtx)
+
+	// SectionDates: data exists for W24-W28 (older weeks were never summarized).
+	var dates []time.Time
+	for w := 24; w <= 28; w++ {
+		from, _, _ := service.ParsePeriodRange(fmt.Sprintf("2026-W%02d", w), "week")
+		dates = append(dates, from.AddDate(0, 0, 3))
+	}
+	sr.datesByTopic[topicID] = dates
+
+	lister := &mockTopicLister{ids: []uint{topicID}}
+	err := svc.HealMissing(context.Background(), string(repository.GranularityWeek), now, lister)
+	if err != nil {
+		t.Fatalf("HealMissing: %v", err)
+	}
+
+	// Should backfill W24-W27 (4 periods), skip W28 (already exists).
+	if len(ar.calls) != 4 {
+		t.Fatalf("expected 4 Chat calls for W24-W27 backfill, got %d", len(ar.calls))
+	}
+
+	// Verify all 5 periods (W24-W28) exist.
+	for w := 24; w <= 28; w++ {
+		period := fmt.Sprintf("2026-W%02d", w)
+		ctx, err := repository.Repo.GetTopicLifelineContext(context.Background(), topicID, string(repository.GranularityWeek), period)
+		if err != nil {
+			t.Fatalf("get context for %s: %v", period, err)
+		}
+		if ctx.Period != period {
+			t.Fatalf("expected period %s, got %s", period, ctx.Period)
+		}
+	}
+}
+
+// ── Tests: summarizeArchive period-aware prompt ────────────────────────────
+
+func TestSummarizeArchive_PeriodAwarePrompt(t *testing.T) {
+	setupLifelineTestDB(t)
+	ar := newMockAirouter()
+	sr := newMockSectionReader()
+	svc := newTestService(ar, sr)
+
+	topicID := uint(12)
+	// Refresh a specific historical period: 2026-W25 (June 15-21).
+	err := svc.RefreshPeriod(context.Background(), topicID, string(repository.GranularityWeek), "2026-W25", fixedMonday())
+	if err != nil {
+		t.Fatalf("RefreshPeriod: %v", err)
+	}
+
+	if len(ar.calls) == 0 {
+		t.Fatal("expected Chat call")
+	}
+	prompt := ar.calls[0].Messages[0].Content
+
+	// Must contain the real period label (not hardcoded "本周").
+	if !strings.Contains(prompt, "2026年第25周") {
+		t.Errorf("prompt should contain 2026年第25周, got: %s", prompt)
+	}
+	if strings.Contains(prompt, "本周") {
+		t.Fatal("prompt should NOT contain hardcoded 本周")
+	}
+
+	// Must contain new prompt structure.
+	if !strings.Contains(prompt, "关键动向") {
+		t.Error("prompt should contain 关键动向 section")
+	}
+	if !strings.Contains(prompt, "涉及主体与领域") {
+		t.Error("prompt should contain 涉及主体与领域 section")
+	}
+	if !strings.Contains(prompt, "事件脉络") {
+		t.Error("prompt should contain 事件脉络 section")
+	}
+	if !strings.Contains(prompt, "不做事态预测") {
+		t.Error("prompt should contain 不做事态预测 constraint")
+	}
+}
+
+// ── Tests: FormatPeriodLabel ───────────────────────────────────────────────
+
+func TestFormatPeriodLabel(t *testing.T) {
+	tests := []struct {
+		name        string
+		period      string
+		granularity string
+		want        string
+	}{
+		{
+			name:        "week",
+			period:      "2026-W27",
+			granularity: "week",
+			// W27 = Mon Jun 29 – Sun Jul 5
+			want: "2026年第27周（6月29日-7月5日）",
+		},
+		{
+			name:        "month",
+			period:      "2026-06",
+			granularity: "month",
+			want:        "2026年6月",
+		},
+		{
+			name:        "year",
+			period:      "2026",
+			granularity: "year",
+			want:        "2026年",
+		},
+		{
+			name:        "all",
+			period:      "all",
+			granularity: "all",
+			want:        "全部周期（滚动汇总）",
+		},
+		{
+			name:        "invalid week format",
+			period:      "bad-week",
+			granularity: "week",
+			want:        "本周期",
+		},
+		{
+			name:        "invalid month format",
+			period:      "bad-month",
+			granularity: "month",
+			want:        "本周期",
+		},
+		{
+			name:        "invalid year format",
+			period:      "bad-year",
+			granularity: "year",
+			want:        "本周期",
+		},
+		{
+			name:        "unknown granularity",
+			period:      "2026-W01",
+			granularity: "unknown",
+			want:        "本周期",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := service.FormatPeriodLabel(tt.period, tt.granularity)
+			if got != tt.want {
+				t.Errorf("expected %q, got %q", tt.want, got)
+			}
+		})
 	}
 }
 

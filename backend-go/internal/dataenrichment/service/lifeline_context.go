@@ -98,9 +98,8 @@ func (s *LifelineContextService) RefreshGranularity(ctx context.Context, topicID
 }
 
 // HealMissing scans active topics for missing periods and fills them in.
-// For each topic, finds the latest existing period. If the latest is behind the
-// current period, generates all intermediate periods forward. If no period
-// exists, generates only the current period.
+// Bidirectional: finds every period that has section data but no lifeline_context
+// row yet, and generates it (up to current period, no future).
 func (s *LifelineContextService) HealMissing(ctx context.Context, granularity string, now time.Time, lister TopicLister) error {
 	topicIDs, err := lister.ListActiveTopicIDs(ctx)
 	if err != nil {
@@ -110,20 +109,40 @@ func (s *LifelineContextService) HealMissing(ctx context.Context, granularity st
 	currentPeriod := PeriodForGranularity(now, granularity)
 
 	for _, topicID := range topicIDs {
+		// Which periods have section data?
+		dates, err := s.sectionReader.SectionDates(ctx, topicID)
+		if err != nil {
+			return fmt.Errorf("heal missing: topic %d section dates: %w", topicID, err)
+		}
+		dataPeriods := make(map[string]bool)
+		for _, d := range dates {
+			dataPeriods[PeriodForGranularity(d, granularity)] = true
+		}
+
+		// Which periods already have context rows?
 		existing, err := s.repo.ListTopicLifelineContextsByGranularity(ctx, topicID, granularity)
 		if err != nil {
 			return fmt.Errorf("heal missing: topic %d: %w", topicID, err)
 		}
-
-		// Find the latest period.
-		var latestPeriod string
-		if len(existing) > 0 {
-			// Already ordered by period DESC from repository.
-			latestPeriod = existing[0].Period
+		have := make(map[string]bool, len(existing))
+		for _, e := range existing {
+			have[e.Period] = true
 		}
 
-		// Compute missing periods from latest+1 to current.
-		missing := PeriodsBetween(latestPeriod, currentPeriod, granularity)
+		// Collect missing periods (have data, no context yet, not after current).
+		var missing []string
+		for p := range dataPeriods {
+			if have[p] {
+				continue
+			}
+			if ComparePeriods(p, currentPeriod) > 0 {
+				continue
+			}
+			missing = append(missing, p)
+		}
+
+		// Stable order for deterministic backfill.
+		sort.Strings(missing)
 		for _, p := range missing {
 			if err := s.refreshArchive(ctx, topicID, granularity, p); err != nil {
 				return fmt.Errorf("heal missing: topic %d %s %s: %w", topicID, granularity, p, err)
@@ -181,7 +200,7 @@ func (s *LifelineContextService) refreshArchive(ctx context.Context, topicID uin
 		sectionsText = "(本周期暂无相关新闻)"
 	}
 
-	content, err := s.summarizeArchive(ctx, topicID, granularity, sectionsText)
+	content, err := s.summarizeArchive(ctx, topicID, granularity, period, sectionsText)
 	if err != nil {
 		return fmt.Errorf("refresh archive: summarize: %w", err)
 	}
@@ -234,25 +253,16 @@ func (s *LifelineContextService) refreshRolling(ctx context.Context, topicID uin
 }
 
 // summarizeArchive produces a fresh standalone summary for one archive period.
-func (s *LifelineContextService) summarizeArchive(ctx context.Context, topicID uint, granularity, sectionsText string) (string, error) {
-	var periodLabel string
-	switch granularity {
-	case string(repository.GranularityWeek):
-		periodLabel = "本周"
-	case string(repository.GranularityMonth):
-		periodLabel = "本月"
-	case string(repository.GranularityYear):
-		periodLabel = "本年"
-	default:
-		periodLabel = "本周期"
-	}
+func (s *LifelineContextService) summarizeArchive(ctx context.Context, topicID uint, granularity, period, sectionsText string) (string, error) {
+	periodLabel := FormatPeriodLabel(period, granularity)
 
 	prompt := fmt.Sprintf(
-		"你是话题新闻汇总助手。下面是一个话题在%s的新闻内容，请用中文总结：\n"+
-			"1. %s主要发生了哪些事件（按时间线）\n"+
-			"2. 数据上有什么显著波动\n"+
-			"只陈述客观事实，不做分析判断。\n\n"+
-			"--- 新闻内容 ---\n%s", periodLabel, periodLabel, sectionsText)
+		"你是话题新闻汇总助手。下面是一个持久话题在%s的新闻报道内容，请用中文客观总结，为后续的演进分析提供素材：\n\n"+
+			"1.【事件脉络】这段时间主要发生了哪些事件，按时间线列出（每条带日期）。\n"+
+			"2.【关键动向】相比常规进展，这段时间出现了哪些值得注意的新变化——例如态势升级/缓和、新参与者介入、影响范围扩大、或方向反转。客观陈述事实差异，不做事态预测。\n"+
+			"3.【涉及主体与领域】列出关键主体（国家/组织/公司/人物）以及波及的领域、地域、行业。\n\n"+
+			"要求：只陈述新闻里的客观事实；不做事态走向判断，不做任何涨跌或预测。\n\n"+
+			"--- %s 新闻内容 ---\n%s", periodLabel, periodLabel, sectionsText)
 
 	return s.callLLM(ctx, topicID, granularity, prompt)
 }

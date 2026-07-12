@@ -60,6 +60,10 @@ func (m *jobMockSectionReader) ReadSections(ctx context.Context, topicID uint, f
 	return "mock sections", nil
 }
 
+func (m *jobMockSectionReader) SectionDates(ctx context.Context, topicID uint) ([]time.Time, error) {
+	return nil, nil
+}
+
 func TestWeeklyLifelineJob_HealThenRefresh(t *testing.T) {
 	setupJobTestDB(t)
 	ar := &jobMockAirouter{}

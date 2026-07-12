@@ -22,6 +22,22 @@ type topicGraphSectionReader struct {
 	db *gorm.DB
 }
 
+// SectionDates returns distinct period_date values for sections belonging to a topic, ascending.
+func (r *topicGraphSectionReader) SectionDates(ctx context.Context, topicID uint) ([]time.Time, error) {
+	var dates []time.Time
+	err := r.db.WithContext(ctx).Raw(`
+		SELECT DISTINCT bdr.period_date
+		FROM daily_report_sections ds
+		JOIN board_daily_reports bdr ON bdr.id = ds.report_id
+		WHERE ds.persistent_topic_id = ?
+		ORDER BY bdr.period_date ASC
+	`, topicID).Scan(&dates).Error
+	if err != nil {
+		return nil, fmt.Errorf("query section dates: %w", err)
+	}
+	return dates, nil
+}
+
 func (r *topicGraphSectionReader) ReadSections(ctx context.Context, topicID uint, from, to time.Time) (string, error) {
 	// Query sections within the date range for this topic.
 	type sectionRow struct {
@@ -44,7 +60,7 @@ func (r *topicGraphSectionReader) ReadSections(ctx context.Context, topicID uint
 	}
 
 	if len(sections) == 0 {
-		return "(本周暂无相关新闻)", nil
+		return "(该周期暂无相关新闻)", nil
 	}
 
 	// For each section, load thread titles.

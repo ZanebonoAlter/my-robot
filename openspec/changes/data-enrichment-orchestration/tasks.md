@@ -50,7 +50,7 @@
 - [f] 4b.4 debate_distill 提炼 service（`debate_distill.go`）：原始输出 → verdict/consensus/agents/votes（Operation=`data_enrichment.debate_distill`），失败降级 distill_status=failed 展示原文
 - [f] 4b.5 独立端点 `POST/GET .../results/:id/debates`（前端按钮触发，失败 non-fatal 不阻塞主分析）
 - [f] 4b.6 单元测试 36 个（distill 15 + client 12 + service 9）+ 修复 PollTask nil panic bug
-- [ ] 4b.7 ★ 前端 `DebateSection.vue` 默认折叠 + 标注"金融可选模块·独立于演进主线"（降级处理）
+- [x] 4b.7 ★ 前端 `DebateSection.vue` 默认折叠 + 标注"金融可选模块·独立于演进主线"（降级处理）—— BoardEnrichmentPanel 里 DebateSection 套 `<details>` 默认折叠 + 橙色「金融可选模块」tag + hint，4b.7 落地
 
 ## 5. 手动触发（仅手动，★ 话题级跨版块）
 
@@ -132,12 +132,12 @@
 
 ### 11.4 前端演进分析报告
 
-- [ ] 11.4.1 报刊式长文报告组件（基于 `prototype/evolution-report.html`）：单栏、衬线、drop-cap、双线 masthead
-- [ ] 11.4.2 双类引用渲染：📰新闻 `[1]`红 / 🔧工具 `[T1]`蓝（吃 evidence.source_type）
-- [ ] 11.4.3 跨泳道关联叙事：泳道名标签 + 传导机制自然语言写进正文
-- [ ] 11.4.4 文末资料来源分两组（新闻报道 / 工具查证）
-- [ ] 11.4.5 演进定位小结条（position 四档 + 迁移说明）
-- [ ] 11.4.6 报告前端测试
+- [x] 11.4.1 报刊式长文报告组件（基于 `prototype/evolution-report.html`）：单栏、衬线、drop-cap、双线 masthead —— `EvolutionReport.vue`
+- [x] 11.4.2 双类引用渲染：📰新闻 `[1]`红 / 🔧工具 `[T1]`蓝（吃 evidence.source_type）—— 上标+hover tooltip+点击跳文末闪烁
+- [x] 11.4.3 跨泳道关联叙事：泳道名标签 + 传导机制自然语言写进正文 —— signals[].lane 内联标签 + mechanism
+- [x] 11.4.4 文末资料来源分两组（新闻报道 / 工具查证）—— sources 区 source_type 分组
+- [x] 11.4.5 演进定位小结条（position 四档 + 迁移说明）—— position-bar 四档高亮 + review position_change 迁移箭头
+- [x] 11.4.6 报告前端测试 —— typecheck/build/test:unit 全绿（331 tests）；boardEnrichment.test.ts 17 个跟新 schema 对齐
 
 ### 11.5 数据清理
 

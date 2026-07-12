@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
+	"sort"
 	"time"
 
 	"syntopica-backend/internal/dataenrichment/repository"
@@ -12,7 +13,8 @@ import (
 )
 
 // LifelineContextService manages topic lifeline context generation for cycle A.
-// It produces week/month/year/all granularity news summaries via LLM.
+// Produces period-archival rows: each (topic, granularity, period) is an independent
+// row. See design.md §2.1-§2.3 for the archival model.
 type LifelineContextService struct {
 	airouter      AirRouter
 	repo          *repository.Repository
@@ -37,48 +39,49 @@ func NewLifelineContextService(
 
 // ── Public methods ──────────────────────────────────────────────────────────
 
-// RefreshWeek directly summarizes the current week's sections without relying on old context.
-// as_of_date is set to the exclusive boundary (next Monday) of the current week.
+// RefreshPeriod generates context for a specific (granularity, period). It is
+// the primary entry point — all other methods delegate to it.
+//
+// For week/month/year: reads sections within the period's date range, produces
+// a fresh standalone summary (no incremental merge with old periods).
+// For 'all': reads all sections since the old 'all' as_of_date and incrementally
+// merges them with the old content (single rolling row, period="all").
+func (s *LifelineContextService) RefreshPeriod(ctx context.Context, topicID uint, granularity, period string, now time.Time) error {
+	switch granularity {
+	case string(repository.GranularityWeek), string(repository.GranularityMonth), string(repository.GranularityYear):
+		return s.refreshArchive(ctx, topicID, granularity, period)
+	case string(repository.GranularityAll):
+		return s.refreshRolling(ctx, topicID, now)
+	default:
+		return fmt.Errorf("unknown granularity: %s", granularity)
+	}
+}
+
+// RefreshWeek generates context for the current ISO week.
 func (s *LifelineContextService) RefreshWeek(ctx context.Context, topicID uint, now time.Time) error {
-	gran := string(repository.GranularityWeek)
-	from, to := weekRange(now)
-	sectionsText, err := s.sectionReader.ReadSections(ctx, topicID, from, to)
-	if err != nil {
-		return fmt.Errorf("refresh week: read sections: %w", err)
-	}
-	content, err := s.summarizeWeek(ctx, topicID, sectionsText)
-	if err != nil {
-		return fmt.Errorf("refresh week: summarize: %w", err)
-	}
-	return s.repo.UpsertTopicLifelineContext(ctx, &repository.TopicLifelineContext{
-		PersistentTopicID: topicID,
-		Granularity:       gran,
-		Content:           content,
-		AsOfDate:          to,
-		Source:            "llm_assisted",
-	})
+	period := FormatWeek(now)
+	return s.RefreshPeriod(ctx, topicID, string(repository.GranularityWeek), period, now)
 }
 
-// RefreshMonth incrementally merges new sections since as_of_date with the old month context.
-// as_of_date is advanced to the exclusive boundary (next month 1st) of the current month.
+// RefreshMonth generates context for the current month.
 func (s *LifelineContextService) RefreshMonth(ctx context.Context, topicID uint, now time.Time) error {
-	gran := string(repository.GranularityMonth)
-	return s.refreshIncremental(ctx, topicID, gran, now)
+	period := FormatMonth(now)
+	return s.RefreshPeriod(ctx, topicID, string(repository.GranularityMonth), period, now)
 }
 
-// RefreshYear incrementally merges new sections since as_of_date with the old year context.
+// RefreshYear generates context for the current year.
 func (s *LifelineContextService) RefreshYear(ctx context.Context, topicID uint, now time.Time) error {
-	gran := string(repository.GranularityYear)
-	return s.refreshIncremental(ctx, topicID, gran, now)
+	period := FormatYear(now)
+	return s.RefreshPeriod(ctx, topicID, string(repository.GranularityYear), period, now)
 }
 
-// RefreshAll incrementally merges new sections since as_of_date with the old 'all' context.
+// RefreshAll incrementally merges new sections with the old 'all' context (rolling).
 func (s *LifelineContextService) RefreshAll(ctx context.Context, topicID uint, now time.Time) error {
-	gran := string(repository.GranularityAll)
-	return s.refreshIncremental(ctx, topicID, gran, now)
+	return s.RefreshPeriod(ctx, topicID, string(repository.GranularityAll), "all", now)
 }
 
-// RefreshGranularity dispatches to the appropriate refresh method based on granularity.
+// RefreshGranularity dispatches to the appropriate refresh method. Delegates
+// to RefreshPeriod with the current period derived from now.
 func (s *LifelineContextService) RefreshGranularity(ctx context.Context, topicID uint, granularity string, now time.Time) error {
 	switch granularity {
 	case string(repository.GranularityWeek):
@@ -94,61 +97,120 @@ func (s *LifelineContextService) RefreshGranularity(ctx context.Context, topicID
 	}
 }
 
-// HealStale scans for topics with stale lifeline contexts and patches them cycle by cycle.
-// It reads stale contexts via ListStaleTopicLifelineContexts, then for each stale context:
-// from as_of_date (exclusive boundary of last patched period), iterates forward by
-// granularity period blocks, merging incremental sections + old context, advancing
-// as_of_date sequentially until it reaches the current period's exclusive boundary.
-func (s *LifelineContextService) HealStale(ctx context.Context, granularity string, now time.Time) error {
-	sinceDays := staleSinceDays(granularity)
-	staleList, err := s.repo.ListStaleTopicLifelineContexts(ctx, granularity, sinceDays)
+// HealMissing scans active topics for missing periods and fills them in.
+// For each topic, finds the latest existing period. If the latest is behind the
+// current period, generates all intermediate periods forward. If no period
+// exists, generates only the current period.
+func (s *LifelineContextService) HealMissing(ctx context.Context, granularity string, now time.Time, lister TopicLister) error {
+	topicIDs, err := lister.ListActiveTopicIDs(ctx)
 	if err != nil {
-		return fmt.Errorf("heal stale: list: %w", err)
+		return fmt.Errorf("heal missing: list topics: %w", err)
 	}
 
-	currentEnd := currentExclusiveEnd(now, granularity)
+	currentPeriod := PeriodForGranularity(now, granularity)
 
-	for _, staleCtx := range staleList {
-		topicID := staleCtx.PersistentTopicID
-		start := staleCtx.AsOfDate
+	for _, topicID := range topicIDs {
+		existing, err := s.repo.ListTopicLifelineContextsByGranularity(ctx, topicID, granularity)
+		if err != nil {
+			return fmt.Errorf("heal missing: topic %d: %w", topicID, err)
+		}
 
-		for start.Before(currentEnd) {
-			end := periodEnd(start, granularity)
-			// Don't go past current time for 'all' granularity.
-			if end.After(currentEnd) {
-				end = currentEnd
+		// Find the latest period.
+		var latestPeriod string
+		if len(existing) > 0 {
+			// Already ordered by period DESC from repository.
+			latestPeriod = existing[0].Period
+		}
+
+		// Compute missing periods from latest+1 to current.
+		missing := PeriodsBetween(latestPeriod, currentPeriod, granularity)
+		for _, p := range missing {
+			if err := s.refreshArchive(ctx, topicID, granularity, p); err != nil {
+				return fmt.Errorf("heal missing: topic %d %s %s: %w", topicID, granularity, p, err)
 			}
-
-			if err := s.refreshIncrementalPeriod(ctx, topicID, granularity, start, end); err != nil {
-				return fmt.Errorf("heal stale: topic %d patch [%s, %s): %w",
-					topicID, start.Format("2006-01-02"), end.Format("2006-01-02"), err)
-			}
-			start = end
 		}
 	}
 	return nil
 }
 
+// ArchivePrune deletes rows older than the retention policy:
+//
+//	week: keep last 8 weeks
+//	month: keep last 12 months
+//	year/all: never prune
+func (s *LifelineContextService) ArchivePrune(ctx context.Context, granularity string, now time.Time) error {
+	switch granularity {
+	case string(repository.GranularityWeek):
+		cutoff := time.Now().AddDate(0, 0, -8*7)
+		cutoffPeriod := FormatWeek(cutoff)
+		return s.repo.DeleteTopicLifelineContextsOlderThan(ctx, granularity, cutoffPeriod)
+	case string(repository.GranularityMonth):
+		cutoff := time.Now().AddDate(0, -12, 0)
+		cutoffPeriod := FormatMonth(cutoff)
+		return s.repo.DeleteTopicLifelineContextsOlderThan(ctx, granularity, cutoffPeriod)
+	default:
+		// year and all: don't prune
+		return nil
+	}
+}
+
+// ── TopicLister (minimal interface, avoids importing dataenrichment pkg) ───
+
+// TopicLister returns active topic IDs. This is the same interface as
+// dataenrichment.ActiveTopicLister but declared here to avoid circular imports.
+type TopicLister interface {
+	ListActiveTopicIDs(ctx context.Context) ([]uint, error)
+}
+
 // ── Private helpers ─────────────────────────────────────────────────────────
 
-// refreshIncremental reads sections since as_of_date, merges with old context, upserts.
-func (s *LifelineContextService) refreshIncremental(ctx context.Context, topicID uint, granularity string, now time.Time) error {
-	from, to := granularityRange(now, granularity)
+// refreshArchive generates fresh context for an archive period (week/month/year).
+// Reads sections within the period's date range and produces a standalone summary.
+func (s *LifelineContextService) refreshArchive(ctx context.Context, topicID uint, granularity, period string) error {
+	from, to, err := ParsePeriodRange(period, granularity)
+	if err != nil {
+		return fmt.Errorf("refresh archive: parse period %q: %w", period, err)
+	}
 
-	// Check if there's an old context.
-	oldCtx, _ := s.repo.GetTopicLifelineContext(ctx, topicID, granularity)
+	sectionsText, err := s.sectionReader.ReadSections(ctx, topicID, from, to)
+	if err != nil {
+		return fmt.Errorf("refresh archive: read sections: %w", err)
+	}
+
+	if sectionsText == "" {
+		sectionsText = "(本周期暂无相关新闻)"
+	}
+
+	content, err := s.summarizeArchive(ctx, topicID, granularity, sectionsText)
+	if err != nil {
+		return fmt.Errorf("refresh archive: summarize: %w", err)
+	}
+
+	return s.repo.UpsertTopicLifelineContext(ctx, &repository.TopicLifelineContext{
+		PersistentTopicID: topicID,
+		Granularity:       granularity,
+		Period:            period,
+		Content:           content,
+		AsOfDate:          to,
+		Source:            "llm_assisted",
+	})
+}
+
+// refreshRolling incrementally merges new sections with the old 'all' context.
+// Uses the same approach as the old refreshIncremental for 'all' granularity.
+func (s *LifelineContextService) refreshRolling(ctx context.Context, topicID uint, now time.Time) error {
+	gran := string(repository.GranularityAll)
+
+	// Read old 'all' context.
+	oldCtx, _ := s.repo.GetTopicLifelineContext(ctx, topicID, gran, "all")
 	var oldAsOf time.Time
 	if oldCtx != nil {
 		oldAsOf = oldCtx.AsOfDate
 	}
-	// If no old context or old as_of_date is before from, use from as the start.
-	if oldAsOf.IsZero() || oldAsOf.Before(from) {
-		oldAsOf = from
-	}
 
-	sectionsText, err := s.sectionReader.ReadSections(ctx, topicID, oldAsOf, to)
+	sectionsText, err := s.sectionReader.ReadSections(ctx, topicID, oldAsOf, now)
 	if err != nil {
-		return fmt.Errorf("refresh incremental: read sections: %w", err)
+		return fmt.Errorf("refresh rolling: read sections: %w", err)
 	}
 
 	oldContent := ""
@@ -156,61 +218,47 @@ func (s *LifelineContextService) refreshIncremental(ctx context.Context, topicID
 		oldContent = oldCtx.Content
 	}
 
-	content, err := s.summarizeIncremental(ctx, topicID, granularity, sectionsText, oldContent)
+	content, err := s.summarizeIncremental(ctx, topicID, gran, sectionsText, oldContent)
 	if err != nil {
-		return fmt.Errorf("refresh incremental: summarize: %w", err)
+		return fmt.Errorf("refresh rolling: summarize: %w", err)
 	}
 
 	return s.repo.UpsertTopicLifelineContext(ctx, &repository.TopicLifelineContext{
 		PersistentTopicID: topicID,
-		Granularity:       granularity,
+		Granularity:       gran,
+		Period:            "all",
 		Content:           content,
-		AsOfDate:          to,
+		AsOfDate:          now,
 		Source:            "llm_assisted",
 	})
 }
 
-// refreshIncrementalPeriod patches one specific period block for self-healing.
-func (s *LifelineContextService) refreshIncrementalPeriod(ctx context.Context, topicID uint, granularity string, from, to time.Time) error {
-	sectionsText, err := s.sectionReader.ReadSections(ctx, topicID, from, to)
-	if err != nil {
-		return fmt.Errorf("read sections: %w", err)
+// summarizeArchive produces a fresh standalone summary for one archive period.
+func (s *LifelineContextService) summarizeArchive(ctx context.Context, topicID uint, granularity, sectionsText string) (string, error) {
+	var periodLabel string
+	switch granularity {
+	case string(repository.GranularityWeek):
+		periodLabel = "本周"
+	case string(repository.GranularityMonth):
+		periodLabel = "本月"
+	case string(repository.GranularityYear):
+		periodLabel = "本年"
+	default:
+		periodLabel = "本周期"
 	}
 
-	oldCtx, _ := s.repo.GetTopicLifelineContext(ctx, topicID, granularity)
-	oldContent := ""
-	if oldCtx != nil {
-		oldContent = oldCtx.Content
-	}
-
-	content, err := s.summarizeIncremental(ctx, topicID, granularity, sectionsText, oldContent)
-	if err != nil {
-		return fmt.Errorf("summarize: %w", err)
-	}
-
-	return s.repo.UpsertTopicLifelineContext(ctx, &repository.TopicLifelineContext{
-		PersistentTopicID: topicID,
-		Granularity:       granularity,
-		Content:           content,
-		AsOfDate:          to,
-		Source:            "llm_assisted",
-	})
-}
-
-// summarizeWeek calls the LLM for a direct week summary (no old context).
-func (s *LifelineContextService) summarizeWeek(ctx context.Context, topicID uint, sectionsText string) (string, error) {
 	prompt := fmt.Sprintf(
-		"你是话题新闻汇总助手。下面是一个话题在过去一周的新闻内容，请用中文总结：\n"+
-			"1. 本周主要发生了哪些事件（按时间线）\n"+
+		"你是话题新闻汇总助手。下面是一个话题在%s的新闻内容，请用中文总结：\n"+
+			"1. %s主要发生了哪些事件（按时间线）\n"+
 			"2. 数据上有什么显著波动\n"+
 			"只陈述客观事实，不做分析判断。\n\n"+
-			"--- 新闻内容 ---\n%s", sectionsText)
+			"--- 新闻内容 ---\n%s", periodLabel, periodLabel, sectionsText)
 
-	return s.callLLM(ctx, topicID, string(repository.GranularityWeek), prompt)
+	return s.callLLM(ctx, topicID, granularity, prompt)
 }
 
 // summarizeIncremental merges new sections with old context via LLM.
-func (s *LifelineContextService) summarizeIncremental(ctx context.Context, topicID uint, granularity string, sectionsText, oldContent string) (string, error) {
+func (s *LifelineContextService) summarizeIncremental(ctx context.Context, topicID uint, granularity, sectionsText, oldContent string) (string, error) {
 	var prompt string
 	if oldContent != "" {
 		prompt = fmt.Sprintf(
@@ -255,100 +303,63 @@ func uuid8() string {
 	return hex.EncodeToString(b)
 }
 
-// ── Granularity period helpers ──────────────────────────────────────────────
+// ── Period enumeration (gap-fill for HealMissing) ───────────────────────────
 
-// weekRange returns the [Monday 00:00, next Monday 00:00) window containing t.
-func weekRange(t time.Time) (from, to time.Time) {
-	weekday := t.Weekday()
-	daysFromMonday := int(weekday) - int(time.Monday)
-	if daysFromMonday < 0 {
-		daysFromMonday += 7
+// PeriodsBetween returns all periods strictly between latestPeriod and
+// currentPeriod (exclusive of latest, inclusive of current). If latestPeriod
+// is empty, returns {currentPeriod} only.
+func PeriodsBetween(latestPeriod, currentPeriod, granularity string) []string {
+	if latestPeriod == "" {
+		// No existing period — just generate the current one.
+		if currentPeriod != "" && currentPeriod != "all" {
+			return []string{currentPeriod}
+		}
+		return nil
 	}
-	monday := t.AddDate(0, 0, -daysFromMonday)
-	from = time.Date(monday.Year(), monday.Month(), monday.Day(), 0, 0, 0, 0, t.Location())
-	to = from.AddDate(0, 0, 7)
-	return
-}
-
-// monthRange returns the [1st of month 00:00, 1st of next month 00:00) window.
-func monthRange(t time.Time) (from, to time.Time) {
-	from = time.Date(t.Year(), t.Month(), 1, 0, 0, 0, 0, t.Location())
-	to = from.AddDate(0, 1, 0)
-	return
-}
-
-// yearRange returns the [Jan 1 00:00, next Jan 1 00:00) window.
-func yearRange(t time.Time) (from, to time.Time) {
-	from = time.Date(t.Year(), 1, 1, 0, 0, 0, 0, t.Location())
-	to = from.AddDate(1, 0, 0)
-	return
-}
-
-// granularityRange returns the current period range for the given granularity.
-// For 'all', returns [zero, now).
-func granularityRange(now time.Time, granularity string) (from, to time.Time) {
-	switch granularity {
-	case string(repository.GranularityWeek):
-		return weekRange(now)
-	case string(repository.GranularityMonth):
-		return monthRange(now)
-	case string(repository.GranularityYear):
-		return yearRange(now)
-	case string(repository.GranularityAll):
-		return time.Time{}, now
-	default:
-		return weekRange(now)
+	if latestPeriod == currentPeriod {
+		return nil
 	}
-}
-
-// periodEnd returns the exclusive boundary after one period from start.
-func periodEnd(start time.Time, granularity string) time.Time {
-	switch granularity {
-	case string(repository.GranularityWeek):
-		return start.AddDate(0, 0, 7)
-	case string(repository.GranularityMonth):
-		return start.AddDate(0, 1, 0)
-	case string(repository.GranularityYear):
-		return start.AddDate(1, 0, 0)
-	case string(repository.GranularityAll):
-		return time.Now()
-	default:
-		return start.AddDate(0, 0, 7)
+	if ComparePeriods(latestPeriod, currentPeriod) >= 0 {
+		return nil
 	}
-}
 
-// currentExclusiveEnd returns the exclusive boundary of the current period for heal detection.
-func currentExclusiveEnd(now time.Time, granularity string) time.Time {
-	switch granularity {
-	case string(repository.GranularityWeek):
-		_, to := weekRange(now)
-		return to
-	case string(repository.GranularityMonth):
-		_, to := monthRange(now)
-		return to
-	case string(repository.GranularityYear):
-		_, to := yearRange(now)
-		return to
-	case string(repository.GranularityAll):
-		return now
-	default:
-		_, to := weekRange(now)
-		return to
+	var result []string
+	next := nextPeriodAfter(latestPeriod, granularity)
+	for next != "" && ComparePeriods(next, currentPeriod) <= 0 {
+		result = append(result, next)
+		next = nextPeriodAfter(next, granularity)
 	}
+
+	// Sort to ensure chronological order.
+	sort.Slice(result, func(i, j int) bool {
+		return ComparePeriods(result[i], result[j]) < 0
+	})
+	return result
 }
 
-// staleSinceDays returns the number of days used for ListStaleTopicLifelineContexts.
-func staleSinceDays(granularity string) int {
+// nextPeriodAfter returns the next chronological period after the given one,
+// or empty string if we can't compute it (e.g. for "all").
+func nextPeriodAfter(period, granularity string) string {
 	switch granularity {
-	case string(repository.GranularityWeek):
-		return 8
-	case string(repository.GranularityMonth):
-		return 32
-	case string(repository.GranularityYear):
-		return 366
-	case string(repository.GranularityAll):
-		return 30
+	case "week":
+		from, _, err := ParsePeriodRange(period, granularity)
+		if err != nil {
+			return ""
+		}
+		return FormatWeek(from.AddDate(0, 0, 7))
+	case "month":
+		from, _, err := ParsePeriodRange(period, granularity)
+		if err != nil {
+			return ""
+		}
+		return FormatMonth(from.AddDate(0, 1, 0))
+	case "year":
+		from, _, err := ParsePeriodRange(period, granularity)
+		if err != nil {
+			return ""
+		}
+		return FormatYear(from.AddDate(1, 0, 0))
 	default:
-		return 8
+		return ""
 	}
 }

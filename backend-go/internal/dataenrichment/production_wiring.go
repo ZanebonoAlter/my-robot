@@ -163,6 +163,7 @@ func (r *dbLifelineReader) GetTopicLifeline(topicID uint) (service.SectionTimeli
 	}
 
 	sections := make([]service.TimelineSectionNode, 0, len(sectionRows))
+	sectionIDs := make([]uint, 0, len(sectionRows))
 	for _, sr := range sectionRows {
 		// Load thread titles.
 		var titles []string
@@ -178,7 +179,37 @@ func (r *dbLifelineReader) GetTopicLifeline(topicID uint) (service.SectionTimeli
 			ThreadCount:          sr.ThreadCnt,
 			ThreadTitles:         titles,
 		})
+		sectionIDs = append(sectionIDs, sr.ID)
 	}
 	data.Sections = sections
+
+	// 3. Section relations.
+	if len(sectionIDs) > 0 {
+		type relationRow struct {
+			FromID       uint    `gorm:"column:from_id"`
+			ToID         uint    `gorm:"column:to_id"`
+			Distance     float64 `gorm:"column:distance"`
+			RelationType string  `gorm:"column:relation_type"`
+		}
+		var relRows []relationRow
+		if err := r.db.Raw(`
+			SELECT from_section_id AS from_id, to_section_id AS to_id, distance, relation_type
+			FROM daily_report_section_relations
+			WHERE from_section_id IN ? OR to_section_id IN ?
+		`, sectionIDs, sectionIDs).Scan(&relRows).Error; err != nil {
+			return data, fmt.Errorf("query relations: %w", err)
+		}
+		relations := make([]service.SectionRelation, len(relRows))
+		for i, rr := range relRows {
+			relations[i] = service.SectionRelation{
+				FromID:       rr.FromID,
+				ToID:         rr.ToID,
+				Distance:     rr.Distance,
+				RelationType: rr.RelationType,
+			}
+		}
+		data.Relations = relations
+	}
+
 	return data, nil
 }

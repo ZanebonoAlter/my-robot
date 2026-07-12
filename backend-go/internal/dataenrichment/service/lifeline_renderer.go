@@ -21,11 +21,19 @@ type ThreadTitleReader interface {
 	GetThreadTitles(sectionID uint) ([]string, error)
 }
 
+// SectionRelation mirrors topicgraph's SectionRelationResult for decoupling.
+type SectionRelation struct {
+	FromID       uint    `json:"from_id"`
+	ToID         uint    `json:"to_id"`
+	Distance     float64 `json:"distance"`
+	RelationType string  `json:"relation_type"`
+}
+
 // SectionTimelineData mirrors topicgraph's SectionTimelineResponse for decoupling.
 type SectionTimelineData struct {
-	Topic    TopicBrief            `json:"topic"`
-	Sections []TimelineSectionNode `json:"sections"`
-	// Relations are read but not rendered into agent text; kept for future use.
+	Topic     TopicBrief            `json:"topic"`
+	Sections  []TimelineSectionNode `json:"sections"`
+	Relations []SectionRelation     `json:"relations"`
 }
 
 // TopicBrief carries the topic metadata needed by the renderer.
@@ -140,6 +148,28 @@ func (r *LifelineRenderer) RenderLifelineForAgent(reader LifelineReader, topicID
 		}
 		for _, title := range titles {
 			lines = append(lines, fmt.Sprintf("  - %s", title))
+		}
+	}
+
+	// Render section relations if present.
+	if len(data.Relations) > 0 {
+		// Build id→section lookup.
+		secByID := make(map[uint]TimelineSectionNode, len(data.Sections))
+		for _, s := range data.Sections {
+			secByID[s.SectionID] = s
+		}
+		lines = append(lines, "", "## section 关联关系")
+		for _, rel := range data.Relations {
+			fromSec, fromOK := secByID[rel.FromID]
+			toSec, toOK := secByID[rel.ToID]
+			if !fromOK || !toOK {
+				continue
+			}
+			lines = append(lines, fmt.Sprintf("- %s [%s] --%s--> %s [%s] (距离 %.2f)",
+				formatDate(fromSec.PeriodDate), fromSec.ClusterLabel,
+				rel.RelationType,
+				formatDate(toSec.PeriodDate), toSec.ClusterLabel,
+				rel.Distance))
 		}
 	}
 

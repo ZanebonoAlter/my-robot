@@ -60,10 +60,16 @@ func Init(db *gorm.DB) {
 		renderer,
 		toolRegistry,
 		boardConfigReader,
+		CapabilityAnalysis,
 	)
 
+	// Cycle B (optional): FinGenius stock debate (submit → poll → distill → persist).
+	fingeniusClient := service.NewFinGeniusHTTPClient()
+	debateDistiller := service.NewDebateDistiller(airouter.NewRouter(), CapabilityAnalysis)
+	debateSvc := service.NewDebateService(fingeniusClient, debateDistiller, repo)
+
 	// HTTP handler singleton consumed by handler.RegisterRoutes.
-	handler.InitHandler(repo, lifelineSvc, orchestrator, boardConfigReader, db)
+	handler.InitHandler(repo, lifelineSvc, orchestrator, boardConfigReader, debateSvc, db)
 }
 
 // GetLifelineService returns the cycle-A service built by Init, for scheduler

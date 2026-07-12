@@ -17,10 +17,6 @@ import (
 	"syntopica-backend/internal/platform/logging"
 )
 
-// capabilityAnalysis is the airouter Capability for cycle-B LLM calls.
-// Mirrors capabilityAnalysis (defined in root package's capability.go).
-const capabilityAnalysis airouter.Capability = "data_enrichment_analysis"
-
 // ── Types ───────────────────────────────────────────────────────────────────
 
 // ToolCallRecord mirrors PoC roles.py ToolCall for agent loop tracing.
@@ -60,6 +56,7 @@ type OrchestratorService struct {
 	renderer          *LifelineRenderer
 	toolRegistry      *Registry
 	boardConfigReader BoardConfigReader
+	capability        airouter.Capability
 }
 
 // NewOrchestratorService creates a new orchestrator with required dependencies.
@@ -70,6 +67,7 @@ func NewOrchestratorService(
 	renderer *LifelineRenderer,
 	toolRegistry *Registry,
 	boardConfigReader BoardConfigReader,
+	capability airouter.Capability,
 ) *OrchestratorService {
 	return &OrchestratorService{
 		airouter:          airouter,
@@ -78,6 +76,7 @@ func NewOrchestratorService(
 		renderer:          renderer,
 		toolRegistry:      toolRegistry,
 		boardConfigReader: boardConfigReader,
+		capability:        capability,
 	}
 }
 
@@ -129,10 +128,11 @@ func (o *OrchestratorService) EnrichTopic(ctx context.Context, topicID uint) (*E
 	}
 
 	// 7. Step 2: Agent loop per topic.
+	allowedTools := cfg.AllowedTools
 	agentResults := make([]*AgentLoopResult, 0, len(topics))
 	topicsData := make([]map[string]any, 0, len(topics))
 	for _, t := range topics {
-		ar, err := o.runAgentLoop(ctx, sessionID, t.topic, lifelineText)
+		ar, err := o.runAgentLoop(ctx, sessionID, t.topic, lifelineText, allowedTools)
 		agentResults = append(agentResults, ar)
 		if err != nil {
 			// Agent loop error is non-fatal; record and continue.
@@ -161,7 +161,15 @@ func (o *OrchestratorService) EnrichTopic(ctx context.Context, topicID uint) (*E
 	toolCallsJSON, _ := json.Marshal(allToolCalls)
 
 	// 11. Write immutable result.
-	sectorsJSON, _ := json.Marshal(analysis.sectors)
+	sectorsObj := map[string]any{
+		"position": analysis.position,
+		"signals":  analysis.signals,
+		"evidence": analysis.evidence,
+	}
+	if analysis.financialView != nil {
+		sectorsObj["financial_view"] = analysis.financialView
+	}
+	sectorsJSON, _ := json.Marshal(sectorsObj)
 	snapJSON, _ := json.Marshal(inputSnap)
 
 	result := &repository.TopicEnrichmentResult{
@@ -188,29 +196,39 @@ func (o *OrchestratorService) EnrichTopic(ctx context.Context, topicID uint) (*E
 		// No previous result (ErrRecordNotFound) is normal — silently skip review.
 	}
 	if prevErr == nil && prevResult != nil {
-		prevJSON, _ := json.Marshal(map[string]any{
-			"evolution_assessment": prevResult.EvolutionAssessment,
-			"sectors":              json.RawMessage(prevResult.Sectors),
-		})
-		currJSON, _ := json.Marshal(map[string]any{
-			"evolution_assessment": result.EvolutionAssessment,
-			"sectors":              json.RawMessage(result.Sectors),
-		})
-		rj, rjErr := o.runReviewJudge(ctx, sessionID, string(prevJSON), string(currJSON))
-		if rjErr == nil && rj != nil && rj.ShouldReview {
-			conf := rj.Confidence
-			review = &repository.TopicEnrichmentReview{
-				PersistentTopicID: topicID,
-				PrevResultID:      &prevResult.ID,
-				CurrResultID:      result.ID,
-				DeviationSummary:  rj.DeviationSummary,
-				AffectedContext:   rj.AffectedContext,
-				Confidence:        &conf,
-				Applied:           false,
-				Source:            "llm_assisted",
-			}
-			if err := o.repo.CreateTopicEnrichmentReview(ctx, review); err != nil {
-				return nil, fmt.Errorf("enrich topic %d: save review: %w", topicID, err)
+		// Guard: skip review if prev result has old-format sectors (no position field).
+		if extractPosition(prevResult.Sectors) == "" {
+			logging.Infof("enrich topic %d: prev result has old-format sectors (no position), skip review judge", topicID)
+		} else {
+			prevJSON, _ := json.Marshal(map[string]any{
+				"evolution_assessment": prevResult.EvolutionAssessment,
+				"analysis":             json.RawMessage(prevResult.Sectors),
+			})
+			currJSON, _ := json.Marshal(map[string]any{
+				"evolution_assessment": result.EvolutionAssessment,
+				"analysis":             json.RawMessage(result.Sectors),
+			})
+			rj, rjErr := o.runReviewJudge(ctx, sessionID, string(prevJSON), string(currJSON))
+			if rjErr == nil && rj != nil && rj.ShouldReview {
+				conf := rj.Confidence
+				var verdictJSON json.RawMessage
+				if len(rj.PositionChange) > 0 {
+					verdictJSON, _ = json.Marshal(rj.PositionChange)
+				}
+				review = &repository.TopicEnrichmentReview{
+					PersistentTopicID: topicID,
+					PrevResultID:      &prevResult.ID,
+					CurrResultID:      result.ID,
+					Verdict:           verdictJSON,
+					DeviationSummary:  rj.ChangeSummary,
+					AffectedContext:   rj.AffectedContext,
+					Confidence:        &conf,
+					Applied:           false,
+					Source:            "llm_assisted",
+				}
+				if err := o.repo.CreateTopicEnrichmentReview(ctx, review); err != nil {
+					return nil, fmt.Errorf("enrich topic %d: save review: %w", topicID, err)
+				}
 			}
 		}
 	}
@@ -255,7 +273,7 @@ func (o *OrchestratorService) interpret(ctx context.Context, sessionID, lifeline
 	prompt += "话题演进脉络:\n" + lifelineText
 
 	resp, err := o.airouter.Chat(ctx, airouter.ChatRequest{
-		Capability:  capabilityAnalysis,
+		Capability:  o.capability,
 		Operation:   "data_enrichment.interpret",
 		SessionID:   sessionID,
 		Messages:    []airouter.Message{{Role: "user", Content: prompt}},
@@ -333,9 +351,15 @@ const agentLoopSystemPrompt = `你是一位 A 股数据查询员。背景:有一
 //	① /no_think prefix in user message (PoC double-insurance, complements DB-level enable_thinking=false)
 //	② Full tool results in history (never truncated)
 //	③ Deduplication: same tool+args blocked
-func (o *OrchestratorService) runAgentLoop(ctx context.Context, sessionID, topic, lifelineText string) (*AgentLoopResult, error) {
-	toolsDesc := buildToolsDesc(o.toolRegistry)
+func (o *OrchestratorService) runAgentLoop(ctx context.Context, sessionID, topic, lifelineText string, allowedTools []string) (*AgentLoopResult, error) {
+	toolsDesc := buildToolsDesc(o.toolRegistry, allowedTools)
 	system := fmt.Sprintf(agentLoopSystemPrompt, toolsDesc, lifelineText)
+
+	// Build allowedTools set for O(1) lookup.
+	allowedSet := make(map[string]bool, len(allowedTools))
+	for _, t := range allowedTools {
+		allowedSet[t] = true
+	}
 
 	result := &AgentLoopResult{Topic: topic}
 	historyLines := make([]string, 0)
@@ -353,7 +377,7 @@ func (o *OrchestratorService) runAgentLoop(ctx context.Context, sessionID, topic
 		userMsg := fmt.Sprintf("/no_think\n当前要查询的产业主题: %s\n\n已有的工具调用历史:\n%s\n\n请决定下一步(调工具或宣布完成),输出 JSON。", topic, historyBlock)
 
 		resp, err := o.airouter.Chat(ctx, airouter.ChatRequest{
-			Capability:  capabilityAnalysis,
+			Capability:  o.capability,
 			Operation:   "data_enrichment.tool_use",
 			SessionID:   sessionID,
 			Messages:    []airouter.Message{{Role: "system", Content: system}, {Role: "user", Content: userMsg}},
@@ -385,6 +409,22 @@ func (o *OrchestratorService) runAgentLoop(ctx context.Context, sessionID, topic
 			args, ok := argsRaw.(map[string]any)
 			if !ok {
 				args = map[string]any{}
+			}
+
+			// Guard: reject tools not in allowedTools.
+			if len(allowedSet) > 0 && !allowedSet[toolName] {
+				errJSON := `{"error":"该工具当前不可用"}`
+				tc := ToolCallRecord{
+					Step:          step,
+					Thought:       thought + " [被拦:工具不可用]",
+					Tool:          toolName,
+					Args:          args,
+					ResultPreview: errJSON,
+					ResultFull:    errJSON,
+				}
+				result.ToolCalls = append(result.ToolCalls, tc)
+				historyLines = append(historyLines, fmt.Sprintf("第%d步: 调用 %s(%s) — 结果: %s", step, toolName, argsToJSON(args), errJSON))
+				continue
 			}
 
 			// 防御③ Dedup check.
@@ -444,33 +484,73 @@ func (o *OrchestratorService) runAgentLoop(ctx context.Context, sessionID, topic
 // ── Analyze (角色③) ────────────────────────────────────────────────────────
 
 // analyzeOutput is the structured output of the analyst role.
+// See design.md §3.3: topic evolution positioning.
 type analyzeOutput struct {
 	evolutionAssessment string
-	sectors             []map[string]any
+	position            string
+	signals             []map[string]any
+	evidence            []map[string]any
+	financialView       *map[string]any // optional: nil when no financial data bound
 	causalChain         string
 	overall             string
 }
 
 // analyzePrompt is the LLM prompt for the analyst role.
-// Ported from PoC roles_evolved.py:analyze_evolved_impact.
-const analyzePrompt = `你是一位资深 A 股策略分析师。下面是一个持久话题的完整演进脉络,以及补充查到的 ETF 实时行情数据。
+// Design §3.3: topic evolution positioning (not financial direction prediction).
+const analyzePrompt = `你是一位产业演进分析师,负责判断一个持久话题的最新进展在话题生命线中的定位。
 
-你的任务:**结合演进脉络和实时数据,判断最新进展在这个话题演进里意味着什么**。
+下面提供:
+1) 话题演进脉络 (lifeline):该话题从出现到最新的时间线节点
+2) 分层新闻上下文:按 week/month/year/all 分层的历史背景
+3) 各主题实时数据:agent 补充查到的信息 (可能是行情数据,也可能是一般搜索)
+
+你的任务:基于这些信息,输出**话题演进定位** JSON。核心是判断话题处在什么演化阶段,而不是预测涨跌。
 
 分析要求:
-- 不要孤立地判断"利好/利空",而要回答:这次进展是**强化了既有趋势**,还是**出现了转折/扩散**?
-- 引用演进脉络里具体哪一天的线索作为对比基准(比如"相比7-02的化工承压,7-04的数据显示...")
-- 用查到的实时行情数据佐证你的判断(具体到 ETF 涨跌)
-- 识别演进中的**因果链**(油价飙升 → 哪些板块连锁反应)
-- 如有数据与演进叙事矛盾的,明确指出
 
-输出严格 JSON:
-{"evolution_assessment": "最新进展在演进中的定位(强化/转折/扩散 + 理由)",
- "sectors": [
-   {"sector": "...", "evolution_role": "在因果链中的位置(源头/传导/末端)", "current_signal": "实时数据给出的信号", "vs_history": "相比前几日的演变", "judgment": "利好/利空/中性", "confidence": "高/中/低"}
- ],
- "causal_chain": "演进中的因果链描述",
- "overall": "一句话总结这次进展在整个演进里的意义"}`
+**1. position 定位 (必填,四选一):**
+- reinforcing (强化):最新进展延续并加强了既有趋势,方向未变、力度加大
+- turning (转折):最新进展表明趋势方向发生反转,或触发质变 (从缓和转向紧张、从上升转向下滑等)
+- expanding (扩散):最新进展将影响传导到了新领域、新主体、新地域,话题范围在扩大
+- fading (衰减):话题热度显著下降,新信号减弱或消失,不再有新的实质进展
+
+**2. signals 信号列表 (必填):**
+- lane:使用**持久话题泳道名** (如"美伊冲突""芯片制裁""AI监管",不要用粗版块大类如"能源""科技")
+- signal:该泳道产生的具体信号描述 (一句话)
+- mechanism:该信号通过什么传导/关联机制影响话题演进
+- 每个 signal 对应一个泳道,不要重复
+
+**3. evidence 证据链 (必填):**
+- context_id:引用的上下文 ID
+- period:引用的时间粒度 (week/month/year/all)
+- quote:直接从 context 中摘录的原话 (不要改写)
+- source_type:数据来源 (news=来自分层新闻上下文, tool=agent 查到的实时数据)
+- tool_ref:source_type 是 tool 时,指向原始 tool_calls 的哪条 (source_type=news 时可为空)
+
+**4. causal_chain 因果链 (必填):**
+- 一句话描述从触发事件到最新进展的因果传导路径 (如 "产油国遭袭 → 油价上涨 → 各国释放储备 → 油价回落")
+
+**5. overall 一句话总结 (必填):**
+- 用一句话概括这次进展在整个话题演进中的意义
+
+**6. financial_view 金融行情 (可选):**
+仅当话题命中了绑定了金融数据源的版块、且有真实行情数据可以佐证时才输出。非金融话题直接省略此字段。
+格式: {"sectors": [{"sector": "版块名", "direction": "up|down|flat|unknown", "supporting_data": "涨跌幅等支撑数据"}]}
+行情数据只作为佐证,不作为 position 的主判断依据。
+
+输出严格 JSON (不要 markdown 包裹,不要额外文字):
+{
+  "evolution_assessment": "一句话演进判断",
+  "position": "reinforcing|turning|expanding|fading",
+  "signals": [
+    {"lane": "持久话题泳道名", "signal": "信号描述", "mechanism": "传导/关联机制"}
+  ],
+  "evidence": [
+    {"context_id": "...", "period": "week|month|year|all", "quote": "引用原话", "source_type": "news|tool", "tool_ref": ""}
+  ],
+  "causal_chain": "因果链描述",
+  "overall": "一句话总结"
+}`
 
 func (o *OrchestratorService) analyze(ctx context.Context, sessionID, lifelineText, contextText string, topicsData []map[string]any) (*analyzeOutput, error) {
 	topicsBlock := ""
@@ -490,7 +570,7 @@ func (o *OrchestratorService) analyze(ctx context.Context, sessionID, lifelineTe
 	prompt += "\n\n话题演进脉络:\n" + lifelineText + "\n\n各主题实时数据:\n" + topicsBlock
 
 	resp, err := o.airouter.Chat(ctx, airouter.ChatRequest{
-		Capability:  capabilityAnalysis,
+		Capability:  o.capability,
 		Operation:   "data_enrichment.analyze",
 		SessionID:   sessionID,
 		Messages:    []airouter.Message{{Role: "user", Content: prompt}},
@@ -507,20 +587,37 @@ func (o *OrchestratorService) analyze(ctx context.Context, sessionID, lifelineTe
 	}
 
 	ea, _ := parsed["evolution_assessment"].(string)
+	pos, _ := parsed["position"].(string)
 	cc, _ := parsed["causal_chain"].(string)
 	ov, _ := parsed["overall"].(string)
 
-	sectorsRaw, _ := parsed["sectors"].([]any)
-	sectors := make([]map[string]any, 0, len(sectorsRaw))
-	for _, s := range sectorsRaw {
+	signalsRaw, _ := parsed["signals"].([]any)
+	signals := make([]map[string]any, 0, len(signalsRaw))
+	for _, s := range signalsRaw {
 		if sm, ok := s.(map[string]any); ok {
-			sectors = append(sectors, sm)
+			signals = append(signals, sm)
 		}
+	}
+
+	evidenceRaw, _ := parsed["evidence"].([]any)
+	evidence := make([]map[string]any, 0, len(evidenceRaw))
+	for _, e := range evidenceRaw {
+		if em, ok := e.(map[string]any); ok {
+			evidence = append(evidence, em)
+		}
+	}
+
+	var fv *map[string]any
+	if fvRaw, ok := parsed["financial_view"].(map[string]any); ok {
+		fv = &fvRaw
 	}
 
 	return &analyzeOutput{
 		evolutionAssessment: ea,
-		sectors:             sectors,
+		position:            pos,
+		signals:             signals,
+		evidence:            evidence,
+		financialView:       fv,
 		causalChain:         cc,
 		overall:             ov,
 	}, nil
@@ -534,7 +631,7 @@ func (o *OrchestratorService) runReviewJudge(ctx context.Context, sessionID, pre
 	prompt := fmt.Sprintf(reviewJudgePrompt, prevResultJSON, currResultJSON)
 
 	resp, err := o.airouter.Chat(ctx, airouter.ChatRequest{
-		Capability:  capabilityAnalysis,
+		Capability:  o.capability,
 		Operation:   "data_enrichment.review_judge",
 		SessionID:   sessionID,
 		Messages:    []airouter.Message{{Role: "user", Content: prompt}},
@@ -552,16 +649,22 @@ func (o *OrchestratorService) runReviewJudge(ctx context.Context, sessionID, pre
 
 	shouldReview, _ := parsed["should_review"].(bool)
 	reason, _ := parsed["reason"].(string)
-	deviationSummary, _ := parsed["deviation_summary"].(string)
+	changeSummary, _ := parsed["change_summary"].(string)
 	affectedContext, _ := parsed["affected_context"].(string)
 	confidence, _ := parsed["confidence"].(float64)
 
+	var positionChange map[string]any
+	if pcRaw, ok := parsed["position_change"].(map[string]any); ok {
+		positionChange = pcRaw
+	}
+
 	return &ReviewJudgeOutput{
-		ShouldReview:     shouldReview,
-		Reason:           reason,
-		DeviationSummary: deviationSummary,
-		AffectedContext:  affectedContext,
-		Confidence:       confidence,
+		ShouldReview:    shouldReview,
+		Reason:          reason,
+		ChangeSummary:   changeSummary,
+		AffectedContext: affectedContext,
+		Confidence:      confidence,
+		PositionChange:  positionChange,
 	}, nil
 }
 
@@ -606,10 +709,22 @@ func argsToJSON(args map[string]any) string {
 }
 
 // buildToolsDesc renders tool descriptions for the agent system prompt.
+// Only includes tools in allowedTools; returns empty string if allowedTools is empty.
 // Ported from PoC roles.py:_build_tools_desc.
-func buildToolsDesc(registry *Registry) string {
+func buildToolsDesc(registry *Registry, allowedTools []string) string {
+	if len(allowedTools) == 0 {
+		return ""
+	}
+	allowedSet := make(map[string]bool, len(allowedTools))
+	for _, t := range allowedTools {
+		allowedSet[t] = true
+	}
+
 	parts := make([]string, 0)
 	for name, tool := range registry.Tools() {
+		if !allowedSet[name] {
+			continue
+		}
 		schemaJSON, _ := json.Marshal(tool.InputSchema)
 		parts = append(parts, fmt.Sprintf("**%s**: %s\n  参数: %s", name, tool.Description, string(schemaJSON)))
 	}
@@ -649,6 +764,7 @@ type lifelineRange struct {
 }
 
 // readContextLayers reads pre-computed context summaries from topic_lifeline_context.
+// Groups by granularity, selects the LATEST period for each layer (not all historical).
 // Returns concatenated text for prompts and a snapshot for traceability.
 func (o *OrchestratorService) readContextLayers(ctx context.Context, topicID uint, layers []string) (string, *contextSnapshot, error) {
 	contexts, err := o.repo.ListTopicLifelineContextsByTopic(ctx, topicID)
@@ -656,10 +772,14 @@ func (o *OrchestratorService) readContextLayers(ctx context.Context, topicID uin
 		return "", nil, fmt.Errorf("read context layers: %w", err)
 	}
 
-	// Index by granularity.
+	// Group by granularity, keep the MAX period per granularity (latest).
 	byGran := make(map[string]*repository.TopicLifelineContext)
 	for i := range contexts {
-		byGran[contexts[i].Granularity] = &contexts[i]
+		lc := &contexts[i]
+		existing, ok := byGran[lc.Granularity]
+		if !ok || lc.Period > existing.Period {
+			byGran[lc.Granularity] = lc
+		}
 	}
 
 	// Filter by requested layers, skip ungenerated ones.
@@ -671,7 +791,7 @@ func (o *OrchestratorService) readContextLayers(ctx context.Context, topicID uin
 			// Layer not generated yet — skip (don't fail).
 			continue
 		}
-		parts = append(parts, fmt.Sprintf("## %s 层级上下文 (截止 %s)\n%s", layer, lc.AsOfDate.Format("2006-01-02"), lc.Content))
+		parts = append(parts, fmt.Sprintf("## %s 层级上下文 (period=%s, 截止 %s)\n%s", layer, lc.Period, lc.AsOfDate.Format("2006-01-02"), lc.Content))
 		snap.Layers[layer] = contextLayerInfo{AsOf: lc.AsOfDate.Format("2006-01-02")}
 	}
 
@@ -690,3 +810,18 @@ func buildInputSnapshot(snap *contextSnapshot, reviewIDs []uint, windowDays int,
 }
 
 // ── helper ────────────────────────────────────────────────────────────────
+
+// extractPosition extracts the "position" field from composite sectors JSON.
+// Returns empty string if sectors is old-format or position is missing.
+// Guards against review judge running on pre-transition old data. See design.md §4.3.
+func extractPosition(sectorsJSON json.RawMessage) string {
+	if len(sectorsJSON) == 0 {
+		return ""
+	}
+	var m map[string]any
+	if err := json.Unmarshal(sectorsJSON, &m); err != nil {
+		return ""
+	}
+	pos, _ := m["position"].(string)
+	return pos
+}

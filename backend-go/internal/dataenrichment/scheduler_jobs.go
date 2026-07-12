@@ -11,20 +11,21 @@ import (
 )
 
 // WeeklyLifelineJob creates a scheduler JobFunc that:
-// 1. Runs HealStale for week granularity (self-heal any missed weeks).
+// 1. Runs HealMissing for week granularity (fill missing weeks).
 // 2. Refreshes all active topics' week context for the current week.
+// 3. Prunes week rows older than 8 weeks.
 func WeeklyLifelineJob(svc *service.LifelineContextService, lister ActiveTopicLister) scheduler.JobFunc {
 	return func(ctx context.Context) (*scheduler.JobResult, error) {
 		gran := string(repository.GranularityWeek)
 		now := time.Now()
 		startedAt := now
 
-		// Step 1: self-heal.
-		if err := svc.HealStale(ctx, gran, now); err != nil {
-			return nil, fmt.Errorf("weekly lifeline: heal stale: %w", err)
+		// Step 1: self-heal missing periods.
+		if err := svc.HealMissing(ctx, gran, now, lister); err != nil {
+			return nil, fmt.Errorf("weekly lifeline: heal missing: %w", err)
 		}
 
-		// Step 2: refresh all active topics.
+		// Step 2: refresh all active topics for current week.
 		topics, err := lister.ListActiveTopicIDs(ctx)
 		if err != nil {
 			return nil, fmt.Errorf("weekly lifeline: list active topics: %w", err)
@@ -39,6 +40,11 @@ func WeeklyLifelineJob(svc *service.LifelineContextService, lister ActiveTopicLi
 			refreshed++
 		}
 
+		// Step 3: archive prune.
+		if err := svc.ArchivePrune(ctx, gran, now); err != nil {
+			return nil, fmt.Errorf("weekly lifeline: archive prune: %w", err)
+		}
+
 		return &scheduler.JobResult{
 			Data: map[string]interface{}{
 				"refreshed":    refreshed,
@@ -48,7 +54,7 @@ func WeeklyLifelineJob(svc *service.LifelineContextService, lister ActiveTopicLi
 				"started_at":   startedAt.Format(time.RFC3339),
 				"finished_at":  time.Now().Format(time.RFC3339),
 			},
-			Summary: fmt.Sprintf("lifeline week: healed stale + refreshed %d/%d topics", refreshed, len(topics)),
+			Summary: fmt.Sprintf("lifeline week: healed + refreshed %d/%d topics + pruned", refreshed, len(topics)),
 		}, nil
 	}
 }
@@ -60,8 +66,8 @@ func MonthlyLifelineJob(svc *service.LifelineContextService, lister ActiveTopicL
 		now := time.Now()
 		startedAt := now
 
-		if err := svc.HealStale(ctx, gran, now); err != nil {
-			return nil, fmt.Errorf("monthly lifeline: heal stale: %w", err)
+		if err := svc.HealMissing(ctx, gran, now, lister); err != nil {
+			return nil, fmt.Errorf("monthly lifeline: heal missing: %w", err)
 		}
 
 		topics, err := lister.ListActiveTopicIDs(ctx)
@@ -78,6 +84,10 @@ func MonthlyLifelineJob(svc *service.LifelineContextService, lister ActiveTopicL
 			refreshed++
 		}
 
+		if err := svc.ArchivePrune(ctx, gran, now); err != nil {
+			return nil, fmt.Errorf("monthly lifeline: archive prune: %w", err)
+		}
+
 		return &scheduler.JobResult{
 			Data: map[string]interface{}{
 				"refreshed":    refreshed,
@@ -87,7 +97,7 @@ func MonthlyLifelineJob(svc *service.LifelineContextService, lister ActiveTopicL
 				"started_at":   startedAt.Format(time.RFC3339),
 				"finished_at":  time.Now().Format(time.RFC3339),
 			},
-			Summary: fmt.Sprintf("lifeline month: healed stale + refreshed %d/%d topics", refreshed, len(topics)),
+			Summary: fmt.Sprintf("lifeline month: healed + refreshed %d/%d topics + pruned", refreshed, len(topics)),
 		}, nil
 	}
 }
@@ -99,8 +109,8 @@ func YearlyLifelineJob(svc *service.LifelineContextService, lister ActiveTopicLi
 		now := time.Now()
 		startedAt := now
 
-		if err := svc.HealStale(ctx, gran, now); err != nil {
-			return nil, fmt.Errorf("yearly lifeline: heal stale: %w", err)
+		if err := svc.HealMissing(ctx, gran, now, lister); err != nil {
+			return nil, fmt.Errorf("yearly lifeline: heal missing: %w", err)
 		}
 
 		topics, err := lister.ListActiveTopicIDs(ctx)
@@ -117,6 +127,8 @@ func YearlyLifelineJob(svc *service.LifelineContextService, lister ActiveTopicLi
 			refreshed++
 		}
 
+		// Year is not pruned per design §2.1.
+
 		return &scheduler.JobResult{
 			Data: map[string]interface{}{
 				"refreshed":    refreshed,
@@ -126,7 +138,7 @@ func YearlyLifelineJob(svc *service.LifelineContextService, lister ActiveTopicLi
 				"started_at":   startedAt.Format(time.RFC3339),
 				"finished_at":  time.Now().Format(time.RFC3339),
 			},
-			Summary: fmt.Sprintf("lifeline year: healed stale + refreshed %d/%d topics", refreshed, len(topics)),
+			Summary: fmt.Sprintf("lifeline year: healed + refreshed %d/%d topics", refreshed, len(topics)),
 		}, nil
 	}
 }

@@ -51,9 +51,31 @@ func (r *dbBoardConfigReader) GetBoardConfig(ctx context.Context, topicID uint) 
 		return nil, fmt.Errorf("find semantic_label %d: %w", boardID, err)
 	}
 
+	// 3. Read enabled board_data_sources and collect allowed tools.
+	var sourceTypes []string
+	err = r.db.WithContext(ctx).
+		Table("board_data_sources").
+		Where("semantic_board_id = ? AND enabled = true", boardID).
+		Pluck("source_type", &sourceTypes).Error
+	if err != nil {
+		return nil, fmt.Errorf("find board_data_sources for board %d: %w", boardID, err)
+	}
+
+	allowedTools := make([]string, 0)
+	seen := make(map[string]bool)
+	for _, st := range sourceTypes {
+		for _, tool := range service.ToolsForSourceType(st) {
+			if !seen[tool] {
+				seen[tool] = true
+				allowedTools = append(allowedTools, tool)
+			}
+		}
+	}
+
 	return &service.BoardEnrichmentConfig{
 		EnrichmentEnabled: label.EnrichmentEnabled,
 		WindowDays:        label.WindowDays,
 		ContextLayers:     label.ContextLayers,
+		AllowedTools:      allowedTools,
 	}, nil
 }

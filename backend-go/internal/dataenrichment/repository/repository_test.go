@@ -193,6 +193,7 @@ func TestTopicLifelineContext_UpsertAndGet(t *testing.T) {
 	lc := &repository.TopicLifelineContext{
 		PersistentTopicID: 1,
 		Granularity:       "week",
+		Period:            "2026-W27",
 		Content:           "本周原油价格波动较大",
 		Source:            "llm_assisted",
 	}
@@ -206,7 +207,7 @@ func TestTopicLifelineContext_UpsertAndGet(t *testing.T) {
 		t.Fatalf("upsert #2: %v", err)
 	}
 
-	got, err := repository.Repo.GetTopicLifelineContext(ctx, 1, "week")
+	got, err := repository.Repo.GetTopicLifelineContext(ctx, 1, "week", "2026-W27")
 	if err != nil {
 		t.Fatalf("get: %v", err)
 	}
@@ -224,6 +225,7 @@ func TestTopicLifelineContext_UpsertTOCTOU(t *testing.T) {
 	lc1 := &repository.TopicLifelineContext{
 		PersistentTopicID: 1,
 		Granularity:       "week",
+		Period:            "2026-W27",
 		Content:           "first upsert",
 	}
 	if err := repository.Repo.UpsertTopicLifelineContext(ctx, lc1); err != nil {
@@ -233,6 +235,7 @@ func TestTopicLifelineContext_UpsertTOCTOU(t *testing.T) {
 	lc2 := &repository.TopicLifelineContext{
 		PersistentTopicID: 1,
 		Granularity:       "week",
+		Period:            "2026-W27",
 		Content:           "second upsert",
 	}
 	if err := repository.Repo.UpsertTopicLifelineContext(ctx, lc2); err != nil {
@@ -258,7 +261,7 @@ func TestTopicLifelineContext_ListByTopic(t *testing.T) {
 
 	for _, g := range []string{"week", "month", "year", "all"} {
 		lc := &repository.TopicLifelineContext{
-			PersistentTopicID: 1, Granularity: g, Content: g + " summary",
+			PersistentTopicID: 1, Granularity: g, Period: periodForGran(g), Content: g + " summary",
 		}
 		if err := repository.Repo.UpsertTopicLifelineContext(ctx, lc); err != nil {
 			t.Fatalf("upsert %s: %v", g, err)
@@ -278,22 +281,52 @@ func TestTopicLifelineContext_ListStale(t *testing.T) {
 	setupRepoTestDB(t)
 	ctx := context.Background()
 
-	// Insert one recent context
+	// Insert one recent context with period
 	fresh := &repository.TopicLifelineContext{
-		PersistentTopicID: 1, Granularity: "week", Content: "fresh",
+		PersistentTopicID: 1, Granularity: "week", Period: "2026-W27", Content: "fresh",
 	}
 	if err := repository.Repo.UpsertTopicLifelineContext(ctx, fresh); err != nil {
 		t.Fatalf("upsert: %v", err)
 	}
 
-	// ListStale should find topics with as_of_date before cutoff
-	// (fresh records have zero-value as_of_date, which is before now)
-	stale, err := repository.Repo.ListStaleTopicLifelineContexts(ctx, "week", 365)
+	// ListByGranularity should return the row.
+	list, err := repository.Repo.ListTopicLifelineContextsByGranularity(ctx, 1, "week")
 	if err != nil {
-		t.Fatalf("list stale: %v", err)
+		t.Fatalf("list by granularity: %v", err)
 	}
-	if len(stale) == 0 {
-		t.Fatal("expected stale records with zero as_of_date")
+	if len(list) != 1 {
+		t.Fatalf("expected 1 row, got %d", len(list))
+	}
+	if list[0].Period != "2026-W27" {
+		t.Fatalf("period = %q, want 2026-W27", list[0].Period)
+	}
+
+	// Test DeleteOlderThan: delete rows older than 2026-W28 (should keep 2026-W27 since it's before W28).
+	err = repository.Repo.DeleteTopicLifelineContextsOlderThan(ctx, "week", "2026-W28")
+	if err != nil {
+		t.Fatalf("delete older than: %v", err)
+	}
+
+	list, err = repository.Repo.ListTopicLifelineContextsByGranularity(ctx, 1, "week")
+	if err != nil {
+		t.Fatalf("list after delete: %v", err)
+	}
+	if len(list) != 0 {
+		t.Fatalf("expected 0 rows after delete (2026-W27 < 2026-W28), got %d", len(list))
+	}
+}
+
+// periodForGran returns a dummy period string for testing.
+func periodForGran(g string) string {
+	switch g {
+	case "week":
+		return "2026-W27"
+	case "month":
+		return "2026-07"
+	case "year":
+		return "2026"
+	default:
+		return "all"
 	}
 }
 

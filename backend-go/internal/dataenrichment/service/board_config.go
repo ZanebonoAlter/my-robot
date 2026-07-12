@@ -11,6 +11,7 @@ type BoardEnrichmentConfig struct {
 	EnrichmentEnabled bool     `json:"enrichment_enabled"` // default false
 	WindowDays        int      `json:"window_days"`        // default 14
 	ContextLayers     []string `json:"context_layers"`     // default ["week","month","year","all"]
+	AllowedTools      []string `json:"allowed_tools"`      // tools permitted for this board (from board_data_sources)
 }
 
 // BoardConfigReader looks up a board's enrichment configuration from a topic ID.
@@ -28,6 +29,25 @@ func DefaultBoardConfig() *BoardEnrichmentConfig {
 		EnrichmentEnabled: false,
 		WindowDays:        14,
 		ContextLayers:     []string{"week", "month", "year", "all"},
+	}
+}
+
+// ToolsForSourceType maps a board_data_sources.source_type to the concrete tool names
+// available for that source type. Unknown source types return nil.
+//
+//	etf_quote      → [list_etf_by_keyword, get_etf_quote, list_sectors]
+//	exchange_rate  → []   (no tools implemented yet)
+//	gdelt_event    → []   (no tools implemented yet)
+func ToolsForSourceType(sourceType string) []string {
+	switch sourceType {
+	case "etf_quote":
+		return []string{"list_etf_by_keyword", "get_etf_quote", "list_sectors"}
+	case "exchange_rate":
+		return nil
+	case "gdelt_event":
+		return nil
+	default:
+		return nil
 	}
 }
 

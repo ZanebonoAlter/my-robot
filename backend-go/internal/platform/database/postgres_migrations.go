@@ -1013,6 +1013,36 @@ func postgresMigrations() []Migration {
 				return nil
 			},
 		},
+
+		// ── Lifeline context: period-archival model change ──────────
+		{
+			Version:     "20260706_0001",
+			Description: "Drop old idx_topic_gran unique index; TRUNCATE topic_lifeline_context old data (pre-period model).",
+			Up: func(db *gorm.DB) error {
+				// Drop old 2-column unique index (replaced by idx_topic_gran_period).
+				if tableExists(db, "topic_lifeline_context") {
+					if err := db.Exec(`
+						DO $$ BEGIN
+							IF EXISTS (
+								SELECT 1 FROM pg_indexes
+								WHERE indexname = 'idx_topic_gran'
+								  AND tablename = 'topic_lifeline_context'
+							) THEN
+								ALTER TABLE topic_lifeline_context DROP CONSTRAINT IF EXISTS idx_topic_gran;
+								DROP INDEX IF EXISTS idx_topic_gran;
+							END IF;
+						END $$`).Error; err != nil {
+						return fmt.Errorf("drop old idx_topic_gran: %w", err)
+					}
+					// TRUNCATE old data (no period field → cannot satisfy new 3-col UNIQUE).
+					// Dev env only — production would need a backfill script.
+					if err := db.Exec("TRUNCATE topic_lifeline_context").Error; err != nil {
+						return fmt.Errorf("truncate topic_lifeline_context: %w", err)
+					}
+				}
+				return nil
+			},
+		},
 	}
 }
 

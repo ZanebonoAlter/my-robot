@@ -100,13 +100,13 @@ func (r *Repository) DeleteBoardDataSource(ctx context.Context, id uint) error {
 
 // ── TopicLifelineContext ────────────────────────────────────────────────────
 
-// UpsertTopicLifelineContext creates or updates a lifeline context (by topic_id + granularity).
+// UpsertTopicLifelineContext creates or updates a lifeline context (by topic_id + granularity + period).
 // Wraps read-then-write in a transaction to avoid TOCTOU race.
 func (r *Repository) UpsertTopicLifelineContext(ctx context.Context, lc *TopicLifelineContext) error {
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var existing TopicLifelineContext
-		err := tx.Where("persistent_topic_id = ? AND granularity = ?",
-			lc.PersistentTopicID, lc.Granularity).First(&existing).Error
+		err := tx.Where("persistent_topic_id = ? AND granularity = ? AND period = ?",
+			lc.PersistentTopicID, lc.Granularity, lc.Period).First(&existing).Error
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return tx.Create(lc).Error
 		}
@@ -119,11 +119,11 @@ func (r *Repository) UpsertTopicLifelineContext(ctx context.Context, lc *TopicLi
 	})
 }
 
-// GetTopicLifelineContext fetches a single lifeline context by topic + granularity.
-func (r *Repository) GetTopicLifelineContext(ctx context.Context, topicID uint, granularity string) (*TopicLifelineContext, error) {
+// GetTopicLifelineContext fetches a single lifeline context by topic + granularity + period.
+func (r *Repository) GetTopicLifelineContext(ctx context.Context, topicID uint, granularity, period string) (*TopicLifelineContext, error) {
 	var lc TopicLifelineContext
 	err := r.db.WithContext(ctx).
-		Where("persistent_topic_id = ? AND granularity = ?", topicID, granularity).
+		Where("persistent_topic_id = ? AND granularity = ? AND period = ?", topicID, granularity, period).
 		First(&lc).Error
 	if err != nil {
 		return nil, fmt.Errorf("get topic lifeline context: %w", err)
@@ -131,12 +131,26 @@ func (r *Repository) GetTopicLifelineContext(ctx context.Context, topicID uint, 
 	return &lc, nil
 }
 
-// ListTopicLifelineContextsByTopic returns all granularity contexts for a topic.
+// GetTopicLifelineContextLatest returns the row with the highest period for a given granularity.
+// Used by orchestrator readContextLayers to pick the freshest period.
+func (r *Repository) GetTopicLifelineContextLatest(ctx context.Context, topicID uint, granularity string) (*TopicLifelineContext, error) {
+	var lc TopicLifelineContext
+	err := r.db.WithContext(ctx).
+		Where("persistent_topic_id = ? AND granularity = ?", topicID, granularity).
+		Order("period DESC").
+		First(&lc).Error
+	if err != nil {
+		return nil, fmt.Errorf("get latest topic lifeline context: %w", err)
+	}
+	return &lc, nil
+}
+
+// ListTopicLifelineContextsByTopic returns all granularity+period contexts for a topic.
 func (r *Repository) ListTopicLifelineContextsByTopic(ctx context.Context, topicID uint) ([]TopicLifelineContext, error) {
 	var list []TopicLifelineContext
 	err := r.db.WithContext(ctx).
 		Where("persistent_topic_id = ?", topicID).
-		Order("granularity ASC").
+		Order("granularity ASC, period DESC").
 		Find(&list).Error
 	if err != nil {
 		return nil, fmt.Errorf("list topic lifeline contexts: %w", err)
@@ -144,18 +158,25 @@ func (r *Repository) ListTopicLifelineContextsByTopic(ctx context.Context, topic
 	return list, nil
 }
 
-// ListStaleTopicLifelineContexts returns contexts whose as_of_date is older than sinceDays ago.
-func (r *Repository) ListStaleTopicLifelineContexts(ctx context.Context, granularity string, sinceDays int) ([]TopicLifelineContext, error) {
+// ListTopicLifelineContextsByGranularity returns all periods for a topic + granularity.
+func (r *Repository) ListTopicLifelineContextsByGranularity(ctx context.Context, topicID uint, granularity string) ([]TopicLifelineContext, error) {
 	var list []TopicLifelineContext
 	err := r.db.WithContext(ctx).
-		Where("granularity = ?", granularity).
-		Where("as_of_date < DATE('now', ?)", fmt.Sprintf("-%d days", sinceDays)).
-		Order("as_of_date ASC").
+		Where("persistent_topic_id = ? AND granularity = ?", topicID, granularity).
+		Order("period DESC").
 		Find(&list).Error
 	if err != nil {
-		return nil, fmt.Errorf("list stale lifeline contexts: %w", err)
+		return nil, fmt.Errorf("list lifeline contexts by granularity: %w", err)
 	}
 	return list, nil
+}
+
+// DeleteTopicLifelineContextsOlderThan deletes rows whose period is before the cutoff
+// for a given granularity. Used by archive/prune logic.
+func (r *Repository) DeleteTopicLifelineContextsOlderThan(ctx context.Context, granularity, cutoffPeriod string) error {
+	return r.db.WithContext(ctx).
+		Where("granularity = ? AND period < ?", granularity, cutoffPeriod).
+		Delete(&TopicLifelineContext{}).Error
 }
 
 // ── TopicEnrichmentResult ───────────────────────────────────────────────────
@@ -271,4 +292,24 @@ func (r *Repository) GetTopicEnrichmentReviewByID(ctx context.Context, id uint) 
 		return nil, fmt.Errorf("get enrichment review: %w", err)
 	}
 	return &review, nil
+}
+
+// ── StockDebateResult ─────────────────────────────────────────────────────
+
+// CreateStockDebateResult inserts a new debate result.
+func (r *Repository) CreateStockDebateResult(ctx context.Context, result *StockDebateResult) error {
+	return r.db.WithContext(ctx).Create(result).Error
+}
+
+// ListStockDebateResultsByResult returns all debate results for a result ID, newest first.
+func (r *Repository) ListStockDebateResultsByResult(ctx context.Context, resultID uint) ([]StockDebateResult, error) {
+	var list []StockDebateResult
+	err := r.db.WithContext(ctx).
+		Where("topic_enrichment_result_id = ?", resultID).
+		Order("id DESC").
+		Find(&list).Error
+	if err != nil {
+		return nil, fmt.Errorf("list debate results: %w", err)
+	}
+	return list, nil
 }

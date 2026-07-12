@@ -60,12 +60,23 @@ func (c *alwaysDisabledBoardConfig) GetBoardConfig(ctx context.Context, topicID 
 type mockLifelineService struct {
 	lastTopicID     uint
 	lastGranularity string
+	lastPeriod      string
 	shouldFail      bool
 }
 
 func (m *mockLifelineService) RefreshGranularity(ctx context.Context, topicID uint, granularity string, now time.Time) error {
 	m.lastTopicID = topicID
 	m.lastGranularity = granularity
+	if m.shouldFail {
+		return fmt.Errorf("mock refresh error")
+	}
+	return nil
+}
+
+func (m *mockLifelineService) RefreshPeriod(ctx context.Context, topicID uint, granularity, period string, now time.Time) error {
+	m.lastTopicID = topicID
+	m.lastGranularity = granularity
+	m.lastPeriod = period
 	if m.shouldFail {
 		return fmt.Errorf("mock refresh error")
 	}
@@ -88,7 +99,7 @@ func (m *mockOrchestrator) EnrichTopic(ctx context.Context, topicID uint) (*serv
 }
 
 func newTestHandler(db *gorm.DB, lifelineSvc handler.LifelineService, orch handler.Orchestrator, cfg service.BoardConfigReader) *handler.EnrichmentHandler {
-	return handler.NewHandler(repository.Repo, lifelineSvc, orch, cfg, db)
+	return handler.NewHandler(repository.Repo, lifelineSvc, orch, cfg, nil, db)
 }
 
 // newTestRouter creates a Gin engine with the handler routes registered.
@@ -179,7 +190,7 @@ func TestListContexts(t *testing.T) {
 
 	// Seed a context.
 	lc := &repository.TopicLifelineContext{
-		PersistentTopicID: 1, Granularity: "week", Content: "week summary",
+		PersistentTopicID: 1, Granularity: "week", Period: "2026-W27", Content: "week summary",
 	}
 	if err := repository.Repo.UpsertTopicLifelineContext(ctx, lc); err != nil {
 		t.Fatalf("seed: %v", err)
@@ -204,7 +215,7 @@ func TestGetContext(t *testing.T) {
 	ctx := context.Background()
 
 	lc := &repository.TopicLifelineContext{
-		PersistentTopicID: 1, Granularity: "month", Content: "month summary",
+		PersistentTopicID: 1, Granularity: "month", Period: "2026-07", Content: "month summary",
 	}
 	if err := repository.Repo.UpsertTopicLifelineContext(ctx, lc); err != nil {
 		t.Fatalf("seed: %v", err)
@@ -213,7 +224,7 @@ func TestGetContext(t *testing.T) {
 	h := newTestHandler(db, nil, nil, nil)
 	r := newTestRouter(h)
 
-	w := doRequest(t, r, "GET", "/api/persistent-topics/1/enrichment/contexts/month", "")
+	w := doRequest(t, r, "GET", "/api/persistent-topics/1/enrichment/contexts/month/2026-07", "")
 	var got repository.TopicLifelineContext
 	expectJSONSuccess(t, w, &got)
 	if got.Content != "month summary" {
@@ -227,7 +238,7 @@ func TestGetContextNotFound(t *testing.T) {
 	h := newTestHandler(db, nil, nil, nil)
 	r := newTestRouter(h)
 
-	w := doRequest(t, r, "GET", "/api/persistent-topics/1/enrichment/contexts/week", "")
+	w := doRequest(t, r, "GET", "/api/persistent-topics/1/enrichment/contexts/week/2026-W27", "")
 	expectJSONError(t, w, http.StatusNotFound)
 }
 
@@ -237,7 +248,7 @@ func TestGetContextInvalidGranularity(t *testing.T) {
 	h := newTestHandler(db, nil, nil, nil)
 	r := newTestRouter(h)
 
-	w := doRequest(t, r, "GET", "/api/persistent-topics/1/enrichment/contexts/fake", "")
+	w := doRequest(t, r, "GET", "/api/persistent-topics/1/enrichment/contexts/fake/2026", "")
 	expectJSONError(t, w, http.StatusBadRequest)
 }
 
@@ -246,7 +257,7 @@ func TestUpdateContext(t *testing.T) {
 	ctx := context.Background()
 
 	lc := &repository.TopicLifelineContext{
-		PersistentTopicID: 1, Granularity: "week", Content: "original content",
+		PersistentTopicID: 1, Granularity: "week", Period: "2026-W27", Content: "original content",
 	}
 	if err := repository.Repo.UpsertTopicLifelineContext(ctx, lc); err != nil {
 		t.Fatalf("seed: %v", err)
@@ -256,7 +267,7 @@ func TestUpdateContext(t *testing.T) {
 	r := newTestRouter(h)
 
 	body := `{"content": "edited content"}`
-	w := doRequest(t, r, "PUT", "/api/persistent-topics/1/enrichment/contexts/week", body)
+	w := doRequest(t, r, "PUT", "/api/persistent-topics/1/enrichment/contexts/week/2026-W27", body)
 	var got repository.TopicLifelineContext
 	expectJSONSuccess(t, w, &got)
 	if got.Content != "edited content" {
@@ -273,7 +284,7 @@ func TestRegenerateContext(t *testing.T) {
 
 	// Seed a context for the regenerate to overwrite.
 	lc := &repository.TopicLifelineContext{
-		PersistentTopicID: 1, Granularity: "week", Content: "old content",
+		PersistentTopicID: 1, Granularity: "week", Period: "2026-W27", Content: "old content",
 	}
 	if err := repository.Repo.UpsertTopicLifelineContext(ctx, lc); err != nil {
 		t.Fatalf("seed: %v", err)
@@ -283,7 +294,7 @@ func TestRegenerateContext(t *testing.T) {
 	h := newTestHandler(db, mockLifeline, nil, nil)
 	r := newTestRouter(h)
 
-	w := doRequest(t, r, "POST", "/api/persistent-topics/1/enrichment/contexts/week/regenerate", "")
+	w := doRequest(t, r, "POST", "/api/persistent-topics/1/enrichment/contexts/week/regenerate?period=2026-W27", "")
 	expectJSONSuccess(t, w, nil)
 
 	if mockLifeline.lastTopicID != 1 || mockLifeline.lastGranularity != "week" {

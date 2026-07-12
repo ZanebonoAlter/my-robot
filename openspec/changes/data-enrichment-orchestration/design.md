@@ -7,10 +7,12 @@
 > - **新闻记忆与分析认知分离**——两个独立循环，通过表 1 单向连接，互不污染；
 > - 分析消费**分层上下文**（周/月/年/总 + 14 天详情），不是单篇新闻；
 > - 持久话题分析是**不断自我修正的认知过程**，不是一次性快照。
+>
+> **★ 重定位（2026-07-09）**：主线从「金融走向预测 + 涨跌兑现」拉回到「持久话题演进定位」。分析员输出从 `sectors[].direction/trigger`（涨跌语义）改为 `position`（强化/转折/扩散/衰减）+ 跨泳道信号 + 证据链；review 从"涨跌兑现 hit/part/miss"改为"定位变化对比"。金融降为可选数据源视角（`financial_view`）；FinGenius 个股辩论冻结现状、标"金融可选模块·独立于演进主线"、前端④默认折叠。骨架（三角色编排 / 三表分离 / agent loop / 可观测性 / 循环A）保留。
 
 ## 设计目标
 
-让持久话题的演进分析能按需补充实时数据（ETF 行情起步），判断"最新进展在演进中的意义"。系统维护两类记忆：**新闻事实记忆**（客观，只随新闻变）与**分析认知演进**（主观，随每次分析迭代），两者隔离。不制造第二个话题泳道，不污染持久话题主数据。
+让持久话题的演进分析能沿话题泳道做**演进定位**——判断"这条线现在走到哪了"（强化/转折/扩散/衰减），而不是脱离泳道做未来涨跌预测。数据源是 agent 可调用的工具（金融只是其一，未来可扩展非金融 skill）。系统维护两类记忆：**新闻事实记忆**（客观，只随新闻变）与**分析认知演进**（主观，随每次分析迭代），两者隔离。不制造第二个话题泳道，不污染持久话题主数据。
 
 ## 0. 架构总览：两个独立循环 + 三表认知闭环
 
@@ -203,31 +205,46 @@ for step in 1..maxLoops:
 2. **结果不截断**：历史累积给完整结果，否则 agent 误判"没拿全"死循环重查。
 3. **去重拦截**：相同 tool+args 直接返回错误提示，避免无限重查。
 
-### 3.3 角色③ 分析员：全层 + 数据 + 走向预测
+### 3.3 角色③ 分析员：全层 + 数据 + 演进定位（★重定位）
 
 ```
-输入: 表1 context（当前周期 + 历史 period）+ 14天详情 + 查询员行情数据 + 历史 applied review
+输入: 表1 context（当前周期 + 历史 period）+ 14天详情 + 查询员数据（若有）+ 历史 applied review
 输出: JSON {
-  evolution_assessment,                                   // 一句话演进判断
-  sectors: [{
-    sector,                                               // 板块名
-    direction: "up" | "down" | "flat" | "unknown",        // 走向（替 evolution_role）
-    confidence: 0.0-1.0,
-    horizon: "short" | "mid" | "long",                    // 短期1-2周 / 中期1-3月 / 长期
-    reasoning: [{signal, mechanism}],                     // 凭什么：新闻信号 → 传导机制
-    evidence: [{context_id, period, quote}],              // 原始依据：引用哪段 context 的原话（证据链）
-    supporting_data,                                      // 支撑数据（涨跌幅等）
-    trigger_up: [...], trigger_down: [...]                // 板块专属触发条件（给 review 兑现度对照）
+  evolution_assessment,                 // 一句话演进判断
+  position: "reinforcing" | "turning" | "expanding" | "fading",   // ★ 演进定位（替 direction 涨跌）
+  signals: [{                           // ★ 跨泳道信号聚合（话题命中的多条泳道）
+    lane,                               //   持久话题泳道名（如"美伊冲突""原油供需平衡"）
+    signal,                             //   信号描述
+    mechanism                           //   传导/关联机制（为什么这条泳道相关）
   }],
+  evidence: [{                          // 证据链（指回 sections/context，不变）
+    context_id, period, quote,          //   引用哪段 context 的原话
+    source_type: "news" | "tool",       //   ★ 引用类型：新闻 / 工具查证（前端双类引用渲染用）
+    tool_ref                            //   source_type=tool 时指向 tool_calls 的哪条
+  }],
+  financial_view: {                     // ★ 可选：金融子视图（仅命中金融版块时产出）
+    sectors: [{ sector, direction, supporting_data }]  // 原金融走向，降级为可选
+  },
   causal_chain, overall
 }
 ```
 
-**关键扩展（相对 PoC，2026-07-06）**：
-- `direction + confidence + horizon + triggers`：从"描述发生了什么"升级为"判断往哪走 + 什么信号验证/证伪"，让 review 能做兑现度复盘（§4.3）。
-- `reasoning + evidence`：每个判断带**可追溯证据链**——`evidence.context_id` 指回具体 context 行 + 原话摘录。前端 tooltip 悬停显示原话（**原地展示，不跳转**，避免分散注意力）。
-- 边界：只到**板块方向 + 置信度 + 触发条件**，不下沉到个股买卖建议（合规 + 数据源只到 ETF 行情）。
-- 判断"最新进展在演进中的定位（强化/转折/扩散）"，引用历史 period 作对比基准（如"vs 6月冲突峰值仍低8%"）。`as_of_date` 滞后时以 14 天详情为准（近期优先）。
+**演进定位四档**（替 `direction` 涨跌，话题通用）：
+
+| 定位 | 含义 | 典型场景 |
+|---|---|---|
+| `reinforcing` 强化 | 现有趋势在延续/加强 | 美伊：上月停火→本月再冲突，"紧张"趋势强化 |
+| `turning` 转折 | 方向反转或质变 | 某框架长期增长→突然宣布停维 |
+| `expanding` 扩散 | 影响传导到新领域/新主体 | AI 军备：训练算力→扩散到端侧/芯片 |
+| `fading` 衰减 | 热度/影响力下降 | 某短期事件逐渐没人报道 |
+
+**关键变化（相对初版走向预测，2026-07-09 重定位）**：
+- `position` 替 `direction`：从"涨/跌/横盘"→"强化/转折/扩散/衰减"。涨跌是金融专属语义，套不进非金融话题（Rust 发布、AI 军备无"涨跌"）；演进定位话题通用。
+- `signals` 替 `sectors`：从"金融板块走向"→"跨泳道信号聚合"。`signals[].lane` 用**持久话题泳道名**（如"美伊冲突"），不是粗 SemanticBoard 大类（"地缘政治"太粗，一个版块下几十条泳道）。
+- `evidence` 保留并扩展：证据链指回 sections/context 原话。★ 新增 `source_type` 区分**新闻**（来自循环A sections）vs**工具查证**（agent 调 skill 查到的），前端据此做双类引用渲染（📰`[1]`红 / 🔧`[T1]`蓝）。
+- `financial_view` 可选：原 `sectors` 的金融走向内容降级进这里，**仅当话题命中绑定了金融数据源的版块时**才产出。非金融话题 agent 不调行情 skill，无此字段。
+- 跨泳道关联：分析员判断"最新进展在演进中的定位（强化/转折/扩散）"，引用历史 period 作对比基准。`as_of_date` 滞后时以 14 天详情为准（近期优先）。
+- 边界：只到**演进定位 + 跨泳道传导 + 证据链**，不下沉到个股买卖建议（合规）。
 
 ### 3.4 个股深度辩论（外部 FinGenius，可选环节，2026-07-06 新增）
 
@@ -330,26 +347,30 @@ CREATE INDEX idx_stock_debate_topic ON stock_debate_result(persistent_topic_id);
 
 **不回写表1/表2/表3**——辩论结果独立存档，是循环B的可选增强产物，不污染新闻记忆、分析快照、认知演进史。前端④区块直接读此表渲染。
 
-### 4.3 review judge：预测兑现度复盘（半自动）
+### 4.3 review judge：定位变化对比（★重定位，半自动）
 
-增强跑完产 result #N 后，触发一次额外 LLM 调用，**对照上次预测 vs 期间实际走势**：
+增强跑完产 result #N 后，触发一次额外 LLM 调用，**对照上次演进定位 vs 本次**，记录定位迁移 + 凭什么：
 
 ```
 Operation: data_enrichment.review_judge
-输入: result #(N-1)（上次，含 prev.sectors[].direction/triggers）+ result #N（本次）+ 期间实际行情
+输入: result #(N-1)（上次，含 prev.position）+ result #N（本次）
 输出 JSON:
   { should_review: true|false,
-    reason: "...",                 // 是否值得复盘（核心判断有无翻转/兑现）
-    verdict: [{sector, predicted_dir, actual, mark}],   // 逐板块兑现度结算（hit/part/miss）
-    deviation_summary: "...",      // 预测为什么对/错（如"会谈=缓和"线性错误）
-    affected_context: "2026-06",   // 建议关注哪个 period
+    reason: "...",                 // 是否值得复盘（定位是否变化）
+    position_change: {             // ★ 定位迁移（替 verdict 涨跌兑现）
+      from: "reinforcing",         //   上次定位
+      to: "turning",               //   本次定位
+      summary: "..."               //   定位怎么变了 + 凭什么（如"停火被打破，强化→转折"）
+    },
+    change_summary: "...",         // 复盘说明（LLM基底+人工可调）
+    affected_context: "2026-07",   // 建议关注哪个 period
     confidence: 0.8 }
 should_review=true 才写 review 行（避免噪音）；false 跳过。
 ```
 
-**从"描述对比"升级为"兑现度复盘"（2026-07-06）**：不再比"上次描述 vs 本次描述"（语义漂浮），而是比"上次预测方向 vs 期间实际走势"，每个 sector 结算 hit/part/miss。这让认知闭环真正闭合——复盘结论（哪个信号导致误判）喂给下一轮解读。
+**从"涨跌兑现"改为"定位变化对比"（2026-07-09 重定位）**：不再比"上次预测方向 vs 实际涨跌 → hit/part/miss"（金融专属语义，套不进非金融话题），而是比"上次演进定位 vs 本次定位 → 迁移 + 凭什么"。这让认知闭环真正闭合——复盘结论（定位为什么变了、哪个信号触发）喂给下一轮解读。
 
-**第一次增强无 prev_result** → 跳过自动 review。**prev 无 direction 字段**（旧格式 result）→ 降级为描述对比。
+**第一次增强无 prev_result** → 跳过自动 review。**prev 无 position 字段**（旧格式 result，重定位前的涨跌语义）→ 视为无对比基础，跳过或降级。
 
 **用户手动批注**：用户可在前端手动写 review（`source='manual'`，`prev_result_id` 可空，`deviation_summary` 用户填，`applied` 默认 true）。
 
@@ -357,14 +378,16 @@ should_review=true 才写 review 行（避免噪音）；false 跳过。
 
 `applied=true` **不触发回写表1**。表1 永远只随循环 A 新闻汇总变（保持新闻事实客观）。`applied` 仅标记"这条认知已被纳入"，下次增强（解读员）会读历史 applied review，避免重蹈已知偏差（如"上次因 X 误判黄金跌，这次别再犯"）。review 在自己的轨道上迭代，跟新闻记忆隔离。
 
-## 5. 手动触发（仅手动，不挂日报管线）
+## 5. 手动触发（话题级跨版块，★重定位）
 
-**循环 B 仅手动触发**——不是所有板块对金融数据产生影响（如"开发工具"板块），自动挂日报管线会产生无意义增强 + 浪费 LLM 成本。用户在 CRUD 界面点"重新分析某话题"才跑。
+**循环 B 仅手动触发**——不是所有话题都需要增强，自动挂日报管线浪费成本。但**一旦触发，就走话题级跨版块**——agent 跨该话题命中的多条泳道聚合信号。
 
-- 触发：CRUD 界面按钮，不依赖日报管线。
+- 触发：话题管理界面"演进分析"按钮，不依赖日报管线。**入口在话题级**（点一个话题，不是点一个版块）。
 - 结果写 `topic_enrichment_result`（独立表，不含 report_id，不改 section.persistent_topic_id，不动 topic 状态）。
-- 调度：板块级 `enrichment_enabled` 开关（默认关）。
+- 调度：`enrichment_enabled` 跨版块语义——话题命中的版块里，**只要有一个 enabled 就允许触发**（演进定位本身不依赖金融数据，纯新闻驱动也成立）；但**只有 enabled 版块绑定的数据源工具**才注册进 agent loop 可用集。
 - 失败处理：增强失败只记日志告警，手动触发天然隔离，无"阻断日报"问题。
+
+> **为什么跨版块**：持久话题的 identity 本来就跨版块（一个"美伊局势"话题可能同时命中地缘/能源/贵金属的多条泳道）。演进分析该跨泳道聚合信号，而不是锁死单板块。旧版"单板块 enrichment_enabled + EnrichTopic 吃单 topicID"把入口混在了板块级，实际 EnrichTopic 早就吃 topicID（话题级入口），只是查询员按板块查——现在放开到跨版块。
 
 > 设计余量：将来若要加回日报管线自动触发，可作为可选开关扩展，不影响当前手动路径。
 
@@ -377,11 +400,11 @@ should_review=true 才写 review 行（避免噪音）；false 跳过。
 | 调用 | Operation |
 |---|---|
 | 解读员 | `data_enrichment.interpret` |
-| 查询员每轮 | `data_enrichment.tool_use` |
-| 分析员 | `data_enrichment.analyze` |
-| review judge | `data_enrichment.review_judge` |
+| 查询员每轮 | `data_enrichment.tool_use`（★工具集按 enabled 版块动态注册） |
+| 分析员 | `data_enrichment.analyze`（★ prompt+输出改演进定位） |
+| review judge | `data_enrichment.review_judge`（★ 改定位变化对比，替涨跌兑现） |
 | 循环A汇总 | `data_enrichment.summarize_context` |
-| 个股辩论结果提炼 | `data_enrichment.debate_distill`（2026-07-06 新增，归 `data_enrichment_analysis` capability） |
+| 个股辩论结果提炼 | `data_enrichment.debate_distill`（冻结，金融可选模块） |
 
 - SessionID（循环B）：`data_enrichment_{topic_id}_{uuid8}`，一次增强内所有调用共享。
 - SessionID（循环A）：`lifeline_context_{topic_id}_{granularity}_{uuid8}`。
@@ -395,36 +418,45 @@ should_review=true 才写 review 行（避免噪音）；false 跳过。
 
 排查路径：`result.session_id` → `GET /api/ai/call-logs?session_id=` 重建该次增强的全部 LLM 调用；`result.tool_calls` + `result.input_snapshot` 补齐工具与输入上下文。
 
-## 7. 前端：板块 tab 下的「认知工作台」（第一版）
+## 7. 前端：演进分析报告（循环B，★重定位 · 报刊式）+ 新闻背景（循环A，独立）
 
-板块详情页新增「数据增强」tab，按**用户认知任务流**组织（不再按四张表平铺 CRUD）。原型见 `prototype/enrichment-workbench.html`（双主题 HTML 原型，已迭代多轮验证交互方向）。
+### 7.1 两个独立产物，分开处理
 
-### 7.1 四步认知循环结构
+循环 A（新闻背景）和循环 B（分析报告）是**两个独立产物、两个独立入口**，不揉在一个界面里：
 
-顶部 sticky 导航条 + 步骤间承上启下引导条，让用户看清这是一个循环（不是四个孤立板块）：
-
-| 步骤 | 区块 | 对应表 | 核心交互 |
+| 产物 | 循环 | 前端形态 | 入口 |
 |---|---|---|---|
-| ① 最近怎么了 | 新闻记忆 | context | **周期筛选器翻历史** + 结构化叙事段落 inline 编辑 |
-| ② 会往哪走 | 走向预测 | result.sectors | **板块可展开卡片**（凭什么/数据/触发）+ tooltip 证据链 |
-| ③ 猜得准吗 | 预测兑现复盘 | review | 时间轴 + **逐条兑现结算**（hit/part/miss）+ 采纳 |
-| ④ 数据源/参数 | 板块配置 | board_data_sources | 折叠高级区 |
+| **新闻背景汇总** | A | 独立 tab/区块，周期筛选翻历史 + inline 编辑 | 独立（保留旧 `enrichment-workbench.html` ①区块已验证方向） |
+| **演进分析报告** | B | **报刊式长文**，带引用 | 话题管理界面"演进分析" |
 
-### 7.2 关键交互（原型验证过的方向）
+报告在后台读新闻背景（用户无感），但前端不把背景塞进报告里。
 
-- **周期筛选器（替四档缩放尺）**：粒度（周/月/年）下拉 + 具体 period 翻页（‹ 2026-06 ›），每周期独立可翻（吃 §2.1 的 period 字段）。
-- **板块可展开卡片**：每个 sector 默认折叠，展开后含「凭什么判断（信号→机制）+ 支撑数据 + 板块专属触发条件」。对应 §3.3 的 reasoning/supporting_data/trigger。
-- **证据链 tooltip（不跳转）**：判断信号/支撑数据悬停显示引用的新闻原话（来自 `evidence.quote`），**原地 tooltip 展示，不跳转**（跳转会分散注意力，用户反馈）。新闻段落标「被 N 个判断引用」徽章。
-- **预测兑现复盘**：每条历史预测对照实际走势，hit/part/miss 一目了然（吃 §4.3 的 verdict），复盘结论标「已喂给下一轮解读」。
-- **完整交互态**：loading/empty/error 都要有（不再只有成功态）。
+### 7.2 演进分析报告结构（原型 `prototype/evolution-report.html` 已验证）
 
-### 7.3 术语翻译（用户友好）
+演进分析的产物是**一篇带引用的分析报告**，不是 dashboard 功能拼盘。已用原型验证方向（单栏长文、editorial 报刊风）。
 
-界面禁用后端术语（granularity / session_id / evolution_assessment / deviation_summary / applied 等），统一用人话：周/月/年 + 具体周期、本次分析的调用记录、一句话结论、涉及的板块、来龙去脉、这次为什么跟上次不一样、采纳/未采纳。
+**报告要素**：
+- **报刊式长文**：单栏、衬线（Georgia/Songti SC）、drop-cap 首字母、双线 masthead。段落自然流动，**不用 1/2/3 编号分块**。
+- **演进定位**：导语一句话交代 + 文末"演进定位"小结条（position 四档 + 迁移说明），不抢正文戏。
+- **跨泳道关联写进正文叙事**：用泳道名标签（持久话题泳道名，如"美伊冲突""霍尔木兹海峡安全""原油供需平衡""黄金避险配置"——不是粗 SemanticBoard 大类）+ 传导机制自然语言。不单独画传导链图。
+- **双类引用（知识库式，★核心）**：
+  - 📰 **新闻** `[1][2]`（红）：来自订阅源入库的新闻（循环A sections）。hover 看原话 + 来源 + 泳道。
+  - 🔧 **工具查证** `[T1][T2]`（蓝）：agent 自主调用 opencli skill 查到的（web-search / market-quote / browser）。hover 看 skill 名 + query 参数 + 结果。
+  - 文末"资料来源"分两组：📰 新闻报道（来自订阅源）/ 🔧 工具查证（agent 自主调用 opencli skill）。
+  - 吃 §3.3 evidence 的 `source_type` 字段做分类渲染。
+- **行情降级为内联佐证**：不设固定金融区。行情只是 agent 可能调的 skill 之一（跟 web-search / browser 平等），融进正文句子低调展示（如"原油本周 +4.2%——但那只是信号确认，不是判断依据"）。
+- **工作流黑盒**：历史汇总→脉络→搜索→佐证→分析这套流程用户无感，文末"关于这份报告"编者按轻量交代方法。
 
-**渐进策略**：第一版工作台验证功能后，再重构侦探墙（`TopicDetectiveWall.client.vue`）为"话题增强分析中枢"，侦探墙重构单列后续 change。
+### 7.3 新闻背景（循环A，独立产物）
 
-**契约稳定性**：API 形状设计成侦探墙能直接复用，避免替换时返工。
+不在报告里揉新闻背景折叠区。循环 A 的 period 汇总用独立 tab/区块：
+- 周期筛选器（粒度周/月/年 + 具体 period 翻页）。
+- 结构化叙事段落 inline 编辑（改完标 source=manual）。
+- 对应旧 `enrichment-workbench.html` ①区块已验证方向，保留。
+
+### 7.4 FinGenius ④ 折叠降级
+
+`DebateSection.vue` 默认折叠，需用户主动展开；仅当话题命中金融版块时才提示可用。标注"金融可选模块·独立于演进定位主线"。
 
 ## 8. 风险与取舍
 
@@ -437,31 +469,43 @@ should_review=true 才写 review 行（避免噪音）；false 跳过。
 
 ## 9. 不做什么
 
-- **不做侦探墙重构**（第一版先 CRUD，验证后单列 change 重构侦探墙）。
+- **★ 不预测涨跌 / 不做涨跌兑现复盘**（2026-07-09 重定位）：演进定位主线只判"走到哪了"（强化/转折/扩散/衰减），不预测未来涨跌、不做 hit/part/miss 兑现打分。那是金融分析师工作流，套不进非金融话题。
+- **★ 不把新闻背景揉进报告**（2026-07-09）：循环A 新闻背景和循环B 分析报告是两个独立产物、两个独立入口。
+- **★ 不预设前端数据视图**（2026-07-09）：不设固定金融区。行情只是 agent 可能调的 skill 之一，前端只展示"agent 查了什么、怎么用它佐证判断"。
+- **★ FinGenius 不再作为主线发展**（2026-07-09 降级）：代码冻结，前端④默认折叠，标"金融可选模块·独立于演进主线"。
+- **不做侦探墙重构**（第一版先验证报告形态，侦探墙重构单列 change）。
 - 不做 GDELT（金融数据起步，GDELT 与话题泳道定位重复）。
 - 不改持久话题演进主链路（只读覆盖层，不动 split/merge/dual-confirmation）。
 - 不把数据落 article 表（数据是 agent 查询上下文，不是订阅流）。
 - **不让分析结果回写新闻记忆**（表1 纯新闻，表3 认知独立迭代）。
 - **不复制/翻译 FinGenius 源码进 Syntopica**（GPL v3 合规边界，见 §11 决策⑥）：FinGenius 只作独立 HTTP 服务黑盒调用，Syntopica 仓库一行 FinGenius 代码都不引入。
 - **不在本 change 实现 FinGenius 服务端改造**：本 change 只定义客户端契约（§11 决策⑥），FinGenius 的 FastAPI 服务壳由另起独立项目实现。
-- **不把个股辩论挂自动管线**：手动触发（前端④按钮），避免 2-3 分钟辩论拖慢循环B主分析；辩论失败 non-fatal，不阻塞板块方向预测。
+- **不把个股辩论挂自动管线**：手动触发（前端④按钮），避免 2-3 分钟辩论拖慢循环B主分析；辩论失败 non-fatal，不阻塞演进定位。
 
-## 10. 完整流转实例（2026-07-05 topic 1「美伊协议」）
+## 10. 完整流转实例（2026-07-09 topic 1「美伊局势」，演进定位主线）
 
-前置：表1 week（as_of 06-28）+ month（as_of 06-30）；表2 result #2（07-01，"局势暂时缓和，原油承压"）；表3 review #1（applied=true）。
+前置：表1 week（as_of 07-02）+ month（as_of 06-30）；表2 result #3（07-01，position=fading，"停火进入观察期"）；表3 review #2（applied=true）。
 
 ```
-手动触发增强（CRUD界面"重新分析"） → session_id=data_enrichment_1_a1b2c3d4
-[解读员] 全层读表1+14天详情+历史review → 提炼查"美伊停火进展""避险联动"
-[查询员] 主题1: list_etf("原油")→get_quote; 主题2: list_etf("避险")命中0→换"黄金"→get_quote
-[分析员] 输出 result #3: "再趋紧张,原油强化(+4.2%),黄金强化(+1.8%)"
-[review_judge] 对比 #2(缓和/承压) vs #3(紧张/强化): should_review=true
-  → "核心判断反转,上次'会谈=缓和'过于线性,本次以军威胁+海峡争议打破预期"
-  → 写 review #2 (applied=false)
+手动触发演进分析（话题管理界面"演进分析"，话题级跨版块） → session_id=data_enrichment_1_a1b2c3d4
+[解读员] 全层读表1+14天详情+历史review → 提炼查"美伊停火进展""海峡通行安全""避险联动"
+[查询员] 工具按 enabled 版块注册（地缘/能源/贵金属版块开启 → 金融工具可用）
+         主题1: web-search("霍尔木兹海峡 通行风险") → 交叉查证
+         主题2: web-search("IEA Q3 原油过剩预期") → 确认多家同步下调
+         主题3: market-quote(原油/黄金 ETF) → 行情佐证 +4.2%/+1.8%
+         主题4: browser(伊朗外交部原文) → agent 判断非必要，主动跳过
+[分析员] 输出 result #4: position=turning
+         signals: [美伊冲突·停火破裂, 霍尔木兹海峡安全·风险溢价, 原油供需平衡·紧平衡, 黄金避险配置·资金流入]
+         evidence: [📰07-09路透, 📰07-08路透, 📰07-07 IEA, 📰07-09彭博, 🔧T1 web-search, 🔧T2 market-quote]
+         financial_view: {sectors:[原油↑+4.2%, 黄金↑+1.8%]}（命中金融版块，可选产出）
+[review_judge] 对比 #3(fading) vs #4(turning): should_review=true
+  → position_change: fading→turning
+  → change_summary: "停火被打破，衰减判断失效，紧张叙事重新主导"
+  → 写 review #3 (applied=false)
 
-此时: 表1 没变(循环B不碰); 表2 +result#3; 表3 +review#2
-用户在CRUD: 看 review#2 → 调 deviation_summary → 采纳(applied=true, 不回写表1)
-07-07循环A定时: week重算(as_of→07-07), 表2/3不动
+此时: 表1 没变(循环B不碰); 表2 +result#4(演进定位); 表3 +review#3(定位变化)
+用户在前端: 读演进分析报告（报刊式，带📰新闻[T1]🔧工具双类引用）→ 调 change_summary → 采纳(applied=true, 不回写表1)
+07-14循环A定时: week重算(as_of→07-14), 表2/3不动
 ```
 
 ## 11. Apply 阶段决策（2026-07-05）
@@ -502,6 +546,8 @@ should_review=true 才写 review 行（避免噪音）；false 跳过。
 **这样 TDD 全程不依赖外部网络/8085**，门禁绿。真实连通冒烟（调东方财富/新浪/本地 8085）等用户启动后单独跑。
 
 ### 决策⑥：FinGenius 个股辩论外部化 + GPL v3 合规边界（2026-07-06）
+
+> **★ 降级声明（2026-07-09 重定位）**：FinGenius 个股涨跌辩论与演进定位主线本质冲突（主线"不预测涨跌" vs 辩论"精确预测个股涨跌"）。经用户决策，**代码冻结、前端④默认折叠、标"金融可选模块·独立于演进主线"、不再作为主线发展**。以下原始契约保留备查（实现已完成，不回退），但后续迭代重心在演进定位主线。降级不取消 GPL 合规义务（致谢 + 上游链接照旧）。
 
 **背景**：循环B分析员只到板块方向（合规边界，不下沉个股买卖建议）。个股深度辩论交给外部 [FinGenius](https://github.com/HuaYaoAI/FinGenius)（6 角色 agent 多轮辩论 + 投票）。FinGenius 用 **GPL v3**，Syntopica 也是 **GPL v3**（见 `LICENSE` / README）。
 

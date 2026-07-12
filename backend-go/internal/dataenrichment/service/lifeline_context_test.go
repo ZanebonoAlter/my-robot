@@ -102,6 +102,15 @@ func newTestService(airouter service.AirRouter, sectionReader service.SectionRea
 	)
 }
 
+// mockTopicLister returns a fixed list of active topic IDs.
+type mockTopicLister struct {
+	ids []uint
+}
+
+func (m *mockTopicLister) ListActiveTopicIDs(ctx context.Context) ([]uint, error) {
+	return m.ids, nil
+}
+
 // fixedMonday returns a time that is a known Monday.
 // 2026-07-06 is a Monday (verified: July 2026 calendar).
 func fixedMonday() time.Time {
@@ -132,7 +141,7 @@ func TestRefreshWeek_ReadsCurrentWeekSections(t *testing.T) {
 	}
 
 	// Verify: context was upserted with as_of_date = end of week (Jul 13)
-	ctx, err := repository.Repo.GetTopicLifelineContext(context.Background(), topicID, string(repository.GranularityWeek))
+	ctx, err := repository.Repo.GetTopicLifelineContext(context.Background(), topicID, string(repository.GranularityWeek), service.FormatWeek(now))
 	if err != nil {
 		t.Fatalf("get context: %v", err)
 	}
@@ -210,205 +219,214 @@ func TestRefreshWeek_NoOldContext(t *testing.T) {
 	if strings.Contains(prompt, "已有汇总") || strings.Contains(prompt, "旧汇总") {
 		t.Fatal("week prompt should not contain old context reference")
 	}
-	if !strings.Contains(prompt, "一周") {
-		t.Fatal("week prompt should mention week")
+	if !strings.Contains(prompt, "本周") {
+		t.Fatal("week prompt should mention 本周")
 	}
 }
 
-// ── Tests: RefreshMonth (incremental + old) ─────────────────────────────────
+// ── Tests: RefreshMonth (standalone, not incremental) ──────────────────────
 
-func TestRefreshMonth_IncrementalMerge(t *testing.T) {
+func TestRefreshMonth_StandaloneSummary(t *testing.T) {
 	setupLifelineTestDB(t)
 	ar := newMockAirouter()
 	sr := newMockSectionReader()
 	svc := newTestService(ar, sr)
 
-	// Pre-populate old month context
+	// Pre-populate old month context (June) — should NOT be merged into July summary.
 	oldCtx := &repository.TopicLifelineContext{
 		PersistentTopicID: 4,
 		Granularity:       string(repository.GranularityMonth),
+		Period:            "2026-06",
 		Content:           "6月摘要：芯片板块整理为主，存储芯片价格回升",
-		AsOfDate:          time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC), // as_of_date = June 1st
+		AsOfDate:          time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC),
 		Source:            "llm_assisted",
 	}
 	if err := repository.Repo.UpsertTopicLifelineContext(context.Background(), oldCtx); err != nil {
 		t.Fatalf("insert old context: %v", err)
 	}
 
-	// Mock sections since June 1st
+	// Mock sections for July only (standalone period).
 	now := time.Date(2026, 7, 6, 10, 0, 0, 0, time.UTC)
 	topicID := uint(4)
 	sr.add(topicID,
-		time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC),
 		time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC),
-		"增量：7月初突发，AI芯片出口管制")
+		time.Date(2026, 8, 1, 0, 0, 0, 0, time.UTC),
+		"7月初突发，AI芯片出口管制")
 
 	err := svc.RefreshMonth(context.Background(), topicID, now)
 	if err != nil {
 		t.Fatalf("RefreshMonth: %v", err)
 	}
 
-	// Verify: old context merged with new sections
+	// Verify: standalone summary (no old context merge).
 	if len(ar.calls) == 0 {
 		t.Fatal("expected Chat call")
 	}
 	prompt := ar.calls[0].Messages[0].Content
-	if !strings.Contains(prompt, "6月摘要") {
-		t.Fatal("month prompt should contain old summary")
+	if strings.Contains(prompt, "6月摘要") || strings.Contains(prompt, "已有汇总") {
+		t.Fatal("month prompt should NOT contain old summary (standalone period)")
 	}
-	if !strings.Contains(prompt, "增量") {
-		t.Fatal("month prompt should contain incremental sections")
+	if !strings.Contains(prompt, "本月") {
+		t.Fatal("month prompt should mention 本月")
 	}
 
-	// Verify: as_of_date advanced
-	ctx, err := repository.Repo.GetTopicLifelineContext(context.Background(), topicID, string(repository.GranularityMonth))
+	// Verify: new row with period 2026-07 created (June row still exists).
+	ctx, err := repository.Repo.GetTopicLifelineContext(context.Background(), topicID, string(repository.GranularityMonth), "2026-07")
 	if err != nil {
-		t.Fatalf("get context: %v", err)
+		t.Fatalf("get new month context: %v", err)
 	}
-	// as_of_date should be July 1st (end of June month period, or start of July)
-	if ctx.AsOfDate.Before(time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC)) {
-		t.Fatalf("expected as_of_date >= 2026-07-01, got %s", ctx.AsOfDate.Format("2006-01-02"))
+	if ctx.Period != "2026-07" {
+		t.Fatalf("expected period 2026-07, got %s", ctx.Period)
+	}
+
+	// Verify: old June row still exists (not overwritten).
+	old, err := repository.Repo.GetTopicLifelineContext(context.Background(), topicID, string(repository.GranularityMonth), "2026-06")
+	if err != nil {
+		t.Fatalf("old June context should still exist: %v", err)
+	}
+	if old.Period != "2026-06" {
+		t.Fatalf("expected old period 2026-06, got %s", old.Period)
 	}
 }
 
-// ── Tests: HealStale (self-healing) ─────────────────────────────────────────
+// ── Tests: HealMissing (self-healing) ───────────────────────────────────────
 
-func TestHealStale_SkipOneWeekThenCatchUp(t *testing.T) {
+func TestHealMissing_SkipOneWeekThenCatchUp(t *testing.T) {
 	setupLifelineTestDB(t)
 	ar := newMockAirouter()
 	sr := newMockSectionReader()
 	svc := newTestService(ar, sr)
 
-	// Simulate: a topic was last refreshed 1 week ago (skipped last week).
-	// Use dates relative to real time so ListStaleTopicLifelineContexts can find them.
-	// Since sinceDays=8 for week, as_of_date must be at least 9 days ago.
-	now := time.Now().UTC()
-	// Compute Monday of the current week.
-	currentMonday, _ := weekBoundaries(now)
-	currentEnd := currentMonday.AddDate(0, 0, 7)
-	// as_of_date = 1 Monday before current Monday (7 days ago), which is >8 days in past
-	// if today is near the weekend. For safety, use 14 days.
-	oldAsOf := currentMonday.AddDate(0, 0, -14)
-
+	now := fixedMonday() // Monday Jul 6, 2026
 	topicID := uint(5)
+
+	// Seed an old week context (2 weeks ago — "2026-W25", which is June 15-21 2026)
+	// Actually let's use fixedMonday minus 14 days which gives a period that's 2 weeks before W27
+	oldWeek := now.AddDate(0, 0, -14)
+	oldPeriod := service.FormatWeek(oldWeek)
 	oldCtx := &repository.TopicLifelineContext{
 		PersistentTopicID: topicID,
 		Granularity:       string(repository.GranularityWeek),
+		Period:            oldPeriod,
 		Content:           "两周前的内容",
-		AsOfDate:          oldAsOf,
+		AsOfDate:          oldWeek,
 		Source:            "llm_assisted",
 	}
 	if err := repository.Repo.UpsertTopicLifelineContext(context.Background(), oldCtx); err != nil {
 		t.Fatalf("insert old: %v", err)
 	}
 
-	// Mock sections for every week from oldAsOf to currentEnd to cover all cycles.
-	// HealStale iterates weekly: oldAsOf → oldAsOf+7 → oldAsOf+14 → ...
-	for start := oldAsOf; start.Before(currentEnd); start = start.AddDate(0, 0, 7) {
-		end := start.AddDate(0, 0, 7)
-		if end.After(currentEnd) {
-			end = currentEnd
-		}
-		label := fmt.Sprintf("week %s", start.Format("01-02"))
-		sr.add(topicID, start, end, label)
+	// Mock sections for the missing period and current period.
+	// HealMissing will compute: latest=oldPeriod, current=FormatWeek(now).
+	// Missing: all periods between oldPeriod+1 and current (inclusive).
+	currentPeriod := service.FormatWeek(now)
+
+	// Mock sections for each missing period.
+	missing := service.PeriodsBetween(oldPeriod, currentPeriod, "week")
+	for _, p := range missing {
+		from, to, _ := service.ParsePeriodRange(p, "week")
+		sr.add(topicID, from, to, fmt.Sprintf("period %s news", p))
 	}
 
-	err := svc.HealStale(context.Background(), string(repository.GranularityWeek), now)
+	lister := &mockTopicLister{ids: []uint{topicID}}
+	err := svc.HealMissing(context.Background(), string(repository.GranularityWeek), now, lister)
 	if err != nil {
-		t.Fatalf("HealStale: %v", err)
+		t.Fatalf("HealMissing: %v", err)
 	}
 
-	// Should have made at least 2 LLM calls: patch missed weeks, then current week
-	if len(ar.calls) < 2 {
-		t.Fatalf("expected at least 2 Chat calls (patch missed + current), got %d", len(ar.calls))
+	// Should have made at least 1 LLM call (if there are missing periods).
+	if len(ar.calls) < 1 {
+		t.Fatalf("expected at least 1 Chat call, got %d", len(ar.calls))
 	}
 
-	// Final as_of_date should be currentEnd (exclusive boundary of current week)
-	ctx, err := repository.Repo.GetTopicLifelineContext(context.Background(), topicID, string(repository.GranularityWeek))
+	// Verify: latest period row exists with current period.
+	ctx, err := repository.Repo.GetTopicLifelineContext(context.Background(), topicID, string(repository.GranularityWeek), currentPeriod)
 	if err != nil {
-		t.Fatalf("get context: %v", err)
+		t.Fatalf("get current week context: %v", err)
 	}
-	if ctx.AsOfDate.Format("2006-01-02") != currentEnd.Format("2006-01-02") {
-		t.Fatalf("expected final as_of_date %s, got %s", currentEnd.Format("2006-01-02"), ctx.AsOfDate.Format("2006-01-02"))
+	if ctx.Period != currentPeriod {
+		t.Fatalf("expected period %s, got %s", currentPeriod, ctx.Period)
 	}
 }
 
-func TestHealStale_NoStaleContexts(t *testing.T) {
+func TestHealMissing_NoStaleContexts(t *testing.T) {
 	setupLifelineTestDB(t)
 	ar := newMockAirouter()
 	sr := newMockSectionReader()
 	svc := newTestService(ar, sr)
 
-	// Context that is up to date: as_of_date = today (well within sinceDays=8).
-	now := time.Now().UTC()
+	now := fixedMonday()
+	currentPeriod := service.FormatWeek(now)
 	topicID := uint(6)
+
+	// Seed current week context.
 	freshCtx := &repository.TopicLifelineContext{
 		PersistentTopicID: topicID,
 		Granularity:       string(repository.GranularityWeek),
+		Period:            currentPeriod,
 		Content:           "本周最新",
-		AsOfDate:          now.AddDate(0, 0, -1), // yesterday — not stale
+		AsOfDate:          now,
 		Source:            "llm_assisted",
 	}
 	repository.Repo.UpsertTopicLifelineContext(context.Background(), freshCtx)
 
-	err := svc.HealStale(context.Background(), string(repository.GranularityWeek), now)
+	lister := &mockTopicLister{ids: []uint{topicID}}
+	err := svc.HealMissing(context.Background(), string(repository.GranularityWeek), now, lister)
 	if err != nil {
-		t.Fatalf("HealStale: %v", err)
+		t.Fatalf("HealMissing: %v", err)
 	}
 
-	// Should be no-op — context is not stale (as_of_date is only 1 day ago, within 8-day threshold)
+	// Should be no-op — context is already at current period.
 	if len(ar.calls) > 0 {
-		t.Fatalf("expected 0 Chat calls for fresh context, got %d", len(ar.calls))
+		t.Fatalf("expected 0 Chat calls for current context, got %d", len(ar.calls))
 	}
 }
 
-func TestHealStale_AsOfDateAdvancesSequentially(t *testing.T) {
+func TestHealMissing_AsOfDateAdvancesSequentially(t *testing.T) {
 	setupLifelineTestDB(t)
 	ar := newMockAirouter()
 	sr := newMockSectionReader()
 	svc := newTestService(ar, sr)
 
-	// Month granularity: as_of_date = 2 months ago 1st, now = today.
-	// Should patch: month1→month2→currentMonth (as_of_date advances sequentially).
-	now := time.Now().UTC()
-	currentMonth1st := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC)
-	nextMonth1st := currentMonth1st.AddDate(0, 1, 0)
-	// as_of_date = 2 months before current month 1st
-	oldAsOf := currentMonth1st.AddDate(0, -2, 0)
-	midAsOf := currentMonth1st.AddDate(0, -1, 0)
-
+	now := time.Date(2026, 7, 6, 10, 0, 0, 0, time.UTC)
 	topicID := uint(7)
+
+	// Seed old month context (April 2026).
+	oldPeriod := "2026-04"
 	oldCtx := &repository.TopicLifelineContext{
 		PersistentTopicID: topicID,
 		Granularity:       string(repository.GranularityMonth),
+		Period:            oldPeriod,
 		Content:           "旧摘要",
-		AsOfDate:          oldAsOf,
+		AsOfDate:          time.Date(2026, 4, 1, 0, 0, 0, 0, time.UTC),
 		Source:            "llm_assisted",
 	}
 	repository.Repo.UpsertTopicLifelineContext(context.Background(), oldCtx)
 
-	// Mock sections for the first missed month
-	sr.add(topicID, oldAsOf, midAsOf, "第1个遗漏月新闻")
-	// Mock sections for the second missed month (up to current)
-	sr.add(topicID, midAsOf, nextMonth1st, "第2个遗漏月（含当前月）新闻")
+	// Mock sections for each missing month: 2026-05, 2026-06, 2026-07
+	for _, p := range []string{"2026-05", "2026-06", "2026-07"} {
+		from, to, _ := service.ParsePeriodRange(p, "month")
+		sr.add(topicID, from, to, fmt.Sprintf("month %s news", p))
+	}
 
-	err := svc.HealStale(context.Background(), string(repository.GranularityMonth), now)
+	lister := &mockTopicLister{ids: []uint{topicID}}
+	err := svc.HealMissing(context.Background(), string(repository.GranularityMonth), now, lister)
 	if err != nil {
-		t.Fatalf("HealStale: %v", err)
+		t.Fatalf("HealMissing: %v", err)
 	}
 
-	// Should have made 2 LLM calls (two missed months → current month inclusive)
-	if len(ar.calls) < 2 {
-		t.Fatalf("expected 2 Chat calls for two months, got %d", len(ar.calls))
+	// Should have made 3 LLM calls (May, June, July).
+	if len(ar.calls) != 3 {
+		t.Fatalf("expected 3 Chat calls for three months, got %d", len(ar.calls))
 	}
 
-	// Final as_of_date should be nextMonth1st (exclusive boundary of current month)
-	ctx, err := repository.Repo.GetTopicLifelineContext(context.Background(), topicID, string(repository.GranularityMonth))
+	// Verify: current month period (2026-07) exists.
+	ctx, err := repository.Repo.GetTopicLifelineContext(context.Background(), topicID, string(repository.GranularityMonth), "2026-07")
 	if err != nil {
-		t.Fatalf("get context: %v", err)
+		t.Fatalf("get current month context: %v", err)
 	}
-	if ctx.AsOfDate.Format("2006-01-02") != nextMonth1st.Format("2006-01-02") {
-		t.Fatalf("expected as_of_date %s, got %s", nextMonth1st.Format("2006-01-02"), ctx.AsOfDate.Format("2006-01-02"))
+	if ctx.Period != "2026-07" {
+		t.Fatalf("expected period 2026-07, got %s", ctx.Period)
 	}
 }
 
@@ -477,6 +495,7 @@ func TestRefreshAll_IncrementalMerge(t *testing.T) {
 	oldCtx := &repository.TopicLifelineContext{
 		PersistentTopicID: 9,
 		Granularity:       string(repository.GranularityAll),
+		Period:            "all",
 		Content:           "历史全貌：芯片板块5年综述",
 		AsOfDate:          time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC),
 		Source:            "llm_assisted",

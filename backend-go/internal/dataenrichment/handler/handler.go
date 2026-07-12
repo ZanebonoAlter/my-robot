@@ -19,12 +19,18 @@ import (
 // This allows tests to mock the LLM-dependent regenerate operation.
 type LifelineService interface {
 	RefreshGranularity(ctx context.Context, topicID uint, granularity string, now time.Time) error
+	RefreshPeriod(ctx context.Context, topicID uint, granularity, period string, now time.Time) error
 }
 
 // Orchestrator abstracts the methods of service.OrchestratorService used by handlers.
 // This allows tests to mock the LLM-dependent trigger operation.
 type Orchestrator interface {
 	EnrichTopic(ctx context.Context, topicID uint) (*service.EnrichmentOutput, error)
+}
+
+// DebateRunner abstracts DebateService.RunDebate for handler testing.
+type DebateRunner interface {
+	RunDebate(ctx context.Context, resultID, topicID uint, sessionID string, symbols []service.DebateSymbol) ([]*repository.StockDebateResult, error)
 }
 
 // EnrichmentHandler serves the data enrichment CRUD API.
@@ -34,6 +40,7 @@ type EnrichmentHandler struct {
 	lifelineSvc       LifelineService
 	orchestrator      Orchestrator
 	boardConfigReader service.BoardConfigReader
+	debateSvc         DebateRunner
 	db                *gorm.DB
 }
 
@@ -45,6 +52,7 @@ func InitHandler(
 	lifelineSvc LifelineService,
 	orchestrator Orchestrator,
 	boardConfigReader service.BoardConfigReader,
+	debateSvc DebateRunner,
 	db *gorm.DB,
 ) {
 	instance = &EnrichmentHandler{
@@ -52,6 +60,7 @@ func InitHandler(
 		lifelineSvc:       lifelineSvc,
 		orchestrator:      orchestrator,
 		boardConfigReader: boardConfigReader,
+		debateSvc:         debateSvc,
 		db:                db,
 	}
 }
@@ -62,6 +71,7 @@ func NewHandler(
 	lifelineSvc LifelineService,
 	orchestrator Orchestrator,
 	boardConfigReader service.BoardConfigReader,
+	debateSvc DebateRunner,
 	db *gorm.DB,
 ) *EnrichmentHandler {
 	return &EnrichmentHandler{
@@ -69,6 +79,7 @@ func NewHandler(
 		lifelineSvc:       lifelineSvc,
 		orchestrator:      orchestrator,
 		boardConfigReader: boardConfigReader,
+		debateSvc:         debateSvc,
 		db:                db,
 	}
 }
@@ -88,13 +99,13 @@ func (h *EnrichmentHandler) RegisterRoutes(rg *gin.RouterGroup) {
 	// ── Topic enrichment (topic dimension) ──────────────────────────────────
 	enrichment := rg.Group("/persistent-topics/:topicId/enrichment")
 
-	// Table 1: topic_lifeline_context
+	// Table 1: topic_lifeline_context (period-archival model)
 	contexts := enrichment.Group("/contexts")
 	{
-		contexts.GET("", h.listContexts)
-		contexts.GET("/:granularity", h.getContext)
-		contexts.PUT("/:granularity", h.updateContext)
-		contexts.POST("/:granularity/regenerate", h.regenerateContext)
+		contexts.GET("", h.listContexts)                               // ?granularity=week (opt)
+		contexts.GET("/:granularity/:period", h.getContext)            // specific period
+		contexts.PUT("/:granularity/:period", h.updateContext)         // edit specific period
+		contexts.POST("/:granularity/regenerate", h.regenerateContext) // ?period=2026-W27
 	}
 
 	// Table 2: topic_enrichment_result
@@ -103,6 +114,10 @@ func (h *EnrichmentHandler) RegisterRoutes(rg *gin.RouterGroup) {
 		results.GET("", h.listResults)
 		results.GET("/:id", h.getResult)
 		results.POST("/trigger", h.triggerEnrichment)
+
+		// Stock debate (FinGenius)
+		results.POST("/:id/debates", h.triggerDebate)
+		results.GET("/:id/debates", h.listDebates)
 	}
 
 	// Table 3: topic_enrichment_review
@@ -153,15 +168,30 @@ func parseIDParam(c *gin.Context, name string) (uint, bool) {
 
 // ── Table 1: topic_lifeline_context ─────────────────────────────────────────
 
-// listContexts returns all granularity contexts for a topic.
-// GET /persistent-topics/:topicId/enrichment/contexts
+// listContexts returns all contexts for a topic, optionally filtered by ?granularity=.
+// GET /persistent-topics/:topicId/enrichment/contexts[?granularity=week]
 func (h *EnrichmentHandler) listContexts(c *gin.Context) {
 	topicID, ok := parseTopicID(c)
 	if !ok {
 		return
 	}
 
-	list, err := h.repo.ListTopicLifelineContextsByTopic(c.Request.Context(), topicID)
+	granFilter := c.Query("granularity")
+	var (
+		list []repository.TopicLifelineContext
+		err  error
+	)
+
+	if granFilter != "" {
+		if !isValidGranularity(granFilter) {
+			respondError(c, http.StatusBadRequest, fmt.Sprintf("invalid granularity filter: %s", granFilter))
+			return
+		}
+		list, err = h.repo.ListTopicLifelineContextsByGranularity(c.Request.Context(), topicID, granFilter)
+	} else {
+		list, err = h.repo.ListTopicLifelineContextsByTopic(c.Request.Context(), topicID)
+	}
+
 	if err != nil {
 		respondError(c, http.StatusInternalServerError, err.Error())
 		return
@@ -170,20 +200,25 @@ func (h *EnrichmentHandler) listContexts(c *gin.Context) {
 	respondOK(c, list)
 }
 
-// getContext returns a single granularity context.
-// GET /persistent-topics/:topicId/enrichment/contexts/:granularity
+// getContext returns a single context by granularity + period.
+// GET /persistent-topics/:topicId/enrichment/contexts/:granularity/:period
 func (h *EnrichmentHandler) getContext(c *gin.Context) {
 	topicID, ok := parseTopicID(c)
 	if !ok {
 		return
 	}
 	granularity := c.Param("granularity")
+	period := c.Param("period")
 	if !isValidGranularity(granularity) {
 		respondError(c, http.StatusBadRequest, fmt.Sprintf("invalid granularity: %s", granularity))
 		return
 	}
+	if period == "" {
+		respondError(c, http.StatusBadRequest, "period is required")
+		return
+	}
 
-	lc, err := h.repo.GetTopicLifelineContext(c.Request.Context(), topicID, granularity)
+	lc, err := h.repo.GetTopicLifelineContext(c.Request.Context(), topicID, granularity, period)
 	if err != nil {
 		respondError(c, http.StatusNotFound, err.Error())
 		return
@@ -195,14 +230,22 @@ func (h *EnrichmentHandler) getContext(c *gin.Context) {
 // updateContext allows manual editing of a context's content.
 // PUT /persistent-topics/:topicId/enrichment/contexts/:granularity
 // Body: { "content": "..." }
+// updateContext allows manual editing of a context's content.
+// PUT /persistent-topics/:topicId/enrichment/contexts/:granularity/:period
+// Body: { "content": "..." }
 func (h *EnrichmentHandler) updateContext(c *gin.Context) {
 	topicID, ok := parseTopicID(c)
 	if !ok {
 		return
 	}
 	granularity := c.Param("granularity")
+	period := c.Param("period")
 	if !isValidGranularity(granularity) {
 		respondError(c, http.StatusBadRequest, fmt.Sprintf("invalid granularity: %s", granularity))
+		return
+	}
+	if period == "" {
+		respondError(c, http.StatusBadRequest, "period is required")
 		return
 	}
 
@@ -215,7 +258,7 @@ func (h *EnrichmentHandler) updateContext(c *gin.Context) {
 	}
 
 	// Fetch existing context to get the ID.
-	existing, err := h.repo.GetTopicLifelineContext(c.Request.Context(), topicID, granularity)
+	existing, err := h.repo.GetTopicLifelineContext(c.Request.Context(), topicID, granularity, period)
 	if err != nil {
 		respondError(c, http.StatusNotFound, err.Error())
 		return
@@ -232,8 +275,9 @@ func (h *EnrichmentHandler) updateContext(c *gin.Context) {
 	respondOK(c, existing)
 }
 
-// regenerateContext triggers manual re-generation of a granularity context.
-// POST /persistent-topics/:topicId/enrichment/contexts/:granularity/regenerate
+// regenerateContext triggers manual re-generation for a granularity (and optional period).
+// POST /persistent-topics/:topicId/enrichment/contexts/:granularity/regenerate?period=2026-W27
+// If period is omitted, the current period is used (via RefreshGranularity).
 func (h *EnrichmentHandler) regenerateContext(c *gin.Context) {
 	topicID, ok := parseTopicID(c)
 	if !ok {
@@ -245,13 +289,26 @@ func (h *EnrichmentHandler) regenerateContext(c *gin.Context) {
 		return
 	}
 
-	if err := h.lifelineSvc.RefreshGranularity(c.Request.Context(), topicID, granularity, time.Now()); err != nil {
+	now := time.Now()
+	period := c.Query("period")
+
+	var err error
+	if period != "" {
+		err = h.lifelineSvc.RefreshPeriod(c.Request.Context(), topicID, granularity, period, now)
+	} else {
+		err = h.lifelineSvc.RefreshGranularity(c.Request.Context(), topicID, granularity, now)
+	}
+
+	if err != nil {
 		respondError(c, http.StatusInternalServerError, fmt.Sprintf("regenerate failed: %v", err))
 		return
 	}
 
 	// Fetch the newly generated context.
-	lc, err := h.repo.GetTopicLifelineContext(c.Request.Context(), topicID, granularity)
+	if period == "" {
+		period = service.PeriodForGranularity(now, granularity)
+	}
+	lc, err := h.repo.GetTopicLifelineContext(c.Request.Context(), topicID, granularity, period)
 	if err != nil {
 		respondError(c, http.StatusInternalServerError, fmt.Sprintf("context regenerated but failed to fetch: %v", err))
 		return
@@ -377,6 +434,114 @@ func (h *EnrichmentHandler) triggerEnrichment(c *gin.Context) {
 		},
 		"review_generated": output.Review != nil,
 	})
+}
+
+// ── Stock Debate (FinGenius) ───────────────────────────────────────────────
+
+// triggerDebate starts a FinGenius debate for the given symbols.
+// POST /persistent-topics/:topicId/enrichment/results/:id/debates
+// Body: { "symbols": [{"code":"161129","name":"易方达原油","sector":"原油"}] }
+// If symbols are omitted or empty, defaults to extracting from the result's sectors.symbols.
+func (h *EnrichmentHandler) triggerDebate(c *gin.Context) {
+	topicID, ok := parseTopicID(c)
+	if !ok {
+		return
+	}
+
+	resultID, ok := parseIDParam(c, "id")
+	if !ok {
+		return
+	}
+
+	// Validate the result belongs to this topic.
+	result, err := h.repo.GetTopicEnrichmentResultByID(c.Request.Context(), resultID)
+	if err != nil {
+		respondError(c, http.StatusNotFound, err.Error())
+		return
+	}
+	if result.PersistentTopicID != topicID {
+		respondError(c, http.StatusNotFound, "result not found for this topic")
+		return
+	}
+
+	var req struct {
+		Symbols []service.DebateSymbol `json:"symbols"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		// Body may be empty or invalid; try default symbols extraction.
+		req.Symbols = nil
+	}
+
+	// Default: extract symbols from result's sectors.
+	symbols := req.Symbols
+	if len(symbols) == 0 {
+		symbols = extractSymbolsFromSectors(result.Sectors)
+	}
+	if len(symbols) == 0 {
+		respondError(c, http.StatusBadRequest, "no symbols provided and none found in result sectors")
+		return
+	}
+
+	// Generate a session ID for this debate run.
+	sessionID := fmt.Sprintf("data_enrichment_debate_%d_%d", topicID, resultID)
+
+	debateResults, err := h.debateSvc.RunDebate(c.Request.Context(), resultID, topicID, sessionID, symbols)
+	if err != nil {
+		respondError(c, http.StatusInternalServerError, fmt.Sprintf("debate failed: %v", err))
+		return
+	}
+
+	respondOK(c, gin.H{"debates": debateResults})
+}
+
+// listDebates returns all debate results for a given enrichment result.
+// GET /persistent-topics/:topicId/enrichment/results/:id/debates
+func (h *EnrichmentHandler) listDebates(c *gin.Context) {
+	resultID, ok := parseIDParam(c, "id")
+	if !ok {
+		return
+	}
+
+	debates, err := h.repo.ListStockDebateResultsByResult(c.Request.Context(), resultID)
+	if err != nil {
+		respondError(c, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	respondOK(c, debates)
+}
+
+// extractSymbolsFromSectors parses the sectors JSONB to extract symbols from each sector.
+func extractSymbolsFromSectors(sectorsJSON json.RawMessage) []service.DebateSymbol {
+	if len(sectorsJSON) == 0 {
+		return nil
+	}
+	var sectors []map[string]any
+	if err := json.Unmarshal(sectorsJSON, &sectors); err != nil {
+		return nil
+	}
+
+	var symbols []service.DebateSymbol
+	for _, s := range sectors {
+		sectorName, _ := s["sector"].(string)
+		symbolsRaw, _ := s["symbols"].([]any)
+		for _, sym := range symbolsRaw {
+			sm, ok := sym.(map[string]any)
+			if !ok {
+				continue
+			}
+			code, _ := sm["code"].(string)
+			name, _ := sm["name"].(string)
+			if code != "" {
+				symbols = append(symbols, service.DebateSymbol{
+					Code:   code,
+					Name:   name,
+					Sector: sectorName,
+				})
+			}
+		}
+	}
+	return symbols
 }
 
 // ── Table 3: topic_enrichment_review ────────────────────────────────────────

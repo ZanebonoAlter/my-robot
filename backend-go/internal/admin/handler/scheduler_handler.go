@@ -137,6 +137,40 @@ func schedulerDescriptors() []schedulerDescriptor {
 				return s
 			},
 		},
+
+		// ── Lifeline context (循环A 新闻汇总) — wall-clock 型，原本不在列表里 →
+		// 前端看不到也无法触发，历史 period 没法按需回填。补进来后 /status 可见、
+		// /trigger 走 BaseScheduler.TriggerNow() 跑 HealMissing 回填。
+		{
+			Name:        "lifeline_weekly",
+			DisplayName: "Lifeline Weekly Refresh",
+			Description: "每周一刷新所有活跃话题的周度新闻汇总（循环A，含历史回填）",
+			TaskName:    "lifeline_weekly",
+			Get: func() interface{} {
+				s, _ := Reg.Get("lifeline_weekly")
+				return s
+			},
+		},
+		{
+			Name:        "lifeline_monthly",
+			DisplayName: "Lifeline Monthly Refresh",
+			Description: "每月1号刷新所有活跃话题的月度新闻汇总（循环A，含历史回填）",
+			TaskName:    "lifeline_monthly",
+			Get: func() interface{} {
+				s, _ := Reg.Get("lifeline_monthly")
+				return s
+			},
+		},
+		{
+			Name:        "lifeline_yearly",
+			DisplayName: "Lifeline Yearly Refresh",
+			Description: "每年1月1号刷新所有活跃话题的年度新闻汇总（循环A，含历史回填）",
+			TaskName:    "lifeline_yearly",
+			Get: func() interface{} {
+				s, _ := Reg.Get("lifeline_yearly")
+				return s
+			},
+		},
 	}
 }
 

@@ -29,6 +29,9 @@ export function getSchedulerDisplayName(name: string): string {
     'log_cleanup': '日志清理',
     'daily_report': '每日报告',
     'blocked_article_recovery': '阻塞文章恢复',
+    'lifeline_weekly': '周度新闻汇总',
+    'lifeline_monthly': '月度新闻汇总',
+    'lifeline_yearly': '年度新闻汇总',
   }
 
   return names[name] || name
@@ -49,6 +52,9 @@ export function getSchedulerIcon(name: string): string {
     'log_cleanup': 'mdi:broom',
     'daily_report': 'mdi:newspaper-variant-outline',
     'blocked_article_recovery': 'mdi:file-restore-outline',
+    'lifeline_weekly': 'mdi:calendar-week-begin-outline',
+    'lifeline_monthly': 'mdi:calendar-month-outline',
+    'lifeline_yearly': 'mdi:calendar-star',
   }
 
   return icons[name] || 'mdi:cog'
@@ -69,6 +75,9 @@ export function getSchedulerColor(name: string): string {
     'log_cleanup': 'from-slate-500 to-gray-500',
     'daily_report': 'from-amber-500 to-yellow-500',
     'blocked_article_recovery': 'from-orange-500 to-red-500',
+    'lifeline_weekly': 'from-sky-500 to-blue-500',
+    'lifeline_monthly': 'from-cyan-500 to-teal-500',
+    'lifeline_yearly': 'from-emerald-500 to-green-500',
   }
 
   return colors[name] || 'from-gray-500 to-gray-600'

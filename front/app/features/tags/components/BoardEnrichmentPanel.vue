@@ -83,6 +83,7 @@ function formatPeriod(period: string | undefined, gran: string): string {
   return period
 }
 const periodLabel = computed(() => formatPeriod(currentContext.value?.period, selectedGran.value))
+const granShort = computed(() => ({ week: '周', month: '月', year: '年' }[selectedGran.value] ?? '周期'))
 const isLatest = computed(() => selectedPeriodIdx.value === 0)
 
 // ── ① narrative 内联编辑 ─────────────────────────────────────────────────
@@ -101,8 +102,10 @@ function cancelNarrative() { editingNarrative.value = false }
 
 async function handleRegenerate() {
   if (selectedTopicId.value === null || regenerating.value) return
+  // period=undefined 时后端默认用当前周期（RefreshGranularity）→ 空态也能生成
   const period = currentContext.value?.period
-  if (!confirm(`重新汇总「${periodLabel.value}」？\n（约 10-30 秒，调用 LLM 重读新闻）`)) return
+  const label = period ? periodLabel.value : `本${granShort.value}`
+  if (!confirm(`重新汇总「${label}」？\n（约 10-30 秒，调用 LLM 重读新闻）`)) return
   await regenerateContext(selectedTopicId.value, selectedGran.value as ContextGranularity, period)
 }
 
@@ -279,6 +282,12 @@ async function handleDebateRetry() {
             <template v-else-if="!currentContext">
               <div class="seg-h-row"><div class="seg-h serif">该周期尚未生成汇总</div></div>
               <div class="seg-b muted">没有这一周期的新闻汇总。点「重新汇总」让 AI 重读新闻生成。</div>
+              <div class="seg-actions">
+                <button type="button" class="btn btn-primary btn-sm" :disabled="regenerating !== null" @click="handleRegenerate">
+                  <Icon icon="mdi:refresh" width="12" />
+                  {{ regenerating !== null ? '汇总中…' : '↻ 生成本' + granShort + '汇总' }}
+                </button>
+              </div>
             </template>
             <template v-else-if="!editingNarrative">
               <div class="seg-h-row">

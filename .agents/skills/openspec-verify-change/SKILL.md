@@ -107,7 +107,32 @@ Verify that an implementation matches the change artifacts (specs, tasks, design
      - Add SUGGESTION: "Code pattern deviation: <details>"
      - Recommendation: "Consider following project pattern: <example>"
 
-8. **Generate Verification Report**
+8. **执行 tasks.md 验证节命令（强制）**
+
+   《开发执行规范》§11.2 要求每个 change 的 tasks.md 以「测试 / 文档 / 验证」三固定尾节收尾，验证节每条是"可执行命令 + 期望结果"。本步骤**实际执行这些命令**，不是静态推断。
+
+   **提取验证条目**：
+   - 读取 tasks.md，定位最后一个 `## N. 验证` 节（`##` + 数字 + `验证`）
+   - 逐行扫描，提取含 `→` 的断言行，拆成「命令」+「期望」：
+     - 断言锚点识别（期望侧）：`PASS` / `零命中` / `0 issues` / `全绿` / `通过` / `exit 0` / 计数（如 `3 个`）
+     - 命令侧：`→` 左侧或右侧出现的 shell 命令（含 `go test` / `golangci-lint` / `grep` / `findstr` / `pnpm` / `cmd.exe` 等）
+   - 无法自动拆解的行标记 `需人工确认`，不强行猜测
+
+   **执行**：
+   - 对每条提取出的命令，用 Bash 工具实际执行（注意：前端 typecheck/test/build 走 `cmd.exe /C`，见 AGENTS.md）
+   - 按断言锚点判定：
+     - `PASS` / `通过` → 检查 exit code == 0
+     - `零命中` → 检查命令 stdout 为空
+     - `0 issues` → 检查 stdout 不含 issue 行
+     - `全绿` → exit code == 0
+   - 每条记录结果：`✅ <命令> → <期望>（实测：<实际摘要）` 或 `❌ <命令> → 期望<期望>，实测<实际>`
+
+   **结果纳入报告**：
+   - 任一验证条目 `❌` → 记 CRITICAL issue："验证节命令失败：<命令>"，阻止 archive
+   - `需人工确认` 条目 → 记 WARNING，提醒人工复核
+   - 全部 `✅` → 记入步骤 9 报告的 Scorecard
+
+9. **Generate Verification Report**
 
    **Summary Scorecard**:
    ```
@@ -119,6 +144,7 @@ Verify that an implementation matches the change artifacts (specs, tasks, design
    | Completeness | X/Y tasks, N reqs|
    | Correctness  | M/N reqs covered |
    | Coherence    | Followed/Issues  |
+   | Gate Exec    | P/Q 验证节命令通过（R 条需人工确认）|
    ```
 
    **Issues by Priority**:
@@ -126,6 +152,7 @@ Verify that an implementation matches the change artifacts (specs, tasks, design
    1. **CRITICAL** (Must fix before archive):
       - Incomplete tasks
       - Missing requirement implementations
+      - **验证节命令执行失败（步骤 8）**
       - Each with specific, actionable recommendation
 
    2. **WARNING** (Should fix):

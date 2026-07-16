@@ -61,7 +61,7 @@ Implement tasks from an OpenSpec change.
    Display:
    - Schema being used
    - Progress: "N/M tasks complete"
-   - Remaining tasks overview
+   - **未完成 task 清单**：从 tasks.md 提取所有 `- [ ]` 行的标题（不只是数量），让用户直接看到下一步要做什么，不用翻 tasks.md
    - Dynamic instruction from CLI
 
 6. **Implement tasks (loop until done or blocked)**

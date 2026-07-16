@@ -33,7 +33,10 @@ func FirecrawlJob(queue *content.FirecrawlJobQueue, batchID string) JobFunc {
 			}, nil
 		}
 
-		firecrawlService := content.NewFirecrawlService(config)
+		firecrawlService := content.NewFallbackCrawler(
+			content.NewReadabilityCrawler(),
+			content.NewFirecrawlService(config),
+		)
 
 		jobs, err := queue.Claim(50, firecrawlLeaseDuration(config))
 		if err != nil {
@@ -113,16 +116,14 @@ func FirecrawlJob(queue *content.FirecrawlJobQueue, batchID string) JobFunc {
 			now := time.Now()
 			updates := map[string]interface{}{
 				"firecrawl_status":     "completed",
-				"firecrawl_content":    result.Data.Markdown,
+				"firecrawl_content":    result.Markdown,
 				"firecrawl_crawled_at": now,
 			}
 			// Backfill image_url from the scrape metadata (OG image, Twitter card
 			// as fallback). Only fill when RSS left it empty — RSS enclosures are
 			// editor-selected and take priority over scraped OG images.
-			if art.ImageURL == "" {
-				if img := pickMetadataImage(result.Data.Metadata.OgImage, result.Data.Metadata.TwitterImage); img != "" {
-					updates["image_url"] = img
-				}
+			if art.ImageURL == "" && result.OGImage != "" {
+				updates["image_url"] = result.OGImage
 			}
 			if feed.ArticleSummaryEnabled {
 				updates["summary_status"] = "incomplete"
@@ -203,16 +204,6 @@ func minInt(a, b int) int {
 		return a
 	}
 	return b
-}
-
-// pickMetadataImage returns the first non-empty image URL from a scrape's
-// metadata fields. OG image is preferred (editor-picked cover), Twitter card
-// image is the fallback.
-func pickMetadataImage(ogImage, twitterImage string) string {
-	if ogImage != "" {
-		return ogImage
-	}
-	return twitterImage
 }
 
 func broadcastFirecrawlProgress(batchID, status string, total, completed, failed int, current *ws.FirecrawlArticleProgress, processingCount *int32) {

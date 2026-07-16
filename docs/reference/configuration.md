@@ -54,6 +54,8 @@ Syntopica 使用分层配置系统：后端 YAML 配置文件、覆盖文件值�
 
 > **注意**：Firecrawl 的 API URL 和 API Key 通过 Web UI 配置（存储在 `ai_settings` 表），而非环境变量。自部署时 API URL 默认为 `http://firecrawl:3002`（容器间通信）或 `http://localhost:3002`（宿主机访问）。
 
+> **Firecrawl 现为可选兜底**：文章正文抓取默认走进程内 readability（纯 Go，零外部依赖）。仅当 readability 提取不到合格正文（SPA 站点）时才降级调用 Firecrawl。Firecrawl 服务可随时关闭而不影响 SSR 站点的正文抓取。
+
 ## 配置文件格式
 
 后端从 `backend-go/configs/config.yaml` 读取 YAML 配置文件，通过 Viper 在启动时加载。默认配置即为 PostgreSQL 连接，即使没有配置文件也能正常工作。

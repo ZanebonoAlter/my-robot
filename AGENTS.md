@@ -85,6 +85,7 @@ cd front && pnpm dev
 - Frontend edits → `pnpm lint` / `pnpm exec nuxi typecheck` / `pnpm test:unit` / `pnpm build`。
 - Backend edits → `golangci-lint run ./...` / targeted `go test` first, then `go test ./...` / `go build ./...`。
 - Docs-only edits: consistency check unless behavior changed.
+- **pi 增量门禁（自动）**：`.pi/extensions/quality-gate.ts` 已挂 `turn_end`，每回合结束若改了代码，自动跑后端 `golangci-lint`+`go vet`+`go build` / 前端 `pnpm lint`，失败以 `steer` 消息喂回。agent 见到失败消息**必须修**，不得忽略。不跑 `go test`/typecheck/build（影响包不可自动判定/需 cmd.exe），这些仍由 agent 手动跑 + §11 归档门禁兜底。门禁分层见 `docs/reference/开发执行规范.md` §4.1。
 - Keep code changes minimal and scoped. Match existing code style.
 - 完成任务后更新维护 `./docs/reference/` 知识库；openspec change 执行走 `开发执行规范.md` §0.6 标准编排流程，归档前满足 §11 门禁，归档后按 §12 补 flow 变更溯源链接（archive 即永久家，v1.x 里程碑可选）。
 - **开工前/完工后必须汇报"部署后影响 + 需要的操作"**：每个 change 完工汇报必须包含一节明确告诉用户——(a) 部署/合并后用户可见行为会发生什么变化；(b) 需要用户手动执行的操作（如重新生成数据、清理、配置）；(c) 旧数据如何降级。避免用户打开界面才发现行为变了产生误会。涉及数据迁移、状态机变更、UI 分区变更时尤其强制。

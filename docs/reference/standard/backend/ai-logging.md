@@ -24,7 +24,7 @@
 每次 AI 调用的 `AICallLog` 至少包含：
 
 | 字段 | 必填 | 说明 |
-|------|------|------|
+| ------ | ------ | ------ |
 | `operation` | ✅ | 业务操作名（如 `daily_report.cluster_tags`、`daily_report.highlights`、`agent.tool_use`）。**必须语义化、可分组查询**，不能只填 capability |
 | `capability` | ✅ | airouter capability 常量（`digest_polish`/`embedding`/未来的 `agent_tool_use` 等） |
 | `provider_name` / `model` | ✅ | 实际调用的供应商 + 模型名 |
@@ -67,7 +67,7 @@ agent loop 里的**工具调用**（非 LLM 调用）也必须留痕，至少记
 > 本节是"补齐跟踪表"。新增 AI 功能必须在此登记。✅=符合本规范，⚠️=待补齐。
 
 | 功能 | operation 名 | 经 airouter | 记 prompt | 记 token | 带 session_id | 状态 |
-|------|-------------|:---:|:---:|:---:|:---:|:---:|
+| ------ | ------------- | :---: | :---: | :---: | :---: | :---: |
 | 日报-标签聚类 | `daily_report.cluster_tags` | ✅ | ✅ | ✅ | ✅ | 已补齐 |
 | 日报-高亮生成 | `daily_report.highlights` | ✅ | ✅ | ✅ | ✅ | 已补齐 |
 | 日报-线索生成 | `daily_report.threads` | ✅ | ✅ | ✅ | ✅ | 已补齐 |
@@ -79,14 +79,27 @@ agent loop 里的**工具调用**（非 LLM 调用）也必须留痕，至少记
 | 循环B-查询员每轮 | `data_enrichment.tool_use` | ✅ | ✅ | ✅ | ✅ | 已补齐 |
 | 循环B-分析员 | `data_enrichment.analyze` | ✅ | ✅ | ✅ | ✅ | 已补齐 |
 | 循环B-review对比 | `data_enrichment.review_judge` | ✅ | ✅ | ✅ | ✅ | 已补齐 |
+| 个股辩论-结果提炼 | `data_enrichment.debate_distill` | ✅ | ✅ | ✅ | ✅ | 已补齐 |
 
 **补齐状态**：以上日报管线 6 处调用已由 [`ai-call-logging-schema`](../../../../openspec/changes/ai-call-logging-schema) change 全部补齐（prompt/token/session_id 落地，operation 升级为一等字段且 airouter 强制校验非空），从"待补齐"转为 ✅。其他调用方（reader/tagmanagement）也已补 operation 字段。
 
-**数据增强 SessionID 规则**：循环B（`data_enrichment.interpret` / `tool_use` / `analyze` / `review_judge`）同一次增强内所有 LLM 调用共享 `data_enrichment_{topic_id}_{uuid8}`；循环A（`data_enrichment.summarize_context`）一次汇总共享 `lifeline_context_{topic_id}_{granularity}_{uuid8}`。
+**数据增强 SessionID 规则**：
+
+- 循环B（`data_enrichment.interpret` / `tool_use` / `analyze` / `review_judge`）同一次增强内所有 LLM 调用共享 `data_enrichment_{topic_id}_{uuid8}`
+- 循环A（`data_enrichment.summarize_context`）一次汇总共享 `lifeline_context_{topic_id}_{granularity}_{uuid8}`
+- 个股辩论提炼（`data_enrichment.debate_distill`）共享 `data_enrichment_debate_{topic_id}_{result_id}`
+
+**数据增强 Capability 映射**：
+
+| Capability | 归属的 Operation |
+| --- | --- |
+| `data_enrichment_news` | `data_enrichment.summarize_context`（循环A 纯新闻汇总） |
+| `data_enrichment_analysis` | `data_enrichment.interpret`（解读员）/ `data_enrichment.tool_use`（查询员每轮）/ `data_enrichment.analyze`（分析员）/ `data_enrichment.review_judge`（兑现度复盘）/ `data_enrichment.debate_distill`（FinGenius 提炼） |
 
 ## 查询入口（规范要求，实现可排期）
 
 记录是为了能看。规范要求至少提供：
+
 - `GET /api/ai/call-logs`（支持按 operation / session_id / capability / 时间范围过滤）
 - 前端查看视图（按 session 分组回放一次编排）
 
@@ -95,4 +108,5 @@ agent loop 里的**工具调用**（非 LLM 调用）也必须留痕，至少记
 ## 资料来源
 
 基于 `internal/platform/airouter/router.go`（`Chat`:102 / `Embed`:188）、`internal/models/ai_models.go`（`AICallLog`:122）现状调研，
-以及 2026-07-04 关于"日报 AI 调用 prompts 看不见 / agent 编排记录缺口"的评审讨论。
+以及 2026-07-04 关于"日报 AI 调用 prompts 看不见 / agent 编排记录缺口"的评审讨论；
+2026-07-07 补 `data_enrichment.debate_distill`（FinGenius 辩论结果提炼）及 Capability 映射表。

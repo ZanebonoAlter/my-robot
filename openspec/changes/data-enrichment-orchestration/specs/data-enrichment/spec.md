@@ -83,6 +83,11 @@
 - **WHEN** 某 topic 从未生成过 2026-05 的 month 汇总
 - **THEN** 检查自愈 SHALL 补生成该 period，`as_of_date` 顺序推进
 
+#### Scenario: 用户手动首次生成缺失 period
+
+- **WHEN** 用户在前端①选一个该 topic 从未生成过的 period（如 2026-W25，表1无对应行）
+- **THEN** 系统 SHALL 允许手动触发该 period 的汇总（调 `POST .../contexts/:granularity/regenerate?period=...`），通过 Upsert 首次插入该 period 行，SHALL NOT 要求用户等待检查自愈排队补；生成后该 period 立即出现在可翻阅列表中。此入口与「翻历史」并列，覆盖「已存在重算」和「从未生成首次生成」两种情况
+
 ### Requirement: 分层上下文驱动的数据增强编排
 
 数据增强编排的入口 SHALL 是分层上下文（`topic_lifeline_context` + 14天窗口详情 + 历史 applied review），**不是单篇新闻，也不是单一 lifeline**。编排 SHALL 由三角色组成：

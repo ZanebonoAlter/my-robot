@@ -1,13 +1,13 @@
 # 数据库字段说明文档
 
-本文档详细说明了 Syntopica 项目中所有数据库表（39 张）的字段用途、数据流向和工作流程。
+本文档详细说明了 Syntopica 项目中所有数据库表（40 张）的字段用途、数据流向和工作流程。
 
 ---
 
 ## 完整表清单
 
 | 表名 | 说明 | 对应模型 |
-|------|------|----------|
+| ------ | ------ | ---------- |
 | `categories` | 分类 | `models.Category` |
 | `feeds` | 订阅源 | `models.Feed` |
 | `articles` | 文章 | `models.Article` |
@@ -45,6 +45,7 @@
 | `topic_lifeline_context` | 话题分层新闻汇总上下文（循环A） | `repository.TopicLifelineContext` |
 | `topic_enrichment_result` | 数据增强结果快照（不可变） | `repository.TopicEnrichmentResult` |
 | `topic_enrichment_review` | 数据增强认知演进反思 | `repository.TopicEnrichmentReview` |
+| `stock_debate_result` | FinGenius 个股辩论结果 | `repository.StockDebateResult` |
 | `schema_migrations` | 迁移版本追踪 | （框架管理） |
 
 ---
@@ -58,7 +59,7 @@
 #### 基础字段
 
 | 字段名 | 类型 | 用途 |
-|--------|------|------|
+| -------- | ------ | ------ |
 | `id` | SERIAL PK | 主键 |
 | `feed_id` | INTEGER NOT NULL | 所属订阅源 ID |
 | `title` | VARCHAR(500) NOT NULL | 文章标题 |
@@ -75,7 +76,7 @@
 #### 内容相关字段
 
 | 字段名 | 类型 | 用途 | 来源 | 格式 |
-|--------|------|------|------|------|
+| -------- | ------ | ------ | ------ | ------ |
 | `content` | TEXT | RSS 原始内容（HTML 片段） | RSS Feed 解析 | HTML |
 | `firecrawl_content` | TEXT | Firecrawl 抓取的完整网页内容 | Firecrawl Scheduler | Markdown |
 | `ai_content_summary` | TEXT | AI 生成的优化总结内容 | AI Summary Scheduler | Markdown |
@@ -83,7 +84,7 @@
 #### AI 总结状态字段
 
 | 字段名 | 类型 | 用途 | 可选值 |
-|--------|------|------|--------|
+| -------- | ------ | ------ | -------- |
 | `summary_status` | VARCHAR(20) DEFAULT 'complete' | AI 总结状态 | `incomplete` / `pending` / `complete` / `failed` |
 | `summary_generated_at` | TIMESTAMP | AI 总结生成时间 | — |
 | `summary_processing_started_at` | TIMESTAMP | AI 总结开始处理时间 | — |
@@ -93,7 +94,7 @@
 #### Firecrawl 状态字段
 
 | 字段名 | 类型 | 用途 | 可选值 |
-|--------|------|------|--------|
+| -------- | ------ | ------ | -------- |
 | `firecrawl_status` | VARCHAR(20) DEFAULT 'pending' | Firecrawl 抓取状态 | `pending` / `processing` / `completed` / `failed` |
 | `firecrawl_error` | TEXT | Firecrawl 抓取错误信息 | — |
 | `firecrawl_crawled_at` | TIMESTAMP | Firecrawl 抓取时间 | — |
@@ -121,7 +122,7 @@
 #### 基础字段
 
 | 字段名 | 类型 | 用途 |
-|--------|------|------|
+| -------- | ------ | ------ |
 | `id` | SERIAL PK | 主键 |
 | `title` | VARCHAR(200) NOT NULL | 订阅源标题 |
 | `description` | TEXT | 描述 |
@@ -141,7 +142,7 @@
 #### 功能开关字段
 
 | 字段名 | 类型 | 用途 | 说明 |
-|--------|------|------|------|
+| -------- | ------ | ------ | ------ |
 | `ai_summary_enabled` | BOOLEAN DEFAULT true | 是否启用 Feed 级 AI 批量摘要 | 跨文章聚合总结 |
 | `article_summary_enabled` | BOOLEAN DEFAULT false | 是否启用文章级 AI 总结 | 依赖 Firecrawl 先抓取完整内容 |
 | `completion_on_refresh` | BOOLEAN DEFAULT true | 刷新时是否自动触发内容补全 | — |
@@ -153,7 +154,7 @@
 ### 3. categories（分类表）
 
 | 字段名 | 类型 | 用途 |
-|--------|------|------|
+| -------- | ------ | ------ |
 | `id` | SERIAL PK | 主键 |
 | `name` | VARCHAR(100) UNIQUE NOT NULL | 分类名称 |
 | `slug` | VARCHAR(50) UNIQUE | URL 友好标识 |
@@ -167,7 +168,7 @@
 ### 4. scheduler_tasks（调度任务表）
 
 | 字段名 | 类型 | 用途 |
-|--------|------|------|
+| -------- | ------ | ------ |
 | `id` | SERIAL PK | 主键 |
 | `name` | VARCHAR(50) UNIQUE NOT NULL | 任务名称 |
 | `description` | VARCHAR(200) | 任务描述 |
@@ -198,7 +199,7 @@
 #### ai_settings（AI 配置键值对）
 
 | 字段名 | 类型 | 用途 |
-|--------|------|------|
+| -------- | ------ | ------ |
 | `id` | SERIAL PK | 主键 |
 | `key` | VARCHAR(100) UNIQUE NOT NULL | 配置键 |
 | `value` | TEXT | JSON 值 |
@@ -209,7 +210,7 @@
 #### ai_providers（AI 供应商）
 
 | 字段名 | 类型 | 用途 |
-|--------|------|------|
+| -------- | ------ | ------ |
 | `id` | SERIAL PK | 主键 |
 | `name` | VARCHAR(100) UNIQUE NOT NULL | 供应商名称 |
 | `provider_type` | VARCHAR(50) DEFAULT 'openai_compatible' | 供应商类型 |
@@ -227,7 +228,7 @@
 #### ai_routes（AI 路由）
 
 | 字段名 | 类型 | 用途 |
-|--------|------|------|
+| -------- | ------ | ------ |
 | `id` | SERIAL PK | 主键 |
 | `name` | VARCHAR(100) NOT NULL | 路由名称 |
 | `capability` | VARCHAR(50) NOT NULL | 能力标识 |
@@ -242,7 +243,7 @@
 #### ai_route_providers（AI 路由-供应商绑定）
 
 | 字段名 | 类型 | 用途 |
-|--------|------|------|
+| -------- | ------ | ------ |
 | `id` | SERIAL PK | 主键 |
 | `route_id` | INTEGER NOT NULL | 路由 ID |
 | `provider_id` | INTEGER NOT NULL | 供应商 ID |
@@ -256,7 +257,7 @@
 #### ai_call_logs（AI 调用日志）
 
 | 字段名 | 类型 | 用途 |
-|--------|------|------|
+| -------- | ------ | ------ |
 | `id` | SERIAL PK | 主键 |
 | `operation` | VARCHAR(80) NOT NULL | 业务操作名（如 `daily_report.cluster_tags`） |
 | `capability` | VARCHAR(50) NOT NULL | 能力标识 |
@@ -287,7 +288,7 @@
 #### ai_summaries（AI 批量摘要）
 
 | 字段名 | 类型 | 用途 |
-|--------|------|------|
+| -------- | ------ | ------ |
 | `id` | BIGSERIAL PK | 主键 |
 | `feed_id` | BIGINT | 所属 Feed ID（FK → `feeds.id`） |
 | `category_id` | BIGINT | 所属分类 ID（FK → `categories.id`） |
@@ -303,7 +304,7 @@
 #### ai_summary_feeds（AI 摘要-Feed 关联）
 
 | 字段名 | 类型 | 用途 |
-|--------|------|------|
+| -------- | ------ | ------ |
 | `id` | BIGSERIAL PK | 主键 |
 | `summary_id` | BIGINT NOT NULL | 摘要 ID |
 | `feed_id` | BIGINT NOT NULL | Feed ID |
@@ -316,7 +317,7 @@
 #### ai_summary_topics（AI 摘要-主题关联）
 
 | 字段名 | 类型 | 用途 |
-|--------|------|------|
+| -------- | ------ | ------ |
 | `id` | BIGSERIAL PK | 主键 |
 | `summary_id` | BIGINT NOT NULL | 摘要 ID（FK → `ai_summaries.id`） |
 | `topic_tag_id` | BIGINT NOT NULL | 标签 ID（FK → `topic_tags.id`, ON DELETE CASCADE） |
@@ -331,7 +332,7 @@
 #### topic_tags（主题标签主表）
 
 | 字段名 | 类型 | 用途 |
-|--------|------|------|
+| -------- | ------ | ------ |
 | `id` | SERIAL PK | 主键 |
 | `slug` | VARCHAR(120) NOT NULL | 稳定标识 |
 | `label` | VARCHAR(160) NOT NULL | 展示名称 |
@@ -363,7 +364,7 @@
 #### topic_tag_embeddings（主题标签向量）
 
 | 字段名 | 类型 | 用途 |
-|--------|------|------|
+| -------- | ------ | ------ |
 | `id` | SERIAL PK | 主键 |
 | `topic_tag_id` | INTEGER NOT NULL | 关联标签 ID |
 | `embedding_type` | VARCHAR(20) NOT NULL DEFAULT 'identity' | 嵌入类型：`identity`（标签名）、`semantic`（语义描述）、`event_keyword`（事件标签关键词） |
@@ -382,7 +383,7 @@ HNSW 索引：`idx_topic_tag_embeddings_embedding USING hnsw (embedding vector_c
 #### topic_tag_analyses（主题分析结果快照）
 
 | 字段名 | 类型 | 用途 |
-|--------|------|------|
+| -------- | ------ | ------ |
 | `id` | BIGSERIAL PK | 主键 |
 | `topic_tag_id` | BIGINT | 关联标签 ID |
 | `analysis_type` | VARCHAR | 分析类型（`event`/`person`/`keyword`） |
@@ -400,7 +401,7 @@ HNSW 索引：`idx_topic_tag_embeddings_embedding USING hnsw (embedding vector_c
 #### topic_analysis_cursors（主题分析游标）
 
 | 字段名 | 类型 | 用途 |
-|--------|------|------|
+| -------- | ------ | ------ |
 | `id` | BIGSERIAL PK | 主键 |
 | `topic_tag_id` | BIGINT | 关联标签 ID |
 | `analysis_type` | VARCHAR | 分析类型 |
@@ -415,7 +416,7 @@ HNSW 索引：`idx_topic_tag_embeddings_embedding USING hnsw (embedding vector_c
 #### topic_analysis_jobs（主题分析任务队列）
 
 | 字段名 | 类型 | 用途 |
-|--------|------|------|
+| -------- | ------ | ------ |
 | `id` | VARCHAR(64) PK | 主键（字符串 ID） |
 | `topic_tag_id` | BIGINT | 分析目标标签 ID |
 | `analysis_type` | VARCHAR(32) | 分析类型 |
@@ -433,7 +434,7 @@ HNSW 索引：`idx_topic_tag_embeddings_embedding USING hnsw (embedding vector_c
 #### article_topic_tags（文章-主题关联）
 
 | 字段名 | 类型 | 用途 |
-|--------|------|------|
+| -------- | ------ | ------ |
 | `id` | SERIAL PK | 主键 |
 | `article_id` | INTEGER NOT NULL | 文章 ID |
 | `topic_tag_id` | INTEGER NOT NULL | 标签 ID |
@@ -461,7 +462,7 @@ HNSW 索引：`idx_topic_tag_embeddings_embedding USING hnsw (embedding vector_c
 #### embedding_config（向量配置）
 
 | 字段名 | 类型 | 用途 |
-|--------|------|------|
+| -------- | ------ | ------ |
 | `id` | SERIAL PK | 主键 |
 | `key` | VARCHAR(100) UNIQUE NOT NULL | 配置键 |
 | `value` | TEXT NOT NULL | 配置值 |
@@ -472,7 +473,7 @@ HNSW 索引：`idx_topic_tag_embeddings_embedding USING hnsw (embedding vector_c
 默认配置项：
 
 | key | 默认值 | 说明 |
-|-----|--------|------|
+| ----- | -------- | ------ |
 | `high_similarity_threshold` | `0.97` | 高相似度阈值，自动复用已有标签 |
 | `low_similarity_threshold` | `0.78` | 低相似度阈值，自动创建新标签 |
 | `embedding_model` | （空） | 覆盖 embedding 模型名 |
@@ -483,7 +484,7 @@ HNSW 索引：`idx_topic_tag_embeddings_embedding USING hnsw (embedding vector_c
 #### embedding_queues（向量生成队列）
 
 | 字段名 | 类型 | 用途 |
-|--------|------|------|
+| -------- | ------ | ------ |
 | `id` | BIGSERIAL PK | 主键 |
 | `tag_id` | BIGINT NOT NULL REFERENCES topic_tags(id) | 关联标签 ID |
 | `status` | VARCHAR(20) DEFAULT 'pending' | 状态 |
@@ -496,7 +497,7 @@ HNSW 索引：`idx_topic_tag_embeddings_embedding USING hnsw (embedding vector_c
 #### merge_reembedding_queues（合并后重算向量队列）
 
 | 字段名 | 类型 | 用途 |
-|--------|------|------|
+| -------- | ------ | ------ |
 | `id` | BIGSERIAL PK | 主键 |
 | `source_tag_id` | BIGINT NOT NULL REFERENCES topic_tags(id) | 源标签 ID |
 | `target_tag_id` | BIGINT NOT NULL REFERENCES topic_tags(id) | 目标标签 ID |
@@ -514,7 +515,7 @@ HNSW 索引：`idx_topic_tag_embeddings_embedding USING hnsw (embedding vector_c
 #### firecrawl_jobs（Firecrawl 抓取任务）
 
 | 字段名 | 类型 | 用途 |
-|--------|------|------|
+| -------- | ------ | ------ |
 | `id` | SERIAL PK | 主键 |
 | `article_id` | INTEGER NOT NULL | 关联文章 ID |
 | `status` | VARCHAR(20) DEFAULT 'pending' | 状态 |
@@ -532,7 +533,7 @@ HNSW 索引：`idx_topic_tag_embeddings_embedding USING hnsw (embedding vector_c
 #### tag_jobs（标签任务）
 
 | 字段名 | 类型 | 用途 |
-|--------|------|------|
+| -------- | ------ | ------ |
 | `id` | SERIAL PK | 主键 |
 | `article_id` | INTEGER NOT NULL | 关联文章 ID |
 | `status` | VARCHAR(20) DEFAULT 'pending' | 状态 |
@@ -555,7 +556,7 @@ HNSW 索引：`idx_topic_tag_embeddings_embedding USING hnsw (embedding vector_c
 ### 11. narrative_summaries（叙事摘要表）
 
 | 字段名 | 类型 | 用途 |
-|--------|------|------|
+| -------- | ------ | ------ |
 | `id` | BIGSERIAL PK | 主键 |
 | `title` | VARCHAR(300) NOT NULL | 叙事标题 |
 | `summary` | TEXT NOT NULL | 叙事内容 |
@@ -579,7 +580,7 @@ HNSW 索引：`idx_topic_tag_embeddings_embedding USING hnsw (embedding vector_c
 ### 12. narrative_boards（叙事板块表）
 
 | 字段名 | 类型 | 用途 |
-|--------|------|------|
+| -------- | ------ | ------ |
 | `id` | SERIAL PK | 主键 |
 | `period_date` | TIMESTAMP NOT NULL | 周期日期（索引 idx_narrative_boards_period） |
 | `name` | VARCHAR(300) NOT NULL | 板块名称 |
@@ -600,7 +601,7 @@ HNSW 索引：`idx_topic_tag_embeddings_embedding USING hnsw (embedding vector_c
 辅助标签和 SemanticBoard 共存于同一张表，通过 `label_type` 字段区分。
 
 | 字段名 | 类型 | 用途 |
-|--------|------|------|
+| -------- | ------ | ------ |
 | `id` | SERIAL PK | 主键 |
 | `label` | VARCHAR(160) NOT NULL | 展示名称 |
 | `slug` | VARCHAR(120) NOT NULL | 稳定标识 |
@@ -624,7 +625,7 @@ HNSW 索引：`idx_topic_tag_embeddings_embedding USING hnsw (embedding vector_c
 #### topic_tag_semantic_labels（tag-辅助标签关联）
 
 | 字段名 | 类型 | 用途 |
-|--------|------|------|
+| -------- | ------ | ------ |
 | `id` | BIGSERIAL PK | 主键 |
 | `topic_tag_id` | BIGINT NOT NULL | 关联 tag ID（FK → `topic_tags.id`） |
 | `semantic_label_id` | BIGINT NOT NULL | 关联辅助标签 ID（FK → `semantic_labels.id`） |
@@ -634,7 +635,7 @@ HNSW 索引：`idx_topic_tag_embeddings_embedding USING hnsw (embedding vector_c
 #### topic_tag_board_labels（tag-SemanticBoard 匹配结果）
 
 | 字段名 | 类型 | 用途 |
-|--------|------|------|
+| -------- | ------ | ------ |
 | `id` | BIGSERIAL PK | 主键 |
 | `topic_tag_id` | BIGINT NOT NULL | 关联 tag ID（FK → `topic_tags.id`） |
 | `semantic_board_id` | BIGINT NOT NULL | 关联 SemanticBoard ID（FK → `semantic_labels.id`） |
@@ -648,7 +649,7 @@ HNSW 索引：`idx_topic_tag_embeddings_embedding USING hnsw (embedding vector_c
 #### board_composition（board 构成）
 
 | 字段名 | 类型 | 用途 |
-|--------|------|------|
+| -------- | ------ | ------ |
 | `id` | BIGSERIAL PK | 主键 |
 | `board_id` | BIGINT NOT NULL | 关联 board ID（FK → `semantic_labels.id`，label_type=board） |
 | `auxiliary_label_id` | BIGINT NOT NULL | 关联辅助标签 ID（FK → `semantic_labels.id`，label_type=auxiliary） |
@@ -662,7 +663,7 @@ HNSW 索引：`idx_topic_tag_embeddings_embedding USING hnsw (embedding vector_c
 #### reading_behaviors（阅读行为）
 
 | 字段名 | 类型 | 用途 |
-|--------|------|------|
+| -------- | ------ | ------ |
 | `id` | SERIAL PK | 主键 |
 | `article_id` | INTEGER NOT NULL | 文章 ID |
 | `feed_id` | INTEGER | 订阅源 ID |
@@ -676,7 +677,7 @@ HNSW 索引：`idx_topic_tag_embeddings_embedding USING hnsw (embedding vector_c
 #### user_preferences（用户偏好）
 
 | 字段名 | 类型 | 用途 |
-|--------|------|------|
+| -------- | ------ | ------ |
 | `id` | SERIAL PK | 主键 |
 | `feed_id` | INTEGER | 订阅源 ID |
 | `category_id` | INTEGER | 分类 ID |
@@ -693,7 +694,7 @@ HNSW 索引：`idx_topic_tag_embeddings_embedding USING hnsw (embedding vector_c
 存储 GORM Span Exporter 导出的 OpenTelemetry span 数据。通过自定义 exporter 落库，支持 trace 查询和统计 API。
 
 | 字段名 | 类型 | 用途 |
-|--------|------|------|
+| -------- | ------ | ------ |
 | `id` | BIGSERIAL PK | 主键 |
 | `trace_id` | CHAR(32) NOT NULL | 追踪 ID |
 | `span_id` | CHAR(16) NOT NULL | Span ID |
@@ -733,7 +734,7 @@ HNSW 索引：`idx_topic_tag_embeddings_embedding USING hnsw (embedding vector_c
 预留的 Digest 日报/周报推送配置表。
 
 | 字段名 | 类型 | 用途 |
-|--------|------|------|
+| -------- | ------ | ------ |
 | `id` | BIGSERIAL PK | 主键 |
 | `daily_enabled` | BOOLEAN DEFAULT false | 是否启用日报 |
 | `daily_time` | VARCHAR(5) DEFAULT '09:00' | 日报推送时间 |
@@ -760,7 +761,7 @@ HNSW 索引：`idx_topic_tag_embeddings_embedding USING hnsw (embedding vector_c
 #### board_persistent_topics
 
 | 字段名 | 类型 | 用途 |
-|---|---|---|
+| --- | --- | --- |
 | `semantic_board_id` | BIGINT | 所属语义板块 |
 | `label` / `description` | TEXT | 持久叙事标题与描述 |
 | `embedding` | vector | 归属匹配与历史回刷聚类 |
@@ -811,7 +812,7 @@ HNSW 索引：`idx_topic_tag_embeddings_embedding USING hnsw (embedding vector_c
 ### 基线索引（迁移 `20260403_0002` 创建）
 
 | 索引名 | 表 | 列 |
-|--------|------|------|
+| -------- | ------ | ------ |
 | `idx_articles_feed_created_at` | articles | `(feed_id, created_at DESC)` |
 | `idx_articles_pub_date` | articles | `(pub_date)` |
 | `idx_article_topic_tags_topic_article` | article_topic_tags | `(topic_tag_id, article_id)` |
@@ -824,14 +825,14 @@ HNSW 索引：`idx_topic_tag_embeddings_embedding USING hnsw (embedding vector_c
 ### 向量索引（迁移 `20260413_0001` 创建）
 
 | 索引名 | 表 | 类型 |
-|--------|------|------|
+| -------- | ------ | ------ |
 | `idx_topic_tag_embeddings_embedding` | topic_tag_embeddings | HNSW `(embedding vector_cosine_ops)` |
 | `idx_topic_tag_embeddings_tag_type_hash` | topic_tag_embeddings | UNIQUE `(topic_tag_id, embedding_type, text_hash)` |
 
 ### 迁移补充索引
 
 | 索引名 | 表 | 迁移版本 |
-|--------|------|----------|
+| -------- | ------ | ---------- |
 | `idx_topic_tags_status` | topic_tags | `20260413_0003` |
 | `idx_topic_tags_merged_into_id` | topic_tags | `20260413_0003` |
 | `idx_topic_tag_embeddings_tag_type_hash` | topic_tag_embeddings | `20260514_0001`（替代旧 `idx_topic_tag_embeddings_tag_type`） |
@@ -845,7 +846,7 @@ HNSW 索引：`idx_topic_tag_embeddings_embedding USING hnsw (embedding vector_c
 绑定板块可用的实时数据源。UNIQUE(semantic_board_id, source_type)。
 
 | 字段名 | 类型 | 用途 |
-|--------|------|------|
+| -------- | ------ | ------ |
 | `id` | BIGSERIAL PK | 主键 |
 | `semantic_board_id` | BIGINT NOT NULL FK → semantic_labels(id) ON DELETE CASCADE | 所属板块ID，外键CASCADE删除 |
 | `source_type` | VARCHAR(40) NOT NULL | 数据源类型：`etf_quote`（ETF行情）/ `exchange_rate`（汇率）/ `gdelt_event`（GDELT事件） |
@@ -856,13 +857,14 @@ HNSW 索引：`idx_topic_tag_embeddings_embedding USING hnsw (embedding vector_c
 
 #### topic_lifeline_context（话题分层新闻汇总上下文）
 
-循环A产物，按 granularity 存储各周期的新闻叙事汇总。UNIQUE(persistent_topic_id, granularity)。
+循环A产物，按 granularity + period 存储各周期的新闻叙事汇总。UNIQUE(persistent_topic_id, granularity, period)。
 
 | 字段名 | 类型 | 用途 |
-|--------|------|------|
+| -------- | ------ | ------ |
 | `id` | BIGSERIAL PK | 主键 |
 | `persistent_topic_id` | BIGINT NOT NULL FK → board_persistent_topics(id) ON DELETE CASCADE | 持久话题ID，外键CASCADE删除 |
 | `granularity` | VARCHAR(10) NOT NULL | 粒度：`week` / `month` / `year` / `all` |
+| `period` | VARCHAR(12) NOT NULL | 具体周期：`2026-W27` / `2026-06` / `2026` / `all`（按粒度格式化），档案式存储——历史周期独立保留不覆盖 |
 | `content` | TEXT NOT NULL | 新闻叙事汇总 + 数据波动快照 |
 | `as_of_date` | DATE NOT NULL | 汇总截止日，双用途：时效判断 + 检查自愈扫描缺口的依据 |
 | `source` | VARCHAR(12) DEFAULT 'manual' | 来源：`manual`（人工修正/初始）/ `llm_assisted`（LLM汇总生成） |
@@ -874,7 +876,7 @@ HNSW 索引：`idx_topic_tag_embeddings_embedding USING hnsw (embedding vector_c
 循环B产物，一次增强一行，**不可变**——存档不修改，确保 review 有对比基准。
 
 | 字段名 | 类型 | 用途 |
-|--------|------|------|
+| -------- | ------ | ------ |
 | `id` | BIGSERIAL PK | 主键 |
 | `persistent_topic_id` | BIGINT NOT NULL FK → board_persistent_topics(id) ON DELETE CASCADE | 持久话题ID，外键CASCADE删除 |
 | `evolution_assessment` | TEXT | 分析员结论：演进评估文本 |
@@ -892,11 +894,12 @@ HNSW 索引：`idx_topic_tag_embeddings_embedding USING hnsw (embedding vector_c
 两次 result 快照间的偏差记录，追加写入。`applied` 不回写表1，仅标记认知已纳入。
 
 | 字段名 | 类型 | 用途 |
-|--------|------|------|
+| -------- | ------ | ------ |
 | `id` | BIGSERIAL PK | 主键 |
 | `persistent_topic_id` | BIGINT NOT NULL FK → board_persistent_topics(id) ON DELETE CASCADE | 持久话题ID，外键CASCADE删除 |
 | `prev_result_id` | BIGINT FK → topic_enrichment_result(id) ON DELETE CASCADE（可空） | 上次 result ID（可空，手动批注时无 prev 对比） |
 | `curr_result_id` | BIGINT NOT NULL FK → topic_enrichment_result(id) ON DELETE CASCADE | 本次 result ID |
+| `verdict` | JSONB | 兑现度逐条结算：[{sector, predicted_dir, actual, mark: "hit"\|"part"\|"miss"}]，可空 |
 | `deviation_summary` | TEXT NOT NULL | 偏差说明（为什么变了，LLM基底+人工可调） |
 | `affected_context` | VARCHAR(10) | 建议关注的粒度层：`week` / `month` / `year` |
 | `confidence` | REAL | review_judge 置信度 |
@@ -905,9 +908,43 @@ HNSW 索引：`idx_topic_tag_embeddings_embedding USING hnsw (embedding vector_c
 | `created_at` | TIMESTAMPTZ | 创建时间 |
 | `updated_at` | TIMESTAMPTZ | 更新时间 |
 
+#### stock_debate_result（FinGenius 个股辩论结果）
+
+FinGenius 多角色辩论输出，按 `(result_id, sector, code)` 维度 append-only（同一 result 内可多次辩论，最新覆盖）。独立存档，不回写表1/表2/表3。
+
+| 字段名 | 类型 | 用途 |
+| -------- | ------ | ------ |
+| `id` | BIGSERIAL PK | 主键 |
+| `topic_enrichment_result_id` | BIGINT NOT NULL FK → topic_enrichment_result(id) ON DELETE CASCADE | 关联的增强结果 ID |
+| `persistent_topic_id` | BIGINT NOT NULL FK → board_persistent_topics(id) ON DELETE CASCADE | 持久话题 ID（冗余，便于按 topic 查） |
+| `sector` | VARCHAR(80) NOT NULL | 关联分析员输出的 sector 名 |
+| `code` | VARCHAR(20) NOT NULL | 标的代码（如 `161129`） |
+| `name` | VARCHAR(60) | 标的名称 |
+| `verdict` | VARCHAR(8) NOT NULL | 综合结论：`up` / `down` / `flat` |
+| `consensus` | VARCHAR(12) | 共识度文本（如 `"4/6"`、`"2/6 分歧"`） |
+| `agents` | JSONB | 各 agent 立场提炼：[{role, stance, note, raw_vote}] |
+| `votes` | JSONB | 三档统计：{up:N, flat:N, down:N} |
+| `fingenius_research` | JSONB | FinGenius 原始研究输出（6 段文本 + basic_info），提炼失败时降级展示 |
+| `fingenius_battle` | JSONB | FinGenius 原始辩论输出（final_decision/vote_count/debate_history 等 8 字段） |
+| `fingenius_task_id` | VARCHAR(120) | FinGenius 异步任务 id（可追溯轮询过程） |
+| `distill_status` | VARCHAR(12) DEFAULT 'done' | 提炼状态：`done` / `failed` / `skipped` |
+| `html_content` | TEXT | FinGenius 完整 HTML 报告字符串（非 URL），前端 iframe `srcdoc` 渲染 |
+| `created_at` | TIMESTAMPTZ | 创建时间 |
+
+**字段分工**：提炼后字段（`verdict`/`consensus`/`agents`/`votes`）由 Syntopica LLM `debate_distill` 产出；原始字段（`fingenius_research`/`fingenius_battle`）为 FinGenius 原始输出，提炼失败时降级展示原文。
+
+索引：`idx_stock_debate_result_id(topic_enrichment_result_id)`、`idx_stock_debate_topic(persistent_topic_id)`。
+
 ---
 
 ## 更新日志
+
+### 2026-07-07
+
+- 新增 `stock_debate_result` 表（FinGenius 个股辩论结果，见 §16）
+- `topic_lifeline_context` 补 `period` 字段（VARCHAR(12) NOT NULL），唯一约束从 `(topic_id, granularity)` 修正为 `(topic_id, granularity, period)`
+- `topic_enrichment_review` 补 `verdict` 字段（JSONB，兑现度逐条结算）
+- 完整表清单扩充至 40 张（原 39 张）
 
 ### 2026-07-06
 
@@ -936,7 +973,7 @@ HNSW 索引：`idx_topic_tag_embeddings_embedding USING hnsw (embedding vector_c
 - 新增 semantic_labels、topic_tag_semantic_labels、topic_tag_board_labels、board_composition 四张表
 - narrative_boards 新增 semantic_board_id 字段，移除 abstract_tag_id 和 board_concept_id
 - topic_tags.concept_id 标记为已废弃
-- embedding_config 新增 semantic_board_match_* 和 semantic_board_upgrade_* 配置
+- embedding_config 新增 semantic_board_match_*和 semantic_board_upgrade_* 配置
 
 ### 2026-05-14
 
@@ -985,7 +1022,7 @@ HNSW 索引：`idx_topic_tag_embeddings_embedding USING hnsw (embedding vector_c
 
 ## 相关文档
 
-- [全局实体关系图](ER_DIAGRAM.md) — 39 张表的 FK 关系图（ASCII + Mermaid）和约束矩阵
+- [全局实体关系图](ER_DIAGRAM.md) — 40 张表的 FK 关系图（ASCII + Mermaid）和约束矩阵
 - [数据生命周期](DATA_LIFECYCLE.md) — 6 条数据链路的状态字段流转说明
 - [业务流程](../reference/flow/README.md) — 链路概要设计、函数调用链、前后端协作
 - [数据库运维说明](../../operations/database-operations.md) — 数据库运维说明

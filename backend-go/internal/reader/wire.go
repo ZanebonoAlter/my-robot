@@ -55,6 +55,15 @@ type FirecrawlConfig = service.FirecrawlConfig
 // NewFirecrawlService is a re-export.
 var NewFirecrawlService = service.NewFirecrawlService
 
+// Crawler is a re-export of the neutral content-crawler interface.
+type Crawler = service.Crawler
+
+// NewReadabilityCrawler is a re-export of the in-process readability crawler constructor.
+var NewReadabilityCrawler = service.NewReadabilityCrawler
+
+// NewFallbackCrawler is a re-export of the readability→firecrawl fallback chain constructor.
+var NewFallbackCrawler = service.NewFallbackCrawler
+
 // NewContentCompletionService is a re-export.
 var NewContentCompletionService = service.NewContentCompletionService
 

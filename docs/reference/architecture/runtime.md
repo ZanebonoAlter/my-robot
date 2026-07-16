@@ -24,8 +24,8 @@
 
 - `AutoRefresh`：扫描到点 feed 并触发刷新
 - `PreferenceUpdate`：更新阅读偏好
-- `ContentCompletion`：基于 Firecrawl 正文生成文章级摘要
-- `Firecrawl`：抓取文章完整正文
+- `ContentCompletion`：基于正文生成文章级摘要
+- `Firecrawl`：抓取文章完整正文（readability 进程内主力，Firecrawl 仅在 readability 不合格时兜底 SPA 站点）
 - `BlockedArticleRecovery`：恢复因 Firecrawl 配置变更等原因阻塞的文章
 - `DailyReport`：基于活跃主题标签生成每日叙事摘要
 - `TagQualityScore`：重算 `topic_tags.quality_score`

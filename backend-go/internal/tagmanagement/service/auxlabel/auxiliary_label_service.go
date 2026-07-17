@@ -11,6 +11,7 @@ import (
 	"syntopica-backend/internal/models"
 	"syntopica-backend/internal/platform/airouter"
 	"syntopica-backend/internal/platform/logging"
+	"syntopica-backend/internal/platform/textutil"
 	"syntopica-backend/internal/tagmanagement/service/core"
 
 	"gorm.io/gorm"
@@ -47,7 +48,10 @@ type AuxLabelGCPreviewItem struct {
 	CreatedAt string `json:"created_at"`
 }
 
-const auxiliaryLabelMergeThreshold = 0.95
+// defaultAuxLabelDedupeSim is the fallback L2 merge similarity threshold when
+// ai_settings.auxiliary_label_dedupe_sim is missing or invalid. The effective
+// threshold is loaded per L2 evaluation by loadAuxLabelDedupeSim (design D5).
+const defaultAuxLabelDedupeSim = 0.95
 
 var ensureVectorDimOnce sync.Once
 
@@ -194,9 +198,15 @@ func (s *AuxiliaryLabelService) ResolveAuxiliaryLabel(ctx context.Context, rawLa
 		return nil, err
 	}
 
-	// L1: exact match by slug or alias
+	gateStart := time.Now()
+	// L1: exact match by slug, alias, or whitespace-insensitive normalize key.
+	// The normalize key (strip all whitespace + lower) collapses text variants
+	// like "SK 海力士" / "SK海力士" that Slugify misses (Slugify keeps a single
+	// space). Same function as the one-shot dup-merge migration (design D5/D6).
+	normalizeKey := textutil.NormalizeLabelKey(label)
 	for _, existing := range labels {
-		if existing.Slug == slug || semanticAliasesContain(existing.Aliases, label) {
+		if existing.Slug == slug || semanticAliasesContain(existing.Aliases, label) ||
+			textutil.NormalizeLabelKey(existing.Label) == normalizeKey {
 			return &existing, nil
 		}
 	}
@@ -210,6 +220,9 @@ func (s *AuxiliaryLabelService) ResolveAuxiliaryLabel(ctx context.Context, rawLa
 	bestMatch, err := s.mergeMatcher(ctx, s.db, labels, mergePgVector, mergeVector)
 	if err != nil {
 		return nil, err
+	}
+	if elapsed := time.Since(gateStart); elapsed > 50*time.Millisecond {
+		logging.Warnf("auxiliary label dedup gate slow: label=%q took=%s (>50ms), review L1/L2 (embedder/merge) performance", label, elapsed)
 	}
 	if bestMatch != nil {
 		return s.addAlias(ctx, bestMatch, label)
@@ -554,6 +567,23 @@ func (s *AuxiliaryLabelService) invalidateOnAliasChange() {
 	// mergeEmbeddings preserved — vectors unchanged by alias changes
 }
 
+// loadAuxLabelDedupeSim reads the configurable L2 merge similarity threshold
+// from ai_settings (key auxiliary_label_dedupe_sim). Falls back to
+// defaultAuxLabelDedupeSim (0.95) when the row is missing or the value is not a
+// valid float in (0,1]. Called once per L2 evaluation (only when L1 misses — the
+// new-entity path), so a single DB read is acceptable (design D5).
+func loadAuxLabelDedupeSim(db *gorm.DB) float64 {
+	var setting models.AISettings
+	if err := db.Where("key = ?", "auxiliary_label_dedupe_sim").First(&setting).Error; err != nil {
+		return defaultAuxLabelDedupeSim
+	}
+	v, err := strconv.ParseFloat(strings.TrimSpace(setting.Value), 64)
+	if err != nil || v <= 0 || v > 1 {
+		return defaultAuxLabelDedupeSim
+	}
+	return v
+}
+
 // sqlMergeMatcher loads merge embeddings from cache and computes cosine
 // similarity in Go. Eliminates the 216 MB DB transfer on every call.
 func sqlMergeMatcher(ctx context.Context, db *gorm.DB, labels []models.SemanticLabel, _ string, mergeVector []float64) (*models.SemanticLabel, error) {
@@ -562,6 +592,7 @@ func sqlMergeMatcher(ctx context.Context, db *gorm.DB, labels []models.SemanticL
 	if err != nil {
 		return nil, err
 	}
+	threshold := loadAuxLabelDedupeSim(db)
 
 	var best *models.SemanticLabel
 	for i := range labels {
@@ -570,7 +601,7 @@ func sqlMergeMatcher(ctx context.Context, db *gorm.DB, labels []models.SemanticL
 			continue
 		}
 		sim, err := airouter.CosineSimilarity(mergeVector, existingVec)
-		if err != nil || sim < auxiliaryLabelMergeThreshold {
+		if err != nil || sim < threshold {
 			continue
 		}
 		candidate := labels[i]

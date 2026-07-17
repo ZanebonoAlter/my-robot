@@ -38,6 +38,7 @@ func RunAutoMigrate(db *gorm.DB) error {
 		&models.TopicTagSemanticLabel{},
 		&models.TopicTagBoardLabel{},
 		&models.BoardComposition{},
+		&models.BoardUpgradeSuggestion{},
 		&models.TopicTagEmbedding{},
 		&models.TopicTagAnalysis{},
 		&models.TopicAnalysisCursor{},

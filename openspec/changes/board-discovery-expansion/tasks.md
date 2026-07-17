@@ -17,11 +17,19 @@
 
 ## 3. 建议持久化与生命周期（spec: board-upgrade-suggestions）
 
-- [ ] 3.1 失败测试：建议落库（非 skip 写入 pending；skip 不写）→ 实现 repository + model
-- [ ] 3.2 失败测试：生成幂等（同哈希 pending 已存在则跳过）→ 实现唯一约束 + ON CONFLICT DO NOTHING
-- [ ] 3.3 失败测试：dismissed 冷却（冷却期内同哈希不再生成；期满允许重生）→ 实现冷却判定（`semantic_board_upgrade_suggestion_dismiss_cooldown_days` 默认 14 天）
-- [ ] 3.4 失败测试：confirm 联动（upgrade-execute 事务内置 confirmed，失败回滚状态不变）→ 实现事务内状态推进
-- [ ] 3.5 失败测试：watch 建议成簇自动关闭 → 实现成簇时关闭对应 watch
+- [x] 3.1 失败测试：建议落库（非 skip 写入 pending；skip 不写）→ 实现 repository + model
+- [x] 3.2 失败测试：生成幂等（同哈希 pending 已存在则跳过）→ 实现唯一约束 + ON CONFLICT DO NOTHING
+- [x] 3.3 失败测试：dismissed 冷却（冷却期内同哈希不再生成；期满允许重生）→ 实现冷却判定（`semantic_board_upgrade_suggestion_dismiss_cooldown_days` 默认 14 天）
+- [x] 3.4 失败测试：confirm 联动（upgrade-execute 事务内置 confirmed，失败回滚状态不变）→ 实现事务内状态推进
+- [x] 3.5 失败测试：watch 建议成簇自动关闭 → 实现成簇时关闭对应 watch
+
+> **§3 留痕（实现澄清）**：
+>
+> - repository 放置：`internal/tagmanagement/repository/board_upgrade_suggestion.go`（独立文件 `BoardUpgradeSuggestionRepository`，与 `tag_job_queue.go` 同级惯例）。service 编排入口在同包 `service/board/board_upgrade_suggestion_persist.go`。
+> - `CloseWatchSuggestions` 返回 `(int64, error)` 而非 tasks 原述的 `error`——计数供阶段 3 成簇逻辑记日志（“关闭 N 条 watch”），调用方可忽略返回值，向前兼容。
+> - `skip 不落库` 的语义在 `GenerateAndPersist` 编排层实现（skip 决策在循环内 `continue`）；repository `InsertPending` 本身不感知决策，被调用即落库。
+> - `CloseWatchSuggestions` 的 jsonb 包含查询用 `auxiliary_label_ids @> jsonb_build_array(?::int)`（逐 id OR），参数需显式 `::int` 类型转换，否则 PG 报 `could not determine data type of parameter`（42P18）。
+> - **预存在失败（非本阶段引入）**：board 包 9 个既有测试（Backfill×4 / Matching×2 / Cluster×2 / CoTag×1）因早期迁移 `postgres_migrations.go:270` 已 seed `semantic_board_upgrade_cotag_hard_limit` 等 ai_settings key，而这些测试用 `db.Create` 插同 key 撞 `uni_ai_settings_key` 唯一约束。已验证：移除全部本阶段改动后原始代码同样失败，失败集完全一致。本阶段 6 个新测试全绿，新增 0 回归。修复属另一笔账（改这些测试为 FirstOrCreate/OnConflict），不在 §3 范围。
 
 ## 4. 扩展决策空间与双签名（spec: board-upgrade）
 

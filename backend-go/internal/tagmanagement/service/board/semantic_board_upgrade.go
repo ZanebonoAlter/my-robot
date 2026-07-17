@@ -19,9 +19,10 @@ import (
 )
 
 type SemanticBoardUpgradeService struct {
-	db       *gorm.DB
-	llm      SemanticBoardUpgradeLLM
-	embedder auxlabel.AuxiliaryLabelEmbedder
+	db             *gorm.DB
+	llm            SemanticBoardUpgradeLLM
+	embedder       auxlabel.AuxiliaryLabelEmbedder
+	suggestionRepo *repository.BoardUpgradeSuggestionRepository
 }
 
 type SemanticBoardUpgradeLLM interface {
@@ -91,6 +92,10 @@ type ConfirmSemanticBoardUpgradeRequest struct {
 	Description       string
 	AuxiliaryLabelIDs []uint
 	TargetBoardID     *uint
+	// SuggestionID, when set, links this confirm to a pending suggestion that
+	// is marked confirmed inside the same transaction (spec: confirm 联动).
+	// Omitted (nil) for back-compat with callers that don't carry a suggestion.
+	SuggestionID *uint
 }
 
 type ConfirmSemanticBoardUpgradeResult struct {
@@ -111,7 +116,7 @@ func NewSemanticBoardUpgradeService(db *gorm.DB, llm SemanticBoardUpgradeLLM, em
 	if db == nil {
 		db = repository.Repo.DB()
 	}
-	return &SemanticBoardUpgradeService{db: db, llm: llm, embedder: embedder}
+	return &SemanticBoardUpgradeService{db: db, llm: llm, embedder: embedder, suggestionRepo: repository.NewBoardUpgradeSuggestionRepository(db)}
 }
 
 func (s *SemanticBoardUpgradeService) GenerateSuggestions(ctx context.Context, mode string) ([]SemanticBoardUpgradeSuggestion, []SemanticBoardUpgradeCluster, error) {
@@ -218,6 +223,14 @@ func (s *SemanticBoardUpgradeService) ConfirmSuggestion(ctx context.Context, req
 		}
 		if err := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&rows).Error; err != nil {
 			return err
+		}
+		// Link the confirm to a pending suggestion inside the same transaction: a
+		// board_composition write failure above already returned, and any error
+		// here rolls both back (suggestion state unchanged on tx failure).
+		if req.SuggestionID != nil {
+			if err := s.suggestionRepo.MarkConfirmed(tx, *req.SuggestionID); err != nil {
+				return err
+			}
 		}
 		result = ConfirmSemanticBoardUpgradeResult{SemanticBoardID: boardID, AuxiliaryLabelIDs: auxiliaryIDs}
 		return nil

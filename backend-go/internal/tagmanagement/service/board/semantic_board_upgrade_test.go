@@ -585,6 +585,220 @@ func TestSemanticBoardUpgradeConfirmMergeIntoExisting(t *testing.T) {
 	require.Equal(t, auxiliaryB.ID, rows[1].AuxiliaryLabelID)
 }
 
+// TestSemanticBoardUpgradeConfirmLinksPendingSuggestion verifies that a
+// confirm (upgrade-execute) carrying a suggestion_id marks the linked pending
+// suggestion confirmed inside the same transaction that writes board_composition
+// (spec: 建议 dismiss 与 confirm 联动).
+//
+// §3.4 happy path: confirm merge with suggestion_id → suggestion confirmed +
+// board composition written.
+func TestSemanticBoardUpgradeConfirmLinksPendingSuggestion(t *testing.T) {
+	db := setupSemanticBoardUpgradeTestDB(t)
+	aux := createUpgradeLabel(t, db, "DeepSeek", "deepseek", "auxiliary", "active", 5, []float64{1, 0, 0})
+	board := createUpgradeLabel(t, db, "AI Board", "ai-board", "board", "active", 0, nil)
+
+	repo := repository.NewBoardUpgradeSuggestionRepository(db)
+	sug := &models.BoardUpgradeSuggestion{
+		BatchID: "conf-1", Mode: "discover_new", Decision: "merge_into_existing",
+		BoardLabel: "DeepSeek", TargetBoardID: &board.ID, AuxiliaryLabelIDs: []uint{aux.ID},
+		Confidence: "llm", SuggestionHash: "conf-hash-1",
+	}
+	inserted, err := repo.InsertPending(context.Background(), sug)
+	require.NoError(t, err)
+	require.True(t, inserted)
+
+	svc := NewSemanticBoardUpgradeService(db, nil, nil)
+	_, err = svc.ConfirmSuggestion(context.Background(), ConfirmSemanticBoardUpgradeRequest{
+		Decision:          SemanticBoardUpgradeDecisionMergeIntoExisting,
+		TargetBoardID:     &board.ID,
+		AuxiliaryLabelIDs: []uint{aux.ID},
+		SuggestionID:      &sug.ID,
+	})
+	require.NoError(t, err)
+
+	var reloaded models.BoardUpgradeSuggestion
+	require.NoError(t, db.First(&reloaded, sug.ID).Error)
+	require.Equal(t, "confirmed", reloaded.Status, "linked pending suggestion must be confirmed in the same tx")
+	require.NotNil(t, reloaded.ResolvedAt, "confirmed suggestion records resolved_at")
+}
+
+// TestSemanticBoardUpgradeConfirmTxFailureLeavesSuggestionPending verifies that
+// when the upgrade-execute transaction fails (e.g. target board missing), the
+// linked suggestion is NOT marked confirmed — state stays pending (spec: confirm
+// 联动, 事务失败时建议状态不变).
+func TestSemanticBoardUpgradeConfirmTxFailureLeavesSuggestionPending(t *testing.T) {
+	db := setupSemanticBoardUpgradeTestDB(t)
+	aux := createUpgradeLabel(t, db, "Llama", "llama", "auxiliary", "active", 5, []float64{1, 0, 0})
+	// No board row is created → the merge target lookup fails and the tx rolls back.
+
+	repo := repository.NewBoardUpgradeSuggestionRepository(db)
+	badTarget := uint(99999)
+	sug := &models.BoardUpgradeSuggestion{
+		BatchID: "conf-tx", Mode: "discover_new", Decision: "merge_into_existing",
+		BoardLabel: "Llama", TargetBoardID: &badTarget, AuxiliaryLabelIDs: []uint{aux.ID},
+		Confidence: "llm", SuggestionHash: "conf-hash-tx",
+	}
+	inserted, err := repo.InsertPending(context.Background(), sug)
+	require.NoError(t, err)
+	require.True(t, inserted)
+
+	svc := NewSemanticBoardUpgradeService(db, nil, nil)
+	_, err = svc.ConfirmSuggestion(context.Background(), ConfirmSemanticBoardUpgradeRequest{
+		Decision:          SemanticBoardUpgradeDecisionMergeIntoExisting,
+		TargetBoardID:     &badTarget, // non-existent → "active target board not found" → tx rollback
+		AuxiliaryLabelIDs: []uint{aux.ID},
+		SuggestionID:      &sug.ID,
+	})
+	require.Error(t, err, "confirm against a non-existent target must fail")
+
+	var reloaded models.BoardUpgradeSuggestion
+	require.NoError(t, db.First(&reloaded, sug.ID).Error)
+	require.Equal(t, "pending", reloaded.Status, "tx failure must leave suggestion state unchanged")
+	require.Nil(t, reloaded.ResolvedAt, "no resolved_at on a rolled-back confirm")
+}
+
+// TestSemanticBoardUpgradeConfirmWithoutSuggestionIDLeavesItPending verifies the
+// back-compat path: a confirm request that omits suggestion_id writes the board
+// normally but does not touch suggestion state (spec: 未携带 suggestion_id 的请求
+// SHALL 正常执行版块写入但不联动建议状态).
+func TestSemanticBoardUpgradeConfirmWithoutSuggestionIDLeavesItPending(t *testing.T) {
+	db := setupSemanticBoardUpgradeTestDB(t)
+	aux := createUpgradeLabel(t, db, "Mistral", "mistral", "auxiliary", "active", 5, []float64{1, 0, 0})
+	board := createUpgradeLabel(t, db, "LLM Board", "llm-board", "board", "active", 0, nil)
+
+	repo := repository.NewBoardUpgradeSuggestionRepository(db)
+	sug := &models.BoardUpgradeSuggestion{
+		BatchID: "conf-noid", Mode: "discover_new", Decision: "merge_into_existing",
+		BoardLabel: "Mistral", TargetBoardID: &board.ID, AuxiliaryLabelIDs: []uint{aux.ID},
+		Confidence: "llm", SuggestionHash: "conf-hash-noid",
+	}
+	inserted, err := repo.InsertPending(context.Background(), sug)
+	require.NoError(t, err)
+	require.True(t, inserted)
+
+	svc := NewSemanticBoardUpgradeService(db, nil, nil)
+	res, err := svc.ConfirmSuggestion(context.Background(), ConfirmSemanticBoardUpgradeRequest{
+		Decision:          SemanticBoardUpgradeDecisionMergeIntoExisting,
+		TargetBoardID:     &board.ID,
+		AuxiliaryLabelIDs: []uint{aux.ID},
+		// SuggestionID omitted (nil) — back-compat path.
+	})
+	require.NoError(t, err)
+	require.Equal(t, board.ID, res.SemanticBoardID, "board composition must still be written")
+
+	var reloaded models.BoardUpgradeSuggestion
+	require.NoError(t, db.First(&reloaded, sug.ID).Error)
+	require.Equal(t, "pending", reloaded.Status, "confirm without suggestion_id must not touch suggestion state")
+	require.Nil(t, reloaded.ResolvedAt)
+}
+
+// TestSemanticBoardUpgradeGenerateAndPersistInsertsNonSkip verifies the
+// GenerateAndPersist entry point persists non-skip suggestions as pending and
+// drops skip decisions (spec: 升级建议持久化存储).
+//
+// GenerateAndPersist Test A: 2 non-skip + 1 skip → 2 pending rows, inserted=2.
+func TestSemanticBoardUpgradeGenerateAndPersistInsertsNonSkip(t *testing.T) {
+	db := setupSemanticBoardUpgradeTestDB(t)
+	auxA := createUpgradeLabel(t, db, "Alpha", "alpha", "auxiliary", "active", 5, []float64{1, 0, 0})
+	auxB := createUpgradeLabel(t, db, "Beta", "beta", "auxiliary", "active", 5, []float64{0.9, 0.4358898943, 0})
+	createUpgradeLabel(t, db, "Gamma", "gamma", "auxiliary", "active", 5, []float64{0.8, 0.6, 0})
+	createUpgradeLabel(t, db, "Delta", "delta", "auxiliary", "active", 5, []float64{0.7, 0.7141428428, 0})
+	createUpgradeLabel(t, db, "Epsilon", "epsilon", "auxiliary", "active", 5, []float64{0.6, 0.8, 0})
+	fakeLLM := &fakeSemanticBoardUpgradeLLM{suggestions: []SemanticBoardUpgradeSuggestion{
+		{Decision: SemanticBoardUpgradeDecisionCreateNew, BoardLabel: "Board A", Description: "A", AuxiliaryLabelIDs: []uint{auxA.ID}},
+		{Decision: SemanticBoardUpgradeDecisionCreateNew, BoardLabel: "Board B", Description: "B", AuxiliaryLabelIDs: []uint{auxB.ID}},
+		{Decision: SemanticBoardUpgradeDecisionSkip, Reason: "too broad"},
+	}}
+	svc := NewSemanticBoardUpgradeService(db, fakeLLM, nil)
+
+	inserted, _, _, err := svc.GenerateAndPersist(context.Background(), "discover_new")
+	require.NoError(t, err)
+	require.Equal(t, 2, inserted, "two non-skip suggestions must be persisted")
+
+	var rows []models.BoardUpgradeSuggestion
+	require.NoError(t, db.Order("board_label ASC").Find(&rows).Error)
+	require.Len(t, rows, 2, "skip decision must NOT be persisted")
+	for _, r := range rows {
+		require.Equal(t, "pending", r.Status)
+		require.Equal(t, "discover_new", r.Mode)
+		require.Equal(t, "llm", r.Confidence, "discover_new confidence defaults to llm until phase 3")
+		require.NotEmpty(t, r.SuggestionHash)
+		require.NotEmpty(t, r.BatchID)
+	}
+}
+
+// TestSemanticBoardUpgradeGenerateAndPersistIdempotentOnSecondRun verifies a
+// re-run over the same cluster+decision is a no-op: the partial unique index
+// makes InsertPending a skip, counted as skipped (spec: 建议生成幂等).
+//
+// GenerateAndPersist Test B: second run → inserted=0, skipped=1.
+func TestSemanticBoardUpgradeGenerateAndPersistIdempotentOnSecondRun(t *testing.T) {
+	db := setupSemanticBoardUpgradeTestDB(t)
+	auxA := createUpgradeLabel(t, db, "Alpha2", "alpha2", "auxiliary", "active", 5, []float64{1, 0, 0})
+	createUpgradeLabel(t, db, "Gamma2", "gamma2", "auxiliary", "active", 5, []float64{0.8, 0.6, 0})
+	createUpgradeLabel(t, db, "Delta2", "delta2", "auxiliary", "active", 5, []float64{0.7, 0.7141428428, 0})
+	createUpgradeLabel(t, db, "Epsilon2", "epsilon2", "auxiliary", "active", 5, []float64{0.6, 0.8, 0})
+	createUpgradeLabel(t, db, "Zeta2", "zeta2", "auxiliary", "active", 5, []float64{0.5, 0.8660254037, 0})
+	fakeLLM := &fakeSemanticBoardUpgradeLLM{suggestions: []SemanticBoardUpgradeSuggestion{
+		{Decision: SemanticBoardUpgradeDecisionCreateNew, BoardLabel: "Board A", AuxiliaryLabelIDs: []uint{auxA.ID}},
+	}}
+	svc := NewSemanticBoardUpgradeService(db, fakeLLM, nil)
+
+	ins1, _, _, err := svc.GenerateAndPersist(context.Background(), "discover_new")
+	require.NoError(t, err)
+	require.Equal(t, 1, ins1, "first run inserts one")
+
+	ins2, skipped2, _, err := svc.GenerateAndPersist(context.Background(), "discover_new")
+	require.NoError(t, err)
+	require.Zero(t, ins2, "second run must not re-insert a duplicate pending hash")
+	require.Equal(t, 1, skipped2, "the idempotent duplicate must be counted as skipped")
+
+	var count int64
+	require.NoError(t, db.Model(&models.BoardUpgradeSuggestion{}).Count(&count).Error)
+	require.Equal(t, int64(1), count, "still exactly one row after re-run")
+}
+
+// TestSemanticBoardUpgradeGenerateAndPersistBlocksOnDismissedCooldown verifies
+// a suggestion whose hash matches a recent dismissal is NOT re-generated; it is
+// counted as cooldownBlocked (spec: dismissed 冷却期).
+//
+// GenerateAndPersist Test C: a 3-day-old dismissed suggestion with the same
+// hash as what the LLM will produce → inserted=0, cooldownBlocked=1.
+func TestSemanticBoardUpgradeGenerateAndPersistBlocksOnDismissedCooldown(t *testing.T) {
+	db := setupSemanticBoardUpgradeTestDB(t)
+	auxA := createUpgradeLabel(t, db, "Alpha3", "alpha3", "auxiliary", "active", 5, []float64{1, 0, 0})
+	createUpgradeLabel(t, db, "Gamma3", "gamma3", "auxiliary", "active", 5, []float64{0.8, 0.6, 0})
+	createUpgradeLabel(t, db, "Delta3", "delta3", "auxiliary", "active", 5, []float64{0.7, 0.7141428428, 0})
+	createUpgradeLabel(t, db, "Epsilon3", "epsilon3", "auxiliary", "active", 5, []float64{0.6, 0.8, 0})
+	createUpgradeLabel(t, db, "Zeta3", "zeta3", "auxiliary", "active", 5, []float64{0.5, 0.8660254037, 0})
+
+	// The LLM will suggest create_new over [auxA]; pre-seed a dismissed row with
+	// the identical hash so the cooldown gate must block re-generation.
+	hash := ComputeSuggestionHash("discover_new", "create_new", nil, []uint{auxA.ID})
+	threeDaysAgo := time.Now().AddDate(0, 0, -3)
+	require.NoError(t, db.Create(&models.BoardUpgradeSuggestion{
+		BatchID: "seed", Mode: "discover_new", Decision: "create_new",
+		BoardLabel: "Board A", AuxiliaryLabelIDs: []uint{auxA.ID},
+		Confidence: "llm", Status: "dismissed", ResolvedAt: &threeDaysAgo,
+		SuggestionHash: hash,
+	}).Error)
+
+	fakeLLM := &fakeSemanticBoardUpgradeLLM{suggestions: []SemanticBoardUpgradeSuggestion{
+		{Decision: SemanticBoardUpgradeDecisionCreateNew, BoardLabel: "Board A", AuxiliaryLabelIDs: []uint{auxA.ID}},
+	}}
+	svc := NewSemanticBoardUpgradeService(db, fakeLLM, nil)
+
+	inserted, _, cooldownBlocked, err := svc.GenerateAndPersist(context.Background(), "discover_new")
+	require.NoError(t, err)
+	require.Zero(t, inserted, "a hash in cooldown must not be re-inserted")
+	require.Equal(t, 1, cooldownBlocked, "the dismissed-in-cooldown hash must be counted as cooldownBlocked")
+
+	// No NEW pending row created for this hash (only the pre-seeded dismissed one exists).
+	var pending int64
+	require.NoError(t, db.Model(&models.BoardUpgradeSuggestion{}).Where("suggestion_hash = ? AND status = ?", hash, "pending").Count(&pending).Error)
+	require.Zero(t, pending, "no pending row must be created for a cooled-down hash")
+}
+
 func createUpgradeLabel(t *testing.T, db *gorm.DB, label string, slug string, labelType string, status string, refCount int, vector []float64) models.SemanticLabel {
 	t.Helper()
 	semanticLabel := models.SemanticLabel{Label: label, Slug: slug, LabelType: labelType, Status: status, RefCount: refCount}

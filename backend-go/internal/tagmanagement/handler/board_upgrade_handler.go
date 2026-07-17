@@ -22,6 +22,7 @@ type confirmSemanticBoardUpgradeHTTPRequest struct {
 	Description       string                               `json:"description"`
 	AuxiliaryLabelIDs []uint                               `json:"auxiliary_label_ids"`
 	TargetBoardID     *uint                                `json:"target_board_id"`
+	SuggestionID      *uint                                `json:"suggestion_id,omitempty"`
 }
 type semanticBoardUpgradeSuggestionDTO struct {
 	Decision          service.SemanticBoardUpgradeDecision `json:"decision"`

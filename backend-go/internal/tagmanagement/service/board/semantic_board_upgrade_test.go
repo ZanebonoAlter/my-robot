@@ -66,9 +66,9 @@ func TestSemanticBoardUpgradeClustersCandidatesWithExistingBoards(t *testing.T) 
 	require.NoError(t, db.Create(&models.BoardComposition{BoardID: board.ID, AuxiliaryLabelID: boardAux.ID}).Error)
 	service := NewSemanticBoardUpgradeService(db, nil, nil)
 	candidates := []SemanticBoardUpgradeCandidate{
-		{ID: candidateA.ID, Label: candidateA.Label, RefCount: 5, Embedding: []float64{1, 0, 0}},
-		{ID: candidateB.ID, Label: candidateB.Label, RefCount: 5, Embedding: []float64{0.95, 0.3122498999, 0}},
-		{ID: candidateC.ID, Label: candidateC.Label, RefCount: 5, Embedding: []float64{0, 1, 0}},
+		{ID: candidateA.ID, Label: candidateA.Label, RefCount: 5, Embedding: testutil.PadVector([]float64{1, 0, 0}, testutil.TestEmbeddingDim)},
+		{ID: candidateB.ID, Label: candidateB.Label, RefCount: 5, Embedding: testutil.PadVector([]float64{0.95, 0.3122498999, 0}, testutil.TestEmbeddingDim)},
+		{ID: candidateC.ID, Label: candidateC.Label, RefCount: 5, Embedding: testutil.PadVector([]float64{0, 1, 0}, testutil.TestEmbeddingDim)},
 	}
 
 	clusters, err := service.ClusterCandidates(context.Background(), candidates, service.LoadUpgradeConfig(context.Background()))
@@ -146,8 +146,8 @@ func TestClusterCandidatesBoardAffinities(t *testing.T) {
 
 		service := NewSemanticBoardUpgradeService(db, nil, nil)
 		candidates := []SemanticBoardUpgradeCandidate{
-			{ID: candidateA.ID, Label: candidateA.Label, RefCount: 5, Embedding: []float64{1, 0, 0}},
-			{ID: candidateB.ID, Label: candidateB.Label, RefCount: 5, Embedding: []float64{0.95, 0.3122498999, 0}},
+			{ID: candidateA.ID, Label: candidateA.Label, RefCount: 5, Embedding: testutil.PadVector([]float64{1, 0, 0}, testutil.TestEmbeddingDim)},
+			{ID: candidateB.ID, Label: candidateB.Label, RefCount: 5, Embedding: testutil.PadVector([]float64{0.95, 0.3122498999, 0}, testutil.TestEmbeddingDim)},
 		}
 
 		clusters, err := service.ClusterCandidates(context.Background(), candidates, service.LoadUpgradeConfig(context.Background()))
@@ -435,6 +435,7 @@ func TestClusterCandidatesCentroidFallback(t *testing.T) {
 
 func TestSemanticBoardUpgradeLoadsCoTagEventContext(t *testing.T) {
 	db := setupSemanticBoardUpgradeTestDB(t)
+	db.Where("key = ?", "semantic_board_upgrade_cotag_hard_limit").Delete(&models.AISettings{})
 	require.NoError(t, db.Create(&models.AISettings{Key: "semantic_board_upgrade_cotag_hard_limit", Value: "2"}).Error)
 	auxiliary := createUpgradeLabel(t, db, "OpenAI", "openai", "auxiliary", "active", 5, []float64{1, 0, 0})
 	seed := createUpgradeTopicTag(t, db, "seed", models.TagCategoryKeyword)

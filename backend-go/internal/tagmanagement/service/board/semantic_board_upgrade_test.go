@@ -728,6 +728,35 @@ func TestSemanticBoardUpgradeSignatureDivergenceGoesToLLM(t *testing.T) {
 	require.Equal(t, "llm", suggestions[0].Confidence, "LLM-adjudicated suggestions carry confidence=llm")
 }
 
+// TestSemanticBoardUpgradePromptInjectsLaneEvidence verifies §4.4: the LLM prompt
+// includes each shortlist board's recent active-topic section titles (≤5, last
+// 30 days) so the LLM grounds its merge decision in the board's actual narrative,
+// not just the board name. Boards without sections degrade to name+description only.
+func TestSemanticBoardUpgradePromptInjectsLaneEvidence(t *testing.T) {
+	db := setupSemanticBoardUpgradeTestDB(t)
+	// 5 candidates at (1,0,0).
+	for _, lbl := range []string{"DeepSeekE", "AgentE", "LLME", "CodexE", "VLME"} {
+		createUpgradeLabel(t, db, lbl, core.Slugify(lbl), "auxiliary", "active", 5, []float64{1, 0, 0})
+	}
+	// Board X: composition affinity + 2 active-topic sections with titles.
+	boardXAux := createUpgradeLabel(t, db, "X AuxE", "x-aux-e", "auxiliary", "active", 2, []float64{1, 0, 0})
+	boardX := createUpgradeLabel(t, db, "生成式AI", "genai-ev", "board", "active", 0, nil)
+	require.NoError(t, db.Create(&models.BoardComposition{BoardID: boardX.ID, AuxiliaryLabelID: boardXAux.ID}).Error)
+	topicX := createUpgradePersistentTopic(t, db, boardX.ID, "active")
+	reportX := createUpgradeBoardDailyReport(t, db, boardX.ID, daysAgo(1))
+	createUpgradeReportSection(t, db, reportX.ID, topicX.ID, "大模型厂商动态", []float64{1, 0, 0})
+	createUpgradeReportSection(t, db, reportX.ID, topicX.ID, "AI芯片融资", []float64{0.95, 0.3122498999, 0})
+
+	fakeLLM := &fakeSemanticBoardUpgradeLLM{suggestions: []SemanticBoardUpgradeSuggestion{{Decision: SemanticBoardUpgradeDecisionSkip}}}
+	svc := NewSemanticBoardUpgradeService(db, fakeLLM, nil)
+	_, _, err := svc.GenerateSuggestions(context.Background(), "discover_new")
+	require.NoError(t, err)
+	require.Equal(t, 1, fakeLLM.calls, "single-board cluster (no top-2) must defer to LLM")
+	require.Contains(t, fakeLLM.prompt, "生成式AI")
+	require.Contains(t, fakeLLM.prompt, "近期内容：大模型厂商动态")
+	require.Contains(t, fakeLLM.prompt, "近期内容：AI芯片融资")
+}
+
 func TestSemanticBoardUpgradeConfirmCreateNew(t *testing.T) {
 	db := setupSemanticBoardUpgradeTestDB(t)
 	auxiliaryA := createUpgradeLabel(t, db, "OpenAI", "openai", "auxiliary", "active", 5, []float64{1, 0, 0})

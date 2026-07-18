@@ -767,7 +767,53 @@ func (s *SemanticBoardUpgradeService) computeShortlist(ctx context.Context, clus
 			byID[aff.BoardID] = len(entries) - 1
 		}
 	}
+	entries = s.loadLaneBriefs(ctx, entries)
 	return entries, nil
+}
+
+// loadLaneBriefs attaches each shortlist board's ≤5 most-recent active-topic
+// section titles (ClusterLabel, last 30 days) as lane evidence for prompt
+// injection (spec §4.4). Parameterized IN (?); on query failure degrades
+// gracefully (name+description only) without aborting generation.
+func (s *SemanticBoardUpgradeService) loadLaneBriefs(ctx context.Context, entries []ShortlistEntry) []ShortlistEntry {
+	boardIDs := make([]uint, 0, len(entries))
+	for _, e := range entries {
+		boardIDs = append(boardIDs, e.BoardID)
+	}
+	if len(boardIDs) == 0 {
+		return entries
+	}
+	cutoff := time.Now().AddDate(0, 0, -30)
+	var rows []struct {
+		BoardID      uint
+		SectionID    uint
+		SectionLabel string
+	}
+	err := s.db.WithContext(ctx).Raw(`
+		SELECT r.semantic_board_id AS board_id, s.id AS section_id, s.cluster_label AS section_label
+		FROM daily_report_sections s
+		JOIN board_daily_reports r ON r.id = s.report_id
+		JOIN board_persistent_topics t ON t.id = s.persistent_topic_id
+		WHERE r.semantic_board_id IN ? AND t.status = ? AND s.cluster_label <> ''
+		  AND r.period_date >= ?
+		ORDER BY r.period_date DESC
+	`, boardIDs, "active", cutoff).Scan(&rows).Error
+	if err != nil {
+		logging.Warnf("[semantic-board-upgrade] lane briefs query failed, degrading to name+description only: %v", err)
+		return entries
+	}
+	byBoard := make(map[uint]*ShortlistEntry, len(entries))
+	for i := range entries {
+		byBoard[entries[i].BoardID] = &entries[i]
+	}
+	for _, r := range rows {
+		e := byBoard[r.BoardID]
+		if e == nil || len(e.RecentSections) >= 5 {
+			continue
+		}
+		e.RecentSections = append(e.RecentSections, LaneBrief{SectionID: r.SectionID, SectionLabel: r.SectionLabel})
+	}
+	return entries
 }
 
 // loadLaneAffinities computes the lane signature (spec §4.2 V1b): for each board,

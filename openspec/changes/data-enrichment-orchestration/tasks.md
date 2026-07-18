@@ -73,7 +73,7 @@
 - [x] 7.1 TagsPage「数据增强」tab 已挂 BoardEnrichmentPanel ✅（保留为新闻背景入口）
 - [x] 7.2 顶部 sticky 认知循环导航（保留旧工作台管理面板；演进报告用新入口，不强求 sticky 导航）
 - [x] 7.3 ①新闻记忆（循环A独立产物）：周期筛选器翻历史 + inline 编辑 ✅（保留）
-- [ ] 7.3.1 周期筛选器支持手动选未生成 period 触发首次生成：除翻已有 period 外，加「手动选 period」入口（周/月选择器）；选中表1不存在的 period 时显示「生成」按钮，调 `POST .../contexts/:granularity/regenerate?period=...`（后端 `UpsertTopicLifelineContext` 已支持首次插入，**无需改后端**）。对齐 spec「用户手动首次生成缺失 period」Scenario
+- [x] 7.3.1 周期筛选器支持手动选未生成 period 触发首次生成：除翻已有 period 外，筛选器右侧加「补生成周期」触发按钮 → 打开 AppDialog（粒度按钮组 + week/month/year 周期输入 + 已存在覆盖提示 + 取消/生成）；调 `regenerateContext`（后端 `UpsertTopicLifelineContext` Upsert 首次插入，**无需改后端**）；生成后自动选中该周期。对齐 spec「用户手动首次生成缺失 period」Scenario。✅ `useBoardEnrichment.selectPeriod` + `BoardEnrichmentPanel` 补生成 dialog；lint(0 error)/typecheck/test(33 files)/build 全绿
 - [~] 7.4 ★ **走向预测卡片待重做为演进分析报告**：旧实现 result detail dialog 渲染新 sectors（涨红跌绿/置信度/触发）→ 需改为报刊式长文报告（见 §11.4）
 - [~] 7.5 ★ **预测兑现复盘待重做为定位变化展示**：旧实现 review verdict（hit绿/part黄/miss红）→ 需改为定位迁移（prev→curr + change_summary）
 - [x] 7.6 术语翻译用人话 ✅（演进定位：强化/转折/扩散/衰减；跨泳道信号；定位变化）

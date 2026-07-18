@@ -26,7 +26,7 @@ type SemanticBoardUpgradeService struct {
 }
 
 type SemanticBoardUpgradeLLM interface {
-	SuggestSemanticBoardUpgrades(ctx context.Context, prompt string) ([]SemanticBoardUpgradeSuggestion, error)
+	SuggestSemanticBoardUpgrades(ctx context.Context, prompt string, mode string) ([]SemanticBoardUpgradeSuggestion, error)
 }
 
 type SemanticBoardUpgradeConfig struct {
@@ -51,6 +51,7 @@ type SemanticBoardUpgradeCandidate struct {
 type BoardAffinity struct {
 	BoardID            uint
 	BoardLabel         string
+	BoardDescription   string
 	MatchingCandidates int
 	AvgDistance        float64
 }
@@ -59,8 +60,32 @@ type SemanticBoardUpgradeCluster struct {
 	Candidates      []SemanticBoardUpgradeCandidate
 	Centroid        []float64
 	BoardAffinities []BoardAffinity
+	Shortlist       []ShortlistEntry
 	Events          []SemanticBoardUpgradeEventContext
 	origIdx         int // internal: tracks Pass 1 cluster index during reassignment
+}
+
+// ShortlistEntry is one candidate board in a cluster's shortlist, carrying the
+// per-signature distances and ranks (spec: 双签名 shortlist). CompositionDistance
+// is always set for a composition-signature board; LaneDistance is nil when the
+// board has no active topic section in the 30-day window (lane N/A → composition
+// only). RecentSections carries ≤5 recent section titles for prompt injection
+// (spec: 泳道内容证据注入).
+type ShortlistEntry struct {
+	BoardID             uint
+	BoardLabel          string
+	BoardDescription    string
+	CompositionDistance float64
+	CompositionRank     int // 1-based within composition signature; 0 if absent
+	LaneDistance        *float64
+	LaneRank            int // 1-based within lane signature; 0 if absent
+	RecentSections      []LaneBrief
+}
+
+// LaneBrief is a recent section title for a board's active topic (lane evidence).
+type LaneBrief struct {
+	SectionID    uint
+	SectionLabel string
 }
 
 type SemanticBoardUpgradeEventContext struct {
@@ -146,9 +171,10 @@ func (s *SemanticBoardUpgradeService) GenerateSuggestions(ctx context.Context, m
 		if err != nil {
 			return nil, nil, err
 		}
+		clusters[i].Shortlist = computeCompositionShortlist(clusters[i])
 	}
 
-	suggestions, err := s.llm.SuggestSemanticBoardUpgrades(ctx, buildSemanticBoardUpgradePrompt(clusters, config.Mode))
+	suggestions, err := s.llm.SuggestSemanticBoardUpgrades(ctx, buildSemanticBoardUpgradePrompt(clusters, config.Mode), config.Mode)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -156,7 +182,12 @@ func (s *SemanticBoardUpgradeService) GenerateSuggestions(ctx context.Context, m
 	for _, candidate := range candidates {
 		validAuxiliaryIDs[candidate.ID] = struct{}{}
 	}
-	return filterSemanticBoardUpgradeSuggestions(suggestions, validAuxiliaryIDs, config.Mode), clusters, nil
+	filtered := filterSemanticBoardUpgradeSuggestions(suggestions, validAuxiliaryIDs)
+	// §4.1: a merge_into_existing whose target_board_id is not in its cluster's
+	// shortlist is downgraded to skip and not produced. Map each aux id to its
+	// cluster's shortlist board-id set, then drop merges with invalid targets.
+	shortlistByAux := buildShortlistByAux(clusters)
+	return validateMergeTargets(filtered, shortlistByAux), clusters, nil
 }
 
 func (s *SemanticBoardUpgradeService) ConfirmSuggestion(ctx context.Context, req ConfirmSemanticBoardUpgradeRequest) (*ConfirmSemanticBoardUpgradeResult, error) {
@@ -317,6 +348,7 @@ func (s *SemanticBoardUpgradeService) ClusterCandidates(ctx context.Context, can
 					affinities = append(affinities, BoardAffinity{
 						BoardID:            boardID,
 						BoardLabel:         contexts[0].BoardLabel,
+						BoardDescription:   contexts[0].BoardDescription,
 						MatchingCandidates: matchingCount,
 						AvgDistance:        totalMinDist / float64(matchingCount),
 					})
@@ -655,6 +687,38 @@ func isNearKeptVector(vector []float64, keptVectors [][]float64, threshold float
 	return false
 }
 
+// computeCompositionShortlist derives the composition-signature portion of a
+// cluster's shortlist: the top-2 boards by composition AvgDistance (already
+// sorted ascending in ClusterCandidates). Lane-signature entries are merged in
+// by the service once the lane query runs (§4.2). For 4.1 this is the whole
+// shortlist.
+func computeCompositionShortlist(cluster SemanticBoardUpgradeCluster) []ShortlistEntry {
+	limit := 2
+	if len(cluster.BoardAffinities) < limit {
+		limit = len(cluster.BoardAffinities)
+	}
+	entries := make([]ShortlistEntry, 0, limit)
+	for i := 0; i < limit; i++ {
+		aff := cluster.BoardAffinities[i]
+		entries = append(entries, ShortlistEntry{
+			BoardID:             aff.BoardID,
+			BoardLabel:          aff.BoardLabel,
+			BoardDescription:    aff.BoardDescription,
+			CompositionDistance: aff.AvgDistance,
+			CompositionRank:     i + 1,
+		})
+	}
+	return entries
+}
+
+// BuildSemanticBoardUpgradeSystemPrompt returns the LLM system-prompt JSON schema
+// instruction, mode-aware (§4.1). Both discover_new and expand_existing now
+// expose the full decision space {create_new, merge_into_existing, skip} with
+// target_board_id (discover_new previously advertised only create_new|skip).
+func BuildSemanticBoardUpgradeSystemPrompt(mode string) string {
+	return `Return JSON only in this shape: {"suggestions":[{"decision":"create_new|merge_into_existing|skip","board_label":"","description":"","auxiliary_label_ids":[1],"target_board_id":123,"reason":""}]}`
+}
+
 func buildSemanticBoardUpgradePrompt(clusters []SemanticBoardUpgradeCluster, mode string) string {
 	var builder strings.Builder
 	builder.WriteString("你是一个语义板块分析助手。根据以下辅助标签聚类信息，判断每个簇应该：")
@@ -667,11 +731,12 @@ func buildSemanticBoardUpgradePrompt(clusters []SemanticBoardUpgradeCluster, mod
 		builder.WriteString("- 如果簇内标签过于分散或过于泛化，不足以形成独立板块 → skip\n\n")
 		builder.WriteString("返回 JSON 格式：{\"suggestions\": [{\"decision\": \"create_new|merge_into_existing|skip\", \"board_label\": \"板块名称\", \"description\": \"板块描述\", \"auxiliary_label_ids\": [id1, id2], \"target_board_id\": 123, \"reason\": \"判断理由\"}]}\n\n")
 	} else {
-		builder.WriteString("create_new（创建新板块）或 skip（跳过不处理）。\n\n")
+		builder.WriteString("create_new（创建新板块）、merge_into_existing（合并到候选版块 shortlist 内某个已有板块）或 skip（跳过不处理）。\n\n")
 		builder.WriteString("判断原则：\n")
 		builder.WriteString("- 如果簇内标签语义集中、有明确主题且不存在对应板块 → create_new\n")
+		builder.WriteString("- 如果簇内标签明确属于候选版块 shortlist 中某个已有板块 → merge_into_existing（必须指定 target_board_id，且只能取自该簇 shortlist）\n")
 		builder.WriteString("- 如果簇内标签过于分散或过于泛化，不足以形成独立板块 → skip\n\n")
-		builder.WriteString("返回 JSON 格式：{\"suggestions\": [{\"decision\": \"create_new|skip\", \"board_label\": \"板块名称\", \"description\": \"板块描述\", \"auxiliary_label_ids\": [id1, id2], \"reason\": \"判断理由\"}]}\n\n")
+		builder.WriteString("返回 JSON 格式：{\"suggestions\": [{\"decision\": \"create_new|merge_into_existing|skip\", \"board_label\": \"板块名称\", \"description\": \"板块描述\", \"auxiliary_label_ids\": [id1, id2], \"target_board_id\": 123, \"reason\": \"判断理由\"}]}\n\n")
 	}
 	for i, cluster := range clusters {
 		fmt.Fprintf(&builder, "【簇 %d】\n", i+1)
@@ -685,6 +750,25 @@ func buildSemanticBoardUpgradePrompt(clusters []SemanticBoardUpgradeCluster, mod
 				fmt.Fprintf(&builder, "  - %s（ID=%d）：%d 个候选匹配，平均距离 %.4f\n", aff.BoardLabel, aff.BoardID, aff.MatchingCandidates, aff.AvgDistance)
 			}
 		}
+		if len(cluster.Shortlist) > 0 {
+			builder.WriteString("候选版块 shortlist（merge 目标 target_board_id 只能取自此处）：\n")
+			for _, e := range cluster.Shortlist {
+				line := fmt.Sprintf("  - %s（ID=%d，组成签名距离=%.4f", e.BoardLabel, e.BoardID, e.CompositionDistance)
+				if e.LaneDistance != nil {
+					line += fmt.Sprintf("，泳道签名距离=%.4f", *e.LaneDistance)
+				}
+				line += ")"
+				if e.BoardDescription != "" {
+					line += "：" + e.BoardDescription
+				}
+				builder.WriteString(line + "\n")
+				for _, s := range e.RecentSections {
+					if s.SectionLabel != "" {
+						fmt.Fprintf(&builder, "      · 近期内容：%s\n", s.SectionLabel)
+					}
+				}
+			}
+		}
 		if len(cluster.Events) > 0 {
 			builder.WriteString("关联事件（近期共现）：\n")
 			for _, event := range cluster.Events {
@@ -696,16 +780,66 @@ func buildSemanticBoardUpgradePrompt(clusters []SemanticBoardUpgradeCluster, mod
 	return builder.String()
 }
 
-func filterSemanticBoardUpgradeSuggestions(suggestions []SemanticBoardUpgradeSuggestion, validAuxiliaryIDs map[uint]struct{}, mode string) []SemanticBoardUpgradeSuggestion {
+// buildShortlistByAux maps each candidate auxiliary id to the set of board ids
+// in its cluster's shortlist. Used by validateMergeTargets to enforce that a
+// merge target belongs to the cluster shortlist (spec §4.1).
+func buildShortlistByAux(clusters []SemanticBoardUpgradeCluster) map[uint]map[uint]struct{} {
+	m := make(map[uint]map[uint]struct{}, len(clusters))
+	for i := range clusters {
+		set := make(map[uint]struct{}, len(clusters[i].Shortlist))
+		for _, e := range clusters[i].Shortlist {
+			set[e.BoardID] = struct{}{}
+		}
+		for _, c := range clusters[i].Candidates {
+			m[c.ID] = set
+		}
+	}
+	return m
+}
+
+// validateMergeTargets drops merge_into_existing suggestions whose target_board_id
+// is absent from the corresponding cluster's shortlist (downgrade to skip, not
+// produced — spec §4.1: merge 目标必须在 shortlist 内，否则降级为 skip 不产出建议).
+// Non-merge decisions pass through unchanged.
+func validateMergeTargets(suggestions []SemanticBoardUpgradeSuggestion, shortlistByAux map[uint]map[uint]struct{}) []SemanticBoardUpgradeSuggestion {
+	out := make([]SemanticBoardUpgradeSuggestion, 0, len(suggestions))
+	for _, sug := range suggestions {
+		if sug.Decision == SemanticBoardUpgradeDecisionMergeIntoExisting {
+			if !mergeTargetInShortlist(sug, shortlistByAux) {
+				continue
+			}
+		}
+		out = append(out, sug)
+	}
+	return out
+}
+
+func mergeTargetInShortlist(sug SemanticBoardUpgradeSuggestion, shortlistByAux map[uint]map[uint]struct{}) bool {
+	if sug.TargetBoardID == nil || len(sug.AuxiliaryLabelIDs) == 0 {
+		return false
+	}
+	for _, auxID := range sug.AuxiliaryLabelIDs {
+		set, ok := shortlistByAux[auxID]
+		if !ok {
+			continue
+		}
+		if _, has := set[*sug.TargetBoardID]; has {
+			return true
+		}
+	}
+	return false
+}
+
+func filterSemanticBoardUpgradeSuggestions(suggestions []SemanticBoardUpgradeSuggestion, validAuxiliaryIDs map[uint]struct{}) []SemanticBoardUpgradeSuggestion {
 	filtered := make([]SemanticBoardUpgradeSuggestion, 0, len(suggestions))
 	for _, suggestion := range suggestions {
 		switch suggestion.Decision {
 		case SemanticBoardUpgradeDecisionCreateNew, SemanticBoardUpgradeDecisionSkip:
 			// Always accepted
 		case SemanticBoardUpgradeDecisionMergeIntoExisting:
-			if mode != "expand_existing" {
-				continue
-			}
+			// Accepted in both discover_new and expand_existing (§4.1 D1): the
+			// discover_new quadrant now allows merging into an existing board whose
+			// target comes from the cluster shortlist.
 		default:
 			continue
 		}

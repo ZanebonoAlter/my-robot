@@ -47,6 +47,7 @@ type semanticBoardUpgradeCandidateDTO struct {
 type boardAffinityDTO struct {
 	BoardID            uint    `json:"board_id"`
 	BoardLabel         string  `json:"board_label"`
+	BoardDescription   string  `json:"board_description"`
 	MatchingCandidates int     `json:"matching_candidates"`
 	AvgDistance        float64 `json:"avg_distance"`
 }
@@ -148,12 +149,12 @@ func (h *semanticBoardHandler) backfillBoardEmbeddings(c *gin.Context) {
 	}
 	respondOK(c, gin.H{"backfilled": count, "total": len(boards)})
 }
-func (airouterSemanticBoardUpgradeLLM) SuggestSemanticBoardUpgrades(ctx context.Context, prompt string) ([]service.SemanticBoardUpgradeSuggestion, error) {
+func (airouterSemanticBoardUpgradeLLM) SuggestSemanticBoardUpgrades(ctx context.Context, prompt string, mode string) ([]service.SemanticBoardUpgradeSuggestion, error) {
 	result, err := airouter.NewRouter().Chat(ctx, airouter.ChatRequest{
 		Operation:  "tagmanagement.board_upgrade_suggest",
 		Capability: airouter.CapabilityTopicTagging,
 		Messages: []airouter.Message{
-			{Role: "system", Content: "Return JSON only in this shape: {\"suggestions\":[{\"decision\":\"create_new|skip\",\"board_label\":\"\",\"description\":\"\",\"auxiliary_label_ids\":[1],\"reason\":\"\"}]}"},
+			{Role: "system", Content: service.BuildSemanticBoardUpgradeSystemPrompt(mode)},
 			{Role: "user", Content: prompt},
 		},
 		JSONMode: true,

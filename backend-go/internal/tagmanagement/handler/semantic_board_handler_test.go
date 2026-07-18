@@ -25,7 +25,7 @@ type fakeSemanticBoardHandlerLLM struct {
 	suggestions []service.SemanticBoardUpgradeSuggestion
 }
 
-func (f fakeSemanticBoardHandlerLLM) SuggestSemanticBoardUpgrades(ctx context.Context, prompt string) ([]service.SemanticBoardUpgradeSuggestion, error) {
+func (f fakeSemanticBoardHandlerLLM) SuggestSemanticBoardUpgrades(ctx context.Context, prompt string, mode string) ([]service.SemanticBoardUpgradeSuggestion, error) {
 	return f.suggestions, nil
 }
 

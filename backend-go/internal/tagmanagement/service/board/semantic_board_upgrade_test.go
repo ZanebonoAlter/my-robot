@@ -18,15 +18,17 @@ import (
 
 type fakeSemanticBoardUpgradeLLM struct {
 	prompt      string
+	mode        string
 	suggestions []SemanticBoardUpgradeSuggestion
 	calls       int
 }
 
 var upgradeFeedSeq uint64
 
-func (f *fakeSemanticBoardUpgradeLLM) SuggestSemanticBoardUpgrades(ctx context.Context, prompt string) ([]SemanticBoardUpgradeSuggestion, error) {
+func (f *fakeSemanticBoardUpgradeLLM) SuggestSemanticBoardUpgrades(ctx context.Context, prompt string, mode string) ([]SemanticBoardUpgradeSuggestion, error) {
 	f.calls++
 	f.prompt = prompt
+	f.mode = mode
 	return f.suggestions, nil
 }
 
@@ -508,7 +510,7 @@ func TestSemanticBoardUpgradeGenerateSuggestionsSkipsWhenCandidateCountBelowThre
 	require.Zero(t, fakeLLM.calls)
 }
 
-func TestSemanticBoardUpgradePromptIncludesBoardAffinities(t *testing.T) {
+func TestSemanticBoardUpgradePromptDiscoverNewOffersMergeAndShortlist(t *testing.T) {
 	db := setupSemanticBoardUpgradeTestDB(t)
 	createUpgradeLabel(t, db, "OpenAI", "openai", "auxiliary", "active", 5, []float64{1, 0, 0})
 	createUpgradeLabel(t, db, "GPT", "gpt", "auxiliary", "active", 5, []float64{0.95, 0.3122498999, 0})
@@ -525,13 +527,62 @@ func TestSemanticBoardUpgradePromptIncludesBoardAffinities(t *testing.T) {
 	_, _, err := service.GenerateSuggestions(context.Background(), "")
 
 	require.NoError(t, err)
-	// Prompt should NOT contain merge_into_existing
-	require.NotContains(t, fakeLLM.prompt, "merge_into_existing")
-	require.NotContains(t, fakeLLM.prompt, "target_board_id")
-	require.NotContains(t, fakeLLM.prompt, "关联已有板块")
-	// Prompt should contain board affinity reference info
-	require.Contains(t, fakeLLM.prompt, "相似已有板块")
+	// discover_new now offers merge_into_existing + target_board_id (§4.1 D1)
+	require.Contains(t, fakeLLM.prompt, "merge_into_existing")
+	require.Contains(t, fakeLLM.prompt, "target_board_id")
+	// shortlist renders the candidate board (composition signature, board "AI Board")
 	require.Contains(t, fakeLLM.prompt, "AI Board")
+	require.Contains(t, fakeLLM.prompt, "Artificial intelligence board")
+}
+
+// TestSemanticBoardUpgradeDiscoverNewMergeTargetValidation verifies the §4.1
+// requirement: a discover_new merge_into_existing whose target_board_id is in
+// the cluster shortlist is kept; one whose target is NOT in the shortlist is
+// downgraded to skip and not produced as a suggestion (spec: merge 目标必须在
+// shortlist 内，否则降级为 skip 不产出建议).
+func TestSemanticBoardUpgradeDiscoverNewMergeTargetValidation(t *testing.T) {
+	db := setupSemanticBoardUpgradeTestDB(t)
+	auxA := createUpgradeLabel(t, db, "DeepSeek", "deepseek", "auxiliary", "active", 5, []float64{1, 0, 0})
+	auxB := createUpgradeLabel(t, db, "Agent", "agent", "auxiliary", "active", 5, []float64{0.95, 0.3122498999, 0})
+	createUpgradeLabel(t, db, "LLM", "llm", "auxiliary", "active", 5, []float64{0.9, 0.4358898943, 0})
+	createUpgradeLabel(t, db, "Codex", "codex", "auxiliary", "active", 5, []float64{0.85, 0.5267826876, 0})
+	createUpgradeLabel(t, db, "VLM", "vlm", "auxiliary", "active", 5, []float64{0.8, 0.6, 0})
+	// Board in this cluster's shortlist (composition aux close to the cluster).
+	boardAux := createUpgradeLabel(t, db, "GenAI Aux", "genai-aux", "auxiliary", "active", 2, []float64{1, 0, 0})
+	board := createUpgradeLabel(t, db, "生成式AI", "genai", "board", "active", 0, nil)
+	require.NoError(t, db.Create(&models.BoardComposition{BoardID: board.ID, AuxiliaryLabelID: boardAux.ID}).Error)
+	// Other board with no composition → never in this cluster's shortlist.
+	otherBoard := createUpgradeLabel(t, db, "其他板块", "other-board", "board", "active", 0, nil)
+
+	validTarget := board.ID
+	invalidTarget := otherBoard.ID
+	fakeLLM := &fakeSemanticBoardUpgradeLLM{suggestions: []SemanticBoardUpgradeSuggestion{
+		{Decision: SemanticBoardUpgradeDecisionMergeIntoExisting, TargetBoardID: &validTarget, AuxiliaryLabelIDs: []uint{auxA.ID, auxB.ID}, BoardLabel: "DeepSeek→生成式AI"},
+		{Decision: SemanticBoardUpgradeDecisionMergeIntoExisting, TargetBoardID: &invalidTarget, AuxiliaryLabelIDs: []uint{auxA.ID, auxB.ID}, BoardLabel: "DeepSeek→其他"},
+	}}
+	service := NewSemanticBoardUpgradeService(db, fakeLLM, nil)
+
+	suggestions, _, err := service.GenerateSuggestions(context.Background(), "discover_new")
+
+	require.NoError(t, err)
+	require.Len(t, suggestions, 1, "invalid-target merge must be downgraded/dropped")
+	require.Equal(t, SemanticBoardUpgradeDecisionMergeIntoExisting, suggestions[0].Decision)
+	require.NotNil(t, suggestions[0].TargetBoardID)
+	require.Equal(t, board.ID, *suggestions[0].TargetBoardID, "only the shortlist-valid merge survives")
+}
+
+// TestSemanticBoardUpgradeSystemPromptModeAware verifies the LLM system-prompt
+// schema is mode-aware (§4.1): discover_new now advertises merge_into_existing +
+// target_board_id (previously only create_new|skip), matching the user prompt.
+func TestSemanticBoardUpgradeSystemPromptModeAware(t *testing.T) {
+	discover := BuildSemanticBoardUpgradeSystemPrompt("discover_new")
+	require.Contains(t, discover, "create_new")
+	require.Contains(t, discover, "merge_into_existing")
+	require.Contains(t, discover, "target_board_id")
+
+	expand := BuildSemanticBoardUpgradeSystemPrompt("expand_existing")
+	require.Contains(t, expand, "merge_into_existing")
+	require.Contains(t, expand, "target_board_id")
 }
 
 func TestSemanticBoardUpgradeConfirmCreateNew(t *testing.T) {

@@ -39,7 +39,7 @@ const {
   debates, debateTriggering, debateError, debateStage, loadDebates, triggerDebate,
   // workbench UI
   selectedGran, selectedPeriodIdx, periodList, currentContext,
-  setGran, shiftPeriod,
+  setGran, shiftPeriod, selectPeriod,
   // misc
   loadAllTopicTables,
 } = useBoardEnrichment()
@@ -107,6 +107,34 @@ async function handleRegenerate() {
   const label = period ? periodLabel.value : `本${granShort.value}`
   if (!confirm(`重新汇总「${label}」？\n（约 10-30 秒，调用 LLM 重读新闻）`)) return
   await regenerateContext(selectedTopicId.value, selectedGran.value as ContextGranularity, period)
+}
+
+// ── ① 补生成周期（7.3.1：手动选未生成 period 触发首次生成）─────────────
+const genDialogOpen = ref(false)
+const genGran = ref<PickerGran>('week')
+const genPeriod = ref<string>('')
+/** 对话框所选 period 是否已存在（决定按钮文案「重生成」/「生成」+ 覆盖提示）。 */
+const genPeriodExists = computed(() =>
+  !!genPeriod.value && contexts.value.some((c) => c.granularity === genGran.value && c.period === genPeriod.value),
+)
+function openGenDialog() {
+  genGran.value = selectedGran.value
+  genPeriod.value = ''
+  genDialogOpen.value = true
+}
+async function confirmGenerate() {
+  if (selectedTopicId.value === null || regenerating.value) return
+  const p = genPeriod.value.trim()
+  if (!p) return
+  if (genGran.value === 'year' && !/^\d{4}$/.test(p)) {
+    notifyError('年份请填 4 位数字，如 2026')
+    return
+  }
+  const ok = await regenerateContext(selectedTopicId.value, genGran.value as ContextGranularity, p)
+  if (ok) {
+    selectPeriod(genGran.value, p) // 选中刚生成的周期（contexts 已含新行）
+    genDialogOpen.value = false
+  }
 }
 
 // ①narrative 被演进报告引用次数：统计 result.sectors.evidence 里命中当前 context 的条数
@@ -270,6 +298,10 @@ async function handleDebateRetry() {
             {{ isLatest ? '最新周期' : '历史周期' }}
           </span>
           <span class="muted ew-period-count">共 {{ periodList.length }} 个历史周期可翻</span>
+          <button type="button" class="btn btn-ghost btn-sm ew-gen-trigger" @click="openGenDialog">
+            <Icon icon="mdi:calendar-plus" width="13" />
+            补生成周期
+          </button>
         </div>
 
         <!-- 叙事 -->
@@ -391,6 +423,46 @@ async function handleDebateRetry() {
         <AppButton variant="primary" size="sm" @click="saveEditingSource">保存</AppButton>
       </template>
     </AppDialog>
+
+    <!-- ── Dialog: 补生成周期（7.3.1） ──────────────────────────────── -->
+    <AppDialog :model-value="genDialogOpen" title="补生成周期" width="440px" @update:model-value="(v) => { if (!v) genDialogOpen = false }">
+      <div class="ew-dialog-form">
+        <p class="ew-gen-hint">选择一个周期生成新闻汇总。<b>支持从未生成过的历史周期</b>（约 10-30 秒，调用 AI 重读该周期新闻）。</p>
+        <div class="ew-field">
+          <span class="ew-field-label">粒度</span>
+          <div class="gran-select gran-select--dialog">
+            <button v-for="g in GRANS" :key="g.id" type="button" :class="{ on: genGran === g.id }" @click="genGran = g.id; genPeriod = ''">{{ g.label }}</button>
+          </div>
+        </div>
+        <label class="ew-field">
+          <span class="ew-field-label">周期</span>
+          <input
+            v-if="genGran !== 'year'"
+            :type="genGran"
+            v-model="genPeriod"
+            class="ew-period-input ew-period-input--dialog"
+          />
+          <input
+            v-else
+            type="text"
+            inputmode="numeric"
+            pattern="\d{4}"
+            maxlength="4"
+            placeholder="如 2026"
+            v-model="genPeriod"
+            class="ew-period-input ew-period-input--dialog ew-period-input--year"
+          />
+          <span v-if="genPeriod && genPeriodExists" class="ew-gen-exists">该周期已存在，将覆盖重算</span>
+        </label>
+      </div>
+      <template #footer>
+        <AppButton variant="ghost" size="sm" @click="genDialogOpen = false">取消</AppButton>
+        <AppButton variant="primary" size="sm" :disabled="!genPeriod.trim() || regenerating !== null" @click="confirmGenerate">
+          <Icon icon="mdi:calendar-plus" width="13" />
+          {{ regenerating !== null ? '生成中…' : (genPeriodExists ? '重生成' : '生成') }}
+        </AppButton>
+      </template>
+    </AppDialog>
   </div>
 </template>
 
@@ -460,6 +532,16 @@ async function handleDebateRetry() {
 .fresh-latest { background: var(--color-success-subtle); color: var(--color-success); }
 .fresh-stale { background: var(--color-warning-subtle); color: var(--color-warning); }
 .ew-period-count { font-size: 11.5px; }
+/* ① 补生成周期入口（7.3.1） */
+.ew-gen-trigger { margin-left: auto; }
+.ew-period-input { padding: 5px 8px; font-size: 13px; border: 1px solid var(--color-input-border); border-radius: 8px; background: var(--color-input-bg); color: var(--color-text-primary); outline: none; font-family: inherit; width: 100%; box-sizing: border-box; }
+.ew-period-input:focus { border-color: var(--color-input-focus); }
+.ew-period-input--year { max-width: 160px; text-align: center; }
+.ew-period-input--dialog { margin-top: 2px; }
+.ew-gen-hint { font-size: 12px; color: var(--color-text-muted); margin: 0 0 0.4rem; line-height: 1.6; }
+.ew-gen-hint b { color: var(--color-text-secondary); }
+.ew-gen-exists { font-size: 11px; color: var(--color-warning); margin-top: 4px; display: block; }
+.gran-select--dialog { display: inline-flex; }
 
 /* 叙事 */
 .narrative { background: var(--color-bg-elevated); border: 1px solid var(--color-border-subtle); border-left: 3px solid var(--color-accent); border-radius: 0 8px 8px 0; padding: 1.1rem 1.3rem; box-shadow: var(--shadow-print); }

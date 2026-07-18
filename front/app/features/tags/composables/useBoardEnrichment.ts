@@ -184,6 +184,16 @@ export function useBoardEnrichment() {
 		);
 	}
 
+	/**
+	 * 选中指定 period（7.3.1 手动补生成用）：设粒度 + 定位到 periodList 中的索引。
+	 * regenerate 成功后 contexts 已含新行、periodList 重算，故能定位到刚生成的周期。
+	 */
+	function selectPeriod(granularity: PickerGran, period: string) {
+		if (selectedGran.value !== granularity) selectedGran.value = granularity;
+		const idx = periodList.value.indexOf(period);
+		selectedPeriodIdx.value = idx >= 0 ? idx : 0;
+	}
+
 	function setActiveSection(id: string) {
 		activeSection.value = id;
 	}
@@ -492,6 +502,7 @@ export function useBoardEnrichment() {
 		currentContext,
 		setGran,
 		shiftPeriod,
+		selectPeriod,
 		activeSection,
 		setActiveSection,
 		latestResultId,

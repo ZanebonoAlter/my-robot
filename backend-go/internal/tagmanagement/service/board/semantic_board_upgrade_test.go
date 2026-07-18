@@ -2,6 +2,7 @@ package board
 
 import (
 	"context"
+	"database/sql/driver"
 	"fmt"
 	"sync/atomic"
 	"testing"
@@ -11,6 +12,7 @@ import (
 	"gorm.io/gorm"
 
 	"syntopica-backend/internal/models"
+	"syntopica-backend/internal/platform/database"
 	"syntopica-backend/internal/platform/testutil"
 	"syntopica-backend/internal/tagmanagement/repository"
 	"syntopica-backend/internal/tagmanagement/service/core"
@@ -585,6 +587,67 @@ func TestSemanticBoardUpgradeSystemPromptModeAware(t *testing.T) {
 	require.Contains(t, expand, "target_board_id")
 }
 
+// TestSemanticBoardUpgradeShortlistDualSignature verifies §4.2: the cluster
+// shortlist is the union of composition-signature top-2 and lane-signature
+// top-2 (≤4, deduped), each entry carrying the per-signature distance; a board
+// with no active topic section participates only via composition.
+func TestSemanticBoardUpgradeShortlistDualSignature(t *testing.T) {
+	db := setupSemanticBoardUpgradeTestDB(t)
+	// cluster candidates (5, near (1,0,0))
+	createUpgradeLabel(t, db, "DeepSeek", "deepseek", "auxiliary", "active", 5, []float64{1, 0, 0})
+	createUpgradeLabel(t, db, "Agent", "agent", "auxiliary", "active", 5, []float64{0.95, 0.3122498999, 0})
+	createUpgradeLabel(t, db, "LLM", "llm-x", "auxiliary", "active", 5, []float64{0.9, 0.4358898943, 0})
+	createUpgradeLabel(t, db, "Codex", "codex-x", "auxiliary", "active", 5, []float64{0.85, 0.5267826876, 0})
+	createUpgradeLabel(t, db, "VLM", "vlm-x", "auxiliary", "active", 5, []float64{0.8, 0.6, 0})
+
+	// Board A: composition + lane (active topic + recent section near centroid)
+	boardAAux := createUpgradeLabel(t, db, "GenAI Aux", "genai-aux-x", "auxiliary", "active", 2, []float64{1, 0, 0})
+	boardA := createUpgradeLabel(t, db, "生成式AI", "genai-x", "board", "active", 0, nil)
+	require.NoError(t, db.Create(&models.BoardComposition{BoardID: boardA.ID, AuxiliaryLabelID: boardAAux.ID}).Error)
+	topicA := createUpgradePersistentTopic(t, db, boardA.ID, "active")
+	reportA := createUpgradeBoardDailyReport(t, db, boardA.ID, daysAgo(1))
+	createUpgradeReportSection(t, db, reportA.ID, topicA.ID, "大模型厂商动态", []float64{1, 0, 0})
+
+	// Board C: composition only (NO active section → composition-only)
+	boardCAux := createUpgradeLabel(t, db, "Cloud Aux", "cloud-aux-x", "auxiliary", "active", 2, []float64{0.85, 0.5267826876, 0})
+	boardC := createUpgradeLabel(t, db, "云计算", "cloud-x", "board", "active", 0, nil)
+	require.NoError(t, db.Create(&models.BoardComposition{BoardID: boardC.ID, AuxiliaryLabelID: boardCAux.ID}).Error)
+
+	// Board B: lane only (active topic + recent section, NO composition)
+	boardB := createUpgradeLabel(t, db, "机器人", "robotics-x", "board", "active", 0, nil)
+	topicB := createUpgradePersistentTopic(t, db, boardB.ID, "active")
+	reportB := createUpgradeBoardDailyReport(t, db, boardB.ID, daysAgo(2))
+	createUpgradeReportSection(t, db, reportB.ID, topicB.ID, "人形机器人进展", []float64{0.95, 0.3122498999, 0})
+
+	svc := NewSemanticBoardUpgradeService(db, &fakeSemanticBoardUpgradeLLM{suggestions: []SemanticBoardUpgradeSuggestion{{Decision: SemanticBoardUpgradeDecisionSkip}}}, nil)
+	_, clusters, err := svc.GenerateSuggestions(context.Background(), "discover_new")
+	require.NoError(t, err)
+	require.Len(t, clusters, 1, "all 5 candidates form one cluster")
+
+	shortlist := clusters[0].Shortlist
+	require.LessOrEqual(t, len(shortlist), 4, "shortlist ≤ 4 (union of two top-2)")
+
+	byBoard := map[uint]ShortlistEntry{}
+	for _, e := range shortlist {
+		byBoard[e.BoardID] = e
+	}
+
+	// Board A: present in BOTH signatures
+	require.Contains(t, byBoard, boardA.ID)
+	require.GreaterOrEqual(t, byBoard[boardA.ID].CompositionRank, 1, "board A has composition affinity")
+	require.NotNil(t, byBoard[boardA.ID].LaneDistance, "board A has an active section → lane distance set")
+
+	// Board C: composition only — NO active section → must NOT have a lane distance
+	require.Contains(t, byBoard, boardC.ID)
+	require.GreaterOrEqual(t, byBoard[boardC.ID].CompositionRank, 1)
+	require.Nil(t, byBoard[boardC.ID].LaneDistance, "board with no active section must be composition-only")
+
+	// Board B: lane only — NO composition → must appear via lane signature
+	require.Contains(t, byBoard, boardB.ID, "lane-only board must enter the shortlist via the lane signature")
+	require.NotNil(t, byBoard[boardB.ID].LaneDistance)
+	require.Equal(t, 0, byBoard[boardB.ID].CompositionRank, "board with no composition must be lane-only")
+}
+
 func TestSemanticBoardUpgradeConfirmCreateNew(t *testing.T) {
 	db := setupSemanticBoardUpgradeTestDB(t)
 	auxiliaryA := createUpgradeLabel(t, db, "OpenAI", "openai", "auxiliary", "active", 5, []float64{1, 0, 0})
@@ -895,4 +958,149 @@ func upgradeCandidateIDs(candidates []SemanticBoardUpgradeCandidate) []uint {
 		ids = append(ids, candidate.ID)
 	}
 	return ids
+}
+
+// daysAgo returns a timestamp n days in the past (used for daily-report period_date).
+func daysAgo(n int) time.Time {
+	return time.Now().AddDate(0, 0, -n)
+}
+
+// The lane signature (§4.2) and lane evidence (§4.4) read board_daily_reports /
+// board_persistent_topics / daily_report_sections — tables owned by
+// topicgraph/repository. That package imports the tagmanagement root package,
+// which transitively imports service/board, so importing it here would form a
+// cycle. These local structs mirror the production models field-for-field (same
+// TableName, same columns) so the testcontainer AutoMigrate + versioned
+// migrations (which reference columns like board_persistent_topics.hit_count)
+// succeed identically to production. They are test-only row builders; the
+// production models in topicgraph/repository remain the schema source of truth.
+
+// testJSON mirrors repository.JSON ([]byte over jsonb) for AutoMigrate + inserts.
+type testJSON []byte
+
+func (j testJSON) Value() (driver.Value, error) {
+	if j == nil {
+		return nil, nil
+	}
+	return string(j), nil
+}
+
+func (j *testJSON) Scan(value interface{}) error {
+	if value == nil {
+		*j = nil
+		return nil
+	}
+	switch v := value.(type) {
+	case []byte:
+		*j = append((*j)[0:0], v...)
+	case string:
+		*j = append((*j)[0:0], v...)
+	default:
+		return fmt.Errorf("testJSON: unsupported scan type %T", value)
+	}
+	return nil
+}
+
+type testBoardDailyReport struct {
+	ID                      uint      `gorm:"primarykey"`
+	SemanticBoardID         uint      `gorm:"index;not null"`
+	PeriodDate              time.Time `gorm:"type:date;not null"`
+	Title                   string
+	Summary                 string
+	Highlights              testJSON `gorm:"type:jsonb"`
+	Dynamics                string    `gorm:"type:text"`
+	ArticleCount            int
+	EventTagCount           int
+	ClusterCount            int
+	Status                  string    `gorm:"size:20;default:generating"`
+	RawClusters             testJSON `gorm:"type:jsonb"`
+	PrevReportID            *uint
+	GenerationPromptVersion string    `gorm:"size:20"`
+	CreatedAt               time.Time
+	UpdatedAt               time.Time
+}
+
+func (testBoardDailyReport) TableName() string { return "board_daily_reports" }
+
+type testBoardPersistentTopic struct {
+	ID              uint      `gorm:"primarykey"`
+	SemanticBoardID uint      `gorm:"not null;index"`
+	Label           string    `gorm:"size:200;not null"`
+	Description     string    `gorm:"type:text"`
+	Embedding       *string   `gorm:"type:vector"`
+	Status          string    `gorm:"size:20;not null;default:candidate"`
+	Source          string    `gorm:"size:10;not null;default:auto"`
+	FirstSeenDate   time.Time `gorm:"type:date;not null"`
+	LastSeenDate    time.Time `gorm:"type:date;not null"`
+	HitCount        int       `gorm:"not null;default:1"`
+	ConsecutiveHits int       `gorm:"not null;default:0"`
+	CreatedAt       time.Time
+	UpdatedAt       time.Time
+}
+
+func (testBoardPersistentTopic) TableName() string { return "board_persistent_topics" }
+
+type testDailyReportSection struct {
+	ID                   uint     `gorm:"primarykey"`
+	ReportID             uint     `gorm:"index;not null"`
+	ClusterIndex         int
+	ClusterLabel         string   `gorm:"size:200"`
+	ClusterTagIDs        testJSON `gorm:"type:jsonb"`
+	ArticleCount         int
+	BestTier             int      `gorm:"default:0"`
+	AvgScore             float64  `gorm:"default:0"`
+	QualityBreakdown     testJSON `gorm:"type:jsonb"`
+	Embedding            string   `gorm:"type:vector"`
+	PersistentTopicID    *uint    `gorm:"index"`
+	TopicMatchDistance   float64
+	TopicMatchConfidence string   `gorm:"size:20"`
+	TopicStatusAtReport  *string  `gorm:"size:20"`
+	CreatedAt            time.Time
+}
+
+func (testDailyReportSection) TableName() string { return "daily_report_sections" }
+
+// init registers the daily-report tables for the board test binary's AutoMigrate.
+// These tables are owned by topicgraph/repository, whose package init registers them
+// in production — but the board test binary cannot import that package (it imports
+// the tagmanagement root, which transitively imports service/board → cycle). Without
+// this, the testcontainer schema lacks the tables the lane signature queries. The
+// local structs above map 1:1 to the production tables (same TableName), so
+// AutoMigrate creates compatible columns. This runs before the first SetupTestDB
+// (Go init order), so the golden schema includes them.
+func init() {
+	database.RegisterModels(
+		&testBoardDailyReport{},
+		&testBoardPersistentTopic{},
+		&testDailyReportSection{},
+	)
+}
+
+func createUpgradePersistentTopic(t *testing.T, db *gorm.DB, boardID uint, status string) testBoardPersistentTopic {
+	t.Helper()
+	today := daysAgo(0)
+	topic := testBoardPersistentTopic{
+		SemanticBoardID: boardID, Label: fmt.Sprintf("topic-%d-%d", boardID, time.Now().UnixNano()),
+		Status: status, FirstSeenDate: today, LastSeenDate: today,
+	}
+	require.NoError(t, db.Create(&topic).Error)
+	return topic
+}
+
+func createUpgradeBoardDailyReport(t *testing.T, db *gorm.DB, boardID uint, periodDate time.Time) testBoardDailyReport {
+	t.Helper()
+	report := testBoardDailyReport{SemanticBoardID: boardID, PeriodDate: periodDate, Status: "completed"}
+	require.NoError(t, db.Create(&report).Error)
+	return report
+}
+
+func createUpgradeReportSection(t *testing.T, db *gorm.DB, reportID uint, topicID uint, clusterLabel string, vector []float64) testDailyReportSection {
+	t.Helper()
+	pgVector := core.FloatsToPgVector(testutil.PadVector(vector, testutil.TestEmbeddingDim))
+	section := testDailyReportSection{
+		ReportID: reportID, ClusterLabel: clusterLabel, Embedding: pgVector,
+		PersistentTopicID: &topicID,
+	}
+	require.NoError(t, db.Create(&section).Error)
+	return section
 }

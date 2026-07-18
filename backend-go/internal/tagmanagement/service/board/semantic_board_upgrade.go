@@ -171,7 +171,10 @@ func (s *SemanticBoardUpgradeService) GenerateSuggestions(ctx context.Context, m
 		if err != nil {
 			return nil, nil, err
 		}
-		clusters[i].Shortlist = computeCompositionShortlist(clusters[i])
+		clusters[i].Shortlist, err = s.computeShortlist(ctx, clusters[i])
+		if err != nil {
+			return nil, nil, err
+		}
 	}
 
 	suggestions, err := s.llm.SuggestSemanticBoardUpgrades(ctx, buildSemanticBoardUpgradePrompt(clusters, config.Mode), config.Mode)
@@ -687,19 +690,20 @@ func isNearKeptVector(vector []float64, keptVectors [][]float64, threshold float
 	return false
 }
 
-// computeCompositionShortlist derives the composition-signature portion of a
-// cluster's shortlist: the top-2 boards by composition AvgDistance (already
-// sorted ascending in ClusterCandidates). Lane-signature entries are merged in
-// by the service once the lane query runs (§4.2). For 4.1 this is the whole
-// shortlist.
-func computeCompositionShortlist(cluster SemanticBoardUpgradeCluster) []ShortlistEntry {
-	limit := 2
-	if len(cluster.BoardAffinities) < limit {
-		limit = len(cluster.BoardAffinities)
+// computeShortlist builds the dual-signature shortlist for a cluster (spec §4.2):
+// composition-signature top-2 (cluster.BoardAffinities, already sorted ascending)
+// unioned with lane-signature top-2 (active-topic section embeddings within 30 days),
+// deduped by board id (≤4 entries). Each entry carries the per-signature distance
+// and rank; LaneDistance is nil for a board with no active section in the window
+// (composition-only participation).
+func (s *SemanticBoardUpgradeService) computeShortlist(ctx context.Context, cluster SemanticBoardUpgradeCluster) ([]ShortlistEntry, error) {
+	comp := cluster.BoardAffinities
+	if len(comp) > 2 {
+		comp = comp[:2]
 	}
-	entries := make([]ShortlistEntry, 0, limit)
-	for i := 0; i < limit; i++ {
-		aff := cluster.BoardAffinities[i]
+	entries := make([]ShortlistEntry, 0, 4)
+	byID := make(map[uint]int, 4)
+	for i, aff := range comp {
 		entries = append(entries, ShortlistEntry{
 			BoardID:             aff.BoardID,
 			BoardLabel:          aff.BoardLabel,
@@ -707,8 +711,69 @@ func computeCompositionShortlist(cluster SemanticBoardUpgradeCluster) []Shortlis
 			CompositionDistance: aff.AvgDistance,
 			CompositionRank:     i + 1,
 		})
+		byID[aff.BoardID] = len(entries) - 1
 	}
-	return entries
+	lane, err := s.loadLaneAffinities(ctx, cluster)
+	if err != nil {
+		return nil, err
+	}
+	for i, aff := range lane {
+		dist := aff.AvgDistance
+		if idx, ok := byID[aff.BoardID]; ok {
+			entries[idx].LaneDistance = &dist
+			entries[idx].LaneRank = i + 1
+		} else {
+			entries = append(entries, ShortlistEntry{
+				BoardID:          aff.BoardID,
+				BoardLabel:       aff.BoardLabel,
+				BoardDescription: aff.BoardDescription,
+				LaneDistance:     &dist,
+				LaneRank:         i + 1,
+			})
+			byID[aff.BoardID] = len(entries) - 1
+		}
+	}
+	return entries, nil
+}
+
+// loadLaneAffinities computes the lane signature (spec §4.2 V1b): for each board,
+// the min cosine distance between the cluster centroid and that board's active
+// topic section embeddings (daily_report_sections within the last 30 days). Returns
+// the top-2 boards by ascending distance. Parameterized (? placeholders, no string
+// concatenation); boards without active sections are naturally absent (degraded to
+// composition-only in computeShortlist).
+func (s *SemanticBoardUpgradeService) loadLaneAffinities(ctx context.Context, cluster SemanticBoardUpgradeCluster) ([]BoardAffinity, error) {
+	if len(cluster.Centroid) == 0 {
+		return nil, nil
+	}
+	centroid := core.FloatsToPgVector(cluster.Centroid)
+	cutoff := time.Now().AddDate(0, 0, -30)
+	var rows []struct {
+		BoardID          uint
+		BoardLabel       string
+		BoardDescription string
+		MinDist          float64
+	}
+	err := s.db.WithContext(ctx).Raw(`
+		SELECT r.semantic_board_id AS board_id, b.label AS board_label, b.description AS board_description,
+		       MIN(s.embedding <=> ?::vector) AS min_dist
+		FROM daily_report_sections s
+		JOIN board_daily_reports r ON r.id = s.report_id
+		JOIN board_persistent_topics t ON t.id = s.persistent_topic_id
+		JOIN semantic_labels b ON b.id = r.semantic_board_id AND b.label_type = ? AND b.status = ?
+		WHERE t.status = ? AND s.embedding IS NOT NULL AND r.period_date >= ?
+		GROUP BY r.semantic_board_id, b.label, b.description
+		ORDER BY min_dist ASC
+		LIMIT 2
+	`, centroid, "board", "active", "active", cutoff).Scan(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+	out := make([]BoardAffinity, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, BoardAffinity{BoardID: r.BoardID, BoardLabel: r.BoardLabel, BoardDescription: r.BoardDescription, AvgDistance: r.MinDist})
+	}
+	return out, nil
 }
 
 // BuildSemanticBoardUpgradeSystemPrompt returns the LLM system-prompt JSON schema

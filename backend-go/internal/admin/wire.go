@@ -87,6 +87,7 @@ var (
 	NewTaskPersistence            = scheduler.NewTaskPersistence
 	NewTaskPersistenceWithNextRun = scheduler.NewTaskPersistenceWithNextRun
 	NextDailyReportTime           = scheduler.NextDailyReportTime
+	NextBoardUpgradeSuggestTime   = scheduler.NextBoardUpgradeSuggestTime
 )
 
 // DailyReportSchedulerWrapper for TriggerNowWithDate support.
@@ -106,6 +107,7 @@ var (
 	AutoRefreshJob            = scheduler.AutoRefreshJob
 	ContentCompletionJob      = scheduler.ContentCompletionJob
 	DailyReportJob            = scheduler.DailyReportJob
+	BoardUpgradeSuggestJob    = scheduler.BoardUpgradeSuggestJob
 	FirecrawlJob              = scheduler.FirecrawlJob
 	FirecrawlStatusEnricher   = scheduler.FirecrawlStatusEnricher
 )

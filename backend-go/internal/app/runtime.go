@@ -163,6 +163,19 @@ func StartRuntime() *Runtime {
 	dailyReportWrapper := admin.NewDailyReportSchedulerWrapper(dailyReportBase)
 	registry.Register("daily_report", dailyReportWrapper)
 
+	// BoardUpgradeSuggest: daily discover_new generation + watch GC (design D4).
+	// Loosely coupled fixed-time trigger (default 06:30), not chained to the
+	// daily report. Manual trigger via POST /upgrade-suggestions/generate.
+	boardUpgradeNextRunFn := scheduler.NextBoardUpgradeSuggestTime
+	registry.Register("board_upgrade_suggest", scheduler.New(scheduler.Config{
+		Name:    "Board Upgrade Suggest",
+		NextRun: boardUpgradeNextRunFn,
+		Job:     admin.BoardUpgradeSuggestJob(),
+		Persistence: admin.NewTaskPersistenceWithNextRun("board_upgrade_suggest",
+			"每日生成版块升级建议(discover_new)+观察池GC",
+			boardUpgradeNextRunFn),
+	}))
+
 	// Firecrawl: with custom status enricher
 	firecrawlQueue := content.NewFirecrawlJobQueue(database.DB)
 	registry.Register("firecrawl", scheduler.New(scheduler.Config{

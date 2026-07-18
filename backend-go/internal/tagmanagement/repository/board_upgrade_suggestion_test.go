@@ -154,3 +154,130 @@ func TestBoardUpgradeSuggestionInsertPendingPersistsRows(t *testing.T) {
 		require.Equal(t, "create_new", r.Decision)
 	}
 }
+
+// TestBoardUpgradeSuggestionListFilters verifies the query API read path (spec:
+// 建议查询 API 读持久化表).
+//
+// §5.1: default = pending + non-watch, high-confidence first then created desc;
+// decision=watch → observation pool; status/decision exact filters honored.
+func TestBoardUpgradeSuggestionListFilters(t *testing.T) {
+	db := testutil.SetupTestDB(t)
+	repo := NewBoardUpgradeSuggestionRepository(db)
+	now := time.Now()
+
+	mk := func(hash, status, decision, confidence string, age time.Duration) *models.BoardUpgradeSuggestion {
+		return &models.BoardUpgradeSuggestion{
+			BatchID: "t", Mode: "discover_new", Decision: decision,
+			BoardLabel: "L-" + hash, AuxiliaryLabelIDs: []uint{1},
+			Confidence: confidence, Status: status, SuggestionHash: hash,
+			CreatedAt: now.Add(-age),
+		}
+	}
+
+	// pending non-watch: high(old), llm(newer), merge(oldest)
+	require.NoError(t, db.Create(mk("h1-high", "pending", "create_new", "high", 2*time.Hour)).Error)
+	require.NoError(t, db.Create(mk("h2-llm", "pending", "create_new", "llm", 1*time.Hour)).Error)
+	require.NoError(t, db.Create(mk("h3-merge", "pending", "merge_into_existing", "llm", 3*time.Hour)).Error)
+	// pending watch — excluded from default list
+	require.NoError(t, db.Create(mk("hw", "pending", "watch", "llm", 1*time.Hour)).Error)
+	// confirmed create_new — excluded when status=pending
+	require.NoError(t, db.Create(mk("hc", "confirmed", "create_new", "high", 1*time.Hour)).Error)
+
+	// default list: pending + non-watch, high first, then created desc among llm.
+	rows, err := repo.List(context.Background(), "pending", "")
+	require.NoError(t, err)
+	require.Len(t, rows, 3)
+	require.Equal(t, "h1-high", rows[0].SuggestionHash, "high confidence sorts first")
+	require.Equal(t, "h2-llm", rows[1].SuggestionHash, "llm: newer before older")
+	require.Equal(t, "h3-merge", rows[2].SuggestionHash)
+
+	// observation pool
+	watchRows, err := repo.List(context.Background(), "pending", "watch")
+	require.NoError(t, err)
+	require.Len(t, watchRows, 1)
+	require.Equal(t, "hw", watchRows[0].SuggestionHash)
+
+	// status filter with default (non-watch) decision exclusion
+	confirmedRows, err := repo.List(context.Background(), "confirmed", "")
+	require.NoError(t, err)
+	require.Len(t, confirmedRows, 1)
+	require.Equal(t, "hc", confirmedRows[0].SuggestionHash)
+
+	// exact decision filter among pending
+	cnRows, err := repo.List(context.Background(), "pending", "create_new")
+	require.NoError(t, err)
+	require.Len(t, cnRows, 2)
+}
+
+// TestBoardUpgradeSuggestionMarkDismissed verifies the dismiss lifecycle (spec:
+// 建议 dismiss 与 confirm 联动): pending → dismissed + resolved_at + reason.
+//
+// §5.2.
+func TestBoardUpgradeSuggestionMarkDismissed(t *testing.T) {
+	db := testutil.SetupTestDB(t)
+	repo := NewBoardUpgradeSuggestionRepository(db)
+
+	require.NoError(t, db.Create(&models.BoardUpgradeSuggestion{
+		BatchID: "d", Mode: "discover_new", Decision: "create_new",
+		BoardLabel: "Dismiss Me", AuxiliaryLabelIDs: []uint{9},
+		Confidence: "llm", Status: "pending", SuggestionHash: "d-1",
+	}).Error)
+	var sug models.BoardUpgradeSuggestion
+	require.NoError(t, db.Where("suggestion_hash = ?", "d-1").First(&sug).Error)
+
+	require.NoError(t, repo.MarkDismissed(context.Background(), sug.ID, "not now"))
+	require.NoError(t, db.Where("id = ?", sug.ID).First(&sug).Error)
+	require.Equal(t, "dismissed", sug.Status)
+	require.NotNil(t, sug.ResolvedAt)
+	require.NotNil(t, sug.DismissReason)
+	require.Equal(t, "not now", *sug.DismissReason)
+	require.NotNil(t, sug.ResolvedBy)
+	require.Equal(t, "manual", *sug.ResolvedBy)
+
+	// double-dismiss on an already-resolved row is a no-op (no error, no change)
+	require.NoError(t, repo.MarkDismissed(context.Background(), sug.ID, "again"))
+}
+
+// TestBoardUpgradeSuggestionGCOldWatch verifies the observation-pool GC (spec:
+// 观察池建议自动回收): watch suggestions older than gcDays are dismissed;
+// younger watch and non-watch pending are untouched.
+//
+// §5.5.
+func TestBoardUpgradeSuggestionGCOldWatch(t *testing.T) {
+	db := testutil.SetupTestDB(t)
+	repo := NewBoardUpgradeSuggestionRepository(db)
+	now := time.Now()
+
+	old := now.AddDate(0, 0, -40)
+	// watch 40 days old → GC'd
+	require.NoError(t, db.Create(&models.BoardUpgradeSuggestion{
+		BatchID: "g", Mode: "discover_new", Decision: "watch",
+		BoardLabel: "Old Watch", AuxiliaryLabelIDs: []uint{11},
+		Confidence: "llm", Status: "pending", SuggestionHash: "g-old", CreatedAt: old,
+	}).Error)
+	// watch 10 days old → kept (within 30-day gc window)
+	require.NoError(t, db.Create(&models.BoardUpgradeSuggestion{
+		BatchID: "g", Mode: "discover_new", Decision: "watch",
+		BoardLabel: "Young Watch", AuxiliaryLabelIDs: []uint{12},
+		Confidence: "llm", Status: "pending", SuggestionHash: "g-young", CreatedAt: now.AddDate(0, 0, -10),
+	}).Error)
+	// create_new 40 days old pending → NOT GC'd (only watch)
+	require.NoError(t, db.Create(&models.BoardUpgradeSuggestion{
+		BatchID: "g", Mode: "discover_new", Decision: "create_new",
+		BoardLabel: "Old Create", AuxiliaryLabelIDs: []uint{13},
+		Confidence: "llm", Status: "pending", SuggestionHash: "g-cn", CreatedAt: old,
+	}).Error)
+
+	gc, err := repo.GCOldWatch(context.Background(), 30)
+	require.NoError(t, err)
+	require.Equal(t, int64(1), gc, "only the old watch is GC'd")
+
+	var oldRow, youngRow, cnRow models.BoardUpgradeSuggestion
+	require.NoError(t, db.Where("suggestion_hash = ?", "g-old").First(&oldRow).Error)
+	require.NoError(t, db.Where("suggestion_hash = ?", "g-young").First(&youngRow).Error)
+	require.NoError(t, db.Where("suggestion_hash = ?", "g-cn").First(&cnRow).Error)
+	require.Equal(t, "dismissed", oldRow.Status, "old watch dismissed by GC")
+	require.NotNil(t, oldRow.ResolvedAt)
+	require.Equal(t, "pending", youngRow.Status, "young watch kept")
+	require.Equal(t, "pending", cnRow.Status, "non-watch pending untouched")
+}

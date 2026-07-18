@@ -2,17 +2,17 @@ package handler
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 
 	"syntopica-backend/internal/models"
-	"syntopica-backend/internal/platform/airouter"
-	"syntopica-backend/internal/platform/jsonutil"
 	"syntopica-backend/internal/platform/logging"
+	"syntopica-backend/internal/tagmanagement/repository"
 	"syntopica-backend/internal/tagmanagement/service"
 )
 
@@ -55,7 +55,6 @@ type semanticBoardUpgradeClusterDTO struct {
 	Candidates      []semanticBoardUpgradeCandidateDTO `json:"candidates"`
 	BoardAffinities []boardAffinityDTO                 `json:"board_affinities"`
 }
-type airouterSemanticBoardUpgradeLLM struct{}
 
 func (h *semanticBoardHandler) getUpgradeCandidates(c *gin.Context) {
 	mode := strings.TrimSpace(c.Query("mode"))
@@ -101,6 +100,147 @@ func (h *semanticBoardHandler) executeUpgrade(c *gin.Context) {
 		return
 	}
 	respondOK(c, gin.H{"semantic_board_id": result.SemanticBoardID, "auxiliary_label_ids": result.AuxiliaryLabelIDs})
+}
+
+// listUpgradeSuggestions reads persisted suggestions (spec: 建议查询 API 读持久化表).
+// status defaults to "pending"; decision empty → default list excludes watch
+// (observation pool), decision="watch" → pool only, otherwise exact match.
+func (h *semanticBoardHandler) listUpgradeSuggestions(c *gin.Context) {
+	status := strings.TrimSpace(c.Query("status"))
+	if status == "" {
+		status = "pending"
+	}
+	decision := strings.TrimSpace(c.Query("decision"))
+	repo := repository.NewBoardUpgradeSuggestionRepository(h.db)
+	rows, err := repo.List(c.Request.Context(), status, decision)
+	if err != nil {
+		respondError(c, http.StatusInternalServerError, err)
+		return
+	}
+	respondOK(c, gin.H{"suggestions": h.upgradeSuggestionsToRowDTO(c.Request.Context(), rows)})
+}
+
+// dismissUpgradeSuggestion marks a pending suggestion dismissed (spec: 建议 dismiss
+// 与 confirm 联动). Body is optional; an optional reason is recorded.
+func (h *semanticBoardHandler) dismissUpgradeSuggestion(c *gin.Context) {
+	id, err := strconv.ParseUint(strings.TrimSpace(c.Param("id")), 10, 64)
+	if err != nil || id == 0 {
+		respondError(c, http.StatusBadRequest, fmt.Errorf("invalid suggestion id"))
+		return
+	}
+	var req struct {
+		Reason string `json:"reason"`
+	}
+	_ = c.ShouldBindJSON(&req) // body optional; missing/empty body is fine
+	repo := repository.NewBoardUpgradeSuggestionRepository(h.db)
+	if err := repo.MarkDismissed(c.Request.Context(), uint(id), req.Reason); err != nil {
+		respondError(c, http.StatusInternalServerError, err)
+		return
+	}
+	respondOK(c, gin.H{"id": uint(id), "status": "dismissed"})
+}
+
+// generateUpgradeSuggestions runs one discover_new generation pass synchronously
+// and returns the counts (spec: scheduler 定期生成建议 — 手动触发与定时任务等效).
+// Replaces the legacy POST upgrade-suggest (kept for a compatibility window).
+func (h *semanticBoardHandler) generateUpgradeSuggestions(c *gin.Context) {
+	svc := service.NewSemanticBoardUpgradeService(h.db, semanticBoardUpgradeLLMFactory(), nil)
+	inserted, skipped, cooldownBlocked, err := svc.GenerateAndPersist(c.Request.Context(), "discover_new")
+	if err != nil {
+		respondError(c, http.StatusInternalServerError, err)
+		return
+	}
+	respondOK(c, gin.H{
+		"inserted":         inserted,
+		"skipped":          skipped,
+		"cooldown_blocked": cooldownBlocked,
+	})
+}
+
+// boardUpgradeSuggestionRowDTO is the JSON shape for a persisted suggestion row
+// served by GET /upgrade-suggestions. It carries the lifecycle fields the panel
+// needs (status/confidence/evidence) plus resolved label names for display.
+type boardUpgradeSuggestionRowDTO struct {
+	ID                uint           `json:"id"`
+	BatchID           string         `json:"batch_id"`
+	Mode              string         `json:"mode"`
+	Decision          string         `json:"decision"`
+	BoardLabel        string         `json:"board_label"`
+	Description       string         `json:"description"`
+	TargetBoardID     *uint          `json:"target_board_id,omitempty"`
+	TargetBoardLabel  string         `json:"target_board_label,omitempty"`
+	AuxiliaryLabelIDs []uint         `json:"auxiliary_label_ids"`
+	AuxiliaryLabels   []idLabelDTO   `json:"auxiliary_labels"`
+	Confidence        string         `json:"confidence"`
+	Evidence          map[string]any `json:"evidence,omitempty"`
+	Status            string         `json:"status"`
+	DismissReason     *string        `json:"dismiss_reason,omitempty"`
+	CreatedAt         time.Time      `json:"created_at"`
+	ResolvedAt        *time.Time     `json:"resolved_at,omitempty"`
+}
+
+type idLabelDTO struct {
+	ID    uint   `json:"id"`
+	Label string `json:"label"`
+}
+
+// upgradeSuggestionsToRowDTO maps persisted rows to the panel DTO, batch-resolving
+// auxiliary-label and target-board names in two queries regardless of row count.
+func (h *semanticBoardHandler) upgradeSuggestionsToRowDTO(ctx context.Context, rows []models.BoardUpgradeSuggestion) []boardUpgradeSuggestionRowDTO {
+	labelIDSet := make(map[uint]struct{})
+	boardIDSet := make(map[uint]struct{})
+	for _, r := range rows {
+		for _, id := range r.AuxiliaryLabelIDs {
+			labelIDSet[id] = struct{}{}
+		}
+		if r.TargetBoardID != nil {
+			boardIDSet[*r.TargetBoardID] = struct{}{}
+		}
+	}
+	labelNames := make(map[uint]string)
+	if len(labelIDSet) > 0 {
+		ids := make([]uint, 0, len(labelIDSet))
+		for id := range labelIDSet {
+			ids = append(ids, id)
+		}
+		var labels []models.SemanticLabel
+		if err := h.db.WithContext(ctx).Where("id IN ?", ids).Select("id, label").Find(&labels).Error; err == nil {
+			for _, l := range labels {
+				labelNames[l.ID] = l.Label
+			}
+		}
+	}
+	boardNames := make(map[uint]string)
+	if len(boardIDSet) > 0 {
+		ids := make([]uint, 0, len(boardIDSet))
+		for id := range boardIDSet {
+			ids = append(ids, id)
+		}
+		var labels []models.SemanticLabel
+		if err := h.db.WithContext(ctx).Where("id IN ? AND label_type = ?", ids, "board").Select("id, label").Find(&labels).Error; err == nil {
+			for _, l := range labels {
+				boardNames[l.ID] = l.Label
+			}
+		}
+	}
+	items := make([]boardUpgradeSuggestionRowDTO, 0, len(rows))
+	for _, r := range rows {
+		dto := boardUpgradeSuggestionRowDTO{
+			ID: r.ID, BatchID: r.BatchID, Mode: r.Mode, Decision: r.Decision,
+			BoardLabel: r.BoardLabel, Description: r.Description,
+			TargetBoardID: r.TargetBoardID, AuxiliaryLabelIDs: r.AuxiliaryLabelIDs,
+			Confidence: r.Confidence, Evidence: r.Evidence, Status: r.Status,
+			DismissReason: r.DismissReason, CreatedAt: r.CreatedAt, ResolvedAt: r.ResolvedAt,
+		}
+		for _, id := range r.AuxiliaryLabelIDs {
+			dto.AuxiliaryLabels = append(dto.AuxiliaryLabels, idLabelDTO{ID: id, Label: labelNames[id]})
+		}
+		if r.TargetBoardID != nil {
+			dto.TargetBoardLabel = boardNames[*r.TargetBoardID]
+		}
+		items = append(items, dto)
+	}
+	return items
 }
 func (h *semanticBoardHandler) enqueueBackfill(c *gin.Context) {
 	var req service.SemanticBoardBackfillRequest
@@ -148,47 +288,6 @@ func (h *semanticBoardHandler) backfillBoardEmbeddings(c *gin.Context) {
 		count++
 	}
 	respondOK(c, gin.H{"backfilled": count, "total": len(boards)})
-}
-func (airouterSemanticBoardUpgradeLLM) SuggestSemanticBoardUpgrades(ctx context.Context, prompt string, mode string) ([]service.SemanticBoardUpgradeSuggestion, error) {
-	result, err := airouter.NewRouter().Chat(ctx, airouter.ChatRequest{
-		Operation:  "tagmanagement.board_upgrade_suggest",
-		Capability: airouter.CapabilityTopicTagging,
-		Messages: []airouter.Message{
-			{Role: "system", Content: service.BuildSemanticBoardUpgradeSystemPrompt(mode)},
-			{Role: "user", Content: prompt},
-		},
-		JSONMode: true,
-		Metadata: map[string]any{"operation": "semantic_board_upgrade_suggest"},
-	})
-	if err != nil {
-		return nil, err
-	}
-	var parsed struct {
-		Suggestions []struct {
-			Decision          service.SemanticBoardUpgradeDecision `json:"decision"`
-			BoardLabel        string                               `json:"board_label"`
-			Description       string                               `json:"description"`
-			AuxiliaryLabelIDs []uint                               `json:"auxiliary_label_ids"`
-			Reason            string                               `json:"reason"`
-		} `json:"suggestions"`
-	}
-	sanitized := jsonutil.SanitizeLLMJSON(result.Content)
-	if err := json.Unmarshal([]byte(sanitized), &parsed); err != nil {
-		rawPreview := sanitized
-		if len(rawPreview) > 500 {
-			rawPreview = rawPreview[:500] + "..."
-		}
-		logging.Warnf("[semantic-board-upgrade] LLM JSON parse failed: %v, raw=%d sanitized=%d preview=%s", err, len(result.Content), len(sanitized), rawPreview)
-		return nil, err
-	}
-	suggestions := make([]service.SemanticBoardUpgradeSuggestion, 0, len(parsed.Suggestions))
-	for _, raw := range parsed.Suggestions {
-		suggestions = append(suggestions, service.SemanticBoardUpgradeSuggestion{Decision: raw.Decision, BoardLabel: raw.BoardLabel, Description: raw.Description, AuxiliaryLabelIDs: raw.AuxiliaryLabelIDs, Reason: raw.Reason})
-	}
-	return suggestions, nil
-}
-func newSemanticBoardUpgradeLLM() service.SemanticBoardUpgradeLLM {
-	return airouterSemanticBoardUpgradeLLM{}
 }
 func upgradeCandidatesToDTO(candidates []service.SemanticBoardUpgradeCandidate) []semanticBoardUpgradeCandidateDTO {
 	items := make([]semanticBoardUpgradeCandidateDTO, 0, len(candidates))

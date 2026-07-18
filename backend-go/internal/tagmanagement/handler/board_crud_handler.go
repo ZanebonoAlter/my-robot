@@ -24,7 +24,7 @@ import (
 )
 
 var semanticBoardLabelEmbedder service.AuxiliaryLabelEmbedder = service.DefaultAuxiliaryLabelEmbedder
-var semanticBoardUpgradeLLMFactory = newSemanticBoardUpgradeLLM
+var semanticBoardUpgradeLLMFactory = service.NewDefaultSemanticBoardUpgradeLLM
 
 type semanticBoardHandler struct {
 	db        *gorm.DB
@@ -110,6 +110,12 @@ func RegisterSemanticBoardRoutes(rg *gin.RouterGroup) {
 		boards.GET("/upgrade-candidates", handler.getUpgradeCandidates)
 		boards.POST("/upgrade-suggest", handler.suggestUpgrades)
 		boards.POST("/upgrade-execute", handler.executeUpgrade)
+
+		// §5: persisted upgrade-suggestions resource (query / dismiss / generate).
+		// Legacy upgrade-suggest is retained for a compatibility window.
+		boards.GET("/upgrade-suggestions", handler.listUpgradeSuggestions)
+		boards.POST("/upgrade-suggestions/:id/dismiss", handler.dismissUpgradeSuggestion)
+		boards.POST("/upgrade-suggestions/generate", handler.generateUpgradeSuggestions)
 		boards.POST("/backfill", handler.enqueueBackfill)
 		boards.GET("/backfill/:id", handler.getBackfillJob)
 		boards.POST("/backfill-embeddings", handler.backfillBoardEmbeddings)

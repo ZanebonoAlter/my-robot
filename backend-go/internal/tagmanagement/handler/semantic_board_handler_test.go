@@ -43,7 +43,7 @@ func setupSemanticBoardHandlerRouter(t *testing.T) (*gorm.DB, *gin.Engine) {
 	}
 	t.Cleanup(func() {
 		semanticBoardLabelEmbedder = service.DefaultAuxiliaryLabelEmbedder
-		semanticBoardUpgradeLLMFactory = newSemanticBoardUpgradeLLM
+		semanticBoardUpgradeLLMFactory = service.NewDefaultSemanticBoardUpgradeLLM
 	})
 
 	api := g.Group("/api")

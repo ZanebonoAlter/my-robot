@@ -144,3 +144,16 @@ func (s *SemanticBoardUpgradeService) LoadDismissCooldownDays(ctx context.Contex
 	}
 	return parseSemanticBoardUpgradeInt(setting.Value, defaultDays)
 }
+
+// LoadWatchGCDays reads the watch observation GC window from ai_settings key
+// semantic_board_upgrade_watch_gc_days (default 30). Watch suggestions older
+// than this that never formed a cluster are auto-dismissed by the scheduler
+// (spec: 观察池建议自动回收). Same pattern as LoadDismissCooldownDays.
+func (s *SemanticBoardUpgradeService) LoadWatchGCDays(ctx context.Context) int {
+	const defaultDays = 30
+	var setting models.AISettings
+	if err := s.db.WithContext(ctx).Where("key = ?", "semantic_board_upgrade_watch_gc_days").First(&setting).Error; err != nil {
+		return defaultDays
+	}
+	return parseSemanticBoardUpgradeInt(setting.Value, defaultDays)
+}

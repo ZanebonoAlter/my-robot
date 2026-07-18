@@ -98,6 +98,7 @@ var (
 	NewSemanticBoardMatchingService       = board.NewSemanticBoardMatchingService
 	NewSemanticBoardBackfillService       = board.NewSemanticBoardBackfillService
 	NewSemanticBoardUpgradeService        = board.NewSemanticBoardUpgradeService
+	NewDefaultSemanticBoardUpgradeLLM     = board.NewDefaultSemanticBoardUpgradeLLM
 	ComputeMatchDetail                    = board.ComputeMatchDetail
 	CosineSimilarity                      = board.CosineSimilarity
 	BuildSemanticBoardUpgradeSystemPrompt = board.BuildSemanticBoardUpgradeSystemPrompt

@@ -101,3 +101,67 @@ func (r *BoardUpgradeSuggestionRepository) CloseWatchSuggestions(ctx context.Con
 	}
 	return res.RowsAffected, nil
 }
+
+// List returns persisted suggestions filtered by status/decision (spec: 建议查询
+// API 读持久化表). Filtering rules:
+//   - status==""   → no status filter (handler supplies the default "pending")
+//   - decision=="" → default list excludes watch (decision <> 'watch')
+//   - decision=="watch" → observation pool only
+//   - decision=<other>  → exact decision match
+//
+// Ordering: high-confidence first, then newest (created_at DESC). This puts the
+// most actionable, highest-signal suggestions at the top of the panel.
+func (r *BoardUpgradeSuggestionRepository) List(ctx context.Context, status, decision string) ([]models.BoardUpgradeSuggestion, error) {
+	q := r.db.WithContext(ctx).Model(&models.BoardUpgradeSuggestion{})
+	if status != "" {
+		q = q.Where("status = ?", status)
+	}
+	switch decision {
+	case "":
+		q = q.Where("decision <> ?", "watch")
+	case "watch":
+		q = q.Where("decision = ?", "watch")
+	default:
+		q = q.Where("decision = ?", decision)
+	}
+	var rows []models.BoardUpgradeSuggestion
+	err := q.Order("CASE WHEN confidence = 'high' THEN 0 ELSE 1 END, created_at DESC").Find(&rows).Error
+	return rows, err
+}
+
+// MarkDismissed transitions a pending suggestion to dismissed, recording
+// resolved_at=now, resolved_by="manual" and the optional reason (spec: 建议
+// dismiss 与 confirm 联动). Only pending rows are affected; an already-resolved
+// suggestion is a no-op (idempotent against a double-dismiss).
+func (r *BoardUpgradeSuggestionRepository) MarkDismissed(ctx context.Context, id uint, reason string) error {
+	updates := map[string]interface{}{
+		"status":      "dismissed",
+		"resolved_at": time.Now(),
+		"resolved_by": "manual",
+	}
+	if reason != "" {
+		updates["dismiss_reason"] = reason
+	}
+	return r.db.WithContext(ctx).Model(&models.BoardUpgradeSuggestion{}).
+		Where("id = ? AND status = ?", id, "pending").
+		Updates(updates).Error
+}
+
+// GCOldWatch dismisses pending watch suggestions older than gcDays that have not
+// yet formed a cluster (spec: 观察池建议自动回收). This bounds the observation
+// pool: a singleton label that never gained peers is eventually retired instead
+// of accumulating forever. gcDays is parameterized (bound as the INTERVAL
+// multiplier) to avoid SQL injection. Returns the number of rows dismissed.
+func (r *BoardUpgradeSuggestionRepository) GCOldWatch(ctx context.Context, gcDays int) (int64, error) {
+	res := r.db.WithContext(ctx).Model(&models.BoardUpgradeSuggestion{}).
+		Where("decision = ? AND status = ? AND created_at < NOW() - (? * INTERVAL '1 day')", "watch", "pending", gcDays).
+		Updates(map[string]interface{}{
+			"status":      "dismissed",
+			"resolved_at": time.Now(),
+			"resolved_by": "watch_gc",
+		})
+	if res.Error != nil {
+		return 0, res.Error
+	}
+	return res.RowsAffected, nil
+}

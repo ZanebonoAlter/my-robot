@@ -41,6 +41,7 @@ const {
   backfillTask,
   upgradeCandidates, upgradeClusters, upgradeSuggestions,
   upgradeLoading, upgradeSuggesting, upgradeBackfillNotice,
+  upgradePersistedSuggestions, upgradePersistedLoading, upgradePersistedGenerating,
   matchingConfig, matchingConfigLoading,
   // Methods - board
   loadBoards: _lb, loadComposition, handleSelectBoard,
@@ -55,6 +56,8 @@ const {
   handleDisableAuxLabel, handleMergeAuxLabel,
   // Methods - other
   handleUpgradeSuggest, handleSuggestUpgrade, handleExecuteUpgrade,
+  loadPersistedSuggestions, handleGenerateUpgradeSuggestions,
+  handleDismissUpgradeRow, handleConfirmUpgradeRow,
   handleTriggerBackfill,
   handleOpenMatchingConfig, handleSaveMatchingConfig,
   handleMergeComplete,
@@ -231,8 +234,15 @@ onMounted(() => {
       :loading="upgradeLoading"
       :suggesting="upgradeSuggesting"
       :backfill-notice="upgradeBackfillNotice"
+      :persisted-suggestions="upgradePersistedSuggestions"
+      :persisted-loading="upgradePersistedLoading"
+      :persisted-generating="upgradePersistedGenerating"
       @suggest="handleSuggestUpgrade"
       @execute="handleExecuteUpgrade"
+      @load-persisted="loadPersistedSuggestions"
+      @generate="handleGenerateUpgradeSuggestions"
+      @dismiss-row="handleDismissUpgradeRow"
+      @confirm-row="handleConfirmUpgradeRow"
       @cancel="showUpgradeDialog = false"
     />
     <MatchingConfigDialog

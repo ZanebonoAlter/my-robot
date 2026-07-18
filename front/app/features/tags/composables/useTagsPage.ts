@@ -1,5 +1,5 @@
 import { ref, onMounted, onUnmounted } from 'vue'
-import { useSemanticBoardsApi, type UpgradeCandidate, type UpgradeCluster, type UpgradeSuggestion, type BackfillTask, type MatchingConfig } from '~/api/semanticBoards'
+import { useSemanticBoardsApi, type UpgradeCandidate, type UpgradeCluster, type UpgradeSuggestion, type UpgradeSuggestionRow, type BackfillTask, type MatchingConfig } from '~/api/semanticBoards'
 import { useArticlesApi } from '~/api/articles'
 import { normalizeArticle, type ArticlePayload } from '~/api/normalizers/article'
 import type { Article } from '~/types'
@@ -35,6 +35,12 @@ export function useTagsPage() {
   const upgradeLoading = ref(false)
   const upgradeSuggesting = ref(false)
   const upgradeBackfillNotice = ref(false)
+
+  // Persisted upgrade suggestions (主数据源，§6.1/6.2)
+  const upgradePersistedSuggestions = ref<UpgradeSuggestionRow[]>([])
+  const upgradePersistedLoading = ref(false)
+  const upgradePersistedGenerating = ref(false)
+  const upgradePersistedFilter = ref('')
 
   // Backfill
   const backfillTask = ref<BackfillTask | null>(null)
@@ -126,6 +132,51 @@ export function useTagsPage() {
     })
     if (res.success) {
       upgradeSuggestions.value.splice(index, 1)
+      upgradeBackfillNotice.value = true
+      void boardCRUD.loadBoards()
+    }
+  }
+
+  // ---- Persisted suggestions (主数据源，§6.1/6.2) ----
+  async function loadPersistedSuggestions(decision: string = '') {
+    upgradePersistedLoading.value = true
+    upgradePersistedFilter.value = decision
+    const res = await sbApi.getUpgradeSuggestions(decision ? { decision } : undefined)
+    if (res.success && res.data) {
+      upgradePersistedSuggestions.value = res.data.suggestions
+    }
+    upgradePersistedLoading.value = false
+  }
+
+  async function handleGenerateUpgradeSuggestions() {
+    upgradePersistedGenerating.value = true
+    const res = await sbApi.generateUpgradeSuggestions()
+    upgradePersistedGenerating.value = false
+    if (res.success) {
+      await loadPersistedSuggestions(upgradePersistedFilter.value)
+    }
+  }
+
+  async function handleDismissUpgradeRow(id: number) {
+    const res = await sbApi.dismissUpgradeSuggestion(id)
+    if (res.success) {
+      upgradePersistedSuggestions.value = upgradePersistedSuggestions.value.filter((r) => r.id !== id)
+    }
+  }
+
+  // 持久化建议确认执行：携带 row.id 作为 suggestion_id，后端事务内置 confirmed 联动 (§6.4)
+  async function handleConfirmUpgradeRow(row: UpgradeSuggestionRow) {
+    if (row.decision !== 'create_new' && row.decision !== 'merge_into_existing') return
+    const res = await sbApi.executeUpgrade({
+      decision: row.decision,
+      board_label: row.board_label,
+      description: row.description,
+      target_board_id: row.target_board_id,
+      auxiliary_label_ids: row.auxiliary_label_ids,
+      suggestion_id: row.id,
+    })
+    if (res.success) {
+      upgradePersistedSuggestions.value = upgradePersistedSuggestions.value.filter((r) => r.id !== row.id)
       upgradeBackfillNotice.value = true
       void boardCRUD.loadBoards()
     }
@@ -265,6 +316,9 @@ export function useTagsPage() {
     upgradeCandidates, upgradeClusters, upgradeSuggestions,
     upgradeLoading, upgradeSuggesting, upgradeBackfillNotice,
     handleUpgradeSuggest, handleSuggestUpgrade, handleExecuteUpgrade,
+    upgradePersistedSuggestions, upgradePersistedLoading, upgradePersistedGenerating,
+    loadPersistedSuggestions, handleGenerateUpgradeSuggestions,
+    handleDismissUpgradeRow, handleConfirmUpgradeRow,
 
     // Backfill
     backfillTask, handleTriggerBackfill,

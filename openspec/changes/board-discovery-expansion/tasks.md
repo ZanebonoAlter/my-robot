@@ -49,10 +49,10 @@
 
 ## 6. 前端建议面板
 
-- [ ] 6.1 建议列表改读 `upgrade-suggestions`（决策过滤：全部/merge/create_new；置信度标识）
-- [ ] 6.2 merge 建议卡：目标版块 + 证据展示（泳道 section 标题 + co-tag 事件）+ dismiss 按钮
-- [ ] 6.3 保留手动"合并到..."下拉（现状）与 expand_existing 入口，不动
-- [ ] 6.4 `front/app/api/` 新接口封装（/upgrade-suggestions 列表、/generate、/:id/dismiss；upgrade-execute 带 suggestion_id）+ 单测
+- [x] 6.1 建议列表改读 `upgrade-suggestions`（决策过滤：全部/merge/create_new；置信度标识）
+- [x] 6.2 merge 建议卡：目标版块 + 证据展示（泳道 section 标题 + co-tag 事件）+ dismiss 按钮
+- [x] 6.3 保留手动"合并到..."下拉（现状）与 expand_existing 入口，不动
+- [x] 6.4 `front/app/api/` 新接口封装（/upgrade-suggestions 列表、/generate、/:id/dismiss；upgrade-execute 带 suggestion_id）+ 单测
 
 ## 7. Review 与数据兼容性
 

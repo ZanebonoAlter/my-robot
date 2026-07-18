@@ -91,6 +91,38 @@ export interface UpgradeSuggestResponse {
   suggestions: UpgradeSuggestion[]
 }
 
+/** 持久化建议行（GET /upgrade-suggestions）。字段对齐后端 boardUpgradeSuggestionRowDTO。 */
+export interface UpgradeSuggestionRow {
+  id: number
+  batch_id: string
+  mode: string
+  decision: string
+  board_label: string
+  description: string
+  target_board_id?: number
+  target_board_label?: string
+  auxiliary_label_ids: number[]
+  auxiliary_labels: { id: number; label: string }[]
+  confidence: string
+  /** 证据快照 {shortlist, margins, cotag_events, lane_briefs, ...}，按 key 安全读取，缺 key 降级。 */
+  evidence?: Record<string, unknown>
+  status: string
+  dismiss_reason?: string
+  created_at: string
+  resolved_at?: string
+}
+
+/** POST /upgrade-suggestions/generate 返回的计数。 */
+export interface GenerateSuggestionsResponse {
+  inserted: number
+  skipped: number
+  cooldown_blocked: number
+}
+
+export interface UpgradeSuggestionsListResponse {
+  suggestions: UpgradeSuggestionRow[]
+}
+
 export interface BackfillTask {
   id: string
   mode: string
@@ -263,8 +295,26 @@ export function useSemanticBoardsApi() {
     description?: string
     target_board_id?: number
     auxiliary_label_ids: number[]
+    /** 携带持久化建议 id：后端在同一事务内置为 confirmed（spec: confirm 联动）。 */
+    suggestion_id?: number
   }): Promise<ApiResponse<{ semantic_board_id: number; auxiliary_label_ids: number[] }>> {
     return apiClient.post('/semantic-boards/upgrade-execute', data)
+  }
+
+  /** 读持久化建议表。status 默认 pending；decision 空=默认列表（排除 watch），`watch`=观察池，其它=精确匹配。 */
+  async function getUpgradeSuggestions(params?: { status?: string; decision?: string }): Promise<ApiResponse<UpgradeSuggestionsListResponse>> {
+    const query = apiClient.buildQueryParams(params)
+    return apiClient.get(`/semantic-boards/upgrade-suggestions${query ? `?${query}` : ''}`)
+  }
+
+  /** 将 pending 建议置为 dismissed（写冷却记录）。 */
+  async function dismissUpgradeSuggestion(id: number, reason?: string): Promise<ApiResponse<{ id: number; status: string }>> {
+    return apiClient.post(`/semantic-boards/upgrade-suggestions/${id}/dismiss`, reason ? { reason } : undefined)
+  }
+
+  /** 同步执行一轮 discover_new 生成入表，返回新增/跳过/冷却拦截计数。 */
+  async function generateUpgradeSuggestions(): Promise<ApiResponse<GenerateSuggestionsResponse>> {
+    return apiClient.post('/semantic-boards/upgrade-suggestions/generate')
   }
 
   async function triggerBackfill(data: { mode: string; board_id?: number }): Promise<ApiResponse<BackfillTask>> {
@@ -328,6 +378,9 @@ return {
     getUpgradeCandidates,
     suggestUpgrade,
     executeUpgrade,
+    getUpgradeSuggestions,
+    dismissUpgradeSuggestion,
+    generateUpgradeSuggestions,
     suggestAuxiliaries,
     suggestAuxiliariesForBoard,
     getBoardArticles,

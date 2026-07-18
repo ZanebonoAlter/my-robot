@@ -648,6 +648,86 @@ func TestSemanticBoardUpgradeShortlistDualSignature(t *testing.T) {
 	require.Equal(t, 0, byBoard[boardB.ID].CompositionRank, "board with no composition must be lane-only")
 }
 
+// TestSemanticBoardUpgradeHighConfidenceMergeSkipsLLM verifies §4.3: when the
+// composition-signature top-1 and lane-signature top-1 point to the SAME board
+// and BOTH per-signature margins (top1-top2 distance gap) are ≥ the configured
+// threshold, the system synthesizes a confidence=high merge directly and does
+// NOT call the LLM.
+func TestSemanticBoardUpgradeHighConfidenceMergeSkipsLLM(t *testing.T) {
+	db := setupSemanticBoardUpgradeTestDB(t)
+	// 5 candidates all at (1,0,0) → centroid (1,0,0).
+	for _, lbl := range []string{"DeepSeek", "Agent", "LLM", "Codex", "VLM"} {
+		createUpgradeLabel(t, db, lbl, core.Slugify(lbl), "auxiliary", "active", 5, []float64{1, 0, 0})
+	}
+	// Board X: composition top-1 (aux (1,0,0), dist 0) + lane top-1 (section (1,0,0), dist 0).
+	boardXAux := createUpgradeLabel(t, db, "X Aux", "x-aux", "auxiliary", "active", 2, []float64{1, 0, 0})
+	boardX := createUpgradeLabel(t, db, "生成式AI", "genai-hc", "board", "active", 0, nil)
+	require.NoError(t, db.Create(&models.BoardComposition{BoardID: boardX.ID, AuxiliaryLabelID: boardXAux.ID}).Error)
+	topicX := createUpgradePersistentTopic(t, db, boardX.ID, "active")
+	reportX := createUpgradeBoardDailyReport(t, db, boardX.ID, daysAgo(1))
+	createUpgradeReportSection(t, db, reportX.ID, topicX.ID, "大模型动态", []float64{1, 0, 0})
+	// Board Y: composition top-2 (aux (0.8,0.6,0), dist 0.2 from centroid) — NO section.
+	boardYAux := createUpgradeLabel(t, db, "Y Aux", "y-aux", "auxiliary", "active", 2, []float64{0.8, 0.6, 0})
+	boardY := createUpgradeLabel(t, db, "云计算", "cloud-hc", "board", "active", 0, nil)
+	require.NoError(t, db.Create(&models.BoardComposition{BoardID: boardY.ID, AuxiliaryLabelID: boardYAux.ID}).Error)
+	// Board Z: lane top-2 (section (0.8,0.6,0), dist 0.2) — NO composition.
+	boardZ := createUpgradeLabel(t, db, "机器人", "robot-hc", "board", "active", 0, nil)
+	topicZ := createUpgradePersistentTopic(t, db, boardZ.ID, "active")
+	reportZ := createUpgradeBoardDailyReport(t, db, boardZ.ID, daysAgo(2))
+	createUpgradeReportSection(t, db, reportZ.ID, topicZ.ID, "机器人动态", []float64{0.8, 0.6, 0})
+
+	fakeLLM := &fakeSemanticBoardUpgradeLLM{suggestions: []SemanticBoardUpgradeSuggestion{{Decision: SemanticBoardUpgradeDecisionSkip}}}
+	svc := NewSemanticBoardUpgradeService(db, fakeLLM, nil)
+
+	suggestions, _, err := svc.GenerateSuggestions(context.Background(), "discover_new")
+	require.NoError(t, err)
+	require.Zero(t, fakeLLM.calls, "high-confidence cluster must bypass the LLM entirely")
+
+	var merge *SemanticBoardUpgradeSuggestion
+	for i := range suggestions {
+		if suggestions[i].Decision == SemanticBoardUpgradeDecisionMergeIntoExisting {
+			merge = &suggestions[i]
+		}
+	}
+	require.NotNil(t, merge, "high-confidence cluster must synthesize a merge suggestion")
+	require.Equal(t, "high", merge.Confidence)
+	require.NotNil(t, merge.TargetBoardID)
+	require.Equal(t, boardX.ID, *merge.TargetBoardID, "merge target is the dual-signature top-1 board")
+	require.NotEmpty(t, merge.AuxiliaryLabelIDs)
+}
+
+// TestSemanticBoardUpgradeSignatureDivergenceGoesToLLM verifies the §4.3 converse:
+// when the composition top-1 and lane top-1 point to DIFFERENT boards (signature
+// disagreement), the cluster is NOT bypassed — the LLM is called and the
+// adjudicated suggestion carries confidence=llm.
+func TestSemanticBoardUpgradeSignatureDivergenceGoesToLLM(t *testing.T) {
+	db := setupSemanticBoardUpgradeTestDB(t)
+	// 5 candidates at (1,0,0) → centroid (1,0,0).
+	for _, lbl := range []string{"DeepSeek2", "Agent2", "LLM2", "Codex2", "VLM2"} {
+		createUpgradeLabel(t, db, lbl, core.Slugify(lbl), "auxiliary", "active", 5, []float64{1, 0, 0})
+	}
+	// Board X: composition top-1 (aux (1,0,0)), but NO section → not lane top-1.
+	boardXAux := createUpgradeLabel(t, db, "X Aux2", "x-aux2", "auxiliary", "active", 2, []float64{1, 0, 0})
+	boardX := createUpgradeLabel(t, db, "生成式AI2", "genai-div", "board", "active", 0, nil)
+	require.NoError(t, db.Create(&models.BoardComposition{BoardID: boardX.ID, AuxiliaryLabelID: boardXAux.ID}).Error)
+	// Board Z: lane top-1 (section (1,0,0)), but NO composition → not comp top-1.
+	boardZ := createUpgradeLabel(t, db, "机器人2", "robot-div", "board", "active", 0, nil)
+	topicZ := createUpgradePersistentTopic(t, db, boardZ.ID, "active")
+	reportZ := createUpgradeBoardDailyReport(t, db, boardZ.ID, daysAgo(1))
+	createUpgradeReportSection(t, db, reportZ.ID, topicZ.ID, "机器人动态", []float64{1, 0, 0})
+
+	fakeLLM := &fakeSemanticBoardUpgradeLLM{suggestions: []SemanticBoardUpgradeSuggestion{
+		{Decision: SemanticBoardUpgradeDecisionMergeIntoExisting, TargetBoardID: &boardZ.ID, BoardLabel: "→机器人", AuxiliaryLabelIDs: []uint{1}},
+	}}
+	svc := NewSemanticBoardUpgradeService(db, fakeLLM, nil)
+
+	suggestions, _, err := svc.GenerateSuggestions(context.Background(), "discover_new")
+	require.NoError(t, err)
+	require.Equal(t, 1, fakeLLM.calls, "divergent signatures must defer to the LLM")
+	require.Len(t, suggestions, 1)
+	require.Equal(t, "llm", suggestions[0].Confidence, "LLM-adjudicated suggestions carry confidence=llm")
+}
+
 func TestSemanticBoardUpgradeConfirmCreateNew(t *testing.T) {
 	db := setupSemanticBoardUpgradeTestDB(t)
 	auxiliaryA := createUpgradeLabel(t, db, "OpenAI", "openai", "auxiliary", "active", 5, []float64{1, 0, 0})

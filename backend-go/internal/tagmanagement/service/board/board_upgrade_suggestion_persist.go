@@ -51,7 +51,8 @@ func (s *SemanticBoardUpgradeService) GenerateAndPersist(ctx context.Context, mo
 			Description:       sug.Description,
 			TargetBoardID:     sug.TargetBoardID,
 			AuxiliaryLabelIDs: sug.AuxiliaryLabelIDs,
-			Confidence:        defaultSuggestionConfidence(),
+			Confidence:        suggestionConfidence(sug.Confidence),
+			Evidence:          sug.Evidence,
 			Status:            "pending",
 			SuggestionHash:    hash,
 		}
@@ -96,9 +97,12 @@ func buildBatchID(mode string) string {
 	return time.Now().UTC().Format("20060102T150405Z") + "-" + mode
 }
 
-// defaultSuggestionConfidence is the persisted confidence until the phase-3
-// algorithm produces a real confidence. discover_new → "llm".
-func defaultSuggestionConfidence() string {
+// suggestionConfidence normalizes the algorithm-produced confidence: "high"
+// stays, anything else (incl. "" from the LLM path) defaults to "llm" (spec §4.3).
+func suggestionConfidence(c string) string {
+	if c == "high" {
+		return "high"
+	}
 	return "llm"
 }
 

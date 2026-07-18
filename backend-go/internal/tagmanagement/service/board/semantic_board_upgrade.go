@@ -13,6 +13,7 @@ import (
 
 	"syntopica-backend/internal/models"
 	"syntopica-backend/internal/platform/airouter"
+	"syntopica-backend/internal/platform/logging"
 	"syntopica-backend/internal/tagmanagement/repository"
 	"syntopica-backend/internal/tagmanagement/service/auxlabel"
 	"syntopica-backend/internal/tagmanagement/service/core"
@@ -38,6 +39,10 @@ type SemanticBoardUpgradeConfig struct {
 	CoTagHardLimit           int
 	ClusterMethod            string
 	Mode                     string
+	// MergeConfidenceMargin is the per-signature margin gate for high-confidence
+	// merge bypass (§4.3): both composition and lane top1-top2 distance gaps must
+	// be ≥ this for the LLM to be skipped. Default 0.05, ai_settings-configurable.
+	MergeConfidenceMargin float64
 }
 
 type SemanticBoardUpgradeCandidate struct {
@@ -101,6 +106,12 @@ type SemanticBoardUpgradeSuggestion struct {
 	AuxiliaryLabelIDs []uint
 	TargetBoardID     *uint
 	Reason            string
+	// Confidence is "high" (dual-signature agreement bypassed the LLM) or "llm"
+	// (LLM-adjudicated). Empty defaults to "llm" at persist time (§4.3).
+	Confidence string
+	// Evidence is the jsonb snapshot persisted with the suggestion
+	// ({shortlist, margins, cotag_events, lane_briefs}) for audit/prompt grounding (§4.3/§4.4).
+	Evidence map[string]any
 }
 
 type SemanticBoardUpgradeDecision string
@@ -177,20 +188,39 @@ func (s *SemanticBoardUpgradeService) GenerateSuggestions(ctx context.Context, m
 		}
 	}
 
-	suggestions, err := s.llm.SuggestSemanticBoardUpgrades(ctx, buildSemanticBoardUpgradePrompt(clusters, config.Mode), config.Mode)
-	if err != nil {
-		return nil, nil, err
-	}
 	validAuxiliaryIDs := map[uint]struct{}{}
 	for _, candidate := range candidates {
 		validAuxiliaryIDs[candidate.ID] = struct{}{}
 	}
-	filtered := filterSemanticBoardUpgradeSuggestions(suggestions, validAuxiliaryIDs)
-	// §4.1: a merge_into_existing whose target_board_id is not in its cluster's
-	// shortlist is downgraded to skip and not produced. Map each aux id to its
-	// cluster's shortlist board-id set, then drop merges with invalid targets.
 	shortlistByAux := buildShortlistByAux(clusters)
-	return validateMergeTargets(filtered, shortlistByAux), clusters, nil
+
+	// §4.3: partition clusters — high-confidence dual-signature agreement
+	// synthesizes a merge (confidence=high) and bypasses the LLM; the rest go to
+	// LLM adjudication (confidence=llm).
+	var suggestions []SemanticBoardUpgradeSuggestion
+	var llmClusters []SemanticBoardUpgradeCluster
+	for i := range clusters {
+		if boardID, ok := highConfidenceMergeBoard(clusters[i].Shortlist, config.MergeConfidenceMargin); ok {
+			suggestions = append(suggestions, synthesizeHighConfidenceMerge(clusters[i], boardID))
+			continue
+		}
+		llmClusters = append(llmClusters, clusters[i])
+	}
+
+	if len(llmClusters) > 0 {
+		raw, err := s.llm.SuggestSemanticBoardUpgrades(ctx, buildSemanticBoardUpgradePrompt(llmClusters, config.Mode), config.Mode)
+		if err != nil {
+			return nil, nil, err
+		}
+		filtered := filterSemanticBoardUpgradeSuggestions(raw, validAuxiliaryIDs)
+		for _, sug := range validateMergeTargets(filtered, shortlistByAux) {
+			if sug.Confidence == "" {
+				sug.Confidence = "llm"
+			}
+			suggestions = append(suggestions, sug)
+		}
+	}
+	return suggestions, clusters, nil
 }
 
 func (s *SemanticBoardUpgradeService) ConfirmSuggestion(ctx context.Context, req ConfirmSemanticBoardUpgradeRequest) (*ConfirmSemanticBoardUpgradeResult, error) {
@@ -476,6 +506,7 @@ func (s *SemanticBoardUpgradeService) LoadUpgradeConfig(ctx context.Context) Sem
 		CoTagDedupeSimThreshold:  0.85,
 		CoTagHardLimit:           15,
 		ClusterMethod:            "average_link",
+		MergeConfidenceMargin:    0.05,
 	}
 	var settings []models.AISettings
 	if err := s.db.WithContext(ctx).Where("key IN ?", []string{
@@ -486,6 +517,7 @@ func (s *SemanticBoardUpgradeService) LoadUpgradeConfig(ctx context.Context) Sem
 		"semantic_board_upgrade_cotag_dedupe_sim_threshold",
 		"semantic_board_upgrade_cotag_hard_limit",
 		"semantic_board_upgrade_cluster_method",
+		"semantic_board_upgrade_merge_confidence_margin",
 	}).Find(&settings).Error; err != nil {
 		return config
 	}
@@ -507,6 +539,8 @@ func (s *SemanticBoardUpgradeService) LoadUpgradeConfig(ctx context.Context) Sem
 			if v := strings.TrimSpace(setting.Value); v == "average_link" || v == "centroid" {
 				config.ClusterMethod = v
 			}
+		case "semantic_board_upgrade_merge_confidence_margin":
+			config.MergeConfidenceMargin = parseSemanticBoardUpgradeFloat(setting.Value, config.MergeConfidenceMargin)
 		}
 	}
 	return config
@@ -767,7 +801,12 @@ func (s *SemanticBoardUpgradeService) loadLaneAffinities(ctx context.Context, cl
 		LIMIT 2
 	`, centroid, "board", "active", "active", cutoff).Scan(&rows).Error
 	if err != nil {
-		return nil, err
+		// Graceful degradation: the lane signature is a secondary signal. If the
+		// daily-report tables are unavailable (e.g. not yet migrated) or the query
+		// fails, fall back to composition-only shortlist rather than aborting the
+		// whole generation pass (spec: 无 active section 的版块仅参与 composition).
+		logging.Warnf("[semantic-board-upgrade] lane signature query failed, degrading to composition-only: %v", err)
+		return nil, nil
 	}
 	out := make([]BoardAffinity, 0, len(rows))
 	for _, r := range rows {
@@ -843,6 +882,103 @@ func buildSemanticBoardUpgradePrompt(clusters []SemanticBoardUpgradeCluster, mod
 		builder.WriteString("\n")
 	}
 	return builder.String()
+}
+
+// highConfidenceMergeBoard returns the board id to merge into when the cluster's
+// dual signatures agree with sufficient margin (spec §4.3): composition top-1 and
+// lane top-1 must be the SAME board, and BOTH per-signature margins (top1-top2
+// distance gap) must be ≥ threshold. Returns ok=false when the signatures disagree,
+// either signature lacks a top-2 (margin undefined), or any margin is below threshold.
+func highConfidenceMergeBoard(shortlist []ShortlistEntry, threshold float64) (uint, bool) {
+	var compTop1, compTop2, laneTop1, laneTop2 *ShortlistEntry
+	for i := range shortlist {
+		e := &shortlist[i]
+		switch e.CompositionRank {
+		case 1:
+			compTop1 = e
+		case 2:
+			compTop2 = e
+		}
+		switch e.LaneRank {
+		case 1:
+			laneTop1 = e
+		case 2:
+			laneTop2 = e
+		}
+	}
+	if compTop1 == nil || laneTop1 == nil || compTop2 == nil || laneTop2 == nil {
+		return 0, false
+	}
+	if compTop1.BoardID != laneTop1.BoardID {
+		return 0, false
+	}
+	// margin = top2.dist - top1.dist (top1 is closer; positive gap) per V1b.
+	compMargin := compTop2.CompositionDistance - compTop1.CompositionDistance
+	if laneTop1.LaneDistance == nil || laneTop2.LaneDistance == nil {
+		return 0, false
+	}
+	laneMargin := *laneTop2.LaneDistance - *laneTop1.LaneDistance
+	if compMargin < threshold || laneMargin < threshold {
+		return 0, false
+	}
+	return compTop1.BoardID, true
+}
+
+// synthesizeHighConfidenceMerge builds the confidence=high merge suggestion for a
+// cluster whose dual signatures agreed (spec §4.3). The LLM is bypassed; evidence
+// snapshots the shortlist + margins for audit.
+func synthesizeHighConfidenceMerge(cluster SemanticBoardUpgradeCluster, boardID uint) SemanticBoardUpgradeSuggestion {
+	auxIDs := make([]uint, 0, len(cluster.Candidates))
+	for _, c := range cluster.Candidates {
+		auxIDs = append(auxIDs, c.ID)
+	}
+	var label, description string
+	compDist, laneDist := 0.0, 0.0
+	for _, e := range cluster.Shortlist {
+		if e.BoardID == boardID {
+			label = e.BoardLabel
+			description = e.BoardDescription
+			compDist = e.CompositionDistance
+			if e.LaneDistance != nil {
+				laneDist = *e.LaneDistance
+			}
+			break
+		}
+	}
+	target := boardID
+	return SemanticBoardUpgradeSuggestion{
+		Decision:          SemanticBoardUpgradeDecisionMergeIntoExisting,
+		BoardLabel:        label,
+		Description:       description,
+		AuxiliaryLabelIDs: UniqueUintSlice(auxIDs),
+		TargetBoardID:     &target,
+		Reason:            "双签名一致且 margin 达标，高置信合并（免 LLM）",
+		Confidence:        "high",
+		Evidence: map[string]any{
+			"shortlist":        shortlistEvidence(cluster.Shortlist),
+			"composition_dist": compDist,
+			"lane_dist":        laneDist,
+		},
+	}
+}
+
+// shortlistEvidence projects a shortlist into a serializable snapshot.
+func shortlistEvidence(entries []ShortlistEntry) []map[string]any {
+	out := make([]map[string]any, 0, len(entries))
+	for _, e := range entries {
+		item := map[string]any{
+			"board_id":         e.BoardID,
+			"board_label":      e.BoardLabel,
+			"composition_rank": e.CompositionRank,
+			"composition_dist": e.CompositionDistance,
+			"lane_rank":        e.LaneRank,
+		}
+		if e.LaneDistance != nil {
+			item["lane_dist"] = *e.LaneDistance
+		}
+		out = append(out, item)
+	}
+	return out
 }
 
 // buildShortlistByAux maps each candidate auxiliary id to the set of board ids

@@ -17,7 +17,7 @@ type BoardUpgradeSuggestion struct {
 	TargetBoardID     *uint      `json:"target_board_id,omitempty"`
 	AuxiliaryLabelIDs []uint     `gorm:"type:jsonb;serializer:json;default:'[]'" json:"auxiliary_label_ids"`
 	Confidence        string     `gorm:"size:16;not null;default:llm" json:"confidence"`       // high | llm
-	Evidence          []byte     `gorm:"type:jsonb;serializer:json" json:"evidence"`           // {shortlist, margins, cotag_events, lane_briefs} snapshot
+	Evidence          map[string]any `gorm:"type:jsonb;serializer:json" json:"evidence"`           // {shortlist, margins, cotag_events, lane_briefs} snapshot
 	Status            string     `gorm:"size:16;not null;default:pending;index" json:"status"` // pending | confirmed | dismissed
 	DismissReason     *string    `gorm:"type:text" json:"dismiss_reason,omitempty"`
 	CreatedAt         time.Time  `json:"created_at"`

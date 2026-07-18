@@ -41,11 +41,11 @@
 
 ## 5. API 与调度
 
-- [ ] 5.1 `GET /api/semantic-boards/upgrade-suggestions`（status/decision 过滤，默认 pending 非 watch，high 优先排序）
-- [ ] 5.2 `POST /api/semantic-boards/upgrade-suggestions/:id/dismiss`
-- [ ] 5.3 `POST /api/semantic-boards/upgrade-suggestions/generate` 同步生成入表返回新增数（替代旧 `POST upgrade-suggest`，旧路由保留兼容期）；`upgrade-execute` 请求体加 `suggestion_id` 联动 confirm
-- [ ] 5.4 注册 `job_board_upgrade_suggest`（默认每日 06:30 固定时间点、松耦合不保证紧随日报、仅 discover_new、失败仅记日志）+ 单测 job 接线
-- [ ] 5.5 watch 建议 GC：创建满 `semantic_board_upgrade_watch_gc_days`（默认 30 天）未成簇自动 dismissed
+- [x] 5.1 `GET /api/semantic-boards/upgrade-suggestions`（status/decision 过滤，默认 pending 非 watch，high 优先排序）
+- [x] 5.2 `POST /api/semantic-boards/upgrade-suggestions/:id/dismiss`
+- [x] 5.3 `POST /api/semantic-boards/upgrade-suggestions/generate` 同步生成入表返回新增数（替代旧 `POST upgrade-suggest`，旧路由保留兼容期）；`upgrade-execute` 请求体加 `suggestion_id` 联动 confirm
+- [x] 5.4 注册 `job_board_upgrade_suggest`（默认每日 06:30 固定时间点、松耦合不保证紧随日报、仅 discover_new、失败仅记日志）+ 单测 job 接线
+- [x] 5.5 watch 建议 GC：创建满 `semantic_board_upgrade_watch_gc_days`（默认 30 天）未成簇自动 dismissed
 
 ## 6. 前端建议面板
 

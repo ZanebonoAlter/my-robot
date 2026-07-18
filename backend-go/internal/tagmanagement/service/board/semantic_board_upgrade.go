@@ -120,6 +120,7 @@ const (
 	SemanticBoardUpgradeDecisionCreateNew         SemanticBoardUpgradeDecision = "create_new"
 	SemanticBoardUpgradeDecisionMergeIntoExisting SemanticBoardUpgradeDecision = "merge_into_existing"
 	SemanticBoardUpgradeDecisionSkip              SemanticBoardUpgradeDecision = "skip"
+	SemanticBoardUpgradeDecisionWatch             SemanticBoardUpgradeDecision = "watch"
 )
 
 type ConfirmSemanticBoardUpgradeRequest struct {
@@ -194,12 +195,17 @@ func (s *SemanticBoardUpgradeService) GenerateSuggestions(ctx context.Context, m
 	}
 	shortlistByAux := buildShortlistByAux(clusters)
 
-	// §4.3: partition clusters — high-confidence dual-signature agreement
-	// synthesizes a merge (confidence=high) and bypasses the LLM; the rest go to
-	// LLM adjudication (confidence=llm).
+	// §4.3/§4.5: partition clusters. Singleton clusters (size 1) go to the
+	// observation pool (decision=watch, no LLM). Of the rest, high-confidence
+	// dual-signature agreement synthesizes a merge (confidence=high, no LLM); the
+	// remainder are LLM-adjudicated (confidence=llm).
 	var suggestions []SemanticBoardUpgradeSuggestion
 	var llmClusters []SemanticBoardUpgradeCluster
 	for i := range clusters {
+		if len(clusters[i].Candidates) == 1 {
+			suggestions = append(suggestions, synthesizeWatchSuggestion(clusters[i]))
+			continue
+		}
 		if boardID, ok := highConfidenceMergeBoard(clusters[i].Shortlist, config.MergeConfidenceMargin); ok {
 			suggestions = append(suggestions, synthesizeHighConfidenceMerge(clusters[i], boardID))
 			continue
@@ -970,6 +976,25 @@ func highConfidenceMergeBoard(shortlist []ShortlistEntry, threshold float64) (ui
 	return compTop1.BoardID, true
 }
 
+// synthesizeWatchSuggestion builds the decision=watch observation-pool
+// suggestion for a singleton cluster (spec §4.5): the lone label is recorded
+// for observation without LLM adjudication; when it later clusters (≥2) the
+// watch is auto-closed by GenerateAndPersist via CloseWatchSuggestions.
+func synthesizeWatchSuggestion(cluster SemanticBoardUpgradeCluster) SemanticBoardUpgradeSuggestion {
+	cand := cluster.Candidates[0]
+	return SemanticBoardUpgradeSuggestion{
+		Decision:          SemanticBoardUpgradeDecisionWatch,
+		BoardLabel:        cand.Label,
+		AuxiliaryLabelIDs: []uint{cand.ID},
+		Reason:            "单标签簇，进入观察池（不调 LLM）",
+		Confidence:        "llm",
+		Evidence: map[string]any{
+			"cluster_size": 1,
+			"candidate":    cand.Label,
+		},
+	}
+}
+
 // synthesizeHighConfidenceMerge builds the confidence=high merge suggestion for a
 // cluster whose dual signatures agreed (spec §4.3). The LLM is bypassed; evidence
 // snapshots the shortlist + margins for audit.
@@ -1087,6 +1112,9 @@ func filterSemanticBoardUpgradeSuggestions(suggestions []SemanticBoardUpgradeSug
 			// Accepted in both discover_new and expand_existing (§4.1 D1): the
 			// discover_new quadrant now allows merging into an existing board whose
 			// target comes from the cluster shortlist.
+		case SemanticBoardUpgradeDecisionWatch:
+			// Observation-pool suggestion for singleton clusters (§4.5); synthesized
+			// directly, never returned by the LLM, but accepted defensively here.
 		default:
 			continue
 		}

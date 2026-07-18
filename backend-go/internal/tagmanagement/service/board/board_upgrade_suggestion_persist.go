@@ -22,7 +22,7 @@ import (
 // are deduplicated via the partial unique index and cooled-down via the
 // dismissed-resolved_at record.
 func (s *SemanticBoardUpgradeService) GenerateAndPersist(ctx context.Context, mode string) (inserted, skipped, cooldownBlocked int, err error) {
-	suggestions, _, err := s.GenerateSuggestions(ctx, mode)
+	suggestions, clusters, err := s.GenerateSuggestions(ctx, mode)
 	if err != nil {
 		return 0, 0, 0, err
 	}
@@ -66,7 +66,34 @@ func (s *SemanticBoardUpgradeService) GenerateAndPersist(ctx context.Context, mo
 			skipped++ // same hash already pending → idempotent no-op
 		}
 	}
+
+	// §4.5: labels that clustered (≥2) this round are no longer singletons — close
+	// any pending watch suggestions whose auxiliary_label_ids overlap them. The
+	// watch observation is resolved by the cluster forming (even if the cluster's
+	// formal suggestion was skip/cooldown-blocked, the labels still found peers).
+	clusteredAuxIDs := clusteredAuxIDs(clusters)
+	if len(clusteredAuxIDs) > 0 {
+		if _, closeErr := s.suggestionRepo.CloseWatchSuggestions(ctx, clusteredAuxIDs); closeErr != nil {
+			return inserted, skipped, cooldownBlocked, closeErr
+		}
+	}
 	return inserted, skipped, cooldownBlocked, nil
+}
+
+// clusteredAuxIDs returns the candidate auxiliary ids of every cluster with
+// ≥2 members — the labels that formed (or joined) a cluster this round and
+// whose singleton watch observations (§4.5) are therefore resolved.
+func clusteredAuxIDs(clusters []SemanticBoardUpgradeCluster) []uint {
+	var ids []uint
+	for _, c := range clusters {
+		if len(c.Candidates) < 2 {
+			continue
+		}
+		for _, cand := range c.Candidates {
+			ids = append(ids, cand.ID)
+		}
+	}
+	return UniqueUintSlice(ids)
 }
 
 // ComputeSuggestionHash returns a stable 32-hex-char fingerprint of

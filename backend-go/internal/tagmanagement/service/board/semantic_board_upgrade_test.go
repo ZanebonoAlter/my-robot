@@ -757,6 +757,66 @@ func TestSemanticBoardUpgradePromptInjectsLaneEvidence(t *testing.T) {
 	require.Contains(t, fakeLLM.prompt, "近期内容：AI芯片融资")
 }
 
+// TestSemanticBoardUpgradeSingletonClusterProducesWatch verifies §4.5: a cluster
+// of size 1 does NOT enter the LLM — the system synthesizes a decision=watch
+// suggestion (observation pool) for the lone label.
+func TestSemanticBoardUpgradeSingletonClusterProducesWatch(t *testing.T) {
+	db := setupSemanticBoardUpgradeTestDB(t)
+	// 5 mutually-orthogonal candidates → 5 singleton clusters (none enter the LLM).
+	createUpgradeLabel(t, db, "Fable5", "fable5", "auxiliary", "active", 5, []float64{1, 0, 0})
+	createUpgradeLabel(t, db, "SoloB", "solob", "auxiliary", "active", 5, []float64{0, 1, 0})
+	createUpgradeLabel(t, db, "SoloC", "soloc", "auxiliary", "active", 5, []float64{0, 0, 1})
+	createUpgradeLabel(t, db, "SoloD", "solod", "auxiliary", "active", 5, []float64{0, 0, 0, 1})
+	createUpgradeLabel(t, db, "SoloE", "soloe", "auxiliary", "active", 5, []float64{0, 0, 0, 0, 1})
+
+	fakeLLM := &fakeSemanticBoardUpgradeLLM{suggestions: []SemanticBoardUpgradeSuggestion{{Decision: SemanticBoardUpgradeDecisionSkip}}}
+	svc := NewSemanticBoardUpgradeService(db, fakeLLM, nil)
+	suggestions, _, err := svc.GenerateSuggestions(context.Background(), "discover_new")
+	require.NoError(t, err)
+	require.Zero(t, fakeLLM.calls, "singleton clusters must bypass the LLM entirely")
+	require.NotEmpty(t, suggestions)
+	for _, s := range suggestions {
+		require.Equal(t, SemanticBoardUpgradeDecisionWatch, s.Decision, "singleton clusters produce watch suggestions")
+		require.Equal(t, "llm", s.Confidence)
+	}
+}
+
+// TestSemanticBoardUpgradeClusteringClosesPriorWatch verifies §4.5: when a label
+// that previously had a singleton-cluster watch suggestion later clusters (≥2)
+// and produces a formal suggestion, GenerateAndPersist auto-closes the prior
+// watch (pending → confirmed) via CloseWatchSuggestions.
+func TestSemanticBoardUpgradeClusteringClosesPriorWatch(t *testing.T) {
+	db := setupSemanticBoardUpgradeTestDB(t)
+	auxX := createUpgradeLabel(t, db, "DeepSeek", "deepseek-w", "auxiliary", "active", 5, []float64{1, 0, 0})
+	createUpgradeLabel(t, db, "Agent", "agent-w", "auxiliary", "active", 5, []float64{0.95, 0.3122498999, 0})
+	createUpgradeLabel(t, db, "LLM", "llm-w", "auxiliary", "active", 5, []float64{0.9, 0.4358898943, 0})
+	createUpgradeLabel(t, db, "Codex", "codex-w", "auxiliary", "active", 5, []float64{0.85, 0.5267826876, 0})
+	createUpgradeLabel(t, db, "VLM", "vlm-w", "auxiliary", "active", 5, []float64{0.8, 0.6, 0})
+
+	// Pre-seed a pending watch suggestion for auxX (as if it were a singleton last round).
+	watchHash := ComputeSuggestionHash("discover_new", "watch", nil, []uint{auxX.ID})
+	require.NoError(t, db.Create(&models.BoardUpgradeSuggestion{
+		BatchID: "watch-seed", Mode: "discover_new", Decision: "watch",
+		BoardLabel: "DeepSeek", AuxiliaryLabelIDs: []uint{auxX.ID},
+		Confidence: "llm", Status: "pending", SuggestionHash: watchHash,
+	}).Error)
+
+	// This round auxX clusters with the others (≥2); LLM returns create_new.
+	fakeLLM := &fakeSemanticBoardUpgradeLLM{suggestions: []SemanticBoardUpgradeSuggestion{
+		{Decision: SemanticBoardUpgradeDecisionCreateNew, BoardLabel: "AI", AuxiliaryLabelIDs: []uint{auxX.ID}},
+	}}
+	svc := NewSemanticBoardUpgradeService(db, fakeLLM, nil)
+
+	inserted, _, _, err := svc.GenerateAndPersist(context.Background(), "discover_new")
+	require.NoError(t, err)
+	require.Equal(t, 1, inserted, "the create_new suggestion is persisted")
+
+	var watch models.BoardUpgradeSuggestion
+	require.NoError(t, db.Where("suggestion_hash = ? AND decision = ?", watchHash, "watch").First(&watch).Error)
+	require.Equal(t, "confirmed", watch.Status, "prior watch must be auto-closed when its label clusters (≥2)")
+	require.NotNil(t, watch.ResolvedAt)
+}
+
 func TestSemanticBoardUpgradeConfirmCreateNew(t *testing.T) {
 	db := setupSemanticBoardUpgradeTestDB(t)
 	auxiliaryA := createUpgradeLabel(t, db, "OpenAI", "openai", "auxiliary", "active", 5, []float64{1, 0, 0})

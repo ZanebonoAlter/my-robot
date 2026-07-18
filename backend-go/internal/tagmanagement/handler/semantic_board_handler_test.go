@@ -264,7 +264,9 @@ func TestSemanticBoardHandlerUpgradeBackfillAndConfig(t *testing.T) {
 
 	suggest := performJSON(t, router, http.MethodPost, "/api/semantic-boards/upgrade-suggest", nil)
 	require.Equal(t, http.StatusOK, suggest.Code)
-	require.Contains(t, suggest.Body.String(), "create_new")
+	// §4.5: a single candidate forms a singleton cluster → observation-pool watch
+	// suggestion (no LLM adjudication), not a create_new.
+	require.Contains(t, suggest.Body.String(), "watch")
 
 	execute := performJSON(t, router, http.MethodPost, "/api/semantic-boards/upgrade-execute", map[string]any{
 		"decision":            "create_new",

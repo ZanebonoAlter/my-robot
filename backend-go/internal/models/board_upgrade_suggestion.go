@@ -14,15 +14,15 @@ type BoardUpgradeSuggestion struct {
 	BoardLabel  string `gorm:"size:160;not null" json:"board_label"`
 	Description string `gorm:"type:text" json:"description"`
 
-	TargetBoardID     *uint      `json:"target_board_id,omitempty"`
-	AuxiliaryLabelIDs []uint     `gorm:"type:jsonb;serializer:json;default:'[]'" json:"auxiliary_label_ids"`
-	Confidence        string     `gorm:"size:16;not null;default:llm" json:"confidence"`       // high | llm
+	TargetBoardID     *uint          `json:"target_board_id,omitempty"`
+	AuxiliaryLabelIDs []uint         `gorm:"type:jsonb;serializer:json;default:'[]'" json:"auxiliary_label_ids"`
+	Confidence        string         `gorm:"size:16;not null;default:llm" json:"confidence"`       // high | llm
 	Evidence          map[string]any `gorm:"type:jsonb;serializer:json" json:"evidence"`           // {shortlist, margins, cotag_events, lane_briefs} snapshot
-	Status            string     `gorm:"size:16;not null;default:pending;index" json:"status"` // pending | confirmed | dismissed
-	DismissReason     *string    `gorm:"type:text" json:"dismiss_reason,omitempty"`
-	CreatedAt         time.Time  `json:"created_at"`
-	ResolvedAt        *time.Time `json:"resolved_at,omitempty"`
-	ResolvedBy        *string    `gorm:"size:50" json:"resolved_by,omitempty"`
+	Status            string         `gorm:"size:16;not null;default:pending;index" json:"status"` // pending | confirmed | dismissed
+	DismissReason     *string        `gorm:"type:text" json:"dismiss_reason,omitempty"`
+	CreatedAt         time.Time      `json:"created_at"`
+	ResolvedAt        *time.Time     `json:"resolved_at,omitempty"`
+	ResolvedBy        *string        `gorm:"size:50" json:"resolved_by,omitempty"`
 
 	// SuggestionHash is a stable fingerprint of (mode, decision, target_board_id, sorted_auxiliary_label_ids).
 	// A partial unique index on this column WHERE status='pending' enforces:

@@ -1177,14 +1177,14 @@ type testBoardDailyReport struct {
 	Title                   string
 	Summary                 string
 	Highlights              testJSON `gorm:"type:jsonb"`
-	Dynamics                string    `gorm:"type:text"`
+	Dynamics                string   `gorm:"type:text"`
 	ArticleCount            int
 	EventTagCount           int
 	ClusterCount            int
-	Status                  string    `gorm:"size:20;default:generating"`
+	Status                  string   `gorm:"size:20;default:generating"`
 	RawClusters             testJSON `gorm:"type:jsonb"`
 	PrevReportID            *uint
-	GenerationPromptVersion string    `gorm:"size:20"`
+	GenerationPromptVersion string `gorm:"size:20"`
 	CreatedAt               time.Time
 	UpdatedAt               time.Time
 }
@@ -1210,8 +1210,8 @@ type testBoardPersistentTopic struct {
 func (testBoardPersistentTopic) TableName() string { return "board_persistent_topics" }
 
 type testDailyReportSection struct {
-	ID                   uint     `gorm:"primarykey"`
-	ReportID             uint     `gorm:"index;not null"`
+	ID                   uint `gorm:"primarykey"`
+	ReportID             uint `gorm:"index;not null"`
 	ClusterIndex         int
 	ClusterLabel         string   `gorm:"size:200"`
 	ClusterTagIDs        testJSON `gorm:"type:jsonb"`
@@ -1222,8 +1222,8 @@ type testDailyReportSection struct {
 	Embedding            string   `gorm:"type:vector"`
 	PersistentTopicID    *uint    `gorm:"index"`
 	TopicMatchDistance   float64
-	TopicMatchConfidence string   `gorm:"size:20"`
-	TopicStatusAtReport  *string  `gorm:"size:20"`
+	TopicMatchConfidence string  `gorm:"size:20"`
+	TopicStatusAtReport  *string `gorm:"size:20"`
 	CreatedAt            time.Time
 }
 

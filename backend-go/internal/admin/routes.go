@@ -27,6 +27,7 @@ func RegisterRoutes(rg *gin.RouterGroup) {
 		schedulers.POST("/:name/trigger", TriggerScheduler)
 		schedulers.POST("/:name/reset", ResetSchedulerStats)
 		schedulers.PUT("/:name/interval", UpdateSchedulerInterval)
+		schedulers.PUT("/:name/schedule-time", UpdateSchedulerScheduleTime)
 	}
 
 	readingBehavior := rg.Group("/reading-behavior")

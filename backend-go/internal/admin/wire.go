@@ -45,12 +45,13 @@ var (
 
 // Scheduler handlers
 var (
-	GetSchedulersStatus     = handler.GetSchedulersStatus
-	GetSchedulerStatus      = handler.GetSchedulerStatus
-	TriggerScheduler        = handler.TriggerScheduler
-	ResetSchedulerStats     = handler.ResetSchedulerStats
-	UpdateSchedulerInterval = handler.UpdateSchedulerInterval
-	GetTasksStatus          = handler.GetTasksStatus
+	GetSchedulersStatus         = handler.GetSchedulersStatus
+	GetSchedulerStatus          = handler.GetSchedulerStatus
+	TriggerScheduler            = handler.TriggerScheduler
+	ResetSchedulerStats         = handler.ResetSchedulerStats
+	UpdateSchedulerInterval     = handler.UpdateSchedulerInterval
+	UpdateSchedulerScheduleTime = handler.UpdateSchedulerScheduleTime
+	GetTasksStatus              = handler.GetTasksStatus
 )
 
 // AI call log handlers

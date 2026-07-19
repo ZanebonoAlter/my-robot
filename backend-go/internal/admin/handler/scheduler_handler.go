@@ -10,6 +10,7 @@ import (
 	"syntopica-backend/internal/admin/repository"
 	"syntopica-backend/internal/admin/scheduler"
 	"syntopica-backend/internal/models"
+	"syntopica-backend/internal/platform/aisettings"
 	"syntopica-backend/internal/platform/logging"
 )
 
@@ -44,6 +45,7 @@ type SchedulerStatusResponse struct {
 	StaleProcessingCount   int                    `json:"stale_processing_count,omitempty"`
 	StaleProcessingArticle interface{}            `json:"stale_processing_article,omitempty"`
 	AIConfigured           bool                   `json:"ai_configured,omitempty"`
+	ScheduleTime           string                 `json:"schedule_time,omitempty"`
 }
 
 // schedulerConfig returns the scheduler's Config, or the zero value if the
@@ -276,6 +278,55 @@ func UpdateSchedulerInterval(c *gin.Context) {
 	})
 }
 
+type UpdateSchedulerScheduleTimeRequest struct {
+	Time string `json:"time" binding:"required"`
+}
+
+// UpdateSchedulerScheduleTime updates the wall-clock trigger time (HH:MM) for
+// the two wall-clock schedulers (board_upgrade_suggest, daily_report). The time
+// is persisted to ai_settings under the same key the scheduler reads at trigger
+// computation, so the change takes effect on the next tick. Other schedulers
+// (cron-based, interval-based) return 400.
+func UpdateSchedulerScheduleTime(c *gin.Context) {
+	requestedName := c.Param("name")
+	key, scheduler := ResolveScheduler(requestedName)
+	if scheduler == nil {
+		c.JSON(http.StatusNotFound, gin.H{"success": false, "error": "Scheduler not found: " + requestedName})
+		return
+	}
+
+	var req UpdateSchedulerScheduleTimeRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "Valid time (HH:MM) is required"})
+		return
+	}
+
+	switch key {
+	case "board_upgrade_suggest":
+		if err := aisettings.SaveBoardUpgradeSuggestTimeConfig(req.Time); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": err.Error()})
+			return
+		}
+	case "daily_report":
+		if err := aisettings.SaveDailyReportTimeConfig(req.Time); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": err.Error()})
+			return
+		}
+	default:
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "Schedule time configuration is not supported for scheduler: " + requestedName})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": fmt.Sprintf("Schedule time updated for scheduler '%s'", key),
+		"data": gin.H{
+			"name": key,
+			"time": req.Time,
+		},
+	})
+}
+
 func GetTasksStatus(c *gin.Context) {
 	tasks := make([]gin.H, 0)
 	queueSize := 0
@@ -351,6 +402,19 @@ func enrichStatus(scheduler interface{}, key string, status *SchedulerStatusResp
 	taskName := key
 	if cfg.TaskName != "" {
 		taskName = cfg.TaskName
+	}
+
+	// Wall-clock schedulers surface their configured HH:MM trigger time so the
+	// status panel can show/edit it. Only these two read HH:MM from ai_settings.
+	switch key {
+	case "board_upgrade_suggest":
+		if t, err := aisettings.LoadBoardUpgradeSuggestTimeConfig(); err == nil {
+			status.ScheduleTime = t
+		}
+	case "daily_report":
+		if t, err := aisettings.LoadDailyReportTimeConfig(); err == nil {
+			status.ScheduleTime = t
+		}
 	}
 
 	if detailer, ok := scheduler.(interface{ GetTaskStatusDetails() map[string]interface{} }); ok {

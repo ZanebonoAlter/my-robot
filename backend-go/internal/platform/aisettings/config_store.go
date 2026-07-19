@@ -17,6 +17,8 @@ const openNotebookConfigKey = "open_notebook_config"
 const firecrawlConfigKey = "firecrawl_config"
 const dailyReportTimeKey = "daily_report_time"
 const defaultDailyReportTime = "21:00"
+const boardUpgradeSuggestTimeKey = "semantic_board_upgrade_suggest_time"
+const defaultBoardUpgradeSuggestTime = "06:30"
 
 var hhmmPattern = regexp.MustCompile(`^([01][0-9]|2[0-3]):([0-5][0-9])$`)
 
@@ -130,5 +132,51 @@ func SaveDailyReportTimeConfig(value string) error {
 		Key:         dailyReportTimeKey,
 		Value:       value,
 		Description: "日报生成时刻（HH:MM）",
+	}).Error
+}
+
+// LoadBoardUpgradeSuggestTimeConfig loads the semantic_board_upgrade_suggest_time
+// setting from ai_settings. Returns the HH:MM string, or default "06:30" when
+// the key is missing or invalid (mirrors LoadDailyReportTimeConfig).
+func LoadBoardUpgradeSuggestTimeConfig() (string, error) {
+	var settings models.AISettings
+	err := database.DB.Where("key = ?", boardUpgradeSuggestTimeKey).First(&settings).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return defaultBoardUpgradeSuggestTime, nil
+		}
+		return "", err
+	}
+
+	value := strings.TrimSpace(settings.Value)
+	if !hhmmPattern.MatchString(value) {
+		logging.Warnf("Invalid semantic_board_upgrade_suggest_time value %q, falling back to default %s", value, defaultBoardUpgradeSuggestTime)
+		return defaultBoardUpgradeSuggestTime, nil
+	}
+	return value, nil
+}
+
+// SaveBoardUpgradeSuggestTimeConfig saves the semantic_board_upgrade_suggest_time
+// setting. Validates HH:MM format (00:00–23:59). Returns error for invalid values.
+func SaveBoardUpgradeSuggestTimeConfig(value string) error {
+	value = strings.TrimSpace(value)
+	if !hhmmPattern.MatchString(value) {
+		return fmt.Errorf("invalid semantic_board_upgrade_suggest_time format %q: expected HH:MM (00:00–23:59)", value)
+	}
+
+	var settings models.AISettings
+	dbErr := database.DB.Where("key = ?", boardUpgradeSuggestTimeKey).First(&settings).Error
+	if dbErr == nil {
+		settings.Value = value
+		return database.DB.Save(&settings).Error
+	}
+	if !errors.Is(dbErr, gorm.ErrRecordNotFound) {
+		return dbErr
+	}
+
+	return database.DB.Create(&models.AISettings{
+		Key:         boardUpgradeSuggestTimeKey,
+		Value:       value,
+		Description: "版块升级建议生成时刻（HH:MM）",
 	}).Error
 }

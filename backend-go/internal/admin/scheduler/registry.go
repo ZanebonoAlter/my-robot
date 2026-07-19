@@ -23,6 +23,7 @@ type Scheduler interface {
 type Registry struct {
 	mu    sync.RWMutex
 	items map[string]Scheduler
+	order []string // registration order, for stable /status output
 }
 
 // NewRegistry creates a new scheduler registry.
@@ -41,6 +42,7 @@ func (r *Registry) Register(name string, s Scheduler) {
 		panic(fmt.Sprintf("scheduler %q already registered", name))
 	}
 	r.items[name] = s
+	r.order = append(r.order, name)
 }
 
 // Get returns the scheduler registered under the given name.
@@ -49,6 +51,17 @@ func (r *Registry) Get(name string) (interface{}, bool) {
 	defer r.mu.RUnlock()
 	s, ok := r.items[name]
 	return s, ok
+}
+
+// OrderedNames returns scheduler keys in registration order. The admin
+// handler iterates this to render /api/schedulers/status in a stable order
+// (registry insertion order) without maintaining a separate descriptor list.
+func (r *Registry) OrderedNames() []string {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	out := make([]string, len(r.order))
+	copy(out, r.order)
+	return out
 }
 
 // StartAll starts all registered schedulers in registration order.

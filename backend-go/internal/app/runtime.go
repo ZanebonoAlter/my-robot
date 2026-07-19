@@ -91,6 +91,7 @@ func StartRuntime() *Runtime {
 
 	registry.Register("log_cleanup", scheduler.New(scheduler.Config{
 		Name:         "Log Cleanup",
+		Description:  "Clean up expired ai_call_logs and otel_spans rows",
 		Interval:     86400 * time.Second,
 		StartupDelay: 5 * time.Minute,
 		Job:          admin.LogCleanupJob,
@@ -100,6 +101,7 @@ func StartRuntime() *Runtime {
 
 	registry.Register("aux_label_cleanup", scheduler.New(scheduler.Config{
 		Name:         "Aux Label Cleanup",
+		Description:  "Clean up auxiliary labels with no active topic_tag references",
 		Interval:     3600 * time.Second,
 		StartupDelay: 10 * time.Minute,
 		Job:          admin.AuxLabelCleanupJob,
@@ -108,34 +110,38 @@ func StartRuntime() *Runtime {
 	}))
 
 	registry.Register("blocked_article_recovery", scheduler.New(scheduler.Config{
-		Name:     "Blocked Article Recovery",
-		Interval: 3600 * time.Second,
-		Job:      admin.BlockedArticleRecoveryJob,
+		Name:        "Blocked Article Recovery",
+		Description: "Recover articles stuck in blocked state",
+		Interval:    3600 * time.Second,
+		Job:         admin.BlockedArticleRecoveryJob,
 		Persistence: admin.NewTaskPersistence("blocked_article_recovery",
 			"恢复被阻塞的文章"),
 	}))
 
 	// Medium schedulers: with SchedulerTask DB persistence
 	registry.Register("preference_update", scheduler.New(scheduler.Config{
-		Name:     "Preference Update",
-		Interval: 1800 * time.Second,
-		Job:      admin.PreferenceUpdateJob,
+		Name:        "Preference Update",
+		Description: "Update reading preferences from behavior data",
+		Interval:    1800 * time.Second,
+		Job:         admin.PreferenceUpdateJob,
 		Persistence: admin.NewTaskPersistence("preference_update",
 			"Update reading preferences from behavior data"),
 	}))
 
 	registry.Register("tag_quality_score", scheduler.New(scheduler.Config{
-		Name:     "Tag Quality Score",
-		Interval: 3600 * time.Second,
-		Job:      admin.TagQualityScoreJob,
+		Name:        "Tag Quality Score",
+		Description: "Recompute persistent quality scores for topic tags",
+		Interval:    3600 * time.Second,
+		Job:         admin.TagQualityScoreJob,
 		Persistence: admin.NewTaskPersistence("tag_quality_score",
 			"Recompute persistent quality scores for topic tags"),
 	}))
 
 	registry.Register("auto_refresh", scheduler.New(scheduler.Config{
-		Name:     "Auto Refresh",
-		Interval: 60 * time.Second,
-		Job:      admin.AutoRefreshJob,
+		Name:        "Auto Refresh",
+		Description: "Auto-refresh RSS feeds",
+		Interval:    60 * time.Second,
+		Job:         admin.AutoRefreshJob,
 		Persistence: admin.NewTaskPersistence("auto_refresh",
 			"Auto-refresh RSS feeds"),
 	}))
@@ -143,9 +149,12 @@ func StartRuntime() *Runtime {
 	// Complex schedulers
 	content.InitContentCompletionHandler()
 	registry.Register("content_completion", scheduler.New(scheduler.Config{
-		Name:     "Content Completion",
-		Interval: 60 * time.Second,
-		Job:      admin.ContentCompletionJob(content.GetContentCompletionService()),
+		Name:        "Content Completion",
+		Description: "Complete article content and generate article summaries",
+		TaskName:    "ai_summary",
+		Aliases:     []string{"ai_summary"},
+		Interval:    60 * time.Second,
+		Job:         admin.ContentCompletionJob(content.GetContentCompletionService()),
 		Persistence: admin.NewTaskPersistence("ai_summary",
 			"Complete article content and generate article summaries"),
 	}))
@@ -153,9 +162,10 @@ func StartRuntime() *Runtime {
 	// DailyReport: wrapped with TriggerNowWithDate support
 	dailyReportNextRunFn := scheduler.NextDailyReportTime
 	dailyReportBase := scheduler.New(scheduler.Config{
-		Name:    "Daily Report",
-		NextRun: dailyReportNextRunFn,
-		Job:     admin.DailyReportJob(), // uses current time at each execution
+		Name:        "Daily Report",
+		Description: "Generate daily reports for all active semantic boards",
+		NextRun:     dailyReportNextRunFn,
+		Job:         admin.DailyReportJob(), // uses current time at each execution
 		Persistence: admin.NewTaskPersistenceWithNextRun("daily_report",
 			"Generate daily reports for all active semantic boards",
 			dailyReportNextRunFn),
@@ -168,9 +178,10 @@ func StartRuntime() *Runtime {
 	// daily report. Manual trigger via POST /upgrade-suggestions/generate.
 	boardUpgradeNextRunFn := scheduler.NextBoardUpgradeSuggestTime
 	registry.Register("board_upgrade_suggest", scheduler.New(scheduler.Config{
-		Name:    "Board Upgrade Suggest",
-		NextRun: boardUpgradeNextRunFn,
-		Job:     admin.BoardUpgradeSuggestJob(),
+		Name:        "Board Upgrade Suggest",
+		Description: "每日生成版块升级建议 + 观察池 watch GC",
+		NextRun:     boardUpgradeNextRunFn,
+		Job:         admin.BoardUpgradeSuggestJob(),
 		Persistence: admin.NewTaskPersistenceWithNextRun("board_upgrade_suggest",
 			"每日生成版块升级建议(discover_new)+观察池GC",
 			boardUpgradeNextRunFn),
@@ -180,6 +191,7 @@ func StartRuntime() *Runtime {
 	firecrawlQueue := content.NewFirecrawlJobQueue(database.DB)
 	registry.Register("firecrawl", scheduler.New(scheduler.Config{
 		Name:         "Firecrawl Crawler",
+		Description:  "Auto-crawl full content for articles",
 		Interval:     300 * time.Second,
 		StartupDelay: 0,
 		Job:          admin.FirecrawlJob(firecrawlQueue, "scheduled"),
@@ -198,9 +210,10 @@ func StartRuntime() *Runtime {
 	// Weekly lifeline: every Monday 03:00 Asia/Shanghai.
 	weeklyNextRun := dataenrichment.NextWeeklyLifelineTime
 	registry.Register("lifeline_weekly", scheduler.New(scheduler.Config{
-		Name:    "Lifeline Weekly Refresh",
-		NextRun: weeklyNextRun,
-		Job:     dataenrichment.WeeklyLifelineJob(lifelineSvc, lister),
+		Name:        "Lifeline Weekly Refresh",
+		Description: "每周一刷新所有活跃话题的周度新闻汇总（循环A，含历史回填）",
+		NextRun:     weeklyNextRun,
+		Job:         dataenrichment.WeeklyLifelineJob(lifelineSvc, lister),
 		Persistence: admin.NewTaskPersistenceWithNextRun("lifeline_weekly",
 			"每周一刷新所有活跃话题的周度新闻汇总上下文", weeklyNextRun),
 	}))
@@ -208,9 +221,10 @@ func StartRuntime() *Runtime {
 	// Monthly lifeline: every 1st of month 03:30 Asia/Shanghai.
 	monthlyNextRun := dataenrichment.NextMonthlyLifelineTime
 	registry.Register("lifeline_monthly", scheduler.New(scheduler.Config{
-		Name:    "Lifeline Monthly Refresh",
-		NextRun: monthlyNextRun,
-		Job:     dataenrichment.MonthlyLifelineJob(lifelineSvc, lister),
+		Name:        "Lifeline Monthly Refresh",
+		Description: "每月1号刷新所有活跃话题的月度新闻汇总（循环A，含历史回填）",
+		NextRun:     monthlyNextRun,
+		Job:         dataenrichment.MonthlyLifelineJob(lifelineSvc, lister),
 		Persistence: admin.NewTaskPersistenceWithNextRun("lifeline_monthly",
 			"每月1号刷新所有活跃话题的月度新闻汇总上下文", monthlyNextRun),
 	}))
@@ -218,9 +232,10 @@ func StartRuntime() *Runtime {
 	// Yearly lifeline: every Jan 1 04:00 Asia/Shanghai.
 	yearlyNextRun := dataenrichment.NextYearlyLifelineTime
 	registry.Register("lifeline_yearly", scheduler.New(scheduler.Config{
-		Name:    "Lifeline Yearly Refresh",
-		NextRun: yearlyNextRun,
-		Job:     dataenrichment.YearlyLifelineJob(lifelineSvc, lister),
+		Name:        "Lifeline Yearly Refresh",
+		Description: "每年1月1号刷新所有活跃话题的年度新闻汇总（循环A，含历史回填）",
+		NextRun:     yearlyNextRun,
+		Job:         dataenrichment.YearlyLifelineJob(lifelineSvc, lister),
 		Persistence: admin.NewTaskPersistenceWithNextRun("lifeline_yearly",
 			"每年1月1号刷新所有活跃话题的年度新闻汇总上下文", yearlyNextRun),
 	}))

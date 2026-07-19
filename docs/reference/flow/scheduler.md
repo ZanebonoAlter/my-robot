@@ -18,6 +18,9 @@
 - 辅助标签入库（随 tag extraction 同步）
 - SemanticBoard 匹配（随 tag 入库后触发）
 - 关注标签叙事维度总结
+- 版块升级建议生成（discover_new，每日 06:30 固定时间点，松耦合不依赖日报，失败仅记日志；附 watch 观察池 GC）
+
+> **自动发现**：调度器清单由 `scheduler.Registry` 自动发现——在 `app/runtime.go` 用 `registry.Register` 注册即自动出现在 `GET /api/schedulers/status` 与 `POST /api/schedulers/:name/trigger`，无需在 handler 维护第二份 descriptor 列表。展示顺序 = runtime 注册顺序。展示元数据（Description/TaskName/Aliases）随 `scheduler.Config` 走，经 `BaseScheduler.GetConfig()` 暴露。
 
 ## scheduler 状态回传
 

@@ -2,7 +2,7 @@
 
 ### Requirement: LLM 判断升级/跳过
 
-系统 SHALL 在触发建议生成（手动或 scheduler）时，将每个簇（≥2 个辅助标签）的辅助标签列表 + co-tag 事件 + 候选版块 shortlist 及其证据发送给 LLM，由 LLM 判断：create_new（升级为新 board）、merge_into_existing（并入 shortlist 内某个已有版块）或 skip（暂不处理）。LLM 输出的 merge_into_existing.target_board_id SHALL 校验必须属于该簇的候选版块 shortlist，非法值降级为 skip。单标签簇 SHALL NOT 进入 LLM 判断（走观察池，见新增需求）。
+系统 SHALL 在触发建议生成（手动或 scheduler）时，将每个簇（≥2 个辅助标签）的辅助标签列表 + co-tag 事件 + 候选版块 shortlist 及其证据发送给 LLM，由 LLM 判断：create_new（升级为新 board）、merge_into_existing（并入 shortlist 内某个已有版块）或 skip（暂不处理）。LLM 输出的 merge_into_existing.target_board_id SHALL 校验是否属于该簇的候选版块 shortlist；target 超出 shortlist 时 SHALL NOT 丢弃或降级为 skip，而 SHALL 保留 merge 建议并在 evidence 标注 `target_off_shortlist=true`（方案 B：discover_new 新簇 composition 信号弱，算法 shortlist 视野窄于 LLM，丢弃会系统性浪费 LLM 合理建议）。单标签簇 SHALL NOT 进入 LLM 判断（走观察池，见新增需求）。
 
 #### Scenario: LLM 判断创建新 board
 
@@ -14,10 +14,10 @@
 - **WHEN** 簇 [DeepSeek, Agent] 的 shortlist 含版块「生成式 AI 与大模型厂商」，且该版块泳道近期内容与簇内标签语义吻合
 - **THEN** LLM SHALL 返回 merge_into_existing 建议，target_board_id 指向该版块
 
-#### Scenario: merge 目标必须在 shortlist 内
+#### Scenario: merge 目标超出 shortlist 降级标注（方案 B）
 
 - **WHEN** LLM 返回 merge_into_existing 且 target_board_id 不在该簇 shortlist 中
-- **THEN** 系统 SHALL 将该决策降级为 skip，不产出建议
+- **THEN** 系统 SHALL 保留该 merge 建议（不丢弃、不降级 skip），并在 evidence 标注 `target_off_shortlist=true`，供前端高亮提示用户重点裁决
 
 #### Scenario: LLM 判断跳过
 

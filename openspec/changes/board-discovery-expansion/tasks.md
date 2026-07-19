@@ -38,6 +38,7 @@
 - [ ] 4.3 失败测试：高置信免 LLM（双签名 top-1 一致且**两签名各自** margin≥0.05 → confidence=high 不调 LLM；分歧或任一 margin 不足 → LLM）→ 实现 margin 闸门（`semantic_board_upgrade_merge_confidence_margin` 可配）
 - [ ] 4.4 失败测试：prompt 注入候选版块泳道近期内容（至多 5 条 section 标题；拉取失败降级名称+描述）→ 实现证据注入
 - [ ] 4.5 失败测试：单标签簇不进 LLM 写 watch → 实现观察池分流
+- [x] 4.6 **诊断修正（方案 B）**：原 §4.1 target 超出 shortlist「丢弃」（spec 写降级 skip，实现是 continue 丢弃，本就不一致），实测诊断发现 LLM 17 条合理 merge 被系统性丢弃（discover_new 新簇 composition 信号弱，shortlist top-2 视野窄于 LLM）。改为**保留 merge + evidence 标注 `target_off_shortlist`**（不丢弃/不降级），prompt 仍引导优先选 shortlist 内。spec Scenario 同步改名「merge 目标超出 shortlist 降级标注」。
 
 ## 5. API 与调度
 

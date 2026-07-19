@@ -567,10 +567,20 @@ func TestSemanticBoardUpgradeDiscoverNewMergeTargetValidation(t *testing.T) {
 	suggestions, _, err := service.GenerateSuggestions(context.Background(), "discover_new")
 
 	require.NoError(t, err)
-	require.Len(t, suggestions, 1, "invalid-target merge must be downgraded/dropped")
-	require.Equal(t, SemanticBoardUpgradeDecisionMergeIntoExisting, suggestions[0].Decision)
-	require.NotNil(t, suggestions[0].TargetBoardID)
-	require.Equal(t, board.ID, *suggestions[0].TargetBoardID, "only the shortlist-valid merge survives")
+	require.Len(t, suggestions, 2, "方案B: off-shortlist merge 降级保留不丢弃")
+	// 两条 merge 都在：shortlist 内的不标注，超出 shortlist 的标 target_off_shortlist
+	var inShortlist, offShortlist *SemanticBoardUpgradeSuggestion
+	for i := range suggestions {
+		if suggestions[i].TargetBoardID != nil && *suggestions[i].TargetBoardID == validTarget {
+			inShortlist = &suggestions[i]
+		} else {
+			offShortlist = &suggestions[i]
+		}
+	}
+	require.NotNil(t, inShortlist, "shortlist 内的 merge 保留")
+	require.NotNil(t, offShortlist, "超出 shortlist 的 merge 也保留（方案B）")
+	require.Nil(t, inShortlist.Evidence["target_off_shortlist"], "shortlist 内不标注")
+	require.Equal(t, true, offShortlist.Evidence["target_off_shortlist"], "超出 shortlist 标注 target_off_shortlist")
 }
 
 // TestSemanticBoardUpgradeSystemPromptModeAware verifies the LLM system-prompt

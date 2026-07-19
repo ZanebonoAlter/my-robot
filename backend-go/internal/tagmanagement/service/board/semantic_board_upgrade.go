@@ -1076,10 +1076,15 @@ func buildShortlistByAux(clusters []SemanticBoardUpgradeCluster) map[uint]map[ui
 func validateMergeTargets(suggestions []SemanticBoardUpgradeSuggestion, shortlistByAux map[uint]map[uint]struct{}) []SemanticBoardUpgradeSuggestion {
 	out := make([]SemanticBoardUpgradeSuggestion, 0, len(suggestions))
 	for _, sug := range suggestions {
-		if sug.Decision == SemanticBoardUpgradeDecisionMergeIntoExisting {
-			if !mergeTargetInShortlist(sug, shortlistByAux) {
-				continue
+		if sug.Decision == SemanticBoardUpgradeDecisionMergeIntoExisting && !mergeTargetInShortlist(sug, shortlistByAux) {
+			// 方案 B（诊断发现：§4.1 原"丢弃"系统性浪费 LLM 合理建议——discover_new 新簇
+			// composition 信号弱，算法 shortlist top-2 视野窄于 LLM，实测 17 条 LLM merge 全被丢）：
+			// 不丢弃、不降级 skip，保留 merge 并在 evidence 标注 target_off_shortlist，
+			// 前端可高亮"算法未覆盖"让用户重点裁决。prompt 仍引导 LLM 优先选 shortlist 内的。
+			if sug.Evidence == nil {
+				sug.Evidence = map[string]any{}
 			}
+			sug.Evidence["target_off_shortlist"] = true
 		}
 		out = append(out, sug)
 	}

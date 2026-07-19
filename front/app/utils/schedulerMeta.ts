@@ -49,6 +49,7 @@ export function getSchedulerDisplayName(name: string): string {
 		tag_quality_score: "标签质量评分",
 		log_cleanup: "日志清理",
 		daily_report: "每日报告",
+		board_upgrade_suggest: "版块升级建议",
 		blocked_article_recovery: "阻塞文章恢复",
 		lifeline_weekly: "周度新闻汇总",
 		lifeline_monthly: "月度新闻汇总",

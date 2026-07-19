@@ -19,9 +19,11 @@ Implement tasks from an OpenSpec change.
    Always announce: "Using change: <name>" and how to override (e.g., `/opsx-apply <other>`).
 
 2. **Check status to understand the schema**
+
    ```bash
    openspec status --change "<name>" --json
    ```
+
    Parse the JSON to understand:
    - `schemaName`: The workflow being used (e.g., "spec-driven")
    - `planningHome`, `changeRoot`, and `actionContext`: planning scope and edit constraints
@@ -52,6 +54,15 @@ Implement tasks from an OpenSpec change.
    The files depend on the schema being used:
    - **spec-driven**: proposal, specs, design, tasks
    - Other schemas: follow the contextFiles from CLI output
+
+   **doc-impact 声明（apply 启动强制）**：读完 context 后跑：
+
+   ```bash
+   bash scripts/doc-impact.sh suggest    # 文档域预勾选（8 选项）
+   bash scripts/doc-impact.sh context    # 注入相关 flow「业务约束与不变量」（必读）
+   ```
+
+   确认 suggest 预勾选后，以 `<!-- doc-impact: 域列表 -->` 机器可读注释写入 tasks.md 文档节第一行（见 `docs/reference/开发执行规范.md` §0.6）。
 
 5. **Show current progress**
 
@@ -136,6 +147,7 @@ What would you like to do?
 ```
 
 **Guardrails**
+
 - Keep going through tasks until done or blocked
 - Always read context files before starting (from the apply instructions output)
 - If task is ambiguous, pause and ask before implementing

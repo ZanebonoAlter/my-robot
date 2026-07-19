@@ -5,3 +5,7 @@ context: |
   tasks.md 必须遵循 docs/reference/开发执行规范.md §11 归档门禁：
   以「测试 / 文档 / 验证」三固定尾节收尾，验证节每条必须是「可执行命令 + 期望结果」。
   纯文档 change 豁免代码测试，但必须附 grep 一致性校验。
+  doc-impact 门禁（开发执行规范.md §0.6/§11.4）：
+  - apply: doc-impact.sh suggest 预勾选 + context 注入 flow 业务约束
+  - 声明: tasks.md 文档节写 <!-- doc-impact: 域列表 -->
+  - 归档: doc-impact.sh verify 对账（check-standards F/G 段）

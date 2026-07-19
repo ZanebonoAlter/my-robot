@@ -1,6 +1,6 @@
 # 开发指南
 
-本地开发与构建命令参考。如果你是首次参与，请先阅读 [Getting Started](../getting-started.md) 完成环境搭建。
+本地开发与构建命令参考。如果你是首次参与，本文件涵盖从环境搭建到构建命令的完整步骤。
 
 > **规范已迁移**：代码风格、目录约定、测试规范、提交前检查、Branch/PR 流程、编码注意事项的**权威定义**已迁至 [`standard/`](standard/README.md)（前后端分文件夹）。本文件只保留**环境搭建**与**构建命令**。
 
@@ -8,10 +8,14 @@
 
 ### 前置条件
 
-- Go 1.25+
-- Node.js + pnpm
-- Docker（用于运行 PostgreSQL）
-- PostgreSQL with pgvector（通过 Docker 启动）
+| 工具 | 最低版本 | 说明 |
+| ------ | ---------------- | ------- |
+| [Go](https://go.dev/) | >= 1.25 | Gin 后端必需 |
+| [Node.js](https://nodejs.org/) | >= 18 | Nuxt 4 前端必需 |
+| [pnpm](https://pnpm.io/) | >= 10 | 前端包管理器 |
+| [Docker](https://www.docker.com/) | — | 用于运行 PostgreSQL |
+| [Git](https://git-scm.com/) | — | 克隆仓库 |
+| [Python](https://www.python.org/) | >= 3.10 | 可选，用于运行 `tests/workflow/` 中的集成测试 |
 
 ### 启动顺序
 
@@ -29,7 +33,7 @@ docker compose up -d
 
 > SQLite 版本已归档到 `sqlite` 分支，主分支不再支持。
 
-2. **再启动后端** — 后端需要先初始化数据库和调度器：
+1. **再启动后端** — 后端需要先初始化数据库和调度器：
 
 ```bash
 cd backend-go
@@ -41,7 +45,7 @@ go run cmd/server/main.go
 
 开发时日志现在按级别分流：常规运行日志和 warning 走 `stdout`，error / fatal / panic 走 `stderr`。如果你在 PowerShell、Docker 或 systemd 里单独收集错误输出，可以直接利用这条分流。
 
-3. **再启动前端**（新终端）：
+1. **再启动前端**（新终端）：
 
 ```bash
 cd front
@@ -51,7 +55,16 @@ pnpm dev
 
 前端开发服务器运行在 `http://localhost:3000`。
 
-4. **验证联调** — 打开 `http://localhost:3000`，确认前端能连接到 `http://localhost:5000/api`。
+1. **验证联调** — 打开 `http://localhost:3000`，确认前端能连接到 `http://localhost:5000/api`。
+
+### 首次使用
+
+两个服务都运行后：
+
+1. 在浏览器中打开 `http://localhost:3000`。
+2. 通过订阅管理面板添加 RSS feed。
+3. Feed 会被抓取，文章出现在三栏阅读布局中。
+4. （可选）通过 Web UI 的设置页面配置 AI 功能 — LLM API key、Firecrawl、Digest 设置。这些存储在数据库中，无需编辑配置文件。
 
 ### Docker Compose 启动
 
@@ -76,7 +89,7 @@ AI 相关设置（LLM、Firecrawl、Digest）通过 Web UI 的设置页面配置
 ### 前端命令（在 `front/` 目录执行）
 
 | 命令 | 说明 |
-|------|------|
+| ------ | ------ |
 | `pnpm install` | 安装依赖 |
 | `pnpm dev` | 启动开发服务器（`http://localhost:3000`） |
 | `pnpm build` | 生产构建 |
@@ -103,7 +116,7 @@ pnpm test:unit -- app/utils/articleContentSource.test.ts -t "prefers firecrawl"
 ### 后端命令（在 `backend-go/` 目录执行）
 
 | 命令 | 说明 |
-|------|------|
+| ------ | ------ |
 | `go mod tidy` | 整理 Go 模块依赖 |
 | `go run cmd/server/main.go` | 启动后端服务 |
 | `go build ./...` | 编译所有包 |
@@ -155,6 +168,46 @@ pytest --cov=. --cov-report=html
 python test_firecrawl_integration.py
 ```
 
+### 常见问题
+
+#### 端口已被占用
+
+如果 `http://localhost:5000` 或 `http://localhost:3000` 被占用，通过环境变量设置端口：
+
+- 后端：运行 `go run cmd/server/main.go` 前设置 `SERVER_PORT`。
+- 前端：如果后端运行在非默认端口，设置 `NUXT_PUBLIC_API_BASE` 环境变量。
+- Docker：在 `.env` 中设置 `FRONT_PORT` 和 `BACKEND_PORT`。
+
+#### 后端启动失败（数据库错误）
+
+后端默认连接 PostgreSQL。确保 PostgreSQL 正在运行且 DSN 配置正确。如果使用 Docker 启动的 PostgreSQL，检查容器是否正常运行：
+
+```bash
+docker ps | grep rss-postgres
+```
+
+#### 前端无法连接后端
+
+确保后端在 `http://localhost:5000` 运行。前端 API 基础 URL 默认为 `http://localhost:5000/api`，如有需要可通过 `NUXT_PUBLIC_API_BASE` 环境变量覆盖。
+
+#### Go 模块下载失败（中国地区）
+
+如果 `go mod tidy` 慢或失败，设置 Go 模块代理：
+
+```bash
+go env -w GOPROXY=https://goproxy.cn,direct
+```
+
+pnpm 也可以设置镜像：
+
+```bash
+pnpm config set registry https://registry.npmmirror.com
+```
+
+#### Docker 构建代理设置
+
+在代理后构建 Docker 镜像时，在 `.env` 文件中配置 `GOPROXY`、`NPM_CONFIG_REGISTRY`、`HTTP_PROXY` 和 `HTTPS_PROXY`。这些会传递到构建上下文。
+
 ---
 
 ## 规范文档导航
@@ -162,7 +215,7 @@ python test_firecrawl_integration.py
 本文件原有的代码风格、目录约定、测试、提交前检查、Branch/PR、编码注意事项等内容已迁入 `standard/`，不再在此重复：
 
 | 原内容 | 权威源 |
-|--------|--------|
+| -------- | -------- |
 | 代码风格（前端 / 后端） | [`standard/frontend/code-style.md`](standard/frontend/code-style.md)、[`standard/backend/code-style.md`](standard/backend/code-style.md) |
 | 目录结构约定 | [`standard/frontend/code-style.md`](standard/frontend/code-style.md) §2、[`standard/backend/package-layout.md`](standard/backend/package-layout.md) |
 | 测试规范 | [`standard/frontend/testing.md`](standard/frontend/testing.md)、[`standard/backend/testing.md`](standard/backend/testing.md) |

@@ -1,11 +1,19 @@
 # 业务流程（Flow）
 
-> **业务设计层**：本目录是**业务链路的概要设计**（配 mermaid），按"大功能"切分，跨前后端。
-> 互补：`architecture/` 描述骨架定位；`architecture/map.md` 是「业务域 → 流程文档 → 代码入口」的索引地图。
+> **业务设计层 · 五位一体活文档**：每个 flow 文档同时承载「需求说明 + 链路设计 + 业务约束 + 代码索引 + 变更溯源」，按"大功能"切分，跨前后端。
+> 本目录**替代原用户手册目录（已删除）** 承接"系统能做什么、怎么用"的说明（面向使用视角的「需求说明」节）；API 参考唯一权威源为 `docs/reference/api/`。
 
-## 这层装什么
+## 这层装什么（五段式）
 
-业务链路怎么跑、状态怎么流转、前后端怎么协作。**不装**：代码怎么写（去 `standard/`）、架构骨架（去 `architecture/`）。
+每个 `flow/<功能>.md` 固定五个二级标题（`scripts/check-standards.sh` A 段校验齐全）：
+
+1. **需求说明** — 功能给用户解决什么问题（面向使用视角）
+2. **链路设计** — mermaid 流程图 + 状态流转
+3. **业务约束与不变量** — 状态机/幂等/去重/限额等业务红线。**是 `doc-impact.sh context` 子命令的数据源**——apply 改代码前按命中 domain 自动 dump 给 agent（见《开发执行规范》§0.6），故必须准确、有实质。
+4. **代码入口** — 后端 handler/service + 前端 feature 入口（含 `backend-go/internal/<domain>/` 包路径，context 靠它关联 flow↔domain）
+5. **变更溯源** — archive change 链接表（见《开发执行规范》§12.2）
+
+**不装**：代码怎么写（去 `standard/`）、架构骨架（去 `architecture/`）、跨功能传导耦合（去 `architecture/coupling-map.md`）。
 
 ## 全局主链路
 
@@ -28,9 +36,10 @@ flowchart LR
 ## 流程索引
 
 | 文档 | 大功能 | 涉及 domain / feature |
-|------|--------|----------------------|
+| ------ | -------- | ---------------------- |
 | [reading.md](./reading.md) | 主阅读页（启动/切分类/切feed/打开文章） | reader / shell, articles |
-| [content-enrichment.md](./content-enrichment.md) | 文章内容增强（Firecrawl 全文/整理稿） | platform(firecrawl) / articles |
+| [content-enrichment.md](./content-enrichment.md) | 文章内容增强（Firecrawl 全文/整理稿） | dataenrichment, reader / articles |
+| [data-enrichment.md](./data-enrichment.md) | 数据富化编排（爬取/补全/向量化的编排链） | dataenrichment |
 | [ai-summary.md](./ai-summary.md) | AI 总结批量生成 | reader / ai |
 | [daily-report.md](./daily-report.md) | 日报 / Digest 聚合 | admin(daily_report) / ai |
 | [topic-graph.md](./topic-graph.md) | 话题图谱（PersistentTopic 归属/展示） | topicgraph / tags |
@@ -42,3 +51,9 @@ flowchart LR
 - 不再维护本地镜像数组同步链，不再使用 `syncToLocalStores()`
 - 组件层优先消费已映射好的前端模型
 - 与后端交互的细节只应停留在 `app/api` 和 store
+
+## 变更溯源
+
+| 日期 | 变更 | 摘要 | 归档位置 |
+|------|------|------|----------|
+| 2026-07-20 | docs-harness-consolidation | flow 升级五位一体活文档（需求/链路/业务约束/代码入口/溯源）；业务约束节作为 `doc-impact.sh context` 数据源；原 user-guide 定位由 flow「需求说明」节承接 | [archive/2026-07-20-docs-harness-consolidation](../../../openspec/changes/archive/2026-07-20-docs-harness-consolidation) |

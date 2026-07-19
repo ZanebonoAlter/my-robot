@@ -1,7 +1,7 @@
 # 详细设计地图（Map）
 
 > **索引层**：业务域 → 流程文档（flow/）→ 架构骨架（architecture/）→ 代码入口。
-> 这是从“我想了解某个业务怎么跑”出发的导航总图。架构骨架文档（overview/backend/frontend/runtime/tracing）描述定位与骨架；flow/ 描述链路怎么跑；本图把它们和代码入口连起来。
+> 这是从“我想了解某个业务怎么跑”出发的导航总图。架构骨架文档（overview/backend/frontend/runtime/tracing）描述定位与骨架；flow/ 是五位一体活文档（需求说明 / 链路设计 / 业务约束与不变量 / 代码入口 / 变更溯源）；本图把它们和代码入口连起来。
 >
 > **另见**：[coupling-map.md](coupling-map.md) — 跨功能传导耦合登记表（“改 A 会影响 B”），配合《开发执行规范》§7 架构体检使用。
 >
@@ -12,7 +12,7 @@
 ```mermaid
 flowchart LR
   Q[我想了解某业务] --> MAP[本图: 定位 flow + 骨架 + 入口]
-  MAP --> FLOW[flow/&lt;大功能&gt;.md<br/>链路怎么跑 / mermaid]
+  MAP --> FLOW[flow/&lt;大功能&gt;.md<br/>五位一体: 需求/链路/业务约束/入口/溯源]
   MAP --> ARCH[architecture/*.md<br/>骨架与定位]
   MAP --> CODE[代码入口<br/>handler/service/repository]
 ```
@@ -20,9 +20,10 @@ flowchart LR
 ## 业务域索引
 
 | 业务域 | 流程设计（flow/） | 架构骨架（architecture/） | 后端入口 | 前端入口 |
-|--------|------------------|--------------------------|----------|----------|
+| -------- | ------------------ | -------------------------- | ---------- | ---------- |
 | 阅读 | [reading.md](../flow/reading.md) | [frontend.md](frontend.md) §页面骨架 | `internal/reader/{handler,service}/` | `features/articles/`、`features/shell/`、`stores/` |
 | 内容增强 | [content-enrichment.md](../flow/content-enrichment.md) | [backend.md](backend.md) §具体数据链路示例 | `internal/reader/handler/`、`internal/platform/`(firecrawl) | `features/articles/`、`app/api/` |
+| 数据富化编排 | [data-enrichment.md](../flow/data-enrichment.md) | [backend.md](backend.md) | `internal/dataenrichment/` | `features/articles/` |
 | AI 总结 | [ai-summary.md](../flow/ai-summary.md) | [backend.md](backend.md) | `internal/reader/`、`internal/platform/airouter/`、`internal/platform/ws/` | `features/ai/` |
 | 日报 / Digest | [daily-report.md](../flow/daily-report.md) | [tracing.md](tracing.md) | `internal/admin/`(scheduler, daily_report job)、`internal/topicgraph/` | `features/ai/`(Digest 预览)、`features/articles/`(关联文章)、`features/tags/components/daily-report/`(section 可视化)、`app/utils/{topicAnchor,matchQuality,threadFit}.ts`(observability: System 1 tag↔板块 / System 2 section↔话题 / System 3 thread↔section) |
 | 话题图谱 | [topic-graph.md](../flow/topic-graph.md) | [backend.md](backend.md) | `internal/topicgraph/{handler,service,repository}/` | `features/tags/`、`tests/e2e/topic-graph.spec.ts` |
@@ -34,7 +35,7 @@ flowchart LR
 ## 横切基础设施（非业务域，不进 flow/）
 
 | 基础设施 | 架构文档 | 入口 |
-|---------|---------|------|
+| --------- | --------- | ------ |
 | 运行时 / 启动 / 优雅退出 | [runtime.md](runtime.md) | `internal/app/runtime.go`、`cmd/server/main.go` |
 | 路由面 | [runtime.md](runtime.md) §当前路由面 | `internal/app/router.go` |
 | 链路追踪（OpenTelemetry） | [tracing.md](tracing.md) | `internal/platform/tracing/` |
@@ -44,7 +45,7 @@ flowchart LR
 ## 代码规约去哪查
 
 - 代码怎么写、包怎么分层、lint/测试配置 → [`standard/`](../standard/README.md)
-- 业务链路怎么跑 → [`flow/`](../flow/README.md)
+- 业务链路怎么跑 / 业务约束与不变量 → [`flow/`](../flow/README.md)（五位一体；业务约束节是 `doc-impact.sh context` 数据源）
 - 架构骨架与定位 → 本目录其余文档
 
 ## 前端交互验证怎么跑

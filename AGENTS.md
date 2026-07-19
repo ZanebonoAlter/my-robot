@@ -3,21 +3,22 @@
 Agent guide for coding assistants working in `Syntopica` (`D:\project\my-robot`).
 
 ## Project Snapshot
+
 - Syntopica: Nuxt 4 frontend + Go backend (Gin/GORM), single-user, no auth.
 - Frontend API: `http://localhost:5000/api`; WebSocket: `ws://localhost:5000/ws`.
 - PostgreSQL + pgvector for persistence; Redis optional for job queues.
 - 和用户沟通使用中文，开发环境 Windows, 返回的回答尽量用大白话，接地气，能让用户理解。
-- 使用 openspec 编写任务时， 必须遵循 `docs/reference/开发执行规范.md` 
+- 使用 openspec 编写任务时， 必须遵循 `docs/reference/开发执行规范.md`
 
 ## 开发环境 (Development Environment)
 
 | 项目 | 说明 |
-|------|------|
-| OS | **Windows**（WSL2 `bash` 可用，但路径使用 Windows 格式如 `D:/project/...`）|
-| 数据库 | **Docker**：`docker compose -f docker-compose.pg.yml up -d` 启动 PostgreSQL（pgvector），默认端口 `5432`，用户/密码为 `postgres`，库名为 `syntopica`（对应 `docker-compose.pg.yml` 的 `POSTGRES_DB` 默认值）。数据持久化在 `./data/` 下。`docker compose -f docker-compose.pg.yml down` 停止。|
-| Python | **uv**：需要 Python 脚本/工具时使用 `uv`（如 `uv run script.py`、`uv add package`）。Python 集成测试位于 `tests/workflow/`、`tests/firecrawl/`。|
-| Node.js | `pnpm`（要求 corepack 启用）。详见 `front/AGENTS.md`。|
-| Go | 直接使用系统 Go 工具链。详见 `backend-go/AGENTS.md`。|
+| ------ | ------ |
+| OS | **Windows**（WSL2 `bash` 可用，但路径使用 Windows 格式如 `D:/project/...`） |
+| 数据库 | **Docker**：`docker compose -f docker-compose.pg.yml up -d` 启动 PostgreSQL（pgvector），默认端口 `5432`，用户/密码为 `postgres`，库名为 `syntopica`（对应 `docker-compose.pg.yml` 的 `POSTGRES_DB` 默认值）。数据持久化在 `./data/` 下。`docker compose -f docker-compose.pg.yml down` 停止。 |
+| Python | **uv**：需要 Python 脚本/工具时使用 `uv`（如 `uv run script.py`、`uv add package`）。Python 集成测试位于 `tests/workflow/`、`tests/firecrawl/`。 |
+| Node.js | `pnpm`（要求 corepack 启用）。详见 `front/AGENTS.md`。 |
+| Go | 直接使用系统 Go 工具链。详见 `backend-go/AGENTS.md`。 |
 
 ## Headroom (Context Compression)
 
@@ -37,8 +38,9 @@ cd front && pnpm dev
 ```
 
 ## Reference Docs (authoritative source)
+
 - **Code Standards**: `docs/reference/standard/` — 代码规范/项目约束/lint/测试配置的**唯一权威源**（前后端分文件夹）
-- **Business Flow**: `docs/reference/flow/` — 业务链路概要设计（按大功能切，配 mermaid，跨端）
+- **Business Flow**: `docs/reference/flow/` — 五位一体活文档（需求说明 / 链路设计 / 业务约束与不变量 / 代码入口 / 变更溯源），替代原 user-guide；「业务约束」节是 `doc-impact.sh context` 的数据源
 - **Architecture**: `docs/reference/architecture/` — 架构定位与骨架；`architecture/map.md` 是业务域→流程→代码入口的索引地图
 - **API**: `docs/reference/api/`
 - **Database**: `docs/reference/database/`
@@ -50,12 +52,14 @@ cd front && pnpm dev
 > `development.md` / `testing.md` 的规范内容已迁入 `standard/`，仅保留构建/运行参考。
 
 ## Repo Layout
+
 - `front/`: Nuxt 4, Vue 3, TypeScript, Pinia, Tailwind CSS v4.
 - `backend-go/`: Gin, GORM, PostgreSQL + pgvector.
 - `docs/`: reference/ (活文档，含 flow 变更溯源) + v1.x/ (里程碑，可选) + experience/.
 - `tests/workflow/`, `tests/firecrawl/`: Python integration tests.
 
 ## Key Entry Points
+
 - `README.md`, `front/app/app.vue`, `front/app/api/client.ts`, `front/app/stores/api.ts`
 - `backend-go/cmd/server/main.go`, `backend-go/internal/app/router.go`, `backend-go/internal/app/runtime.go`
 
@@ -68,12 +72,14 @@ cd front && pnpm dev
 **Pre-push check**: `cd backend-go && golangci-lint run ./... && go vet ./... && go test ./... && go build ./...` && `cd front && pnpm lint && pnpm exec nuxi typecheck && pnpm test:unit && pnpm build`
 
 ## AI Behavior Rules
+
 - Do not add linters, formatters, or tooling unless asked.
 - Do not assume Python backend; the product backend is Go.
 - Ignore unrelated dirty-worktree changes. Verify smallest relevant command after edits.
 - git提交使用 zanebonoalter <380207345@qq.com>
 - **测试只跑本次修改影响的包**，不要跑全量 `go test ./...`。例如改了 `daily_report` 和 `ws`，就只跑 `go test ./internal/domain/daily_report ./internal/platform/ws`。
 - **前端 pnpm 编译/测试类命令（typecheck / build / test:unit）必须通过 Windows cmd 执行**，WSL 环境缺少 native binding（typecheck 如 `@oxc-parser/binding-linux-x64-gnu`；test:unit 经 Vite→rollup 缺 `@rollup/rollup-linux-x64-gnu`）会失败。lint 可在 WSL 跑。权威定义见 [`standard/frontend/testing.md`](docs/reference/standard/frontend/testing.md) §跨平台运行 + §常见陷阱。示例：
+
   ```bash
   # lint — WSL 可用
   cd front && pnpm lint
@@ -82,12 +88,13 @@ cd front && pnpm dev
   cmd.exe /C "cd /d D:\project\Syntopica\front && pnpm build"
   cmd.exe /C "cd /d D:\project\Syntopica\front && pnpm test:unit 2>&1"
   ```
+
 - Frontend edits → `pnpm lint` / `pnpm exec nuxi typecheck` / `pnpm test:unit` / `pnpm build`。
 - Backend edits → `golangci-lint run ./...` / targeted `go test` first, then `go test ./...` / `go build ./...`。
 - Docs-only edits: consistency check unless behavior changed.
 - **pi 增量门禁（自动）**：`.pi/extensions/quality-gate.ts` 已挂 `turn_end`，每回合结束若改了代码，自动跑后端 `golangci-lint`+`go vet`+`go build` / 前端 `pnpm lint`，失败以 `steer` 消息喂回。agent 见到失败消息**必须修**，不得忽略。不跑 `go test`/typecheck/build（影响包不可自动判定/需 cmd.exe），这些仍由 agent 手动跑 + §11 归档门禁兜底。门禁分层见 `docs/reference/开发执行规范.md` §4.1。
 - Keep code changes minimal and scoped. Match existing code style.
-- 完成任务后更新维护 `./docs/reference/` 知识库；openspec change 执行走 `开发执行规范.md` §0.6 标准编排流程，归档前满足 §11 门禁，归档后按 §12 补 flow 变更溯源链接（archive 即永久家，v1.x 里程碑可选）。
+- 完成任务后更新维护 `./docs/reference/` 知识库；openspec change 执行走 `开发执行规范.md` §0.6 标准编排流程（**apply 启动跑 `doc-impact.sh suggest`+`context`，归档前跑 `doc-impact.sh verify`+`check-standards.sh`**），归档前满足 §11 门禁，归档后按 §12 补 flow 变更溯源链接（archive 即永久家，v1.x 里程碑可选）。
 - **开工前/完工后必须汇报"部署后影响 + 需要的操作"**：每个 change 完工汇报必须包含一节明确告诉用户——(a) 部署/合并后用户可见行为会发生什么变化；(b) 需要用户手动执行的操作（如重新生成数据、清理、配置）；(c) 旧数据如何降级。避免用户打开界面才发现行为变了产生误会。涉及数据迁移、状态机变更、UI 分区变更时尤其强制。
 
 子线程派发参考（pi 的 subagent 派发如何选供应商与模型）:
@@ -99,7 +106,7 @@ cd front && pnpm dev
 **任务→模型全称对照**（`model` 参数照填下表全称）：
 
 | 任务类型 | model 全称 |
-|---------|------------|
+| --------- | ------------ |
 | 简单/重复劳动、编译修复脏活累活 | `deepseek/deepseek-v4-flash` |
 | 实现后端功能较复杂、TDD | `zai-coding-cn/glm-5.2` |
 | 核心逻辑实现、架构级选型、疑难杂症 | `zai-coding-cn/glm-5.2` |
@@ -111,6 +118,7 @@ cd front && pnpm dev
 > change 执行的完整编排（主线程调度 + 子线程派发六步）见 `docs/reference/开发执行规范.md` §0.6。
 
 ## Browser Automation
+
 Use `agent-browser`: `open <url>` → `snapshot -i` → `click @eX` / `fill @eX "text"` → re-snapshot.
 
 ---
@@ -123,6 +131,7 @@ Behavioral guidelines to reduce common LLM coding mistakes. Merge with project-s
 **Don't assume. Don't hide confusion. Surface tradeoffs.**
 
 Before implementing:
+
 - State your assumptions explicitly. If uncertain, ask.
 - If multiple interpretations exist, present them - don't pick silently.
 - If a simpler approach exists, say so. Push back when warranted.
@@ -145,12 +154,14 @@ Ask yourself: "Would a senior engineer say this is overcomplicated?" If yes, sim
 **Touch only what you must. Clean up only your own mess.**
 
 When editing existing code:
+
 - Don't "improve" adjacent code, comments, or formatting.
 - Don't refactor things that aren't broken.
 - Match existing style, even if you'd do it differently.
 - If you notice unrelated dead code, mention it - don't delete it.
 
 When your changes create orphans:
+
 - Remove imports/variables/functions that YOUR changes made unused.
 - Don't remove pre-existing dead code unless asked.
 
@@ -161,11 +172,13 @@ The test: Every changed line should trace directly to the user's request.
 **Define success criteria. Loop until verified.**
 
 Transform tasks into verifiable goals:
+
 - "Add validation" → "Write tests for invalid inputs, then make them pass"
 - "Fix the bug" → "Write a test that reproduces it, then make it pass"
 - "Refactor X" → "Ensure tests pass before and after"
 
 For multi-step tasks, state a brief plan:
+
 ```
 1. [Step] → verify: [check]
 2. [Step] → verify: [check]
@@ -216,6 +229,7 @@ context-mode 提供 11 个 `ctx_*` 工具。下列规则保护上下文窗口，
 ### 并发 I/O 批处理
 
 多 URL 抓取或多 API 调用时，带上 `concurrency: N`（1-8）：
+
 - 网络类（`gh`、`curl`、多区域云查询）用 `concurrency: 4-8`。
 - CPU 密集或共享状态（`npm test`、`build`、`lint`、同仓库写）保持 `concurrency: 1`。
 - GitHub API 限流：`gh` 调用上限 4。
@@ -239,7 +253,7 @@ context-mode 提供 11 个 `ctx_*` 工具。下列规则保护上下文窗口，
 ### ctx 命令
 
 | 命令 | 动作 |
-|------|------|
+| ------ | ------ |
 | `ctx stats` | 调 `stats` MCP 工具，原样展示完整输出 |
 | `ctx doctor` | 调 `doctor` MCP 工具，跑返回的 shell 命令，按 checklist 展示 |
 | `ctx upgrade` | 调 `upgrade` MCP 工具，跑返回的 shell 命令，按 checklist 展示 |

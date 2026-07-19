@@ -6,7 +6,7 @@
 ## 这层装什么
 
 | 写的内容 | 放哪 |
-|---------|------|
+| --------- | ------ |
 | 代码怎么写（命名、import、错误处理、目录归属） | `frontend/code-style.md` / `backend/code-style.md` |
 | 双主题 / 设计系统 / Token 架构 | `frontend/theming.md` |
 | 交互友好性 / 可观测性展示分层（状态标记左对齐、状态说明不伪装动作） | `frontend/interaction-conventions.md` |
@@ -41,11 +41,14 @@ standard/
 
 ## 验收门禁
 
-本目录由 `scripts/check-standards.sh`（L1）静态校验，归档前随《开发执行规范》§11 归档门禁一起跑：
+本目录由 `scripts/check-standards.sh`（L1）静态校验，归档前随《开发执行规范》§11.4 归档门禁一起跑。脚本现含 A-G 段：
 
-- 每个 `standard/**/*.md` 至少被一处 AGENTS.md 或本 README 引用（防孤立）
-- 后端 `internal/<domain>/` 都在 package-layout.md 白名单内、且都有 `handler/` 子目录
-- 前端 ESLint 配置存在、Token 三层目录存在、双主题（editorial/dark）定义存在
+- **A** 文档完整性（standard/flow 关键文件存在 + flow 五段式结构校验）
+- **B/C** 后端 domain 白名单 + 三层包结构 / 前端 ESLint + Token 三层 + 双主题
+- **D** 防孤立引用（每个 `standard/**/*.md` 至少被一处 AGENTS.md 或本 README 引用）
+- **E** flow 变更溯源链接（archive 后校验）
+- **F** doc-impact 声明对账（`doc-impact.sh verify`，见《开发执行规范》§11.4）
+- **G** 导航层文档死链检查（docs/README + reference 一级 + flow/architecture 导航文档）
 
 ## 与《开发执行规范》的边界
 

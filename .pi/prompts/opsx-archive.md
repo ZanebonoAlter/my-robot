@@ -47,6 +47,15 @@ Archive a completed change in the experimental workflow.
 
    **If no tasks file exists:** Proceed without task-related warning.
 
+   **归档门禁（doc-impact + check-standards，强制）**：archive 前必须跑且零失败：
+
+   ```bash
+   bash scripts/doc-impact.sh verify "<changeRoot>"   # 文档声明对账（F 段）
+   bash scripts/check-standards.sh                    # 含 F 段 doc-impact + G 段死链
+   ```
+
+   失败则修复后再 archive（见 `docs/reference/开发执行规范.md` §11.4）。
+
 4. **Assess delta spec sync state**
 
    Use `artifactPaths.specs.existingOutputPaths` from status JSON to check for delta specs. If none exist, proceed without sync prompt.
@@ -65,6 +74,7 @@ Archive a completed change in the experimental workflow.
 5. **Perform the archive**
 
    Create an `archive` directory under `planningHome.changesDir` if it doesn't exist:
+
    ```bash
    mkdir -p "<planningHome.changesDir>/archive"
    ```
@@ -149,6 +159,7 @@ Target archive directory already exists.
 ```
 
 **Guardrails**
+
 - Always prompt for change selection if not provided
 - Use artifact graph (openspec status --json) for completion checking
 - Don't block archive on warnings - just inform and confirm

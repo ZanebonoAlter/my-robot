@@ -9,6 +9,7 @@ export function useSchedulerStatus() {
   const lastSchedulerTriggerAt = ref<number | null>(null)
   const schedulerLoading = ref(false)
   const schedulerTriggerLoading = ref(false)
+  const scheduleTimeLoading = ref(false)
   const schedulerError = ref<string | null>(null)
   const schedulerSuccess = ref<string | null>(null)
   let schedulerPollTimer: ReturnType<typeof setTimeout> | null = null
@@ -82,6 +83,29 @@ export function useSchedulerStatus() {
     }
   }
 
+  async function updateScheduleTime(name: string, time: string) {
+    scheduleTimeLoading.value = true
+    schedulerError.value = null
+    schedulerSuccess.value = null
+    try {
+      const { updateScheduleTime: update } = useSchedulerApi()
+      const response = await update(name, time)
+      if (response.success) {
+        schedulerSuccess.value = response.message || '定时时间已更新'
+        setTimeout(() => { schedulerSuccess.value = null }, 2000)
+        await loadSchedulersStatus()
+        return true
+      }
+      schedulerError.value = response.error || '更新定时时间失败'
+      return false
+    } catch {
+      schedulerError.value = '更新定时时间失败'
+      return false
+    } finally {
+      scheduleTimeLoading.value = false
+    }
+  }
+
   onUnmounted(() => {
     stopSchedulerPolling()
   })
@@ -90,5 +114,6 @@ export function useSchedulerStatus() {
     schedulerStatuses, schedulerTriggerFeedback, schedulerLoading,
     schedulerTriggerLoading, schedulerError, schedulerSuccess,
     loadSchedulersStatus, stopSchedulerPolling, triggerScheduler,
+    scheduleTimeLoading, updateScheduleTime,
   }
 }

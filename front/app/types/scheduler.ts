@@ -124,4 +124,5 @@ export interface SchedulerStatus {
 	stale_processing_count?: number
 	stale_processing_article?: SchedulerArticleRef | null
 	last_run_summary?: SchedulerLastRunSummary | null
+	schedule_time?: string
 }

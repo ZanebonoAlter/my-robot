@@ -21,5 +21,9 @@ export function useSchedulerApi() {
       return triggerSchedulerRequest(name, params)
     },
 
+    async updateScheduleTime(name: string, time: string) {
+      return apiClient.put<{ name: string; time: string }>(`/schedulers/${name}/schedule-time`, { time })
+    },
+
   }
 }

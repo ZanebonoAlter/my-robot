@@ -220,6 +220,13 @@ func (s *SemanticBoardUpgradeService) GenerateSuggestions(ctx context.Context, m
 		}
 		filtered := filterSemanticBoardUpgradeSuggestions(raw, validAuxiliaryIDs)
 		for _, sug := range validateMergeTargets(filtered, shortlistByAux) {
+			// LLM 偶尔返回 merge 但缺 target_board_id（只给 board_label），落库后确认时报
+			// "target board id is required" 400。降级为 create_new（LLM 给了 board_label，
+			// 视作新建意图；target_off_shortlist 标注保留在 evidence 作审计）。
+			if sug.Decision == SemanticBoardUpgradeDecisionMergeIntoExisting && (sug.TargetBoardID == nil || *sug.TargetBoardID == 0) {
+				sug.Decision = SemanticBoardUpgradeDecisionCreateNew
+				sug.TargetBoardID = nil
+			}
 			if sug.Confidence == "" {
 				sug.Confidence = "llm"
 			}

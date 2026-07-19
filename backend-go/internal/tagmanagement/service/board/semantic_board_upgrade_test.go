@@ -561,26 +561,34 @@ func TestSemanticBoardUpgradeDiscoverNewMergeTargetValidation(t *testing.T) {
 	fakeLLM := &fakeSemanticBoardUpgradeLLM{suggestions: []SemanticBoardUpgradeSuggestion{
 		{Decision: SemanticBoardUpgradeDecisionMergeIntoExisting, TargetBoardID: &validTarget, AuxiliaryLabelIDs: []uint{auxA.ID, auxB.ID}, BoardLabel: "DeepSeek→生成式AI"},
 		{Decision: SemanticBoardUpgradeDecisionMergeIntoExisting, TargetBoardID: &invalidTarget, AuxiliaryLabelIDs: []uint{auxA.ID, auxB.ID}, BoardLabel: "DeepSeek→其他"},
+		// LLM 偶尔返回 merge 但缺 target_board_id（只给 board_label）→ 降级 create_new
+		{Decision: SemanticBoardUpgradeDecisionMergeIntoExisting, TargetBoardID: nil, AuxiliaryLabelIDs: []uint{auxA.ID, auxB.ID}, BoardLabel: "全新板块"},
 	}}
 	service := NewSemanticBoardUpgradeService(db, fakeLLM, nil)
 
 	suggestions, _, err := service.GenerateSuggestions(context.Background(), "discover_new")
 
 	require.NoError(t, err)
-	require.Len(t, suggestions, 2, "方案B: off-shortlist merge 降级保留不丢弃")
-	// 两条 merge 都在：shortlist 内的不标注，超出 shortlist 的标 target_off_shortlist
-	var inShortlist, offShortlist *SemanticBoardUpgradeSuggestion
+	require.Len(t, suggestions, 3, "方案B + 缺target降级: 3 条全保留")
+	// 按 board_label 定位三条
+	var inShortlist, offShortlist, downgraded *SemanticBoardUpgradeSuggestion
 	for i := range suggestions {
-		if suggestions[i].TargetBoardID != nil && *suggestions[i].TargetBoardID == validTarget {
+		switch suggestions[i].BoardLabel {
+		case "DeepSeek→生成式AI":
 			inShortlist = &suggestions[i]
-		} else {
+		case "DeepSeek→其他":
 			offShortlist = &suggestions[i]
+		case "全新板块":
+			downgraded = &suggestions[i]
 		}
 	}
 	require.NotNil(t, inShortlist, "shortlist 内的 merge 保留")
 	require.NotNil(t, offShortlist, "超出 shortlist 的 merge 也保留（方案B）")
+	require.NotNil(t, downgraded, "缺 target 的 merge 保留")
 	require.Nil(t, inShortlist.Evidence["target_off_shortlist"], "shortlist 内不标注")
 	require.Equal(t, true, offShortlist.Evidence["target_off_shortlist"], "超出 shortlist 标注 target_off_shortlist")
+	require.Equal(t, SemanticBoardUpgradeDecisionCreateNew, downgraded.Decision, "缺 target 的 merge 降级为 create_new")
+	require.Nil(t, downgraded.TargetBoardID, "降级后 target 清空")
 }
 
 // TestSemanticBoardUpgradeSystemPromptModeAware verifies the LLM system-prompt

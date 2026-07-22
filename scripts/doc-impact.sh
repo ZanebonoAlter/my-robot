@@ -131,6 +131,8 @@ cmd_context() {
 
 	local files
 	files="$(changed_files "$base" | sort -u)"
+
+	# ========== 业务规范（what）：按命中 domain dump flow 业务约束节 ==========
 	# 从改动文件提取命中的 backend domain
 	local hit_domains=""
 	for d in $DOMAIN_WHITELIST; do
@@ -139,47 +141,96 @@ cmd_context() {
 		fi
 	done
 
+	local what_out=""
 	if [ -z "${hit_domains// /}" ]; then
-		echo '未识别到相关业务约束 flow；如改动涉及业务逻辑，请主动查阅 docs/reference/flow/'
-		exit 0
+		what_out="未识别到相关业务约束 flow；如改动涉及业务逻辑，请主动查阅 docs/reference/flow/"
+	else
+		what_out="命中 domain:${hit_domains}"
+		what_out="$what_out"$'\n'"（按 flow 文档「代码入口」节关联匹配，dump 其「业务约束与不变量」节）"
+		local dumped=0
+		for flow in docs/reference/flow/*.md; do
+			[ -f "$flow" ] || continue
+			[ "$(basename "$flow")" = "README.md" ] && continue
+			# 提取「代码入口」节，看是否提及任一命中 domain
+			local entry_section
+			entry_section="$(awk '/^## 代码入口/{f=1;next} /^## /{f=0} f' "$flow" 2>/dev/null)"
+			local matched=0
+			for d in $hit_domains; do
+				if echo "$entry_section" | grep -qE "internal/$d/|/$d/|$d"; then
+					matched=1
+					break
+				fi
+			done
+			[ "$matched" -eq 0 ] && continue
+
+			what_out="$what_out"$'\n\n'"──────── $(basename "$flow") ────────"
+			local constraint_section
+			constraint_section="$(awk '/^## 业务约束与不变量/{f=1;next} /^## /{f=0} f' "$flow" 2>/dev/null)"
+			if [ -n "$constraint_section" ]; then
+				what_out="$what_out"$'\n'"$constraint_section"
+			else
+				what_out="$what_out"$'\n'"（⚠ 该 flow 尚未补齐「业务约束与不变量」节）"
+			fi
+			dumped=$((dumped + 1))
+		done
+		if [ "$dumped" -eq 0 ]; then
+			what_out="$what_out"$'\n\n'"命中 domain 但无 flow 文档「代码入口」节关联（flow 五段式可能未补齐）。如改动涉及业务逻辑，请主动查阅 docs/reference/flow/ 并补全「代码入口」节。"
+		fi
 	fi
 
-	echo "命中 domain:${hit_domains}"
-	echo "（按 flow 文档「代码入口」节关联匹配，dump 其「业务约束与不变量」节）"
-	echo
+	# ========== 执行规范（how）：按 doc-impact-applies 匹配 standard Requirements ==========
+	# 遍历 standard 文档，按文档头 doc-impact-applies 标签（逗号分隔多 token，路径前缀匹配）
+	# 命中改动代码路径的文档 → dump 其 ## Requirements 节；MUST 级条目前缀 🛑。
+	local how_out="" how_hit=0
+	while IFS= read -r std; do
+		[ -f "$std" ] || continue
+		# 解析文档头 doc-impact-applies 标签（取该行，去前缀与可能的 -->）
+		local applies
+		applies="$(grep 'doc-impact-applies:' "$std" 2>/dev/null | head -1 | sed 's/.*doc-impact-applies://; s/-->.*//; s/^[[:space:]]*//; s/[[:space:]]*$//')"
+		[ -z "$applies" ] && continue   # 无 applies 标签的文档跳过（过渡期未 spec 化）
 
-	local dumped=0
-	for flow in docs/reference/flow/*.md; do
-		[ -f "$flow" ] || continue
-		[ "$(basename "$flow")" = "README.md" ] && continue
-		# 提取「代码入口」节，看是否提及任一命中 domain
-		local entry_section
-		entry_section="$(awk '/^## 代码入口/{f=1;next} /^## /{f=0} f' "$flow" 2>/dev/null)"
-		local matched=0
-		for d in $hit_domains; do
-			if echo "$entry_section" | grep -qE "internal/$d/|/$d/|$d"; then
+		# 逗号分隔多 token，每个做路径前缀匹配（token 去尾斜杠；file==token 或以 token/ 开头）
+		local tok matched=0 applies_spaced
+		applies_spaced="$(printf '%s' "$applies" | tr ',' ' ' | tr -s ' ')"
+		for tok in $applies_spaced; do
+			tok="${tok%/}"
+			[ -z "$tok" ] && continue
+			local tok_re
+			tok_re="$(printf '%s' "$tok" | sed 's/[.[\*^$()+?{|\\]/\\&/g')"
+			if echo "$files" | grep -qE "^${tok_re}($|/)"; then
 				matched=1
 				break
 			fi
 		done
 		[ "$matched" -eq 0 ] && continue
 
-		echo "──────── $(basename "$flow") ────────"
-		local constraint_section
-		constraint_section="$(awk '/^## 业务约束与不变量/{f=1;next} /^## /{f=0} f' "$flow" 2>/dev/null)"
-		if [ -n "$constraint_section" ]; then
-			echo "$constraint_section"
-		else
-			echo "（⚠ 该 flow 尚未补齐「业务约束与不变量」节，待 docs-harness-consolidation task 5.2.1 填写）"
-		fi
-		echo
-		dumped=$((dumped + 1))
-	done
+		# dump ## Requirements 节（无此节的非 spec 化文档静默跳过，过渡期行为）
+		local req_section
+		req_section="$(awk '/^## Requirements/{f=1;next} /^## /{f=0} f' "$std" 2>/dev/null)"
+		[ -z "$req_section" ] && continue
 
-	if [ "$dumped" -eq 0 ]; then
-		echo "命中 domain 但无 flow 文档「代码入口」节关联（flow 五段式可能未补齐）。"
-		echo "如改动涉及业务逻辑，请主动查阅 docs/reference/flow/ 并补全「代码入口」节。"
+		# MUST 级别行前缀 🛑，SHOULD 前缀 [SHOULD]
+		req_section="$(printf '%s' "$req_section" | awk '
+/^\*\*级别\*\*:[[:space:]]*MUST/ { print "🛑 " $0; next }
+/^\*\*级别\*\*:[[:space:]]*SHOULD/ { print "[SHOULD] " $0; next }
+{ print }
+')"
+
+		how_out="$how_out"$'\n\n'"──────── $(basename "$std") ────────"
+		how_out="$how_out"$'\n'"$req_section"
+		how_hit=$((how_hit + 1))
+	done < <(find docs/reference/standard -name '*.md' ! -name 'README.md' 2>/dev/null | sort)
+
+	if [ "$how_hit" -eq 0 ]; then
+		how_out="未识别到相关执行规范"
 	fi
+
+	# ========== 输出双段 ==========
+	echo "──── 业务规范（理解任务：what）────"
+	printf '%s\n' "$what_out"
+	echo
+	echo "──── 执行规范（写代码：how）────"
+	printf '%s\n' "$how_out"
 	exit 0
 }
 

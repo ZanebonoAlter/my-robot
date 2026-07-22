@@ -134,19 +134,79 @@ SemanticBoard 管理面板
   → 辅助标签入库: L1 slug匹配 → L2 embedding合并 → L3 新建
   → SemanticBoard 匹配: 三规则挂载 → topic_tag_board_labels
   → 升级建议: 见上「升级建议生命周期」（持久化 + 双签名 + 观察池 + 定时生成）
-  → 辅助标签治理: 禁用、alias合并、composition移除
-  → 回填: all / unassigned / board 三种模式
+  → 辅助标签治理: 禁用、alias合并、composition移除、suggest-auxiliaries、clusters、gc
+  → 回填: all / unassigned / board 三种模式 + backfill-embeddings + rematch-all
 ```
+
+#### 板块运维端点（`board_crud_handler.go` / `board_match_handler.go` / `board_upgrade_handler.go`）
+
+| 端点 | 业务用途 |
+| ---- | -------- |
+| `POST /api/semantic-boards/backfill` | 入队一个 backfill job（`SemanticBoardBackfillRequest`，all/unassigned/board 三模式），返回 job 对象 |
+| `GET /api/semantic-boards/backfill/:id` | 查询 backfill job 状态/进度（前端 `BackfillProgress.vue` 轮询） |
+| `POST /api/semantic-boards/backfill-embeddings` | 为 `embedding IS NULL` 的板块生成 embedding（一次性补齐；`board-direction-check` 引入板块向量后的回填入口） |
+| `POST /api/semantic-boards/rematch-all` | 取所有已挂载 `topic_tag`，逐个重跑 `MatchTopicTag`，返回 `{success, failed, total}`（匹配阈值调整后全量重算） |
+| `GET/PUT /api/semantic-boards/matching-config` | 读/写匹配阈值（`ai_settings` 中 13 个 `semantic_board_match_*` key；PUT 后调 `InvalidateMatchingConfigCache` 失效缓存）。前端 `MatchingConfigDialog.vue` |
+
+#### 辅助标签治理与建议（`board_crud_handler.go` + `service/auxlabel/`）
+
+| 端点 | 业务用途 |
+| ---- | -------- |
+| `GET /api/semantic-boards/suggest-auxiliaries?label=&description=` | 全局建议：embed 查询文本 → 与 active aux cosine 排序，分页返回候选 |
+| `GET /api/semantic-boards/:id/suggest-auxiliaries` | 板块级建议：以板块 `label+description` 为查询，排除已在该板块 composition 里的 aux |
+| `GET /api/auxiliary-labels/clusters` | 聚类：cosine 距离 < 0.2 的连通分量（size≥2），10 分钟缓存，`?refresh=true` 强制重算 |
+| `POST /api/auxiliary-labels/gc` | GC 回收，`mode` ∈ `dry_run/disable/delete/recalculate`，可选 `grace_days` |
+| `POST /api/auxiliary-labels/merge-alias` | alias 合并（source→target） |
+| `POST /api/auxiliary-labels/:id/disable` | 禁用单个 aux |
+| `GET/POST /api/semantic-boards/:id/composition`、`DELETE /:id/composition/:aux` | 板块 composition 增删查 |
+
+前端治理 UI（`features/tags/components/`）：`AuxiliaryLabelPool.vue`（辅助标签池）、`AuxiliaryLabelPicker.vue`（选择器）、`BoardCompositionPanel.vue`（板块 composition 管理）、`composables/useAuxiliaryLabels.ts`。
+
+### 标签级 watched tags（区别于话题级 topic-watch）
+
+用户可在标签管理里关注（watch）任意标签，用于按标签筛选文章/日报。这与 `flow/daily-report.md` / `flow/topic-graph.md` 的**话题级** topic-watch（watch 持久话题 → 日报评估命中）是两套独立机制：一个 watch 的是**标签**，一个 watch 的是**持久话题**。
+
+路由（`tagmanagement/handler/watched_tags_handler.go` + `service/watched/watched_tags_service.go`，挂在 `/api/topic-tags` 下）：
+
+| 端点 | 语义 |
+| ---- | ---- |
+| `GET /api/topic-tags/watched` | 列出所有 `is_watched && status=active` 的标签，附 abstract 元信息（`is_abstract` + `child_slugs`，查 `topic_tag_relations`） |
+| `POST /api/topic-tags/:tag_id/watch` | 标记 `is_watched=true`、`watched_at=now` |
+| `POST /api/topic-tags/:tag_id/unwatch` | 取消关注（`is_watched=false`、`watched_at=NULL`） |
+
+`GetWatchedTagIDsExpanded` 递归展开被关注标签（含抽象标签）的全部子标签 ID，供下游按 watched 标签集合做文章/日报筛选时使用。前端：`api/watchedTags.ts`。
+
+### 标签合并预览（merge-preview，流式扫描/评估）
+
+> 该工作流替代了已废弃的「标签自动合并 scheduler」（见 `flow/scheduler.md`，旧 scheduler 已不存在）。合并不再由定时任务自动执行，而是由用户驱动的 scan → evaluate → 分组 → dismiss/merge 流水线完成。
+
+路由（`tagmanagement/handler/tag_merge_preview_handler.go` + `service/merge/` + `service/core/`，挂在 `/api/topic-tags` 下）：
+
+| 端点 | 语义 |
+| ---- | ---- |
+| `POST /api/topic-tags/merge-preview/scan` | 启动异步全量扫描（`StartFullScan` 单例锁，已在跑返回 409） |
+| `GET /api/topic-tags/merge-preview/scan/stream` | SSE 流式推送扫描进度 |
+| `POST /api/topic-tags/merge-preview/evaluate` | 启动异步 LLM 评估（`StartEvaluation`，对候选对逐个裁决） |
+| `GET /api/topic-tags/merge-preview/evaluate/stream` | SSE 流式推送评估进度 |
+| `GET /api/topic-tags/merge-preview` | 读 pending 的 `TagMergeSuggestion`，过滤 `should_merge=false`，按目标标签分组返回 |
+| `GET /api/topic-tags/merge-preview/status` | 返回 scan/eval 是否在跑 |
+| `POST /api/topic-tags/merge-preview/add-to-group` | 手动把标签加入某合并组（`source=manual`，`OnConflict DoNothing`） |
+| `POST /api/topic-tags/merge-preview/dismiss` | 标记候选对 `status=dismissed` |
+| `POST /api/topic-tags/merge-with-name` | 真正执行硬合并：事务内 `FOR UPDATE` 锁两端 → 可选 rename + slug 冲突检测 → `HardMergeTags` → 提交后 `EnqueueMergeReembedding` 入重算队列 → 相关 suggestion 标 `merged` |
+
+工作流：**scan**（全量扫描候选对，SSE 进度）→ **evaluate**（LLM 评估每对，SSE 进度）→ **merge-preview** 列表（按 target 分组）→ 用户对每组 **dismiss** / **add-to-group** / **merge-with-name**。合并后源标签的文章/关系迁移到目标标签，并触发 `merge-reembedding` 队列重算 embedding（见下「队列与回填运维」）。
+
+前端（`features/tags/components/`）：`TagMergePreview.vue`、`TagMergeGroup.vue`、`composables/useTagMergePreview.ts`、`api/tagMergePreview.ts`。后端 service：`service/merge/tag_merge_suggest.go`、`service/core/merge_suggestions.go`、`service/core/hard_merge.go`、`service/core/merge_reembedding_queue.go`。
 
 ### 叙事面板数据流
 
 ```text
-NarrativePanel
-  → loadBoardTimeline(date) → GET /api/narratives/boards/timeline
-  → loadScopes(date) → GET /api/narratives/scopes
-  → loadNarratives(date) → GET /api/narratives?date=...
-  → switchScope('category') → loadScopes → 展示 board_count
-  → triggerGeneration() → POST /api/narratives/regenerate
+NarrativePanel（叙事面板）【已下线】
+  原 NarrativePanel 调用的 /api/narratives/*（boards/timeline、scopes、list、regenerate）
+  路由已全部移除，narrative 生成管线已废弃（生成能力并入 daily_report 日报）。
+  narrative_summaries / narrative_boards 表仅保留只读历史，经
+  GET /api/semantic-boards/:id/narratives（getBoardNarratives）读取；
+  前端现以日报（BoardDailyReportTimeline 等）承载该视图。
 
 SemanticBoardPanel
   → loadBoards() → GET /api/semantic-boards
@@ -189,10 +249,25 @@ Event 类标签不随入库立即向量化，而是等描述与关键词生成�
 
 - **后端辅助标签**：`backend-go/internal/tagmanagement/service/auxlabel/`（`auxiliary_label_service.go` L1/L2/L3 去重、`addAlias`、alias 合并、composition 移除、禁用）。
 - **后端板块匹配 / 升级 / 回填**：`backend-go/internal/tagmanagement/service/board/`（`semantic_board_matching.go` 四规则 + 方向校验、`semantic_board_upgrade.go` 升级算法 + `MarkConfirmed` 事务联动、`board_upgrade_suggestion_persist.go` `ComputeSuggestionHash` 幂等 + `CountDismissedInCooldown` 冷却、`semantic_board_backfill.go` all/unassigned/board 三模式回填）。
-- **后端板块 handler**：`backend-go/internal/tagmanagement/handler/`（`board_crud_handler.go`、`board_match_handler.go`、`board_upgrade_handler.go` 升级建议资源、`tag_management_handler.go`）。
+- **后端板块 handler**：`backend-go/internal/tagmanagement/handler/`（`board_crud_handler.go` 板块 CRUD/运维端点/suggest-auxiliaries/clusters/gc、`board_match_handler.go` 匹配/rematch-all/matching-config、`board_upgrade_handler.go` 升级建议资源/backfill job、`tag_management_handler.go`）。
+- **后端标签关注 / 合并预览 / 队列 handler**：同目录下 `watched_tags_handler.go`（标签级 watched tags）、`tag_merge_preview_handler.go`（scan/evaluate SSE + dismiss/merge-with-name）、`tag_queue_handler.go`、`embedding_queue_handler.go`、`merge_reembedding_queue_handler.go`（见下「队列与回填运维」）。
+- **后端 watched/merge service**：`service/watched/watched_tags_service.go`、`service/merge/tag_merge_suggest.go`、`service/core/{merge_suggestions,hard_merge,merge_reembedding_queue,person_metadata_backfill}.go`。
 - **后端板块调度**：`backend-go/internal/admin/scheduler/job_board_upgrade_suggest.go`（定时 06:30 + watch GC）。
 - **后端时间线 / 叙事面板**：`backend-go/internal/topicgraph/`（`service/daily_report_*.go` 板块时间线、`handler/`）。
 - **前端**：`front/app/features/tags/components/UpgradeSuggestionPanel.vue`（升级建议面板）、`front/app/features/tags/components/TagsPage.vue`、`front/app/features/tags/composables/useTagsPage.ts`（SemanticBoardPanel / NarrativePanel）。
+
+## 队列与回填运维
+
+> settings 页 Queues section（`features/settings/components/SettingsSectionQueues.vue`）直接暴露下列三个队列给用户查看状态与 retry。
+
+| 队列 / 回填 | 路由组 | 用途 |
+| ----------- | ------ | ---- |
+| tag-queue | `/api/tag-queue/{status,tasks,retry,retag-today}` | 文章打标签任务队列（`TagJob`）。`retag-today` 把今日文章批量重新入队（`force_retag=true`）；对应 `flow/reading.md` 的打标签时机。前端 `features/settings/components/TagQueuePanel.vue` |
+| embedding/queue | `/api/embedding/queue/{status,tasks,retry}` | 标签/板块 embedding 生成队列（`EmbeddingQueueService`）。前端 `features/ai/components/EmbeddingQueuePanel.vue` |
+| embedding/merge-reembedding | `/api/embedding/merge-reembedding/{status,tasks,retry}` | 标签合并后重算 embedding 的独立队列；`merge-with-name` 提交后由 `EnqueueMergeReembedding` 入队（`MergeReembeddingQueueService`） |
+| person-metadata 回填 | `POST /api/embedding/queue/person-metadata/backfill` | 人物标签元数据回填（`service/core/person_metadata_backfill.go` 的 `BackfillPersonMetadata`） |
+
+handler 出处：`tagmanagement/handler/{tag_queue,embedding_queue,merge_reembedding_queue}_handler.go`。
 
 ## 变更溯源
 

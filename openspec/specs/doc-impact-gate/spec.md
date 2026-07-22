@@ -26,19 +26,27 @@ TBD - created by archiving change docs-harness-consolidation. Update Purpose aft
 
 ### Requirement: 业务约束上下文获取（apply 前置）
 
-apply 启动时 SHALL 运行 `bash scripts/doc-impact.sh context` 获取与本次改动相关的业务约束上下文：脚本按 git diff 命中的代码 domain，从命中的 flow 文档「业务约束与不变量」节提取内容，作为改代码前的约束上下文注入 agent。本要求是**前置必读**而非归档断言——context 输出不构成归档门禁 FAIL 条件，但 §0.6 编排强制 apply 阶段执行。
+apply 启动时 SHALL 运行 `bash scripts/doc-impact.sh context` 获取**双源**上下文：
 
-业务约束↔flow 的关联 SHALL 通过 flow 文档「代码入口」节对 domain 包名的匹配建立，不依赖硬编码 domain→flow 映射表。
+- **业务规范（what，理解任务）**：按 git diff 命中 domain，dump 相关 flow 文档「业务约束与不变量」节。
+- **执行规范（how，写对代码）**：按 git diff 命中代码路径，匹配 standard 文档头 `doc-impact-applies` 标签，dump 命中文档的 `## Requirements` 节；MUST 级条目前缀 🛑。
 
-#### Scenario: 命中相关 flow
+本要求是**前置必读**而非归档断言——context 输出不构成归档门禁 FAIL 条件，但 §0.6 编排强制 apply 阶段执行。
 
-- **WHEN** git diff 含 `backend-go/internal/reader/service/crawler.go` 且 `docs/reference/flow/content-enrichment.md`「代码入口」节提及 reader domain
-- **THEN** context 子命令输出 content-enrichment.md「业务约束与不变量」节全文
+#### Scenario: 命中执行规范
 
-#### Scenario: 无命中
+- **WHEN** git diff 含 `backend-go/internal/platform/airouter/router.go` 且 `ai-logging.md` 头 `doc-impact-applies` 含 `backend-go/internal/platform/airouter/`
+- **THEN** context 执行规范段输出 ai-logging.md 的 `## Requirements` 节，MUST 条目带 🛑
 
-- **WHEN** git diff 未命中任何 flow 文档「代码入口」节关联的 domain
-- **THEN** context 输出「未识别到相关业务约束 flow；如改动涉及业务逻辑，请主动查阅 docs/reference/flow/」且退出码 0
+#### Scenario: 无执行规范命中
+
+- **WHEN** git diff 未命中任何 standard 文档的 `doc-impact-applies` 标签
+- **THEN** context 执行规范段输出「未识别到相关执行规范」且退出码 0
+
+#### Scenario: 双源分列
+
+- **WHEN** context 同时命中业务规范与执行规范
+- **THEN** 输出分「业务规范（what）」「执行规范（how）」两段，各自标头，agent 同时看到任务理解与代码红线
 
 ### Requirement: 归档前对账（verify）
 

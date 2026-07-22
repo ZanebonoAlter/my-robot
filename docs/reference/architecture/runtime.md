@@ -99,7 +99,7 @@
 
 - `/api/embedding`：embedding 配置与队列管理
 - `/api/topic-tags`：关注标签、标签合并预览
-- `/api/narratives`：叙事摘要列表、详情、历史
+- ~~`/api/narratives`~~：已废弃（narrative 生成并入 daily_report；历史数据经 `/api/semantic-boards/:id/narratives` 只读）
 
 ### Scheduler API
 

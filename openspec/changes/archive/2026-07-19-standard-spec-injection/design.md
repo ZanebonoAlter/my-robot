@@ -18,7 +18,7 @@ doc-impact context 现只注入 what（左列）；本 change 补 how（右列�
 # <规范名>
 
 <!--
-doc-impact-applies: internal/platform/airouter/, *.LLM 调用
+doc-impact-applies: backend-go/internal/platform/airouter/, backend-go/internal/dataenrichment/
 -->
 
 ## Requirements
@@ -39,7 +39,7 @@ doc-impact-applies: internal/platform/airouter/, *.LLM 调用
 
 要素：
 
-- 文档头 HTML 注释 `doc-impact-applies: <代码路径模式>` —— 文档级适用范围（关联代码改动，支持 glob）
+- 文档头 HTML 注释 `doc-impact-applies: <代码路径模式>` —— 文档级适用范围（逗号分隔多 token，路径前缀匹配，详见 §4）
 - `## Requirements` —— 注入机制只提取此节
 - `### Requirement: <name>` —— 每条规范一个条目
 - `**级别**: MUST/SHOULD` —— MUST 注入时 🛑 突出
@@ -68,9 +68,20 @@ doc-impact-applies: internal/platform/airouter/, *.LLM 调用
 
 ## 4. 关联机制（代码 → standard）
 
-文档级 `doc-impact-applies` 标签（路径模式，支持 glob）。改了 `internal/platform/airouter/router.go` → 匹配 `ai-logging.md` 的 `applies: internal/platform/airouter/`。
+文档级 `doc-impact-applies` 标签。改了 `backend-go/internal/platform/airouter/router.go` → 匹配 `ai-logging.md` 的 `applies: backend-go/internal/platform/airouter/`。
+
+**匹配语义**：逗号分隔多 token；每个 token 做**路径前缀匹配**——以 `/` 结尾视作目录前缀（匹配其下所有文件），否则整路径前缀。token 须用**仓库根相对路径**（与 `git diff --name-only` 输出一致，如 `backend-go/internal/...`）。**本 change 不支持 glob 通配符**（`*`/`?`），起步够用，远期再加。
 
 起步用文档级（简单，对称 flow 的 domain 关联）。条目级精准标签（每个 Requirement 独立 applies）为远期，非本 change。
+
+### 标签对照（勿混）
+
+| 标签 | 出现位置 | 语义（方向） | 消费者 |
+| --- | --- | --- | --- |
+| `<!-- doc-impact: ... -->` | change 的 tasks.md | **change → 文档域**：声明本次改动影响哪些文档域（menu 8 选项） | `doc-impact.sh verify` 对账 |
+| `<!-- doc-impact-applies: ... -->` | standard 文档头 | **文档 → 代码**：声明本规范适用哪些代码路径 | `doc-impact.sh context` how 注入 |
+
+两者名字相近、方向相反，agent 编写/阅读时须按上表区分。
 
 ## 5. 粒度与 token 控制
 
@@ -89,10 +100,18 @@ MUST 条目（如禁绕过 airouter）注入时 🛑 突出，agent 看到即知
 `ai-logging.md` 已有 R1-R4 + Anti-Patterns 半结构，spec 化成本最低：
 
 - R1-R4 → 4 个 Requirement（级别 MUST）+ Scenario
-- Anti-Patterns 并入对应 Requirement 的 `AND NOT` 句式
-- 文档头加 `doc-impact-applies: internal/platform/airouter/, backend-go/internal/dataenrichment/service/`（LLM 调用方）
+- Anti-Patterns 按条目归宿拆解：
+  - 「绕过 airouter 直连」→ R1 的 `AND NOT`
+  - 「AICallLog 不存 prompt」「operation 留空/无意义值」→ R2 的 `AND NOT`
+  - 「agent loop 不传 session_id」→ R3 的 `AND NOT`
+  - 「新增 AI 功能不更新已接入清单」→ 不属 R1-R4，独立 `### Requirement: 规范清单维护`（级别 SHOULD）
+- 文档头加 `doc-impact-applies: backend-go/internal/platform/airouter/, backend-go/internal/dataenrichment/`（LLM 调用方）
 - context 扩展后验证：改 airouter 代码 → context 输出含 ai-logging Requirements
 
 ## 8. check-standards 校验（本 change 不做）
 
 spec 化铺开后可加 check-standards 校验「每个 standard 文档有 `## Requirements` 节」（类似 flow 五段式）。本 change 先靠试点验证，铺开 change 再加校验。
+
+## 9. 过渡期行为（非 spec 化文档）
+
+本 change 仅 spec 化 ai-logging.md，standard/ 下其余 10 个文档（code-style / lint / package-layout / testing / theming / interaction-conventions / commit-pr …）暂维持散文现状。context how 注入遇到**无 `## Requirements` 节**的 standard 文档时**静默跳过**（不报错、不灌散文），待后续 change 逐步 spec 化。配合 §8，check-standards 本 change 也不校验 standard spec 结构，避免一次性爆 FAIL。

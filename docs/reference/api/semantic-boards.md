@@ -4,6 +4,44 @@
 
 通用响应：成功为 `{"success": true, "data": ...}`；失败为 `{"success": false, "error": "..."}`。
 
+## 端点汇总
+
+| 方法 | 路径 | 说明 |
+| ------ | ------ | ------ |
+| GET | `/semantic-boards` | 查询 active 板块列表 |
+| GET | `/semantic-boards/:id` | 查询单个板块 |
+| POST | `/semantic-boards` | 创建板块 |
+| PUT | `/semantic-boards/:id` | 更新板块 |
+| DELETE | `/semantic-boards/:id` | 软删除板块（status→disabled） |
+| GET | `/semantic-boards/:id/composition` | 查看板块构成辅助标签 |
+| POST | `/semantic-boards/:id/composition` | 新增 composition 辅助标签 |
+| DELETE | `/semantic-boards/:id/composition/:auxiliary_label_id` | 移除 composition 辅助标签 |
+| GET | `/semantic-boards/:id/articles` | 查询板块下的文章 |
+| GET | `/semantic-boards/:id/narratives` | 查询板块叙事 |
+| GET | `/semantic-boards/:id/suggest-auxiliaries` | 板块级辅助标签建议 |
+| GET | `/semantic-boards/suggest-auxiliaries` | 全局辅助标签建议 |
+| GET | `/semantic-boards/:id/match-detail/:tagId` | tag 与板块匹配明细 |
+| GET | `/auxiliary-labels` | 查询辅助标签池 |
+| GET | `/auxiliary-labels/clusters` | 辅助标签聚类 |
+| POST | `/auxiliary-labels/merge-alias` | 合并辅助标签为 alias |
+| POST | `/auxiliary-labels/gc` | 辅助标签垃圾回收 |
+| POST | `/auxiliary-labels/:id/disable` | 禁用辅助标签 |
+| GET | `/semantic-boards/upgrade-candidates` | 升级候选 + 预聚类 |
+| POST | `/semantic-boards/upgrade-suggest` | 触发 LLM 升级建议（legacy） |
+| POST | `/semantic-boards/upgrade-execute` | 执行升级建议 |
+| GET | `/semantic-boards/upgrade-suggestions` | 列持久化升级建议 |
+| POST | `/semantic-boards/upgrade-suggestions/:id/dismiss` | 忽略升级建议 |
+| POST | `/semantic-boards/upgrade-suggestions/generate` | 生成升级建议 |
+| POST | `/semantic-boards/backfill` | 触发匹配回填任务 |
+| GET | `/semantic-boards/backfill/:id` | 查询回填进度 |
+| POST | `/semantic-boards/backfill-embeddings` | 板块向量回填 |
+| POST | `/semantic-boards/rematch-all` | 全量重新匹配 |
+| GET | `/semantic-boards/matching-config` | 读取匹配参数 |
+| PUT | `/semantic-boards/matching-config` | 更新匹配参数 |
+| GET | `/tags/:id/auxiliary-labels` | tag 关联辅助标签 |
+| GET | `/tags/:id/semantic-boards` | tag 所属板块 |
+| POST | `/semantic-boards/:id/persistent-topics/manual` | 手动新建持久话题 |
+
 ## SemanticBoard CRUD
 
 ### GET `/semantic-boards`
@@ -11,6 +49,7 @@
 查询 active SemanticBoard 列表。
 
 Query：
+
 - `search` 可选，按 `label` / `slug` 模糊搜索。
 - `status` 可选；不传时只返回 `active`，可传 `disabled` 查看禁用项。
 
@@ -125,6 +164,24 @@ Response `data`：
 }
 ```
 
+### POST `/semantic-boards/:id/composition`
+
+向板块 composition 新增一个辅助标签（幂等，重复添加不报错；不会自动回填历史 `topic_tag_board_labels`）。
+
+Request：
+
+```json
+{ "auxiliary_label_id": 10 }
+```
+
+- `auxiliary_label_id` 必填，须为 `active` 的辅助标签。板块不存在返回 404；辅助标签不存在或非 active 返回 400。
+
+Response `data`：
+
+```json
+{ "board_id": 1, "auxiliary_label_id": 10 }
+```
+
 ### DELETE `/semantic-boards/:id/composition/:auxiliary_label_id`
 
 从 board composition 中移除辅助标签；不会自动回填历史 `topic_tag_board_labels`，前端需要提示用户可手动触发回填。
@@ -142,6 +199,7 @@ Response `data`：
 查询辅助标签池。
 
 Query：
+
 - `search` 可选，按 `label` / `slug` 模糊搜索。
 - `status` 可选，传 `active` 或 `disabled` 过滤；不传返回全部辅助标签。
 
@@ -192,6 +250,61 @@ Response `data`：
 ```json
 { "source_id": 11, "target_id": 10 }
 ```
+
+### GET `/auxiliary-labels/clusters`
+
+对 active 且有 embedding 的辅助标签做余弦相似度聚类（相似度 > 0.8，即 cosine 距离 < 0.2 视为邻居），返回连通分量大小 ≥ 2 的簇，最多 50 簇。结果有 10 分钟内存缓存。
+
+Query：
+
+- `refresh=true` 或 `1` 可选，强制重算并刷新缓存。
+
+Response `data`：
+
+```json
+{
+  "clusters": [
+    {
+      "labels": [
+        { "id": 10, "label": "OpenAI", "slug": "openai", "ref_count": 8 },
+        { "id": 11, "label": "OpenAI Inc.", "slug": "openai-inc", "ref_count": 2 }
+      ],
+      "size": 2,
+      "label": "OpenAI"
+    }
+  ],
+  "unclustered_count": 3
+}
+```
+
+`label` 为簇代表（`ref_count` 最高者）；`unclustered_count` 为未能进入任何 ≥2 簇的标签数。
+
+### POST `/auxiliary-labels/gc`
+
+辅助标签垃圾回收，清理无活跃引用的辅助标签。
+
+Request：
+
+```json
+{ "mode": "dry_run", "grace_days": 7 }
+```
+
+- `mode` 必填，取值 `dry_run` / `disable` / `delete` / `recalculate`；非法值返回 400。
+- `grace_days` 可选，宽限天数。
+
+Response `data`：
+
+```json
+{
+  "eligible_count": 5,
+  "affected_count": 3,
+  "corrected_count": 0,
+  "total_count": 120,
+  "preview": [{ "id": 99, "label": "废弃标签", "ref_count": 0, "created_at": "2026-01-01T..." }]
+}
+```
+
+`preview` 在 `dry_run` 模式下列出候选标签。
 
 ## 升级候选与建议
 
@@ -289,6 +402,65 @@ Response `data`：
 { "semantic_board_id": 1, "auxiliary_label_ids": [10, 11, 12] }
 ```
 
+### GET `/semantic-boards/upgrade-suggestions`
+
+查询已持久化的升级建议（区别于一次性的 legacy `upgrade-suggest`）。建议由调度器定期生成并落表，该接口只读持久表。
+
+Query：
+
+- `status` 可选，默认 `pending`。
+- `decision` 可选；不传时默认排除观测池（`watch`），传 `watch` 仅返回观测池，传其它值则精确匹配该 decision。
+
+Response `data`：
+
+```json
+{
+  "suggestions": [
+    {
+      "id": 3,
+      "batch_id": "2026-07-01-abc",
+      "mode": "discover_new",
+      "decision": "create_new",
+      "board_label": "AI与机器学习",
+      "description": "...",
+      "target_board_id": null,
+      "auxiliary_label_ids": [10, 11],
+      "auxiliary_labels": [{ "id": 10, "label": "OpenAI" }],
+      "confidence": "high",
+      "evidence": {},
+      "status": "pending",
+      "created_at": "2026-07-01T..."
+    }
+  ]
+}
+```
+
+### POST `/semantic-boards/upgrade-suggestions/:id/dismiss`
+
+忽略一条 pending 升级建议。请求体可选，可带 `reason` 记录忽略原因。
+
+Request（可选）：
+
+```json
+{ "reason": "已手动处理" }
+```
+
+Response `data`：
+
+```json
+{ "id": 3, "status": "dismissed" }
+```
+
+### POST `/semantic-boards/upgrade-suggestions/generate`
+
+手动触发一次 `discover_new` 建议生成（同步执行，与定时任务等效），用于取代 legacy `upgrade-suggest`。受冷却时间限制，冷却期内本次不写入。
+
+无需请求体。Response `data`：
+
+```json
+{ "inserted": 3, "skipped": 1, "cooldown_blocked": 0 }
+```
+
 ## 匹配回填
 
 ### POST `/semantic-boards/backfill`
@@ -330,6 +502,26 @@ Response `data`：
 查询回填进度。
 
 Response `data.status`：`pending`、`running`、`completed`、`failed`。
+
+### POST `/semantic-boards/backfill-embeddings`
+
+为所有缺少 embedding 的板块（`label_type=board` 且 `embedding IS NULL`）补算向量。同步逐个嵌入并写库。
+
+无需请求体。Response `data`：
+
+```json
+{ "backfilled": 2, "total": 3 }
+```
+
+### POST `/semantic-boards/rematch-all`
+
+对所有已存在 `topic_tag_board_labels` 记录的 topic tag 全量重新匹配板块，同步执行。
+
+无需请求体。Response `data`：
+
+```json
+{ "success": 120, "failed": 1, "total": 121 }
+```
 
 ## 匹配参数配置
 
@@ -457,6 +649,105 @@ Response `data`：
   ],
   "total": 1
 }
+```
+
+## 辅助标签建议
+
+### GET `/semantic-boards/suggest-auxiliaries`
+
+按自然语言查询全局推荐辅助标签（按与查询向量的余弦相似度排序），用于建/编板块时挑选构成标签。
+
+Query：
+
+- `label` 必填，查询文本。
+- `description` 可选，拼接到查询文本。
+- `search` 可选，按 label / slug 模糊过滤。
+- `exclude_board_id` 可选，排除已在该板块 composition 中的标签。
+- `page` / `page_size` 可选，默认 `1` / `20`，`page_size` 上限 100。
+
+Response `data`：
+
+```json
+{
+  "items": [
+    { "id": 10, "label": "OpenAI", "slug": "openai", "aliases": [], "ref_count": 8, "similarity": 0.9123 }
+  ],
+  "total": 24,
+  "page": 1,
+  "page_size": 20
+}
+```
+
+### GET `/semantic-boards/:id/suggest-auxiliaries`
+
+以板块 `:id` 自身的 `label + description` 向量为查询，推荐可补充进该板块的辅助标签（自动排除已在该板块 composition 中的标签）。
+
+Query：
+
+- `search` / `page` / `page_size` 可选，同全局接口。
+
+Response `data`：结构同全局接口。板块不存在返回 404。
+
+## 板块文章与叙事
+
+### GET `/semantic-boards/:id/articles`
+
+查询板块 `:id` 下的文章（通过该板块的 topic tag 关联），支持按匹配质量或时间排序与分页。
+
+Query：
+
+- `page` / `per_page` 可选，默认 `1` / `20`，`per_page` 上限 100。
+- `feed_id` 可选，按 feed 过滤。
+- `auxiliary_label_id` 可选，按该辅助标签关联的 topic tag 过滤。
+- `start_date` / `end_date` 可选，`YYYY-MM-DD`，按 `pub_date` 过滤（`end_date` 含当天）。
+- `show_direction_mismatch=true` 可选，默认隐藏方向不一致的 tag。
+- `sort` 可选，`quality`（默认，按匹配 tier/score 排序）或 `time`（按 `pub_date` 倒序）。
+
+Response（`data` 为文章数组，`pagination` 与 `data` 同级）：
+
+```json
+{
+  "success": true,
+  "data": [
+    {
+      "id": 1,
+      "title": "...",
+      "feed_name": "...",
+      "filtered_tags": [
+        { "id": 42, "label": "...", "category": "...", "match_reason": "hit_rate", "score": 0.84, "downgraded": false, "direction_mismatch": false }
+      ]
+    }
+  ],
+  "pagination": { "page": 1, "per_page": 20, "total": 35, "pages": 2 }
+}
+```
+
+文章字段同 `GET /articles/:id`（`ToDict()`），额外带 `feed_name` 与 `filtered_tags`；无数据时 `data` 为空数组。
+
+### GET `/semantic-boards/:id/narratives`
+
+查询板块 `:id` 的叙事摘要（`narrative_summaries`，按周期倒序）。
+
+Query：
+
+- `days` 可选，默认 7，`<1` 取 7。查询最近 N 天（基于 `period_date`）。
+
+Response `data`（数组，无数据时为 `[]`）：
+
+```json
+[
+  {
+    "id": 1,
+    "title": "...",
+    "summary": "...",
+    "status": "completed",
+    "related_tags": [{ "id": 42, "label": "..." }],
+    "related_article_ids": [1, 2],
+    "scope_type": "daily",
+    "article_count": 2,
+    "period_date": "2026-07-01"
+  }
+]
 ```
 
 ## 持久话题手动编排

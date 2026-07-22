@@ -26,7 +26,8 @@ DATA_LIFECYCLE.md  = "数据怎么变的"（哪些表被写入、状态字段怎
 │  需要: 全局 Firecrawl API 配置（ai_settings / AI Provider/Route）        │
 │                                                                          │
 │  INSERT INTO firecrawl_jobs (article_id, status='pending', ...)         │
-│  firecrawl_jobs.status: pending → processing → completed                │
+│  firecrawl_jobs.status: pending → leased → completed / failed   │
+│  (lease 模式: Claim 时 leased_at+lease_expires_at；到期/重启回收)  │
 │                                                                          │
 │  成功时:                                                                  │
 │  UPDATE articles SET                                                     │
@@ -67,7 +68,7 @@ DATA_LIFECYCLE.md  = "数据怎么变的"（哪些表被写入、状态字段怎
                               ↓
 ┌─ 标签提取 ───────────────────────────────────────────────────────────────┐
 │  INSERT INTO tag_jobs (article_id, status='pending', ...)               │
-│  tag_jobs.status: pending → processing → completed                       │
+│  tag_jobs.status: pending → leased → completed / failed            │
 │                                                                          │
 │  LLM 从 firecrawl_content / ai_content_summary / content 提取标签        │
 │  → INSERT/UPDATE article_topic_tags (article_id, topic_tag_id, score)   │
@@ -107,7 +108,8 @@ DATA_LIFECYCLE.md  = "数据怎么变的"（哪些表被写入、状态字段怎
 └─────────────────────────────────────────────────────────────────────────┘
                               ↓
 ┌─ Embedding 去重 + 入库 ──────────────────────────────────────────────────┐
-│  embedding_queues.status: pending → processing → completed               │
+│  embedding_queues.status: pending → processing → completed / failed │
+│  (worker: SELECT FOR UPDATE SKIP LOCKED；失败需手动 RetryFailed)       │
 │                                                                          │
 │  调用 embedding API 生成向量 →                                            │
 │  pgvector cosine similarity 与已有标签比较:                               │
@@ -159,13 +161,16 @@ DATA_LIFECYCLE.md  = "数据怎么变的"（哪些表被写入、状态字段怎
 └─────────────────────────────────────────────────────────────────────────┘
                               ↓
 ┌─ SemanticBoard 升级建议（手动触发）───────────────────────────────────────┐
-│  用户手动触发，收集 ref_count ≥ 语义配置阈值的候选辅助标签            │
+│  用户手动触发 或 board_upgrade_suggest 调度器(默认每日06:30)，收集      │
+│  ref_count ≥ 语义配置阈值的候选辅助标签
 │                                                                          │
 │  1. 预聚类：embedding 余弦距离 < 0.7 的候选分为簇                        │
 │  2. 补充上下文：每个簇补充 co-tag 事件（30天窗口、top 20、去重>0.85）  │
-│  3. LLM 判断：每个簇 → create_new / merge_into_existing / skip          │
+│  3. LLM 判断：每个簇 → create_new / merge_into_existing / watch        │
 │  4. 用户确认后：创建新 SemanticBoard 或更新已有 board_composition       │
 │  5. 可触发回填重算 topic_tag_board_labels                               │
+│  6. watch GC：超过观察期（默认30天）未确认的 watch 建议自动 dismissed   │
+│     (board_upgrade_suggestions.status pending→dismissed, resolved_by='watch_gc') │
 └─────────────────────────────────────────────────────────────────────────┘
                               ↓
 ┌─ 回填队列 ───────────────────────────────────────────────────────────────┐
@@ -278,6 +283,61 @@ DATA_LIFECYCLE.md  = "数据怎么变的"（哪些表被写入、状态字段怎
 
 ---
 
+## 数据清理与保留策略
+
+本节记录各表的真实清理/回收机制（真相源：`internal/admin/scheduler/*` + `internal/app/runtime.go`）。**除明确列出者外，其他表无自动清理**，行会无限累积。
+
+### 调度器驱动的定时清理
+
+| 调度器 | 间隔 | 清理对象与条件 |
+| ------ | ---- | -------------- |
+| `log_cleanup` | 86400s（每日，启动延迟5min） | `DELETE FROM ai_call_logs WHERE created_at < now()-7天`；`DELETE FROM otel_spans WHERE start_time_unix_nano < now()-7天`。**保留 7 天**。 |
+| `aux_label_cleanup` | 3600s（每时，启动延迟10min） | 软禁用「无活跃引用」的辅助标签：`semantic_labels` 中 `label_type='auxiliary' AND status='active' AND protected=false AND created_at < now()-1天` 且无 `topic_tag_semantic_labels` 引用且不在 `board_composition` 中 → `status='disabled'`（并删其 board_composition 行）。**不硬删**，模式为 disable、宽限1天。 |
+| `blocked_article_recovery` | 3600s（每时） | 恢复卡在 `articles.firecrawl_status IN ('waiting_for_firecrawl','blocked')` 且其 `feed.firecrawl_enabled=true` 的文章 → 置回 `pending` 重试。另含 STAT-05 告警（阻塞数>50 时 WARN）。 |
+| `preference_update` | 1800s（每30min） | 聚合 `reading_behaviors`→`user_preferences`；并运行孤儿清理：修复/删除 category_id 指向已删分类的 reading_behaviors，删除 feed_id 指向已删源的 reading_behaviors 与 user_preferences。**仅孤儿清理，无时间型 TTL**。 |
+| `board_upgrade_suggest` | 墙钟（默认每日06:30） | 生成 discover_new 升级建议 + **watch GC**：`board_upgrade_suggestions` 中 `decision='watch' AND status='pending'` 且创建超过观察期（`ai_settings.semantic_board_upgrade_watch_gc_days`，默认30天）→ `status='dismissed'`、`resolved_by='watch_gc'`。**软回收，不硬删**。 |
+| `tag_quality_score` | 3600s | 重算 `topic_tags` 质量分并执行 tag 合并（源 Tag 硬删，见“主题标签生命周期”）。 |
+
+### 进程启动状态重置（resetStaleStates）
+
+服务启动时一次性清理上一进程残留的“进行中”状态（非定时，仅启动时跑）：
+
+- `scheduler_tasks.status: running → idle`
+- `feeds.refresh_status: refreshing → idle`
+- `articles.firecrawl_status: processing → pending`
+- `firecrawl_jobs.status: leased → pending`（清 leased_at / lease_expires_at）
+- `tag_jobs.status: leased → pending`（清 leased_at / lease_expires_at）
+
+### 队列状态流转与重试（重点）
+
+> **注意**：两类队列的中间态命名不同，不要混淆。
+
+**firecrawl_jobs / tag_jobs**（lease 租约模型，`internal/.../job_queue.go` + 各 repository）：
+
+- 状态机：`pending → leased → completed / failed`
+- Claim 时先回收过期租约（`lease_expires_at <= now`）→ pending；再把 `attempt_count >= max_attempts(默认5)` 的 pending 置为 failed；然后按 `priority DESC, available_at ASC, id ASC` 领取 → `leased` 并 `attempt_count++`。
+- 失败重试：`MarkFailed` 以退避时间重置为 `pending`（`available_at = now+backoff`）；`attempt_count` 达到 `max_attempts` 后转 `failed`。**租约到期自动回收**即自动重试。
+- **无任何行级清除**：completed/failed 行不被定时删除，无限累积。
+
+**embedding_queues / merge_reembedding_queues**（SELECT FOR UPDATE SKIP LOCKED，`core/embedding_queue.go`）：
+
+- 状态机：`pending → processing → completed / failed`
+- worker `Start()` 时一次性把残留 `processing → pending`。失败时 `markFailed` 置 `failed`、`retry_count++`，**无自动重试**，仅靠手动 `RetryFailed()` API 重置 failed→pending。
+- **无任何行级清除**：completed/failed 行不被定时删除，无限累积。
+
+### 明确无自动清理的表（累积型）
+
+以下表当前**没有任何基于时间或状态的定时清除**，行会一直增长，需要人工/运维介入：
+
+- 队列表：`firecrawl_jobs` / `tag_jobs` / `embedding_queues` / `merge_reembedding_queues` 的 completed/failed 行
+- 叙事与日报：`narrative_summaries` / `narrative_boards` / `board_daily_reports` / `daily_report_sections` / `daily_report_threads` / `daily_report_section_relations`（日报重生成仅删当日同 report 的旧分区，非 TTL 清理）
+- 持久话题与观察：`board_persistent_topics`（仅一次性迁移裁剪 candidate、状态机自驱动 candidate→active→archived，无时间型删除）、`board_topic_watches`、`topic_watch_hits`
+- 升级建议：`board_upgrade_suggestions`（仅 watch 软回收为 dismissed，不删行；confirmed/dismissed 行累积）
+- 阅读与偏好：`reading_behaviors`（仅孤儿清理，无 TTL）、`user_preferences`
+- 基础数据：`articles` / `topic_tags` / `topic_tag_embeddings` / `semantic_labels` / `ai_call_logs`（仅 tag 合并会硬删被合并源）
+
+---
+
 ## 配置要求
 
 ### Firecrawl 全文抓取
@@ -341,6 +401,14 @@ digest_configs (推送配置)
 ---
 
 ## 更新日志
+
+### 2026-07-19
+
+- 新增「数据清理与保留策略」节，以代码为真相补全全部定时清理/回收机制（log_cleanup / aux_label_cleanup / blocked_article_recovery / preference_update / board_upgrade_suggest watch GC）
+- 纠正队列状态流转：firecrawl_jobs / tag_jobs 实为 `pending → leased → completed/failed`（lease 租约模型，非 processing）
+- 纠正 embedding_queues / merge_reembedding_queues 为 `pending → processing → completed/failed`（无自动重试）
+- 补进程启动状态重置（resetStaleStates）与「无自动清理的累积型表」清单
+- 明确各队列 completed/failed 行无定时清除
 
 ### 2026-05-22
 

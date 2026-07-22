@@ -13,7 +13,7 @@
 - **调用审计**：每次调用（成功/失败）落 `ai_call_logs`，含 operation、prompt、token 用量、provider、延迟、session，供调试幻觉 / 查错数据 / 重建编排。
 - **配置可视**：前端「AI」页配置能力路由、provider、备用链、embedding 队列，无需改后端代码。
 
-> **范围说明（待主线程确认）**：本 flow 早期标题为「AI 总结批量生成（队列 + WebSocket 进度推送）」，描述的 `submitQueueSummary` / `AISummariesListView` / `useSummaryWebSocket` 等 feed 级批量总结功能在当前后端 router 与前端代码中**已不存在**——该能力被 `content_completion`（文章级整理稿，见 `flow/content-enrichment.md`）与日报（版块级叙事，见 `flow/daily-report.md`）取代。当前 `internal/platform/airouter/` + `front/app/features/ai/` 实际承载的是 AI 调用路由层，故本 flow 围绕真实存在的功能重写。如主线程确认批量总结另有归处，请订正本 flow 定位。
+> **范围说明（已确认过时，仅留路由层）**：本 flow 早期标题为「AI 总结批量生成（队列 + WebSocket 进度推送）」，描述的 `submitQueueSummary` / `AISummariesListView` / `useSummaryWebSocket` 等 feed 级批量总结功能在后端 router 与前端代码中**已不存在**。批量总结能力已被 **`content_completion` 调度器**（兼容别名 `ai_summary`）+ 文章级整理稿 API 取代（见 `flow/content-enrichment.md`）；版块级叙事走日报（见 `flow/daily-report.md`）。当前 `internal/platform/airouter/` + `front/app/features/ai/` 实际承载的是 **AI 调用路由层（airouter）**，本 flow 围绕此真实功能描述。
 
 ## 链路设计
 

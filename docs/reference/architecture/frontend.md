@@ -20,6 +20,7 @@
 - 应用壳入口：`front/app/app.vue`
 - 主阅读页：`front/app/pages/index.vue`
 - 标签管理：`front/app/pages/tags.vue`
+- 设置中心：`front/app/pages/settings.vue`（工作台式 7-section 设置页，详见 §设置中心）
 
 `app.vue` 只做一件事：启动时调用 `apiStore.initialize()`，先拉分类、订阅源和文章，再渲染页面。
 
@@ -84,19 +85,19 @@ features/
 │  ├─ components/      # FeedEmptyGuide（RSS 源空状态引导卡片）
 │  ├─ composables/     # useAutoRefresh、useRefreshPolling
 │  └─ public.ts        # 跨 feature 共享 facade
-├─ summaries/          # AI 总结列表、队列进度（通过 useEventStream 实时更新）
-├─ digest/             # 日报、周报、详情页、配置抽屉
 ├─ preferences/        # 阅读行为埋点与偏好
 │  ├─ composables/     # useReadingTracker
 │  └─ public.ts        # 跨 feature 共享 facade
-├─ tags/               # 标签管理、合并、质量评分
-│  ├─ components/      # TagsPage、BoardCRUD、Timeline、Merge 等
-│  ├─ components/detective-wall/  # 3D 侦探照片墙（Three.js 子模块，见 §3D 侦探墙）
+├─ tags/               # 标签/板块/日报/数据富化的前端主体
+│  ├─ components/      # TagsPage、BoardCRUD、Timeline、Merge、BoardEnrichmentPanel 等
+│  ├─ components/daily-report/   # 日报全屏阅读层（见 §日报全屏阅读层）
+│  ├─ components/detective-wall/ # 3D 侦探照片墙（Three.js 子模块，见 §3D 侦探墙）
 │  └─ composables/     # useTagsPage、useBoardCRUD、useBoardTimeline、useAuxiliaryLabels
-├─ ai/                 # AI Router 设置面板、Embedding 队列
-│  ├─ components/      # AIRouterSettingsPanel、EmbeddingQueuePanel 等
+├─ ai/                 # AI 调用路由配置 + 嵌入队列面板（仅路由/供应商管理，不含日报/叙事/digest）
+│  ├─ components/      # AIRouterSettingsPanel、AIRouterBackupProviders、AIRouterCapabilityRoutes、AIProviderManagement、EmbeddingQueuePanel
 │  └─ composables/     # useAIRouterSettings
-└─ hierarchy-config/   # 层级配置管理
+└─ settings/           # 设置中心（工作台式 7-section，由 pages/settings.vue 挂载，见 §设置中心）
+   └─ components/      # SettingsWorkspace、SettingsSidebar、7 个 SettingsSection*、FeedMasterList、FeedDetailEditor、TagQueuePanel
 ```
 
 ### Feature Facade 约定
@@ -108,6 +109,22 @@ features/
 - `features/preferences/public.ts` → `useReadingTracker`、`useScrollDepthTracker`
 
 **禁止跨 feature 深 import 对方内部实现**（组件、composable、工具函数）。共享 normalizer 上移到 `api/normalizers/`，共享 UI 上移到 `components/` 或通过 feature facade 暴露。
+
+## 设置中心（features/settings/）
+
+`pages/settings.vue` 挂载的工作台式设置页。`SettingsWorkspace.vue` 提供左侧 `SettingsSidebar` + 右侧 section 内容区，当前 section 由 URL query `?section=<key>` 驱动（`activeSection` computed，默认 `feeds`），切换走 `router.replace({ query: { section: key } })`。共 7 个 section：
+
+| Section key | 标签 | section 组件 | 复用面板 / 说明 |
+| ------ | ------ | ------ | ------ |
+| `feeds` | 订阅源 | `SettingsSectionFeeds` | 本 feature 的 `FeedMasterList` + `FeedDetailEditor` |
+| `ai-providers` | AI 模型 | `SettingsSectionAiProviders` | 复用 `features/ai/components/AIProviderManagement.vue` |
+| `capability-routes` | 能力路由 | `SettingsSectionCapabilityRoutes` | 复用 `features/ai/` 的 `useAIRouterSettings` + `AIRouterCapabilityRoutes.vue` |
+| `queues` | 队列 | `SettingsSectionQueues` | 复用 `features/ai/components/EmbeddingQueuePanel.vue` + 本 feature 的 `TagQueuePanel.vue`（tag-queue / embedding-queue / merge-reembedding-queue 监控与 retry） |
+| `preferences` | 阅读偏好 | `SettingsSectionPreferences` | 阅读统计、来源评分、推荐偏好 |
+| `firecrawl` | Firecrawl | `SettingsSectionFirecrawl` | Firecrawl 服务配置与抓取参数 |
+| `schedulers` | 定时任务 | `SettingsSectionSchedulers` | 复用 `components/dialog/SchedulerStatusPanel.vue`，13 个 scheduler 状态查看与手动触发 |
+
+> `features/settings/` 只提供工作台编排与 section 外壳；AI 路由/队列/调度等具体面板复用 `features/ai/` 与 `components/dialog/` 的现成实现。
 
 ## 数据层约定
 
@@ -127,7 +144,7 @@ features/
 **唯一权威原则（D19）：**
 
 | 职责 | 唯一权威 Module |
-|------|-----------------|
+| ------ | ----------------- |
 | 查询参数构建 | `utils/api-helpers.ts` → `buildQueryString()` |
 | 响应解包 | `utils/api-helpers.ts` → `mapApiResponse()` / `unwrapResponse()` |
 | camelCase 转换 | `utils/api-helpers.ts` → `camelizeKeys()` |
@@ -135,14 +152,14 @@ features/
 
 **已落地的 API 模块：**
 
-`categories` · `feeds` · `articles` · `summaries` · `digest` · `opml` · `reading_behavior` · `firecrawl` · `scheduler` · `aiAdmin` · `abstractTags` · `semanticBoards` · `auxiliaryLabels` · `embeddingConfig` · `embeddingQueue` · `mergeReembeddingQueue` · `tagMergePreview` · `tagQueue` · `watchedTags` · `dailyReports`
+`categories` · `feeds` · `articles` · `opml` · `reading_behavior` · `firecrawl` · `scheduler` · `aiAdmin` · `abstractTags` · `semanticBoards` · `auxiliaryLabels` · `embeddingQueue` · `tagMergePreview` · `tagQueue` · `watchedTags` · `dailyReports` · `boardEnrichment` · `persistentTopics` · `topicWatches`
 
 ### Store 层
 
 **Store 职责分离（D13/D16）：**
 
 | Store | 职责 | 自有状态 |
-|-------|------|---------|
+| ------- | ------ | --------- |
 | `useApiStore` | 应用初始化、categories/feeds 的加载与基本 CRUD | `categories`、`feeds`、全局 loading/error |
 | `useArticlesStore` | 文章状态管理，所有文章 mutation 直接调用 API | `articles`、`totalArticles`、`filters`、`currentArticle`、`loading` |
 | `useFeedsStore` | Feed 派生视图层（computed from apiStore） | 无独立状态 |
@@ -188,7 +205,7 @@ features/
 **通知责任层（唯一责任原则）：**
 
 | 层级 | 责任 |
-|------|------|
+| ------ | ------ |
 | Store / Composable | 执行写操作失败时调用 `notify.error()` |
 | 底层 API module | **不直接弹 toast**，只返回错误 |
 | View 组件 | 可保留局部 `error` 展示状态，全局错误走 `useNotify()` |
@@ -209,7 +226,7 @@ features/
 - 中栏：文章列表或 AI 总结列表
 - 右栏：文章正文或 AI 总结详情
 
-Digest 页面走独立路由和独立视觉壳，不复用主阅读页的三栏壳。
+日报详情不走独立路由，而是在 `/tags` 页内由 `BoardDailyReportTimeline.vue` 渲染为全屏阅读层（独立视觉壳，不复用主阅读页三栏壳），详见 §日报全屏阅读层。
 
 ## 大组件拆分阈值（D14）
 
@@ -289,20 +306,24 @@ surgical 边界：不改相机坐标系/布局算法/交互/BFS/红线/全局迷
 前端采用三层 Token 架构和双主题系统，确保视觉一致性：
 
 **三层 Token 架构：**
+
 1. **Layer 1: Primitive Tokens (`--raw-*`)** - 原始色值，项目色板的唯一来源，不直接在组件中使用
 2. **Layer 2: Semantic Tokens (`--color-*`)** - 跟主题走，组件直接引用这一层
 3. **Layer 3: Component Tokens (`--dialog-*`, `--button-*` 等)** - 可选，复杂组件的局部 token
 
 **双主题：**
+
 - **Editorial Theme (`data-theme="editorial"`)** - 暖白印刷厂风格，主色 Print Red，背景 Paper Warmth
 - **Dark Theme (`data-theme="dark"`)** - 深色调查风格，强调色 Amber，背景深蓝灰
 
 **主题切换：**
+
 - 通过 `<html data-theme="editorial|dark">` 属性切换
 - 使用 `useTheme()` composable 管理主题状态，支持 localStorage 记忆
 - 首次绘制前 `<html>` 必须已有有效 `data-theme`，避免主题闪烁
 
 **Token 使用规则：**
+
 - 组件只引用 Layer 2 语义 token（`--color-*`），不直接使用原始色值
 - `--color-bg-overlay` 仅用于模态遮罩，不得作为普通表面背景
 - 页面表面按层级使用 `base → elevated → sunken`
@@ -319,6 +340,7 @@ surgical 边界：不改相机坐标系/布局算法/交互/BFS/红线/全局迷
 - **AppSectionHeader** - 统一 section 标题组件，可选 icon box + 标题 + 描述
 
 **使用约束：**
+
 - 所有对话框必须使用 AppDialog，禁止自建对话框模式
 - 所有按钮必须使用 AppButton，禁止使用原生 button 样式类
 - 所有开关必须使用 AppToggle，禁止使用原生 checkbox 或手写 toggle

@@ -23,9 +23,9 @@ flowchart LR
 | -------- | ------------------ | -------------------------- | ---------- | ---------- |
 | 阅读 | [reading.md](../flow/reading.md) | [frontend.md](frontend.md) §页面骨架 | `internal/reader/{handler,service}/` | `features/articles/`、`features/shell/`、`stores/` |
 | 内容增强 | [content-enrichment.md](../flow/content-enrichment.md) | [backend.md](backend.md) §具体数据链路示例 | `internal/reader/handler/`、`internal/platform/`(firecrawl) | `features/articles/`、`app/api/` |
-| 数据富化编排 | [data-enrichment.md](../flow/data-enrichment.md) | [backend.md](backend.md) | `internal/dataenrichment/` | `features/articles/` |
-| AI 总结 | [ai-summary.md](../flow/ai-summary.md) | [backend.md](backend.md) | `internal/reader/`、`internal/platform/airouter/`、`internal/platform/ws/` | `features/ai/` |
-| 日报 / Digest | [daily-report.md](../flow/daily-report.md) | [tracing.md](tracing.md) | `internal/admin/`(scheduler, daily_report job)、`internal/topicgraph/` | `features/ai/`(Digest 预览)、`features/articles/`(关联文章)、`features/tags/components/daily-report/`(section 可视化)、`app/utils/{topicAnchor,matchQuality,threadFit}.ts`(observability: System 1 tag↔板块 / System 2 section↔话题 / System 3 thread↔section) |
+| 数据富化编排 | [data-enrichment.md](../flow/data-enrichment.md) | [backend.md](backend.md) | `internal/dataenrichment/` | `features/tags/`(`BoardEnrichmentPanel.vue` 数据增强 tab、`DebateSection.vue`、`composables/useBoardEnrichment.ts`) |
+| AI 调用路由 | [ai-summary.md](../flow/ai-summary.md) | [backend.md](backend.md) | `internal/platform/airouter/`、`internal/reader/`(调用方)、`internal/platform/ws/` | `features/ai/`(AI 路由/供应商配置面板 + 嵌入队列面板；非日报/叙事入口) |
+| 日报 / Digest | [daily-report.md](../flow/daily-report.md) | [tracing.md](tracing.md) | `internal/admin/`(scheduler, daily_report job)、`internal/topicgraph/` | `features/tags/components/daily-report/`(日报全屏阅读层 + section 可视化)、`features/articles/`(关联文章正文)、`app/utils/{topicAnchor,matchQuality,threadFit}.ts`(observability: System 1 tag↔板块 / System 2 section↔话题 / System 3 thread↔section) |
 | 话题图谱 | [topic-graph.md](../flow/topic-graph.md) | [backend.md](backend.md) | `internal/topicgraph/{handler,service,repository}/` | `features/tags/`、`tests/e2e/topic-graph.spec.ts` |
 | 语义版块 | [semantic-board.md](../flow/semantic-board.md) | [backend.md](backend.md) | `internal/tagmanagement/{handler,service}/`(auxlabel, board) | `features/tags/` |
 | 定时任务（横切） | [scheduler.md](../flow/scheduler.md) | [runtime.md](runtime.md) §Scheduler | `internal/admin/scheduler/`、`internal/app/`(runtime) | `features/settings/` |

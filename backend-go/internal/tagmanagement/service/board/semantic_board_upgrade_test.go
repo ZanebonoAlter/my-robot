@@ -959,6 +959,40 @@ func TestSemanticBoardUpgradeConfirmTxFailureLeavesSuggestionPending(t *testing.
 	require.Nil(t, reloaded.ResolvedAt, "no resolved_at on a rolled-back confirm")
 }
 
+// TestSemanticBoardUpgradeConfirmMergeMissingTarget verifies that a merge
+// confirm against a suggestion whose target_board_id is NULL (board-upgrade
+// spec 方案 B: target_off_shortlist=true) fails with an actionable error
+// prompting the user to pick a target board, instead of a generic 400.
+func TestSemanticBoardUpgradeConfirmMergeMissingTarget(t *testing.T) {
+	db := setupSemanticBoardUpgradeTestDB(t)
+	aux := createUpgradeLabel(t, db, "Jensen", "jensen", "auxiliary", "active", 5, []float64{1, 0, 0})
+
+	repo := repository.NewBoardUpgradeSuggestionRepository(db)
+	// 方案 B: merge 建议保留但 target_board_id=NULL（target_off_shortlist=true）。
+	sug := &models.BoardUpgradeSuggestion{
+		BatchID: "conf-missing", Mode: "discover_new", Decision: "merge_into_existing",
+		BoardLabel: "全球科技巨头动态", AuxiliaryLabelIDs: []uint{aux.ID},
+		Confidence: "llm", SuggestionHash: "conf-missing-hash",
+	}
+	inserted, err := repo.InsertPending(context.Background(), sug)
+	require.NoError(t, err)
+	require.True(t, inserted)
+
+	svc := NewSemanticBoardUpgradeService(db, nil, nil)
+	_, err = svc.ConfirmSuggestion(context.Background(), ConfirmSemanticBoardUpgradeRequest{
+		Decision:          SemanticBoardUpgradeDecisionMergeIntoExisting,
+		AuxiliaryLabelIDs: []uint{aux.ID},
+		SuggestionID:      &sug.ID, // TargetBoardID deliberately nil
+	})
+	require.Error(t, err, "merge without a target board must fail")
+	require.Contains(t, err.Error(), "目标板块", "error must prompt the user to pick a target board")
+
+	// Suggestion state unchanged on the failed confirm.
+	var reloaded models.BoardUpgradeSuggestion
+	require.NoError(t, db.First(&reloaded, sug.ID).Error)
+	require.Equal(t, "pending", reloaded.Status)
+}
+
 // TestSemanticBoardUpgradeConfirmWithoutSuggestionIDLeavesItPending verifies the
 // back-compat path: a confirm request that omits suggestion_id writes the board
 // normally but does not touch suggestion state (spec: 未携带 suggestion_id 的请求

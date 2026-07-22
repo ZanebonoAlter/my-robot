@@ -37,6 +37,7 @@ const emit = defineEmits<{
   'update:end-date': [val: string]
   'update:show-direction-mismatch': [val: boolean]
   'update:timeline-sort': [mode: 'quality' | 'time']
+  'update:selected-tag-for-detail': [val: BoardArticleTag | null]
 }>()
 
 function strongestMatch(tags: BoardArticleTag[]): BoardArticleTag | null {
@@ -202,7 +203,7 @@ function isSelectedDetailTag(tag: BoardArticleTag): boolean {
         :board-id="selectedBoardId"
         :tag="selectedTagForDetail"
         class="tags-match-detail-panel"
-        @close="selectedTagForDetail = null"
+        @close="emit('update:selected-tag-for-detail', null)"
       />
     </Transition>
   </div>

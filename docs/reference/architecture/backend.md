@@ -30,6 +30,7 @@
 项目使用 SSE 推送后台长任务的实时进度。适用场景：单向进度推送（不需要双向通信）。
 
 **后端实现模式（Gin）：**
+
 ```go
 // Handler 示例
 c.Header("Content-Type", "text/event-stream")
@@ -46,6 +47,7 @@ c.Stream(func(w io.Writer) bool {
 ```
 
 **前端消费模式：**
+
 ```ts
 const es = new EventSource('/api/topic-tags/merge-preview/scan/stream')
 es.onmessage = (e) => { progress.value = JSON.parse(e.data) }
@@ -53,12 +55,14 @@ es.onerror = () => es.close() // 扫描完成或出错时自动断开
 ```
 
 **使用约定：**
+
 - SSE 端点路径：`*/stream`，与触发任务的同级 `POST` 端点配对（如 `POST /scan` + `GET /scan/stream`）
 - 消息格式：JSON `{ status, ...progress_fields }`，status 取值 `scanning` / `done` / `error`
 - 连接管理：任务完成后服务端关闭 channel，客户端 `onerror` 时清理
 - 并发保护：同类型任务同时只允许一个（用 `atomic.Bool` 保护）
 
 **当前使用 SSE 的功能：**
+
 - 标签合并全量扫描进度（`GET /api/topic-tags/merge-preview/scan/stream`）
 
 ### WebSocket
@@ -237,6 +241,7 @@ internal/<domain>/
 ### 主题图谱（`topicgraph` 域）
 
 每日报告生成 + PersistentTopic 生命周期管理。PersistentTopic 身份系统（candidate / active / archived 叙事状态）独立于规划中的 topic-watch 注意力系统——身份系统表示叙事演进阶段，watch 表示用户主动关注，本 change 只做身份侧。
+
 - `tagging/analysis`：生成并查询 topic analysis，同时承担 embedding 向量化、Tag 合并（源 DELETE）、辅助标签入库（L1/L2/L3 三级匹配）
 - `tagging/watched`：关注标签管理
 
@@ -444,8 +449,7 @@ AI 管理则已经扩展到 provider 和 route 级别，而不是只有"摘要�
 
 - `/api/topic-tags`：关注标签、标签合并预览（由 `tagmanagement` 域注册）
 - `/api/embedding`：embedding 配置与队列管理（由 `tagmanagement` 域注册）
-- `/api/narratives`：叙事摘要时间线、列表、详情、历史、重新生成
-- `/api/narratives/boards`：Board 时间线和详情
+- ~~`/api/narratives`~~（**已废弃**）：narrative 生成管线下线，生成能力并入 `daily_report`；历史 `narrative_summaries`/`narrative_boards` 数据只读，经 `/api/semantic-boards/:id/narratives` 访问
 - `/api/semantic-boards`：SemanticBoard CRUD、升级建议、回填、匹配配置
 - `/api/auxiliary-labels`：辅助标签池查询和治理
 - `/api/tags/:id/auxiliary-labels`：tag 辅助标签查询
@@ -456,7 +460,7 @@ AI 管理则已经扩展到 provider 和 route 级别，而不是只有"摘要�
 > 逐条业务链路的详细设计已迁至 [`flow/`](../flow/README.md)。本节给追代码时的索引：
 
 | 链路 | flow 文档 | 代码入口 |
-|------|----------|----------|
+| ------ | ---------- | ---------- |
 | 自动刷新 feed → 新文章入库（状态位预埋） | [`flow/scheduler.md`](../flow/scheduler.md) | `admin/scheduler/job_auto_refresh.go` → `reader/service.FeedService.RefreshFeed` → `buildArticleFromEntry` |
 | Firecrawl 抓正文 → 内容补全生成摘要 | [`flow/content-enrichment.md`](../flow/content-enrichment.md) | `job_firecrawl.go` → `job_content_completion.go` → `ContentCompletionService.CompleteArticle` |
 | Article 打标签时机 / 正文提取优先级 | [`flow/reading.md`](../flow/reading.md) | `tag_jobs` 队列 → `TagQueue` worker；手动 `POST /api/articles/:id/tags` |

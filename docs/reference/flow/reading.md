@@ -100,7 +100,7 @@ ArticleListPanel → ArticleContentView
 - **后端 reader 域**：`backend-go/internal/reader/handler/`（article/feed/content-completion/firecrawl handler）、`backend-go/internal/reader/service/`（feed_service、content_completion_service）、`backend-go/internal/reader/repository/`、`backend-go/internal/reader/routes.go`。
 - **后端偏好/阅读行为（admin 域）**：`backend-go/internal/admin/service/preferences_service.go`（`PreferenceService` 全量重算）、`backend-go/internal/admin/handler/preferences_handler.go`（reading-behavior / user-preferences handler）、`backend-go/internal/admin/scheduler/job_preference_update.go`（偏好调度）、`backend-go/internal/admin/routes.go`（`/reading-behavior/*`、`/user-preferences/*`）。
 - **打标签（tagmanagement 域）**：`backend-go/internal/tagmanagement/`（`TagQueue`、article_tagger）。
-- **前端**：`front/app/features/articles/`（列表/正文/阅读追踪）、`front/app/features/shell/`（FeedLayoutShell、导航）、`front/app/stores/`（api/feeds/articles/preferences）、`front/app/composables/useReadingTracker.ts`（阅读行为采集）。
+- **前端**：`front/app/features/articles/`（列表/正文/阅读追踪）、`front/app/features/shell/`（FeedLayoutShell、导航）、`front/app/stores/`（api/feeds/articles/preferences）、`front/app/features/preferences/composables/useReadingTracker.ts`（阅读行为采集）。
 - 应用装配：`backend-go/internal/app/router.go`、`backend-go/internal/app/runtime.go`。
 
 ## 变更溯源

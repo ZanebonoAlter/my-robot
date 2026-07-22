@@ -280,7 +280,9 @@ func (s *SemanticBoardUpgradeService) ConfirmSuggestion(ctx context.Context, req
 			boardID = board.ID
 		case SemanticBoardUpgradeDecisionMergeIntoExisting:
 			if req.TargetBoardID == nil || *req.TargetBoardID == 0 {
-				return fmt.Errorf("target board id is required")
+				// target_off_shortlist 方案 B 会保留 target_board_id=NULL 的 merge
+				// 建议供用户裁决；执行层必须提示用户先选目标板块，否则前端一键确认会 400。
+				return fmt.Errorf("合并到已有板块时必须指定目标板块，请先选择目标版块后再执行")
 			}
 			var count int64
 			if err := tx.Model(&models.SemanticLabel{}).Where("id = ? AND label_type = ? AND status = ?", *req.TargetBoardID, "board", "active").Count(&count).Error; err != nil {

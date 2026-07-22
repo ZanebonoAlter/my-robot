@@ -25,9 +25,8 @@ flowchart TD
   CAND --> THRESH{consecutive_hits 达阈值}
   THRESH -->|是| QUALIFY[仅获人工确认资格<br/>仍保持 candidate]
   THRESH -->|否| WAIT[继续累计]
-  QUALIFY --> PATCH[话题管理 PATCH active]
-  PATCH --> REVIEW[后端复核阈值后启用]
-  REVIEW --> ACTIVE[只有 active topic 进入<br/>独立持久泳道]
+  QUALIFY --> PATCH[话题管理 PATCH status=active 转正]
+  PATCH --> ACTIVE[只有 active topic 进入<br/>独立持久泳道]
 ```
 
 双重确认锚定（AND-gate，详见 `flow/daily-report.md` §2）是归属的第一道门：语义门（section 标题向量 ↔ 话题首义向量余弦距离 ≤ 0.30）+ LLM 门（Step3 聚类的 `matched_topic_id` 指向同一话题），两道都过才 anchor_hit 到已有 topic；否则 auto_new 开新 candidate。
@@ -79,6 +78,26 @@ identity（同 persistent_topic）
 
 从话题相似度构建连通分量，过滤掉过小簇，再用 LLM 为每个概念簇命名。
 
+### 话题运维操作（重命名 / 状态 / 合并 / 分裂 / 硬删）
+
+话题管理 UI（`GET /api/semantic-boards/:id/topics`）不仅展示全量话题，还通过下列端点把 candidate→active→archived 的状态流转与归并/拆分交给用户显式操作（`backend-go/internal/topicgraph/handler/daily_report_handler.go`）：
+
+| 端点 | 语义 |
+| ---- | ---- |
+| `PATCH /api/daily-reports/topics/:id` | `{label?, status?}`：重命名（label）与/或改状态（status 仅 `active`/`archived`，即转正/重激活/归档），两字段皆可省略以单独变更。**不止「转正」一种语义**。 |
+| `DELETE /api/daily-reports/topics/:id` | 硬删话题：清空其 section 的归属（section 本身保留），不可逆；可逆路径是 PATCH status=archived。 |
+| `POST /api/daily-reports/topics/:id/merge` | `{source_topic_ids:[]}`：把若干源话题的 section 全部划归 `:id`，源话题归档。 |
+| `POST /api/daily-reports/topics/:id/split` | `{section_ids:[], label}`：把指定 section 从 `:id` 拆出，新建一个话题承载。 |
+
+> 注：旧文档把 PATCH 仅描述为「active 转正」过窄——实际 PATCH 是 rename + status(active|archived) 的组合运维端点，且 merge/split/DELETE 同属话题级治理操作（均不自动触发，需用户显式调用）。
+
+### 前端：演进报告与标签合并
+
+话题图谱前端除 candidate→active 的生命周期操作外，还承载两个与「演进/合并」相关的组件（`front/app/features/tags/components/`）：
+
+- **演进报告 `EvolutionReport.vue`**：由 `BoardEnrichmentPanel.vue` 在板块详情「数据增强」面板的「演进报告」子区块挂载。它消费 boardEnrichment 的 `result` 详情 + `reviews`（`api/boardEnrichment.ts` 的 `EvolutionAnalysis` 复合对象），以报刊式 editorial 呈现话题的演进定位（强化/转折/扩散）、跨泳道引用与证据清单。属「B 分析认知」数据富化循环的展示层（详见 `flow/data-enrichment.md`）。
+- **标签合并对话框 `TopicGraphMergeDialog.vue`**：presentational 组件，提供「搜索目标标签 → 把当前标签的所有文章迁移到目标标签」的交互（emit `doMerge`）。注意它是**标签级**合并 UI（区别于上表的**话题级** merge 端点）；当前该组件未被任何视图引用（预留/orphan）。
+
 ## 业务约束与不变量
 
 > 本节是 `doc-impact.sh context` 的数据源：apply 改 `internal/topicgraph/` 或 `internal/tagmanagement/` 代码前会自动 dump 给 agent，必须遵守。
@@ -95,7 +114,7 @@ identity（同 persistent_topic）
 
 - **后端生命周期与归属**：`backend-go/internal/topicgraph/repository/daily_report_assignment.go`（`planLifecycle` 命中计数、`planTopicAssignments` 双重确认锚定）、`repository/daily_report_topic_repository.go`（status 状态机 `candidate|active|archived`、可锚定选择器 `ListAnchorableTopicsByBoard`）、`repository/daily_report_manual_topic.go`（手动建泳道）。
 - **后端关系双轨 / 聚类**：`backend-go/internal/topicgraph/service/daily_report_cluster.go`（ClusterTags 聚类 + 概念 bootstrap）、`service/daily_report_orchestrator.go`（`GenerateDailyReport` 管线、`RebuildBoardRelations` 关系双轨）、`service/daily_report_merge.go`。
-- **后端 handler**：`backend-go/internal/topicgraph/handler/topic_watch_handler.go`（话题 watch）、`handler/daily_report_handler.go`（话题管理 PATCH active / 列表）。
+- **后端 handler**：`backend-go/internal/topicgraph/handler/topic_watch_handler.go`（话题 watch）、`handler/daily_report_handler.go`（话题管理列表 + PATCH rename/status、DELETE 硬删、POST merge/split、手动建泳道、backfill-embeddings/relations/topics）。
 - **标签提取 / 去重 / 层级**（话题聚类的输入源）：`backend-go/internal/tagmanagement/`（`service/` 抽象标签层级与合并、`handler/` 标签管理、`repository/` 持久化）。
 - **前端**：`front/app/features/tags/components/daily-report/`（SectionLifecyclePanel、话题锚定展示）、`front/app/features/tags/components/BoardThreadBrowser.vue`（话题总览泳道）、`front/tests/e2e/topic-graph.spec.ts`。
 

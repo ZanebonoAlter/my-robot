@@ -9,7 +9,7 @@
 
 - **当天发生了什么**：把版块当天的事件 tag 收集、去重、质量过滤后聚类成若干 section（叙事单元），LLM 给每个 section 起标题并生成 section 内的 thread（逐条事件）。
 - **和已有话题什么关系**：每个 section 通过「双重确认锚定」关联到版块的持久话题（沿用 / 新开候选），把每天的 section 串成跨天演进的话题链。
-- **怎么看**：前端 Digest 预览/查看提供每日 / 每周叙事；section 在 TagsPage 用三套独立匹配血缘（标签↔版块、section↔话题、thread↔section）做轻量可视化 + 深度探究。
+- **怎么看**：前端「日报阅读层」在 TagsPage 内以全屏层承载当日报告的报纸式阅读；section 用三套独立匹配血缘（标签↔版块、section↔话题、thread↔section）做轻量可视化 + 深度探究。
 - **用户主权**：用户可手动挑若干 section 建一条 active 持久话题（手动泳道），不必等算法连续命中。
 
 理解日报，先分清四个对象。它们是「生成 → 锚定 → 展示」整条链的语义基石：
@@ -123,17 +123,45 @@ ClusterTags 注入（Step3）与双重确认归属**共享同一个可锚定 Per
 2. candidate 需 `last_seen_date` 在 `persistent_topic_candidate_decay_window`（默认 7 天）内，按 `last_seen_date DESC, hit_count DESC, id ASC` 排序，最多保留 `persistent_topic_candidate_prompt_limit`（默认 20）条。
 3. 窗口外或被截断的 candidate 不出现在任何一侧，消除单边锚定的隐式 bug。
 
-### 前端：Digest 预览/查看链路
+### 后端：日报运维 backfill 端点
+
+除每日自动生成外，日报域提供三个手动回填端点（`topicgraph/handler/daily_report_handler.go:59-67`），用于修正历史数据 / 重建派生结果，均为 POST 异步触发：
 
 ```text
-DigestListView
-  → getStatus()
-  → getPreview(daily|weekly, date)
-  → 左栏分类 + 中栏 summary 列表 + 右栏详情
-  → runNow() 可立即生成新版本
-  → DigestDetail 按 article_ids 拉关联文章
-  → 关联文章在弹窗中复用 ArticleContentView
+POST /api/daily-reports/backfill-embeddings   重建 section embedding（按 cluster_label）+ 重新匹配
+POST /api/daily-reports/backfill-relations    重建关系双轨（相似度 + 身份）连线
+POST /api/daily-reports/backfill-topics       重建持久话题
 ```
+
+可按 board 限定（body 传 `board_id`）或全量回填，与自动生成一样走 topicgraph service、幂等重建。
+
+### 前端：日报阅读层
+
+日报**不设独立 Digest 列表页**，而是在 TagsPage 内以「全屏阅读层」承载当日报告的报纸式阅读：
+
+```text
+TagsPage (front/app/features/tags/components/TagsPage.vue)
+  → BoardDailyReportTimeline.vue（全屏阅读层入口）
+  → useDailyReportReader.ts（阅读编排：拉取 / 分节 / 导航）
+  → api/dailyReports.ts（getBoardDailyReports / getDailyReportDetail / generateDailyReport）
+  → features/tags/components/daily-report/（Masthead 报头 / Sidebar 侧栏 / TopicSection 分节 / MiniLifeline 迷你生命线）
+```
+
+> 旧文档描述的 `DigestListView` / `getPreview(daily|weekly)` / `runNow` 链路对应的组件**已不存在**（周报能力已下线，仅留日报）。手动生成走 `POST /api/daily-reports/generate`。
+
+### 前端：话题盯盘（topic-watch / watch-hits）
+
+用户可在版块上 watch 若干持久话题（`board_topic_watches`）；每生成一份日报，LLM 自动评估各 section 命中哪些被 watch 的话题，结果写 `topic_watch_hits`，前端在日报顶部用 WatchBar 汇总命中：
+
+```text
+CRUD：POST/GET /api/semantic-boards/:id/topic-watches、PATCH/DELETE /api/topic-watches/:id
+命中查询：GET /api/daily-reports/:id/watch-hits
+后端评估：service/daily_report_watch.go 的 EvaluateWatchHits —— SaveReport 之后（其事务外）执行，
+         LLM 对每个 active watch × 全部 section 评估，写 TopicWatchHit 行
+前端：features/tags/components/daily-report/DailyReportWatchBar.vue + topicWatchGrouping.ts + api/topicWatches.ts
+```
+
+**不变量**：watch 评估是**只读覆盖层**——失败被吞掉仅记日志，**不改**任何 section 的 `persistent_topic_id`、不动 topic 的 `consecutive_hits`（`daily_report_watch.go` 注释明示 SHALL NOT）。
 
 ### 前端：Section 可视化与三套匹配血缘
 
@@ -168,7 +196,8 @@ DigestListView
 - **后端生成（topicgraph 域）**：`backend-go/internal/topicgraph/service/daily_report_orchestrator.go`（`GenerateDailyReport` 管线）、`backend-go/internal/topicgraph/service/daily_report_llm.go`（聚类 / 线程 LLM）、`backend-go/internal/topicgraph/repository/daily_report_assignment.go`（双重确认锚定 `planTopicAssignments`）、`backend-go/internal/topicgraph/repository/daily_report_repository.go`（`SaveReport` upsert）、`backend-go/internal/topicgraph/repository/daily_report_manual_topic.go`（手动建泳道）、`backend-go/internal/topicgraph/handler/daily_report_handler.go`、`backend-go/internal/topicgraph/routes.go`。
 - **后端调度（admin 域）**：`backend-go/internal/admin/scheduler/job_daily_report.go`（daily_report job）、`backend-go/internal/admin/handler/scheduler_handler.go`。
 - **平台层**：`backend-go/internal/platform/airouter/`（日报 LLM 走 `CapabilityDigestPolish` 等能力路由）、`backend-go/internal/platform/ws/`。
-- **前端**：`front/app/features/ai/`（Digest 预览/查看）、`front/app/features/articles/`（关联文章）、`front/app/features/tags/components/daily-report/`（section 可视化与三套匹配血缘）、`front/app/utils/topicAnchor.ts`（锚定分档）、`front/app/utils/threadFit.ts`（thread↔section 贴合度分档）。
+- **后端 watch 评估**：`backend-go/internal/topicgraph/service/daily_report_watch.go`（`EvaluateWatchHits`）、`backend-go/internal/topicgraph/handler/topic_watch_handler.go`（topic-watch CRUD + watch-hits 查询）、`backend-go/internal/topicgraph/repository/daily_report_models.go`（`BoardTopicWatch` / `TopicWatchHit` 模型）。
+- **前端**：`front/app/features/tags/components/BoardDailyReportTimeline.vue`（日报阅读层全屏入口）、`front/app/features/tags/composables/useDailyReportReader.ts`（阅读编排）、`front/app/api/dailyReports.ts`、`front/app/api/topicWatches.ts`、`front/app/features/tags/components/daily-report/`（section 可视化、三套匹配血缘、话题盯盘 WatchBar）、`front/app/utils/topicAnchor.ts`（锚定分档）、`front/app/utils/threadFit.ts`（thread↔section 贴合度分档）。
 
 > 互补：`flow/topic-graph.md`（持久话题生命周期 candidate→active→archived、关系相似度/身份双轨）、`flow/semantic-board.md`（版块）、`architecture/tracing.md`。迁自原 `architecture/data-flow.md`（Digest 流 / 叙事数据流·每日叙事生成）。
 

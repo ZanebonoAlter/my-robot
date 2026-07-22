@@ -1,19 +1,20 @@
 # 定时任务 Schedulers
 
 | 方法 | 路径 | 说明 |
-|------|------|------|
+| ------ | ------ | ------ |
 | GET | `/api/schedulers/status` | 所有调度器状态 |
 | GET | `/api/schedulers/:name/status` | 指定调度器状态 |
 | POST | `/api/schedulers/:name/trigger` | 手动触发 |
 | POST | `/api/schedulers/:name/reset` | 重置统计 |
 | PUT | `/api/schedulers/:name/interval` | 更新间隔 |
+| PUT | `/api/schedulers/:name/schedule-time` | 更新固定时间点 |
 
 ---
 
 ### 支持的调度器
 
 | 名称 | 别名 | 说明 |
-|------|------|------|
+| ------ | ------ | ------ |
 | `auto_refresh` | - | 自动刷新 RSS |
 | `preference_update` | - | 更新阅读偏好 |
 | `content_completion` | `ai_summary` | 文章内容补全 |
@@ -63,3 +64,13 @@
 ```
 
 `interval`：正整数，单位取决于调度器（一般为秒）。返回更新后的 `name` 和 `check_interval`。
+
+### PUT /api/schedulers/:name/schedule-time
+
+为支持「固定时间点执行」的调度器设置每日触发时间（目前仅 `daily_report`、`board_upgrade_suggest` 支持，其它调度器返回 `400`）。
+
+```json
+{ "time": "08:30" }
+```
+
+`time`：`HH:MM` 格式（24 小时制，必填）。返回 `{"success": true}`。

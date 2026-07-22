@@ -9,7 +9,7 @@
 
 1. **需求说明** — 功能给用户解决什么问题（面向使用视角）
 2. **链路设计** — mermaid 流程图 + 状态流转
-3. **业务约束与不变量** — 状态机/幂等/去重/限额等业务红线。**是 `doc-impact.sh context` 子命令的数据源**——apply 改代码前按命中 domain 自动 dump 给 agent（见《开发执行规范》§0.6），故必须准确、有实质。
+3. **业务约束与不变量** — 状态机/幂等/去重/限额等业务红线。**是 `doc-impact.sh context` 子命令的数据源（业务规范 what 段）**——apply 改代码前按命中 domain 自动 dump 给 agent（见《开发执行规范》§0.6）。context 现为双源注入，执行规范 how 段来自 `standard/` 文档头标 `doc-impact-applies` 且命中的「## Requirements」节。
 4. **代码入口** — 后端 handler/service + 前端 feature 入口（含 `backend-go/internal/<domain>/` 包路径，context 靠它关联 flow↔domain）
 5. **变更溯源** — archive change 链接表（见《开发执行规范》§12.2）
 

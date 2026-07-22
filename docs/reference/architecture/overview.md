@@ -10,7 +10,7 @@ Syntopica 是一个个人部署的 RSS 阅读器，采用前后端分离的单�
 ## 技术栈
 
 | 层级 | 技术 | 说明 |
-|------|------|------|
+| ------ | ------ | ------ |
 | 前端 | Nuxt 4 + Vue 3 + TypeScript + Pinia + Tailwind CSS v4 | SSR/SPA 混合，Composition API |
 | 后端 | Go + Gin + GORM + PostgreSQL + pgvector | 单二进制 HTTP 服务 |
 | AI | OpenAI 兼容 API（通过 airouter 多 provider 路由） | 摘要、内容补全、主题分析 |
@@ -62,6 +62,7 @@ Feed 管理（`backend-go/internal/reader/`）和文章管理构成系统的基�
 - `topicgraph`（主题图谱域）：每日报告生成
 
 此外，`tagmanagement` 还承担了以下高级能力：
+
 - Tag embedding 向量化与自动合并（源 DELETE，不再使用 status='merged'）
 - Event 标签多行 embedding（semantic title + event_keyword 关键词行）
 - SemanticBoard 匹配与升级建议
@@ -71,11 +72,12 @@ Feed 管理（`backend-go/internal/reader/`）和文章管理构成系统的基�
 - 7 Phase 层级清理（僵尸 Tag → 低质量 → 空 Node → 同 Level 去重 → Template 校验 → Sector 健康 → 聚类信号）
 
 `tagmanagement/service/watched` 负责：
+
 - 关注标签（watched tags）管理
 
 ### 4. 叙事摘要
 
-叙事摘要子系统（`backend-go/internal/topicgraph/`），基于活跃主题标签生成每日叙事摘要。由 `daily_report` 调度器定时触发，支持按日期查询、历史版本回溯。前端通过 `/api/narratives` 接口读取。
+叙事摘要（narrative）生成管线已废弃——生成能力并入 `daily_report` 日报（见 `flow/daily-report.md`）。`narrative_summaries`/`narrative_boards` 两张表仅保留只读历史数据，前端经 `/api/semantic-boards/:id/narratives`（`getBoardNarratives`）访问。原 `/api/narratives/*` 路由已全部移除。
 
 ### 4.5 话题总览工作台
 
@@ -168,7 +170,7 @@ my-robot/
 ## 后台调度器一览
 
 | 调度器 | 间隔 | 职责 |
-|--------|------|------|
+| -------- | ------ | ------ |
 | AutoRefresh | 60 秒 | 扫描到点 feed 并触发 RSS 刷新 |
 | Firecrawl | 300 秒 | 抓取待处理文章完整正文 |
 | ContentCompletion | 60 秒 | 基于 Firecrawl 正文生成 AI 整理稿 |
@@ -184,7 +186,7 @@ my-robot/
 后端通过 `backend-go/internal/app/router.go` 注册以下主路由组：
 
 | 路由组 | 职责 |
-|--------|------|
+| -------- | ------ |
 | `/api/categories` | 分类 CRUD |
 | `/api/feeds` | 订阅 CRUD、刷新、OPML |
 | `/api/articles` | 文章列表、详情、状态更新、统计、标签管理 |
@@ -197,7 +199,7 @@ my-robot/
 | `/api/user-preferences` | 偏好查询与更新 |
 | `/api/embedding` | Embedding 配置与队列管理 |
 | `/api/topic-tags` | 关注标签、标签合并预览 |
-| `/api/narratives` | 叙事摘要查询与历史 |
+| ~~`/api/narratives`~~ | 已废弃（并入 daily_report；历史数据经 `/api/semantic-boards/:id/narratives` 只读） |
 | `/api/traces` | 链路追踪查询与统计 |
 | `/ws` | WebSocket 实时推送 |
 

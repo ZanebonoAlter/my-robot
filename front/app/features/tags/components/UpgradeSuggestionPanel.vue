@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { watch } from 'vue'
+import { computed, watch } from 'vue'
 import { Icon } from '@iconify/vue'
-import type { UpgradeCandidate, UpgradeCluster, UpgradeSuggestion, BoardAffinity, UpgradeSuggestionRow } from '~/api/semanticBoards'
+import type { UpgradeCandidate, UpgradeCluster, UpgradeSuggestion, BoardAffinity, UpgradeSuggestionRow, SemanticBoard } from '~/api/semanticBoards'
 
 const props = defineProps<{
   visible: boolean
@@ -15,6 +15,8 @@ const props = defineProps<{
   persistedSuggestions: UpgradeSuggestionRow[]
   persistedLoading: boolean
   persistedGenerating: boolean
+  /** 全量 active 板块，供 merge 建议选目标版块用。 */
+  boards: SemanticBoard[]
 }>()
 
 const emit = defineEmits<{
@@ -29,6 +31,13 @@ const emit = defineEmits<{
 
 const upgradeMode = ref<'discover_new' | 'expand_existing'>('discover_new')
 const openMergeIndex = ref<number | null>(null)
+// 持久化行：当前展开「合并到...」选目标版块下拉的行 id。
+// 所有 merge 行都先选目标（不盲用 LLM/high 给的 top-1），用户在下拉里确认或改选。
+const openMergeRowId = ref<number | null>(null)
+// 下拉内的搜索关键字（按行隔离：用 openMergeRowId 对应的 row id 作为 key）。
+const mergeSearchByRow = ref<Record<number, string>>({})
+// 每行勾选的辅助标签 id 集合（row.id → Set<auxId>）。默认全选；emit 时只带勾选子集。
+const selectedAuxByRow = ref<Record<number, Set<number>>>({})
 
 // ---- 持久化建议过滤（主数据源） ----
 type PersistedFilter = 'all' | 'merge_into_existing' | 'create_new' | 'watch'
@@ -74,9 +83,100 @@ function rowAuxLabels(row: UpgradeSuggestionRow): { id: number; label: string }[
     ? row.auxiliary_labels
     : row.auxiliary_label_ids.map((id) => ({ id, label: `标签 #${id}` }))
 }
+
+// ---- 辅助标签勾选（不必全要，emit 时只带勾选子集）----
+// 每行维护一个「选中的 id 集合」；默认全选。persistedSuggestions 变化时：
+// 已有勾选记录的行沿用原勾选（清理掉已不存在的标签 id）；新行默认全选。
+watch(() => props.persistedSuggestions, (rows) => {
+  const next: Record<number, Set<number>> = {}
+  for (const row of rows) {
+    const allIds = new Set(rowAuxLabels(row).map((al) => al.id))
+    const prev = selectedAuxByRow.value[row.id]
+    if (prev) {
+      // 沿用 prev：只保留仍存在的标签；prev 里没有的新标签默认选中。
+      const merged = new Set<number>(prev)
+      for (const id of merged) {
+        if (!allIds.has(id)) merged.delete(id)
+      }
+      for (const id of allIds) {
+        // 新出现的标签默认选中（prev 没记录过它）
+        if (!prev.has(id)) merged.add(id)
+      }
+      next[row.id] = merged
+    } else {
+      next[row.id] = allIds
+    }
+  }
+  selectedAuxByRow.value = next
+}, { immediate: true, deep: false })
+
+function isAuxSelected(rowId: number, auxId: number): boolean {
+  return selectedAuxByRow.value[rowId]?.has(auxId) ?? true
+}
+function toggleAux(rowId: number, auxId: number): void {
+  const set = selectedAuxByRow.value[rowId] ?? new Set<number>()
+  if (set.has(auxId)) set.delete(auxId)
+  else set.add(auxId)
+  selectedAuxByRow.value[rowId] = set
+}
+function selectAllAux(row: UpgradeSuggestionRow): void {
+  selectedAuxByRow.value[row.id] = new Set(rowAuxLabels(row).map((al) => al.id))
+}
+function clearAllAux(row: UpgradeSuggestionRow): void {
+  selectedAuxByRow.value[row.id] = new Set<number>()
+}
+function selectedAuxCount(row: UpgradeSuggestionRow): number {
+  const all = rowAuxLabels(row)
+  return all.filter((al) => isAuxSelected(row.id, al.id)).length
+}
+// 当前行勾选的 auxiliary_label_ids（供 emit 用）。
+function selectedAuxIds(row: UpgradeSuggestionRow): number[] {
+  return rowAuxLabels(row).filter((al) => isAuxSelected(row.id, al.id)).map((al) => al.id)
+}
 function rowTargetLabel(row: UpgradeSuggestionRow): string {
   if (row.target_board_label) return row.target_board_label
   return row.target_board_id ? `板块 #${row.target_board_id}` : ''
+}
+
+// ---- merge 行选目标版块（board-upgrade spec 方案 B + 候选优先全量可搜）----
+// 所有 merge 行都先展开下拉让用户确认/改选目标，不盲用 LLM/high 给的 top-1。
+// 下拉内容：① LLM/算法候选区（evidence.shortlist，高亮置顶）；② 全量 active 板块区
+// （可搜索，去重掉已在候选区的）。
+function rowOffShortlist(row: UpgradeSuggestionRow): boolean {
+  return row.evidence?.target_off_shortlist === true
+}
+
+// 某行下拉的关键字（双向绑定用）。
+function mergeSearch(rowId: number): string {
+  return mergeSearchByRow.value[rowId] ?? ''
+}
+function setMergeSearch(rowId: number, val: string): void {
+  mergeSearchByRow.value[rowId] = val
+}
+
+// 下拉里要展示的全量板块（已排除 shortlist 候选，避免重复；按关键字过滤）。
+function extraBoardsForRow(row: UpgradeSuggestionRow): SemanticBoard[] {
+  const candidateIds = new Set(
+    shortlist(row).map((s) => s.board_id).filter((id): id is number => typeof id === 'number'),
+  )
+  const kw = (mergeSearchByRow.value[row.id] ?? '').trim().toLowerCase()
+  return props.boards.filter((b) => {
+    if (candidateIds.has(b.id)) return false
+    if (!kw) return true
+    return b.label.toLowerCase().includes(kw)
+      || (b.aliases ?? []).some((a) => a.toLowerCase().includes(kw))
+  })
+}
+
+function handlePickRowTarget(row: UpgradeSuggestionRow, boardId: number) {
+  openMergeRowId.value = null
+  delete mergeSearchByRow.value[row.id]
+  emit('confirmRow', { ...row, target_board_id: boardId, auxiliary_label_ids: selectedAuxIds(row) })
+}
+
+// create_new 行确认：同样只带勾选的辅助标签子集。
+function handleConfirmCreateRow(row: UpgradeSuggestionRow) {
+  emit('confirmRow', { ...row, auxiliary_label_ids: selectedAuxIds(row) })
 }
 
 // ---- 手动合并（内存建议，保留现状，§6.3 不动） ----
@@ -179,12 +279,32 @@ function decisionStyle(d: string): { border: string; bg: string; color: string }
                   {{ decisionLabel(row.decision) }}
                 </span>
                 <span v-if="row.confidence === 'high'" class="usp-confidence-badge" data-confidence="high">高置信</span>
+                <span v-if="rowOffShortlist(row)" class="usp-confidence-badge usp-off-shortlist-badge">目标超出候选范围</span>
                 <span v-if="rowTargetLabel(row)" class="usp-item-board">{{ rowTargetLabel(row) }}</span>
                 <span v-else-if="row.board_label" class="usp-item-board">{{ row.board_label }}</span>
               </div>
               <p v-if="row.description" class="usp-item-desc">{{ row.description }}</p>
+              <div class="usp-aux-toolbar">
+                <span class="usp-aux-count">辅助标签 {{ selectedAuxCount(row) }}/{{ rowAuxLabels(row).length }}</span>
+                <button type="button" class="usp-aux-toggle" @click="selectAllAux(row)">全选</button>
+                <button type="button" class="usp-aux-toggle" @click="clearAllAux(row)">清空</button>
+              </div>
               <div class="usp-item-tags">
-                <span v-for="al in rowAuxLabels(row)" :key="al.id" class="usp-item-tag">{{ al.label || ('标签 #' + al.id) }}</span>
+                <button
+                  v-for="al in rowAuxLabels(row)"
+                  :key="al.id"
+                  type="button"
+                  class="usp-item-tag usp-aux-chip"
+                  :class="{ 'usp-aux-chip--off': !isAuxSelected(row.id, al.id) }"
+                  :title="al.label || ('标签 #' + al.id)"
+                  @click="toggleAux(row.id, al.id)"
+                >
+                  <Icon
+                    :icon="isAuxSelected(row.id, al.id) ? 'mdi:checkbox-marked' : 'mdi:checkbox-blank-outline'"
+                    width="12"
+                  />
+                  {{ al.label || ('标签 #' + al.id) }}
+                </button>
               </div>
               <div v-if="laneBriefs(row).length > 0" class="usp-evidence">
                 <span class="usp-evidence-label">泳道：</span>
@@ -199,11 +319,67 @@ function decisionStyle(d: string): { border: string; bg: string; color: string }
                 <span v-for="(s, si) in shortlist(row)" :key="'sl' + si" class="usp-evidence-chip">{{ s.board_label || ('板块 #' + s.board_id) }}</span>
               </div>
               <div class="usp-item-actions">
+                <template v-if="row.decision === 'merge_into_existing'">
+                  <!-- 所有 merge 行都先展开「合并到...」选目标：候选优先（shortlist 置顶高亮）+ 全量可搜，不盲用 LLM/high 的 top-1 -->
+                  <div class="usp-merge-wrapper">
+                    <button
+                      type="button"
+                      class="usp-item-btn usp-item-btn--merge"
+                      :disabled="selectedAuxCount(row) === 0"
+                      :title="selectedAuxCount(row) === 0 ? '至少勾选一个辅助标签' : undefined"
+                      @click="openMergeRowId = openMergeRowId === row.id ? null : row.id"
+                    >
+                      <Icon icon="mdi:merge" width="12" />
+                      合并到...
+                    </button>
+                    <div v-if="openMergeRowId === row.id" class="usp-merge-dropdown usp-merge-dropdown--search">
+                      <input
+                        class="usp-merge-search"
+                        type="text"
+                        placeholder="搜索板块名称或别名…"
+                        :value="mergeSearch(row.id)"
+                        @input="setMergeSearch(row.id, ($event.target as HTMLInputElement).value)"
+                      >
+                      <div class="usp-merge-list">
+                        <!-- ① LLM/算法候选区（evidence.shortlist），高亮置顶 -->
+                        <template v-if="shortlist(row).length > 0">
+                          <div class="usp-merge-group-label">候选版块</div>
+                          <button
+                            v-for="s in shortlist(row)"
+                            :key="'sl-' + s.board_id"
+                            type="button"
+                            class="usp-merge-option usp-merge-option--candidate"
+                            @click="s.board_id && handlePickRowTarget(row, s.board_id)"
+                          >
+                            <span class="usp-merge-option-name">{{ s.board_label || ('板块 #' + s.board_id) }}</span>
+                            <span v-if="typeof s.composition_dist === 'number'" class="usp-merge-option-detail">comp {{ s.composition_dist.toFixed(3) }}</span>
+                          </button>
+                        </template>
+                        <!-- ② 全量板块区（去重候选，按搜索词过滤） -->
+                        <div class="usp-merge-group-label">{{ shortlist(row).length > 0 ? '其他板块' : '全部板块' }}</div>
+                        <button
+                          v-for="b in extraBoardsForRow(row)"
+                          :key="'ex-' + b.id"
+                          type="button"
+                          class="usp-merge-option"
+                          :class="{ 'usp-merge-option--recommended': row.target_board_id === b.id }"
+                          @click="handlePickRowTarget(row, b.id)"
+                        >
+                          <span class="usp-merge-option-name">{{ b.label }}</span>
+                          <span v-if="row.target_board_id === b.id" class="usp-merge-option-tag">推荐</span>
+                        </button>
+                        <span v-if="extraBoardsForRow(row).length === 0" class="usp-merge-empty">无匹配板块</span>
+                      </div>
+                    </div>
+                  </div>
+                </template>
                 <button
-                  v-if="row.decision !== 'watch'"
+                  v-else-if="row.decision === 'create_new'"
                   type="button"
                   class="usp-item-btn usp-item-btn--primary"
-                  @click="emit('confirmRow', row)"
+                  :disabled="selectedAuxCount(row) === 0"
+                  :title="selectedAuxCount(row) === 0 ? '至少勾选一个辅助标签' : undefined"
+                  @click="handleConfirmCreateRow(row)"
                 >
                   <Icon icon="mdi:check" width="12" />
                   确认执行
@@ -618,6 +794,64 @@ function decisionStyle(d: string): { border: string; bg: string; color: string }
   background: var(--color-bg-hover);
 }
 
+/* 辅助标签勾选 chip */
+.usp-aux-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.15rem;
+}
+
+.usp-aux-count {
+  font-size: 0.64rem;
+  color: var(--color-text-muted);
+}
+
+.usp-aux-toggle {
+  border: none;
+  background: none;
+  color: var(--color-text-muted);
+  font-size: 0.64rem;
+  cursor: pointer;
+  padding: 0.05rem 0.2rem;
+  border-radius: 4px;
+  transition: all 0.1s ease;
+}
+
+.usp-aux-toggle:hover {
+  color: var(--color-text-secondary);
+  background: var(--color-bg-hover);
+}
+
+.usp-aux-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: all 0.1s ease;
+  user-select: none;
+}
+
+.usp-aux-chip:hover {
+  background: var(--color-bg-sunken);
+}
+
+/* 选中态：用 link 色高亮 */
+.usp-aux-chip:not(.usp-aux-chip--off) {
+  color: var(--color-link);
+  background: var(--color-link-subtle);
+}
+
+/* 取消态：灰化 + 删除线 */
+.usp-aux-chip--off {
+  color: var(--color-text-muted);
+  background: transparent;
+  border-color: var(--color-border-subtle);
+  text-decoration: line-through;
+  opacity: 0.65;
+}
+
 .usp-item-actions {
   display: flex;
   justify-content: flex-end;
@@ -723,6 +957,79 @@ function decisionStyle(d: string): { border: string; bg: string; color: string }
   font-size: 0.65rem;
 }
 
+/* 带 search 的下拉：加宽 + 内容区滚动 */
+.usp-merge-dropdown--search {
+  min-width: 260px;
+  max-height: 320px;
+  display: flex;
+  flex-direction: column;
+}
+
+.usp-merge-search {
+  width: 100%;
+  padding: 0.45rem 0.65rem;
+  border: none;
+  border-bottom: 1px solid var(--color-border-subtle);
+  background: var(--color-input-bg);
+  color: var(--color-text-primary);
+  font-size: 0.74rem;
+  outline: none;
+}
+
+.usp-merge-search::placeholder {
+  color: var(--color-text-muted);
+}
+
+.usp-merge-list {
+  overflow-y: auto;
+  max-height: 260px;
+}
+
+.usp-merge-group-label {
+  padding: 0.3rem 0.65rem 0.15rem;
+  font-size: 0.62rem;
+  font-weight: 600;
+  color: var(--color-text-muted);
+  letter-spacing: 0.02em;
+  background: var(--color-bg-sunken);
+}
+
+/* LLM/算法候选区高亮 */
+.usp-merge-option--candidate {
+  background: var(--color-link-subtle);
+}
+
+.usp-merge-option--candidate:hover {
+  background: var(--color-link-border);
+}
+
+.usp-merge-option-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* LLM/high 已推荐的目标，在全量列表里标记 */
+.usp-merge-option--recommended {
+  background: var(--color-success-bg, rgba(61, 138, 74, 0.08));
+}
+
+.usp-merge-option--recommended:hover {
+  background: var(--color-success-bg, rgba(61, 138, 74, 0.18));
+}
+
+.usp-merge-option-tag {
+  margin-left: 0.4rem;
+  padding: 0.05rem 0.3rem;
+  border-radius: 4px;
+  background: var(--color-success-bg, rgba(61, 138, 74, 0.2));
+  color: var(--color-success);
+  font-size: 0.6rem;
+  font-weight: 600;
+}
+
 .usp-persisted {
   display: flex;
   flex-direction: column;
@@ -793,6 +1100,19 @@ function decisionStyle(d: string): { border: string; bg: string; color: string }
   border-radius: 4px;
   background: var(--color-success-bg, rgba(61, 138, 74, 0.15));
   color: var(--color-success);
+}
+
+/* target_off_shortlist 警示徽标（board-upgrade spec 方案 B） */
+.usp-off-shortlist-badge {
+  background: var(--color-warning-bg, rgba(180, 140, 40, 0.15));
+  color: var(--color-warning, #b48c28);
+}
+
+.usp-merge-empty {
+  display: block;
+  padding: 0.45rem 0.65rem;
+  color: var(--color-text-muted);
+  font-size: 0.7rem;
 }
 
 .usp-evidence {

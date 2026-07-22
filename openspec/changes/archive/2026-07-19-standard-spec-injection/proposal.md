@@ -30,5 +30,6 @@ doc-impact context 已实现「业务规范（what）」的 apply 前置注入�
 
 - 纯文档 + 脚本 change：spec 化 standard 文档 + 扩展 `doc-impact.sh context`。
 - 工作流影响：apply 第 1 步 context 输出从「只 flow 业务约束」变为「flow 业务约束 + standard 执行规范」双源，agent 改代码前同时看到 what 与 how。
-- 渐进：试点 ai-logging，验证后铺开其余 standard（后续 change）。
+- **范围边界（重要）**：本 change 仅试点 spec 化 `ai-logging.md` + 扩展 context。standard/ 下其余 10 个文档（code-style / lint / package-layout / testing / theming / interaction-conventions / commit-pr）**维持散文现状**，后续 change 逐步 spec 化；check-standards 本 change 不加 standard spec 结构校验，避免一次性爆 FAIL。
+- 渐进：试点 ai-logging 验证闭环后，铺开 change 再迁其余文档 + 加 check-standards 校验。
 - 不引入独立 lint 脚本；token 成本靠 spec 结构化 + 按需注入控制。

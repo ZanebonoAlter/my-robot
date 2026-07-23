@@ -43,7 +43,7 @@ export interface ContextRow {
 
 // ── Table 2: topic_enrichment_result ────────────────────────────────────────
 
-/** 方向（涨/跌/横盘）。debate.verdict / ResultSector.direction / financial_view 方向复用（演进主线不再用）。 */
+/** 方向（涨/跌/横盘）。debate.verdict / ResultSector.direction 复用。 */
 export type Direction = "up" | "down" | "flat";
 
 /** 板块下代表标的（design §3.4 symbols）。 */
@@ -86,73 +86,19 @@ export interface ResultSector {
 	[key: string]: unknown;
 }
 
-// ── Evolution analysis（主线重定位：金融涨跌 → 演进定位）──────────────────────
-// 后端"分析员"与"review judge"输出已从 sectors 涨跌改为演进定位复合对象。
-// 字段名 `sectors` 在表2 JSONB 里不变，但内容形状变了：旧 ResultSector[] → 新
-// EvolutionAnalysis（复合对象）。ResultSector 类型保留给 financial_view.sectors 用。
-
-/** 演进定位四档：reinforcing=强化 / turning=转折 / expanding=扩散 / fading=衰减。 */
-export type EvolutionPosition =
-	| "reinforcing"
-	| "turning"
-	| "expanding"
-	| "fading";
-
-/** 跨泳道信号：lane=持久话题泳道名，signal=该泳道发生的变化，mechanism=传导机制。 */
-export interface EvolutionSignal {
-	lane: string;
-	signal: string;
-	mechanism: string;
-	[key: string]: unknown;
-}
-
-/** 演进分析证据条目（双类引用）：source_type 区分新闻(news)/工具(tool)。 */
-export interface EvolutionEvidence {
-	context_id?: string | number;
-	period?: "week" | "month" | "year" | "all" | string;
-	quote?: string;
-	/** ★ news=来自订阅源新闻报道 / tool=agent 自主调用 opencli skill 查证。 */
-	source_type?: "news" | "tool";
-	/** 工具引用的 skill 名（web-search / market-quote / browser…），仅 source_type=tool。 */
-	tool_ref?: string;
-	[key: string]: unknown;
-}
-
-/** 金融视角下的板块方向（可选，仅金融话题；非主线，低调展示）。 */
-export interface FinancialView {
-	sectors: Array<{
-		sector: string;
-		direction: "up" | "down" | "flat" | "unknown" | string;
-		supporting_data?: string;
-		[key: string]: unknown;
-	}>;
-	[key: string]: unknown;
-}
-
-/** 表2 result.sectors 的演进定位复合对象（新 schema）。 */
-export interface EvolutionAnalysis {
-	position: EvolutionPosition | string;
-	signals: EvolutionSignal[];
-	evidence: EvolutionEvidence[];
-	/** 可选，仅金融话题——非主线。 */
-	financial_view?: FinancialView;
-	[key: string]: unknown;
-}
-
-/** 两次 result 之间的定位迁移（review.verdict 新 schema）。 */
-export interface PositionChange {
-	from: EvolutionPosition | string;
-	to: EvolutionPosition | string;
-	summary: string;
-	[key: string]: unknown;
-}
+// ── （causal-analysis-agent 阶段2/3b：result.sectors 已迁移为 AnalyzeOutput
+//     {form,lens,analysis} 按形态多态；review.verdict 迁移为 ReviewVerdict。
+//     旧的 EvolutionAnalysis / EvolutionPosition / EvolutionSignal /
+//     EvolutionEvidence / FinancialView / PositionChange 类型已随消费端
+//     EvolutionReport → CausalAnalysisReport 重构一并移除。ResultSector 仍保留
+//     给 DebateSection 的金融辩论板块切片用。）───────────────────────────────
 
 /** 表2 列表项（slim 版，后端 listResults 返回）。 */
 export interface ResultSummaryRow {
 	id: number;
 	evolution_assessment: string;
-	/** 字段名不变；内容从 ResultSector[] 变为 EvolutionAnalysis 复合对象。 */
-	sectors: EvolutionAnalysis | null;
+	/** 字段名不变；内容为 AnalyzeOutput（按 form 多态）。 */
+	sectors: AnalyzeOutput | null;
 	tool_calls_count: number;
 	session_id: string;
 	created_at: string;
@@ -163,8 +109,8 @@ export interface ResultDetailRow {
 	id: number;
 	persistent_topic_id?: number;
 	evolution_assessment: string;
-	/** 字段名不变；内容从 ResultSector[] 变为 EvolutionAnalysis 复合对象。 */
-	sectors: EvolutionAnalysis | null;
+	/** 字段名不变；内容为 AnalyzeOutput（按 form 多态）。 */
+	sectors: AnalyzeOutput | null;
 	causal_chain: string | null;
 	/** 工具调用记录（名/参数/返回摘要/耗时），LLM 产物，结构未冻结。 */
 	tool_calls: unknown;
@@ -179,8 +125,8 @@ export interface TriggerEnrichmentResponse {
 	result: {
 		id: number;
 		evolution_assessment: string;
-		/** 字段名不变；内容为 EvolutionAnalysis 复合对象。 */
-		sectors: EvolutionAnalysis | null;
+		/** 字段名不变；内容为 AnalyzeOutput（按 form 多态）。 */
+		sectors: AnalyzeOutput | null;
 		causal_chain: string | null;
 		tool_calls_count: number;
 		session_id: string;
@@ -208,8 +154,8 @@ export interface ReviewRow {
 	persistent_topic_id?: number;
 	prev_result_id: number | null;
 	curr_result_id: number;
-	/** 定位迁移（新 schema：from→to + summary）。旧 verdict 数组结算已废弃。 */
-	verdict?: PositionChange | null;
+	/** 反思结算（causal-analysis-agent：should_review + new_findings + 确定性漂移）。 */
+	verdict?: ReviewVerdict | null;
 	deviation_summary: string;
 	affected_context: ContextGranularity | null;
 	confidence: number | null;
@@ -263,6 +209,165 @@ export interface StockDebateResult {
 	[key: string]: unknown;
 }
 
+// ── Causal analysis schema（causal-analysis-agent 阶段2 新 result.sectors）──
+// 后端 result.sectors 形状为 {form,lens,analysis}（按 form 多态）。本节是该形状的
+// TS 镜像；3b 已把 ResultDetailRow/ResultSummaryRow/TriggerEnrichmentResponse.sectors
+// 与 ReviewRow.verdict 迁移到 AnalyzeOutput / ReviewVerdict，旧 Evolution* 类型已移除。
+
+/** 因果叙事形态：event_chain=事件链 / theme_vein=主题脉络 / single_point=单点深入 / sparse=稀疏。 */
+export type AnalyzeForm =
+	| "event_chain"
+	| "theme_vein"
+	| "single_point"
+	| "sparse";
+
+/** 确定性档位：high=高 / medium=中 / low=低 / question=存疑。 */
+export type AnalyzeCert = "high" | "medium" | "low" | "question";
+
+/**
+ * 双类引用：news=订阅源新闻报道 / tool=agent 工具查证。
+ * 加 Analyze 前缀避免与 Vue 的 Ref<T>（本文件大量使用）混淆。
+ */
+export interface AnalyzeRef {
+	source_type: "news" | "tool";
+	ref: string;
+	quote?: string;
+	[key: string]: unknown;
+}
+
+/** 洞察条目（确定性 + 标题 + 逻辑链 + 证据，可选 web 核验引用）。 */
+export interface AnalyzeInsight {
+	cert: AnalyzeCert | string;
+	title: string;
+	logic: string;
+	evidence: AnalyzeRef[];
+	web_verified?: AnalyzeRef[];
+	[key: string]: unknown;
+}
+
+// ── analysis body（按 form 多态：每个 variant 形状不同）────────────────────
+/** event_chain 的 analysis 体：事实层 + 时间线 + 洞察层。 */
+export interface AnalysisEventChain {
+	fact_layer: Array<{
+		claim: string;
+		evidence: AnalyzeRef[];
+		verified: boolean;
+	}>;
+	timeline: Array<{
+		date: string;
+		event: string;
+		ref?: AnalyzeRef;
+	}>;
+	insight_layer: AnalyzeInsight[];
+}
+
+/** theme_vein 的 analysis 体：脉络切片 + 跨脉络洞察。 */
+export interface AnalysisThemeVein {
+	veins: Array<{
+		name: string;
+		desc: string;
+		evidence: AnalyzeRef[];
+	}>;
+	cross_insight: AnalyzeInsight[];
+}
+
+/** single_point 的 analysis 体：单点深入（影响 + 证据）。 */
+export interface AnalysisSinglePoint {
+	impact: {
+		implication: string;
+		ripple: string;
+		benchmark: string;
+	};
+	evidence: AnalyzeRef[];
+}
+
+/** sparse 的 analysis 体：稀疏（提示 + 摘要）。 */
+export interface AnalysisSparse {
+	notice: string;
+	summary: string;
+}
+
+/**
+ * analysis 内容体联合。各 variant 无独立判别字段，窄化须依赖父 AnalyzeOutput.form
+ * （switch output.form 后即可安全访问对应 analysis 专属结构）。
+ */
+export type AnalysisBody =
+	| AnalysisEventChain
+	| AnalysisThemeVein
+	| AnalysisSinglePoint
+	| AnalysisSparse;
+
+/**
+ * result.sectors 新形状 {form,lens,analysis}（判别联合）。
+ * form 为判别字段：switch (out.form) 后 TS 自动窄化到对应 variant，
+ * 进而安全读取 out.analysis 的专属结构。lens 为分析视角标签（LLM 产物）。
+ */
+export interface AnalyzeEventChainOutput {
+	form: "event_chain";
+	lens: string;
+	analysis: AnalysisEventChain;
+}
+
+export interface AnalyzeThemeVeinOutput {
+	form: "theme_vein";
+	lens: string;
+	analysis: AnalysisThemeVein;
+}
+
+export interface AnalyzeSinglePointOutput {
+	form: "single_point";
+	lens: string;
+	analysis: AnalysisSinglePoint;
+}
+
+export interface AnalyzeSparseOutput {
+	form: "sparse";
+	lens: string;
+	analysis: AnalysisSparse;
+}
+
+export type AnalyzeOutput =
+	| AnalyzeEventChainOutput
+	| AnalyzeThemeVeinOutput
+	| AnalyzeSinglePointOutput
+	| AnalyzeSparseOutput;
+
+/**
+ * review.verdict 新形状（causal-analysis-agent 阶段2）。
+ * 反思结算：是否需要重审 + 原因 + 新发现/被推翻的洞察 + 确定性漂移。
+ * ReviewRow.verdict 已在 3b 迁移为本类型。
+ */
+export interface ReviewVerdict {
+	should_review: boolean;
+	reason?: string;
+	new_findings?: string[];
+	overturned?: string[];
+	confidence_shift?: Array<{
+		insight: string;
+		from: AnalyzeCert | string;
+		to: AnalyzeCert | string;
+	}>;
+	affected_context?: string | null;
+	confidence?: number | null;
+	[key: string]: unknown;
+}
+
+/**
+ * 报告追问 QA 条目（append-only，归属一个不可变 result 快照；可 sediment 沉淀）。
+ * 对齐后端 TopicEnrichmentQA（table topic_enrichment_qa）。
+ */
+export interface TopicEnrichmentQA {
+	id: number;
+	topic_enrichment_result_id: number;
+	question: string;
+	answer: string;
+	/** 工具调用记录（jsonb，结构未冻结）。 */
+	tool_calls: unknown;
+	source: EnrichmentSource;
+	sedimented: boolean;
+	created_at: string;
+}
+
 // ── Request body types ──────────────────────────────────────────────────────
 
 export interface CreateReviewBody {
@@ -275,6 +380,15 @@ export interface UpsertDataSourceBody {
 	source_type: string;
 	config?: Record<string, unknown>;
 	enabled?: boolean;
+}
+
+/** POST .../results/:id/qa 的响应（对齐后端 service.QAAnswer）。 */
+export interface AskQAResponse {
+	answer: string;
+	/** 工具调用记录（结构未冻结，LLM 产物）。 */
+	tool_calls: unknown;
+	/** 双类引用：news=报告上下文 / tool=工具查证结果。 */
+	refs: AnalyzeRef[];
 }
 
 // ── API factory ─────────────────────────────────────────────────────────────
@@ -432,6 +546,39 @@ export function useBoardEnrichmentApi() {
 		);
 	}
 
+	// ── QA (causal-analysis-agent 阶段3：报告追问 + 沉淀) ─────────────────────
+	/** 问一轮：POST .../results/:id/qa body {question} → {answer,tool_calls,refs}。 */
+	async function askQA(
+		topicId: number,
+		resultId: number,
+		question: string,
+	): Promise<ApiResponse<AskQAResponse>> {
+		return apiClient.post(
+			`/persistent-topics/${topicId}/enrichment/results/${resultId}/qa`,
+			{ question },
+		);
+	}
+
+	/** 多轮历史：GET .../results/:id/qa → TopicEnrichmentQA[]（oldest first）。 */
+	async function listQA(
+		topicId: number,
+		resultId: number,
+	): Promise<ApiResponse<TopicEnrichmentQA[]>> {
+		return apiClient.get(
+			`/persistent-topics/${topicId}/enrichment/results/${resultId}/qa`,
+		);
+	}
+
+	/** 沉淀一轮：POST .../qa/:id/sediment → 更新后的 TopicEnrichmentQA（sedimented=true）。 */
+	async function sedimentQA(
+		topicId: number,
+		qaId: number,
+	): Promise<ApiResponse<TopicEnrichmentQA>> {
+		return apiClient.post(
+			`/persistent-topics/${topicId}/enrichment/qa/${qaId}/sediment`,
+		);
+	}
+
 	return {
 		listContexts,
 		getContext,
@@ -449,5 +596,9 @@ export function useBoardEnrichmentApi() {
 		listDataSources,
 		upsertDataSource,
 		deleteDataSource,
+		// qa (causal-analysis-agent 阶段3)
+		askQA,
+		listQA,
+		sedimentQA,
 	};
 }

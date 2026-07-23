@@ -14,7 +14,6 @@ import (
 
 	"syntopica-backend/internal/models"
 	"syntopica-backend/internal/platform/airouter"
-	"syntopica-backend/internal/platform/database"
 	"syntopica-backend/internal/platform/logging"
 	"syntopica-backend/internal/platform/ws"
 	"syntopica-backend/internal/topicgraph/repository"
@@ -286,25 +285,13 @@ func listBoardTopics(c *gin.Context) {
 		return
 	}
 	// Aggregate section counts per topic in one query (left-joined topics show 0).
-	type countRow struct {
-		PersistentTopicID uint
-		N                 int
-	}
-	var counts []countRow
-	if err := database.DB.Table("daily_report_sections").
-		Select("persistent_topic_id, count(*) AS n").
-		Where("persistent_topic_id IS NOT NULL").
-		Group("persistent_topic_id").
-		Scan(&counts).Error; err != nil {
+	countMap, err := repository.Repo.CountSectionsByTopic()
+	if err != nil {
 		logging.Errorf("list board topics: count sections: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "failed to count sections"})
 		return
 	}
-	countMap := make(map[uint]int, len(counts))
-	for _, cr := range counts {
-		countMap[cr.PersistentTopicID] = cr.N
-	}
-	upgradeThreshold := repository.LoadPersistentTopicConfig(database.DB).UpgradeThreshold
+	upgradeThreshold := repository.LoadPersistentTopicConfig(repository.Repo.DB()).UpgradeThreshold
 	// Filter out observing candidates (hit_count < upgrade_threshold).
 	topics = repository.FilterVisibleTopics(topics, upgradeThreshold)
 	type topicListItem struct {

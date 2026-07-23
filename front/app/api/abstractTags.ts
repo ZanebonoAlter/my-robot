@@ -1,5 +1,5 @@
 import { apiClient } from './client'
-import { mapApiResponse } from '~/utils/api-helpers'
+import { mapApiResponse, buildQueryString } from '~/utils/api-helpers'
 import type { ApiResponse } from '~/types'
 import type { TagHierarchyNode, TagHierarchyResponse } from '~/types/topicTag'
 
@@ -43,14 +43,14 @@ function mapNode(raw: RawTagHierarchyNode): TagHierarchyNode {
 export function useAbstractTagApi() {
   return {
     async fetchHierarchy(category?: string, feedId?: string, categoryId?: string, unclassified?: boolean, timeRange?: string, conceptId?: number): Promise<ApiResponse<TagHierarchyResponse>> {
-      const params = new URLSearchParams()
-      if (category) params.set('category', category)
-      if (feedId) params.set('feed_id', feedId)
-      if (categoryId) params.set('category_id', categoryId)
-      if (unclassified) params.set('unclassified', 'true')
-      if (timeRange) params.set('time_range', timeRange)
-      if (conceptId) params.set('concept_id', String(conceptId))
-      const query = params.toString() ? `?${params.toString()}` : ''
+      const query = buildQueryString({
+        category,
+        feed_id: feedId,
+        category_id: categoryId,
+        unclassified: unclassified ? 'true' : undefined,
+        time_range: timeRange,
+        concept_id: conceptId,
+      })
       const response = await apiClient.get<RawHierarchyResponse>(`/topic-tags/hierarchy${query}`)
       if (response.success && response.data) {
         return mapApiResponse(response, {
@@ -74,9 +74,7 @@ export function useAbstractTagApi() {
     },
 
     async organizeTags(category?: string): Promise<ApiResponse<{ message: string }>> {
-      const params = new URLSearchParams()
-      if (category) params.set('category', category)
-      const query = params.toString() ? `?${params.toString()}` : ''
+      const query = buildQueryString({ category })
       return apiClient.post('/topic-tags/organize' + query, {})
     },
   }

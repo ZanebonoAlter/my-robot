@@ -47,8 +47,8 @@ type EnrichmentOutput struct {
 
 // ── OrchestratorService ─────────────────────────────────────────────────────
 
-// OrchestratorService runs the cycle-B data enrichment flow (三角色编排).
-// See design.md §3 and overview.md §4.
+// OrchestratorService runs the cycle-B data enrichment flow (探索判断 agent 编排).
+// See design.md §3 and spec under causal-analysis-agent.
 type OrchestratorService struct {
 	airouter          AirRouter
 	repo              *repository.Repository
@@ -56,10 +56,15 @@ type OrchestratorService struct {
 	renderer          *LifelineRenderer
 	toolRegistry      *Registry
 	boardConfigReader BoardConfigReader
+	lensSource        LensSource // 视角来源（默认 AgentLensSource，可注入外部源）
 	capability        airouter.Capability
 }
 
 // NewOrchestratorService creates a new orchestrator with required dependencies.
+// The lens source defaults to AgentLensSource (LLM-generated); callers needing
+// an external viewpoint source (video commentators, research reports) may swap
+// the field after construction. Constructor signature is kept stable so existing
+// wiring/tests do not change.
 func NewOrchestratorService(
 	airouter AirRouter,
 	repo *repository.Repository,
@@ -76,6 +81,7 @@ func NewOrchestratorService(
 		renderer:          renderer,
 		toolRegistry:      toolRegistry,
 		boardConfigReader: boardConfigReader,
+		lensSource:        NewAgentLensSource(airouter, capability),
 		capability:        capability,
 	}
 }
@@ -121,18 +127,36 @@ func (o *OrchestratorService) EnrichTopic(ctx context.Context, topicID uint) (*E
 		reviewText += fmt.Sprintf("- [review #%d] %s\n", r.ID, r.DeviationSummary)
 	}
 
-	// 6. Step 1: Interpret — extract topics to research.
-	topics, err := o.interpret(ctx, sessionID, lifelineText, contextText, reviewText)
+	// 6. Step 1: Interpret — form classification + research topics.
+	ictx := interpretContext{
+		SessionID:    sessionID,
+		LifelineText: lifelineText,
+		ContextText:  contextText,
+		ReviewText:   reviewText,
+	}
+	interp, err := o.interpret(ctx, ictx)
 	if err != nil {
 		return nil, fmt.Errorf("enrich topic %d: interpret: %w", topicID, err)
 	}
 
-	// 7. Step 2: Agent loop per topic.
-	allowedTools := cfg.AllowedTools
-	agentResults := make([]*AgentLoopResult, 0, len(topics))
-	topicsData := make([]map[string]any, 0, len(topics))
-	for _, t := range topics {
-		ar, err := o.runAgentLoop(ctx, sessionID, t.topic, lifelineText, allowedTools)
+	// 7. Lens candidates + select first.
+	// TODO(阶段2b): 视角选择交互——把候选返回前端让用户选/自填。本阶段默认选第一个。
+	lenses, err := o.lensSource.Propose(ctx, ictx, interp.Form)
+	if err != nil {
+		return nil, fmt.Errorf("enrich topic %d: lens propose: %w", topicID, err)
+	}
+	selectedLens := lenses[0]
+
+	// 8. Step 2: Agent loop per topic (selected lens focuses research).
+	// Exploration entry points (list_boards/list_lanes/get_lane_detail) and
+	// web_search are ALWAYS available; financial (source-typed) tools are only
+	// added when the board's source_types include them (cfg.AllowedTools already
+	// reflects ToolsForSourceType, see board_config_impl.go).
+	allowedTools := o.buildAgentAllowedTools(cfg.AllowedTools)
+	agentResults := make([]*AgentLoopResult, 0, len(interp.Topics))
+	topicsData := make([]map[string]any, 0, len(interp.Topics))
+	for _, t := range interp.Topics {
+		ar, err := o.runAgentLoop(ctx, sessionID, t.topic, selectedLens.Name, lifelineText, allowedTools)
 		agentResults = append(agentResults, ar)
 		if err != nil {
 			// Agent loop error is non-fatal; record and continue.
@@ -144,39 +168,31 @@ func (o *OrchestratorService) EnrichTopic(ctx context.Context, topicID uint) (*E
 		})
 	}
 
-	// 8. Step 3: Analyze — synthesize context + market data.
-	analysis, err := o.analyze(ctx, sessionID, lifelineText, contextText, topicsData)
+	// 9. Step 3: Analyze — layered insight (fact_layer + insight_layer) by form + lens.
+	analysis, err := o.analyze(ctx, sessionID, interp.Form, selectedLens.Name, lifelineText, contextText, topicsData)
 	if err != nil {
 		return nil, fmt.Errorf("enrich topic %d: analyze: %w", topicID, err)
 	}
 
-	// 9. Build input snapshot for traceability.
+	// 10. Build input snapshot for traceability.
 	inputSnap := buildInputSnapshot(contextSnap, reviewIDs, cfg.WindowDays, cfg.ContextLayers)
 
-	// 10. Build tool_calls JSON from all agent loops.
+	// 11. Build tool_calls JSON from all agent loops.
 	allToolCalls := make([]ToolCallRecord, 0)
 	for _, ar := range agentResults {
 		allToolCalls = append(allToolCalls, ar.ToolCalls...)
 	}
 	toolCallsJSON, _ := json.Marshal(allToolCalls)
 
-	// 11. Write immutable result.
-	sectorsObj := map[string]any{
-		"position": analysis.position,
-		"signals":  analysis.signals,
-		"evidence": analysis.evidence,
-	}
-	if analysis.financialView != nil {
-		sectorsObj["financial_view"] = analysis.financialView
-	}
-	sectorsJSON, _ := json.Marshal(sectorsObj)
+	// 12. Write immutable result. Sectors jsonb stores {form,lens,analysis}
+	// (column reused, no DDL — stage-1 migration cleared old evolution-positioning data).
+	sectorsJSON, _ := json.Marshal(analysis) // analyzeOutput marshals to {form,lens,analysis}
 	snapJSON, _ := json.Marshal(inputSnap)
 
 	result := &repository.TopicEnrichmentResult{
 		PersistentTopicID:   topicID,
-		EvolutionAssessment: analysis.evolutionAssessment,
+		EvolutionAssessment: "", // vestigial column; new schema lives in Sectors
 		Sectors:             sectorsJSON,
-		CausalChain:         analysis.causalChain,
 		ToolCalls:           toolCallsJSON,
 		InputSnapshot:       snapJSON,
 		SessionID:           sessionID,
@@ -185,7 +201,7 @@ func (o *OrchestratorService) EnrichTopic(ctx context.Context, topicID uint) (*E
 		return nil, fmt.Errorf("enrich topic %d: save result: %w", topicID, err)
 	}
 
-	// 12. Step 4: Review judge (if prev result exists).
+	// 13. Step 4: Review judge (if prev result exists with new-format sectors).
 	var review *repository.TopicEnrichmentReview
 	prevResult, prevErr := o.repo.GetPrevLatestTopicEnrichmentResult(ctx, topicID, result.ID)
 	if prevErr != nil {
@@ -196,31 +212,31 @@ func (o *OrchestratorService) EnrichTopic(ctx context.Context, topicID uint) (*E
 		// No previous result (ErrRecordNotFound) is normal — silently skip review.
 	}
 	if prevErr == nil && prevResult != nil {
-		// Guard: skip review if prev result has old-format sectors (no position field).
-		if extractPosition(prevResult.Sectors) == "" {
-			logging.Infof("enrich topic %d: prev result has old-format sectors (no position), skip review judge", topicID)
+		// Guard: skip review if prev result has no form field (old-format/empty sectors).
+		if extractForm(prevResult.Sectors) == "" {
+			logging.Infof("enrich topic %d: prev result has no form (old-format/empty sectors), skip review judge", topicID)
 		} else {
 			prevJSON, _ := json.Marshal(map[string]any{
-				"evolution_assessment": prevResult.EvolutionAssessment,
-				"analysis":             json.RawMessage(prevResult.Sectors),
+				"analysis": json.RawMessage(prevResult.Sectors),
 			})
 			currJSON, _ := json.Marshal(map[string]any{
-				"evolution_assessment": result.EvolutionAssessment,
-				"analysis":             json.RawMessage(result.Sectors),
+				"analysis": json.RawMessage(result.Sectors),
 			})
 			rj, rjErr := o.runReviewJudge(ctx, sessionID, string(prevJSON), string(currJSON))
 			if rjErr == nil && rj != nil && rj.ShouldReview {
 				conf := rj.Confidence
-				var verdictJSON json.RawMessage
-				if len(rj.PositionChange) > 0 {
-					verdictJSON, _ = json.Marshal(rj.PositionChange)
+				verdictObj := map[string]any{
+					"new_findings":     rj.NewFindings,
+					"overturned":       rj.Overturned,
+					"confidence_shift": rj.ConfidenceShift,
 				}
+				verdictJSON, _ := json.Marshal(verdictObj)
 				review = &repository.TopicEnrichmentReview{
 					PersistentTopicID: topicID,
 					PrevResultID:      &prevResult.ID,
 					CurrResultID:      result.ID,
 					Verdict:           verdictJSON,
-					DeviationSummary:  rj.ChangeSummary,
+					DeviationSummary:  rj.Reason,
 					AffectedContext:   rj.AffectedContext,
 					Confidence:        &conf,
 					Applied:           false,
@@ -242,40 +258,92 @@ func (o *OrchestratorService) EnrichTopic(ctx context.Context, topicID uint) (*E
 
 // ── Interpret (角色①) ──────────────────────────────────────────────────────
 
+// interpretTopic is one research topic extracted by the interpreter to feed
+// the agent loop (e.g. an A-share ETF industry direction worth querying).
 type interpretTopic struct {
 	topic  string
 	reason string
 }
 
+// interpretContext bundles the text inputs the interpreter + lens source need.
+// Kept as a struct so LensSource implementations stay signature-stable as the
+// inputs evolve.
+type interpretContext struct {
+	SessionID    string
+	LifelineText string
+	ContextText  string
+	ReviewText   string
+}
+
+// interpretResult is the output of the interpreter role: the topic's form
+// classification plus the research topics that feed the agent loop.
+type interpretResult struct {
+	Form       string // event_chain|theme_vein|single_point|sparse
+	FormReason string // 判据说明（为什么这个形态）
+	Topics     []interpretTopic
+}
+
+// Form classification constants. The form enum is extensible: adding a new form
+// only requires a new AnalysisBody impl + a branch in parseAnalyzeOutput, not
+// an architecture change. Spec "话题形态判断".
+const (
+	FormEventChain  = "event_chain"
+	FormThemeVein   = "theme_vein"
+	FormSinglePoint = "single_point"
+	FormSparse      = "sparse"
+)
+
+// Certainty grading constants for insights. Spec "见解依据与确定性分级".
+const (
+	CertHigh     = "high"     // 已验证
+	CertMedium   = "medium"   // 推演·有据
+	CertLow      = "low"      // 假设·情景
+	CertQuestion = "question" // 提问·指出条件非预言成败
+)
+
+func isValidForm(f string) bool {
+	switch f {
+	case FormEventChain, FormThemeVein, FormSinglePoint, FormSparse:
+		return true
+	}
+	return false
+}
+
 // interpretPrompt is the LLM prompt for the interpreter role.
-// Ported from PoC roles_evolved.py:interpret_lifeline.
-const interpretPrompt = `你是一位资深产业分析师。下面是一个持久话题的演进脉络(跨多天的事件演进)。
+// Performs form classification (first) + research topic extraction (second).
+// Spec "话题形态判断".
+const interpretPrompt = `你是一位资深产业分析师。下面是一个持久话题的演进脉络（跨多天的事件演进）与分层新闻上下文。
 
-你的任务:基于这个演进脉络,提炼出**需要查询哪些产业/板块的实时行情数据**,以便佐证或丰富对"这次最新进展在整个演进里意味着什么"的判断。
+第一步·形态判断：先判断这个话题的【形态】，四选一：
+- event_chain（事件链）：高密度、时序呈线性因果演进（如“官宣→否认→条款”），有清晰的因果链条
+- theme_vein（主题脉络）：线索高度发散、多线并行（如“产业范式转移”下多个 AI 线索），无线性因果
+- single_point（单点影响）：单一事件/单一时点，影响评估本身即见解
+- sparse（骨感）：料严重不足（命中极少、脉络单薄），无法支撑推演
 
-要求:
-- 主题必须是 A 股有对应 ETF 的产业方向(如:石油/能源、黄金/贵金属、军工、航空、航运/物流、光伏/新能源、化工、半导体等)
-- 每个主题给出"为什么要查它"的理由(关联到演进脉络的哪一天/哪个环节)
-- 提炼 3-5 个主题,聚焦最能佐证演进判断的方向
+判据（基于语义综合判断，无需精确数字）：
+- 丰满度：事件/线索总量是否足够
+- 聚合度：能否聚成时间线/板块结构
+- 线性 vs 平行：是“A→B→C”的因果，还是多线并行的脉络
 
-输出严格 JSON:
-{"topics": [{"topic": "产业主题词", "reason": "关联演进:...所以需要查它的实时表现"}]}`
+第二步·提炼研究主题：基于形态，提炼出需要查询的【产业/板块】实时数据方向（A 股有对应 ETF 的方向，如石油/能源、军工、半导体等），每个给“为什么要查它”的理由，聚焦 3-5 个。
 
-func (o *OrchestratorService) interpret(ctx context.Context, sessionID, lifelineText, contextText, reviewText string) ([]interpretTopic, error) {
+输出严格 JSON（不要其他内容）：
+{"form": "event_chain|theme_vein|single_point|sparse", "form_reason": "为什么是这个形态（一两句）", "topics": [{"topic": "产业主题词", "reason": "关联演进:...所以需要查它"}]}`
+
+func (o *OrchestratorService) interpret(ctx context.Context, ictx interpretContext) (*interpretResult, error) {
 	prompt := interpretPrompt + "\n\n---\n"
-
-	if contextText != "" {
-		prompt += "分层新闻上下文:\n" + contextText + "\n\n"
+	if ictx.ContextText != "" {
+		prompt += "分层新闻上下文:\n" + ictx.ContextText + "\n\n"
 	}
-	if reviewText != "" {
-		prompt += "历史认知记录(避免重蹈已知偏差):\n" + reviewText + "\n\n"
+	if ictx.ReviewText != "" {
+		prompt += "历史认知记录(避免重蹈已知偏差):\n" + ictx.ReviewText + "\n\n"
 	}
-	prompt += "话题演进脉络:\n" + lifelineText
+	prompt += "话题演进脉络:\n" + ictx.LifelineText
 
 	resp, err := o.airouter.Chat(ctx, airouter.ChatRequest{
 		Capability:  o.capability,
 		Operation:   "data_enrichment.interpret",
-		SessionID:   sessionID,
+		SessionID:   ictx.SessionID,
 		Messages:    []airouter.Message{{Role: "user", Content: prompt}},
 		Temperature: floatPtr(0.2),
 		JSONMode:    true,
@@ -288,6 +356,12 @@ func (o *OrchestratorService) interpret(ctx context.Context, sessionID, lifeline
 	if err != nil {
 		return nil, fmt.Errorf("interpret parse: %w", err)
 	}
+
+	form, _ := parsed["form"].(string)
+	if !isValidForm(form) {
+		return nil, fmt.Errorf("interpret: invalid or missing form: %q", form)
+	}
+	formReason, _ := parsed["form_reason"].(string)
 
 	topicsRaw, ok := parsed["topics"].([]any)
 	if !ok {
@@ -307,11 +381,12 @@ func (o *OrchestratorService) interpret(ctx context.Context, sessionID, lifeline
 		}
 	}
 
-	if len(topics) == 0 {
+	// sparse 形态允许零主题（骨感型可能无可查方向）；其它形态至少要一个。
+	if len(topics) == 0 && form != FormSparse {
 		return nil, fmt.Errorf("interpret: no topics extracted from response")
 	}
 
-	return topics, nil
+	return &interpretResult{Form: form, FormReason: formReason, Topics: topics}, nil
 }
 
 // ── Agent Loop (角色②) ─────────────────────────────────────────────────────
@@ -319,8 +394,10 @@ func (o *OrchestratorService) interpret(ctx context.Context, sessionID, lifeline
 const maxAgentLoops = 6
 
 // agentLoopSystemPrompt is the system prompt for the data query agent.
-// Ported from PoC roles_evolved.py:research_topic_evolved.
-const agentLoopSystemPrompt = `你是一位 A 股数据查询员。背景:有一个持久话题正在演进(见下方脉络),你需要针对给定的产业主题,查到相关的 ETF 实时行情数据,帮助分析"最新进展在这个演进里的意义"。
+// The selected lens focuses what the data should help analyze.
+// Ported from PoC roles_evolved.py:research_topic_evolved, lens slot added by
+// causal-analysis-agent (spec "分析视角候选与选择").
+const agentLoopSystemPrompt = `你是一位 A 股数据查询员。背景:有一个持久话题正在演进(见下方脉络),本次分析视角是「%s」。你需要针对给定的产业主题,查到相关的 ETF 实时行情数据,帮助分析"最新进展在这个演进里、从该视角看意味着什么"。
 
 可用工具:
 %s
@@ -351,21 +428,54 @@ const agentLoopSystemPrompt = `你是一位 A 股数据查询员。背景:有一
 //	① /no_think prefix in user message (PoC double-insurance, complements DB-level enable_thinking=false)
 //	② Full tool results in history (never truncated)
 //	③ Deduplication: same tool+args blocked
-func (o *OrchestratorService) runAgentLoop(ctx context.Context, sessionID, topic, lifelineText string, allowedTools []string) (*AgentLoopResult, error) {
+func (o *OrchestratorService) runAgentLoop(ctx context.Context, sessionID, topic, lens, lifelineText string, allowedTools []string) (*AgentLoopResult, error) {
 	toolsDesc := buildToolsDesc(o.toolRegistry, allowedTools)
-	system := fmt.Sprintf(agentLoopSystemPrompt, toolsDesc, lifelineText)
+	system := fmt.Sprintf(agentLoopSystemPrompt, lens, toolsDesc, lifelineText)
+	return runToolLoop(ctx, o.airouter, o.toolRegistry, o.capability, toolLoopParams{
+		sessionID:    sessionID,
+		systemPrompt: system,
+		taskLine:     "当前要查询的产业主题: " + topic,
+		operation:    "data_enrichment.tool_use",
+		allowedTools: allowedTools,
+		maxLoops:     maxAgentLoops,
+		resultTopic:  topic,
+	})
+}
 
+// toolLoopParams bundles the inputs to runToolLoop so the core loop stays
+// signature-stable as callers (EnrichTopic's runAgentLoop, QAAgent.Ask) evolve.
+type toolLoopParams struct {
+	sessionID    string   // airouter session tag
+	systemPrompt string   // pre-built system prompt (caller-specific)
+	taskLine     string   // first body line after /no_think (e.g. "当前要查询的产业主题: X" / "用户追问: X")
+	operation    string   // airouter operation tag
+	allowedTools []string // tools the loop may call (guard + dedup scope)
+	maxLoops     int      // loop cap
+	resultTopic  string   // optional: sets AgentLoopResult.Topic (enrichment sets it; QA leaves blank)
+}
+
+// runToolLoop is the shared agent core used by both the enrichment agent loop
+// (runAgentLoop) and the report follow-up QA agent (QAAgent.Ask). It preserves
+// the three defenses from spec:
+//   - ① /no_think prefix in user message (PoC double-insurance)
+//   - ② Full tool results in history (never truncated)
+//   - ③ Deduplication: same tool+args blocked
+//
+// The system prompt + taskLine are caller-specific; everything inside (chat,
+// parse, allowed-tools guard, dedup, execute, history accumulation) is shared
+// so the two agents never drift on loop discipline.
+func runToolLoop(ctx context.Context, router AirRouter, toolRegistry *Registry, capability airouter.Capability, p toolLoopParams) (*AgentLoopResult, error) {
 	// Build allowedTools set for O(1) lookup.
-	allowedSet := make(map[string]bool, len(allowedTools))
-	for _, t := range allowedTools {
+	allowedSet := make(map[string]bool, len(p.allowedTools))
+	for _, t := range p.allowedTools {
 		allowedSet[t] = true
 	}
 
-	result := &AgentLoopResult{Topic: topic}
+	result := &AgentLoopResult{Topic: p.resultTopic}
 	historyLines := make([]string, 0)
 	seenCalls := make(map[string]bool) // dedup key → true
 
-	for step := 1; step <= maxAgentLoops; step++ {
+	for step := 1; step <= p.maxLoops; step++ {
 		result.Loops = step
 
 		historyBlock := strings.Join(historyLines, "\n")
@@ -374,13 +484,13 @@ func (o *OrchestratorService) runAgentLoop(ctx context.Context, sessionID, topic
 		}
 
 		// 防御① /no_think prefix (双保险 — DB provider 配置是主防线).
-		userMsg := fmt.Sprintf("/no_think\n当前要查询的产业主题: %s\n\n已有的工具调用历史:\n%s\n\n请决定下一步(调工具或宣布完成),输出 JSON。", topic, historyBlock)
+		userMsg := fmt.Sprintf("/no_think\n%s\n\n已有的工具调用历史:\n%s\n\n请决定下一步(调工具或宣布完成),输出 JSON。", p.taskLine, historyBlock)
 
-		resp, err := o.airouter.Chat(ctx, airouter.ChatRequest{
-			Capability:  o.capability,
-			Operation:   "data_enrichment.tool_use",
-			SessionID:   sessionID,
-			Messages:    []airouter.Message{{Role: "system", Content: system}, {Role: "user", Content: userMsg}},
+		resp, err := router.Chat(ctx, airouter.ChatRequest{
+			Capability:  capability,
+			Operation:   p.operation,
+			SessionID:   p.sessionID,
+			Messages:    []airouter.Message{{Role: "system", Content: p.systemPrompt}, {Role: "user", Content: userMsg}},
 			Temperature: floatPtr(0.2),
 			JSONMode:    true,
 		})
@@ -446,7 +556,7 @@ func (o *OrchestratorService) runAgentLoop(ctx context.Context, sessionID, topic
 			seenCalls[dedupKey] = true
 
 			// Execute tool.
-			toolResult, toolErr := o.toolRegistry.Execute(ctx, toolName, args)
+			toolResult, toolErr := toolRegistry.Execute(ctx, toolName, args)
 			if toolErr != nil {
 				toolResult = fmt.Sprintf(`{"error":"%s"}`, toolErr.Error())
 			}
@@ -476,7 +586,7 @@ func (o *OrchestratorService) runAgentLoop(ctx context.Context, sessionID, topic
 
 	// Exhausted maxLoops.
 	if result.Error == "" {
-		result.Error = fmt.Sprintf("达到最大循环数 %d 未完成", maxAgentLoops)
+		result.Error = fmt.Sprintf("达到最大循环数 %d 未完成", p.maxLoops)
 	}
 	return result, nil
 }
@@ -484,75 +594,196 @@ func (o *OrchestratorService) runAgentLoop(ctx context.Context, sessionID, topic
 // ── Analyze (角色③) ────────────────────────────────────────────────────────
 
 // analyzeOutput is the structured output of the analyst role.
-// See design.md §3.3: topic evolution positioning.
+//
+// Replaces the old evolution-positioning schema (position/signals/causal_chain)
+// with a polymorphic "exploration judgment" payload keyed by Form. Spec
+// "分层见解产出" / "见解依据与确定性分级".
 type analyzeOutput struct {
-	evolutionAssessment string
-	position            string
-	signals             []map[string]any
-	evidence            []map[string]any
-	financialView       *map[string]any // optional: nil when no financial data bound
-	causalChain         string
-	overall             string
+	Form     string       `json:"form"`     // event_chain|theme_vein|single_point|sparse
+	Lens     string       `json:"lens"`     // 选定视角（具体问题式）
+	Analysis AnalysisBody `json:"analysis"` // 按 form 多态
+}
+
+// AnalysisBody is the polymorphic analysis payload. Concrete type varies by
+// Form; per-form structs live below. JSON round-trip is handled by a custom
+// UnmarshalJSON on *analyzeOutput that dispatches by Form. The sealed-interface
+// marker keeps the set of valid bodies closed.
+type AnalysisBody interface {
+	isAnalysisBody()
+}
+
+// Ref is a typed evidence reference: a news article quote or an agent tool
+// result. Spec "见解依据与确定性分级" (双类引用 📰新闻/🔧工具).
+type Ref struct {
+	SourceType string `json:"source_type"` // "news"|"tool"
+	Ref        string `json:"ref"`
+	Quote      string `json:"quote,omitempty"`
+}
+
+// FactClaim is a verified fact node in the fact_layer (event_chain).
+type FactClaim struct {
+	Claim    string `json:"claim"`
+	Evidence []Ref  `json:"evidence"`
+	Verified bool   `json:"verified"`
+}
+
+// TimelineNode is a dated event in the timeline (event_chain).
+type TimelineNode struct {
+	Date  string `json:"date"`
+	Event string `json:"event"`
+	Ref   *Ref   `json:"ref,omitempty"`
+}
+
+// Insight is a推演/假设/提问 insight — the core output of the analysis. Cert ∈
+// high|medium|low|question. Every insight MUST carry Evidence; insights with
+// empty evidence are dropped at parse time (spec "见解必须挂依据").
+type Insight struct {
+	Cert        string `json:"cert"` // high|medium|low|question
+	Title       string `json:"title"`
+	Logic       string `json:"logic"`
+	Evidence    []Ref  `json:"evidence"`
+	WebVerified []Ref  `json:"web_verified,omitempty"`
+}
+
+// hasEvidence reports whether an insight carries at least one supporting ref.
+func (in Insight) hasEvidence() bool {
+	return len(in.Evidence) > 0 || len(in.WebVerified) > 0
+}
+
+// EventChainAnalysis is the body for form=event_chain.
+type EventChainAnalysis struct {
+	FactLayer    []FactClaim    `json:"fact_layer"`
+	Timeline     []TimelineNode `json:"timeline"`
+	InsightLayer []Insight      `json:"insight_layer"`
+}
+
+func (EventChainAnalysis) isAnalysisBody() {}
+
+// Vein is a parallel theme thread (theme_vein.veins).
+type Vein struct {
+	Name     string `json:"name"`
+	Desc     string `json:"desc"`
+	Evidence []Ref  `json:"evidence"`
+}
+
+// ThemeVeinAnalysis is the body for form=theme_vein.
+type ThemeVeinAnalysis struct {
+	Veins        []Vein    `json:"veins"`
+	CrossInsight []Insight `json:"cross_insight"`
+}
+
+func (ThemeVeinAnalysis) isAnalysisBody() {}
+
+// ImpactAssessment is the single-point impact (itself the insight).
+type ImpactAssessment struct {
+	Implication string `json:"implication"`
+	Ripple      string `json:"ripple"`
+	Benchmark   string `json:"benchmark"`
+}
+
+// SinglePointAnalysis is the body for form=single_point.
+type SinglePointAnalysis struct {
+	Impact   ImpactAssessment `json:"impact"`
+	Evidence []Ref            `json:"evidence"`
+}
+
+func (SinglePointAnalysis) isAnalysisBody() {}
+
+// SparseAnalysis is the body for form=sparse — honestly marks information
+// insufficiency. By design it has NO insight_layer (spec "骨感型不硬推演").
+type SparseAnalysis struct {
+	Notice  string `json:"notice"`
+	Summary string `json:"summary"`
+}
+
+func (SparseAnalysis) isAnalysisBody() {}
+
+// UnmarshalJSON dispatches the analysis body by the form field, enabling JSON
+// round-trip of analyzeOutput (e.g. reading a stored Sectors snapshot back).
+func (a *analyzeOutput) UnmarshalJSON(data []byte) error {
+	var raw struct {
+		Form     string          `json:"form"`
+		Lens     string          `json:"lens"`
+		Analysis json.RawMessage `json:"analysis"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	a.Form = raw.Form
+	a.Lens = raw.Lens
+	switch raw.Form {
+	case FormEventChain:
+		var body EventChainAnalysis
+		if err := json.Unmarshal(raw.Analysis, &body); err != nil {
+			return fmt.Errorf("event_chain analysis: %w", err)
+		}
+		a.Analysis = body
+	case FormThemeVein:
+		var body ThemeVeinAnalysis
+		if err := json.Unmarshal(raw.Analysis, &body); err != nil {
+			return fmt.Errorf("theme_vein analysis: %w", err)
+		}
+		a.Analysis = body
+	case FormSinglePoint:
+		var body SinglePointAnalysis
+		if err := json.Unmarshal(raw.Analysis, &body); err != nil {
+			return fmt.Errorf("single_point analysis: %w", err)
+		}
+		a.Analysis = body
+	case FormSparse:
+		var body SparseAnalysis
+		if err := json.Unmarshal(raw.Analysis, &body); err != nil {
+			return fmt.Errorf("sparse analysis: %w", err)
+		}
+		a.Analysis = body
+	default:
+		return fmt.Errorf("unknown form: %q", raw.Form)
+	}
+	return nil
 }
 
 // analyzePrompt is the LLM prompt for the analyst role.
-// Design §3.3: topic evolution positioning (not financial direction prediction).
-const analyzePrompt = `你是一位产业演进分析师,负责判断一个持久话题的最新进展在话题生命线中的定位。
+// Produces layered output (fact_layer + insight_layer) shaped by form + lens.
+// Spec "分层见解产出" / "见解依据与确定性分级" / "骨感型诚实标注".
+const analyzePrompt = `你是一位产业探索判断分析师。话题形态已判断为「%s」，本次分析视角是「%s」。
 
-下面提供:
-1) 话题演进脉络 (lifeline):该话题从出现到最新的时间线节点
-2) 分层新闻上下文:按 week/month/year/all 分层的历史背景
-3) 各主题实时数据:agent 补充查到的信息 (可能是行情数据,也可能是一般搜索)
+下面提供：
+1) 话题演进脉络 (lifeline)
+2) 分层新闻上下文
+3) 各主题实时数据（agent 查到的信息）
 
-你的任务:基于这些信息,输出**话题演进定位** JSON。核心是判断话题处在什么演化阶段,而不是预测涨跌。
+你的任务：按形态 + 视角，产出【分层分析】——事实层（梳理+验证，铺垫）+ 见解层（推演/假设/提问，★产出主体）。发挥 AI 多层推演 + 跨领域联想 + 假设性提问的优势。
 
-分析要求:
+【按形态产出结构（严格按本形态二选一）】
 
-**1. position 定位 (必填,四选一):**
-- reinforcing (强化):最新进展延续并加强了既有趋势,方向未变、力度加大
-- turning (转折):最新进展表明趋势方向发生反转,或触发质变 (从缓和转向紧张、从上升转向下滑等)
-- expanding (扩散):最新进展将影响传导到了新领域、新主体、新地域,话题范围在扩大
-- fading (衰减):话题热度显著下降,新信号减弱或消失,不再有新的实质进展
+▶ event_chain（事件链）：
+{"fact_layer":[{"claim":"已验证的事实陈述","evidence":[{"source_type":"news|tool","ref":"引用id","quote":"原话"}],"verified":true}],"timeline":[{"date":"2026-07-01","event":"事件","ref":{"source_type":"news","ref":"..."}}],"insight_layer":[{"cert":"high|medium|low|question","title":"见解标题","logic":"凭什么 A→B 的推演逻辑","evidence":[{"source_type":"news","ref":"...","quote":"..."}],"web_verified":[{"source_type":"tool","ref":"..."}]}]}
 
-**2. signals 信号列表 (必填):**
-- lane:使用**持久话题泳道名** (如"美伊冲突""芯片制裁""AI监管",不要用粗版块大类如"能源""科技")
-- signal:该泳道产生的具体信号描述 (一句话)
-- mechanism:该信号通过什么传导/关联机制影响话题演进
-- 每个 signal 对应一个泳道,不要重复
+▶ theme_vein（主题脉络）：
+{"veins":[{"name":"线索名","desc":"线索描述","evidence":[{"source_type":"news","ref":"..."}]}],"cross_insight":[{"cert":"...","title":"...","logic":"...","evidence":[...]}]}
 
-**3. evidence 证据链 (必填):**
-- context_id:引用的上下文 ID
-- period:引用的时间粒度 (week/month/year/all)
-- quote:直接从 context 中摘录的原话 (不要改写)
-- source_type:数据来源 (news=来自分层新闻上下文, tool=agent 查到的实时数据)
-- tool_ref:source_type 是 tool 时,指向原始 tool_calls 的哪条 (source_type=news 时可为空)
+▶ single_point（单点影响）：
+{"impact":{"implication":"直接影响","ripple":"连锁涟漪","benchmark":"可比历史基准"},"evidence":[{"source_type":"news","ref":"..."}]}
 
-**4. causal_chain 因果链 (必填):**
-- 一句话描述从触发事件到最新进展的因果传导路径 (如 "产油国遭袭 → 油价上涨 → 各国释放储备 → 油价回落")
+▶ sparse（骨感）：
+{"notice":"信息不足的诚实说明（命中少/脉络薄，哪些还说不准）","summary":"能确定的轻量摘要"}
 
-**5. overall 一句话总结 (必填):**
-- 用一句话概括这次进展在整个话题演进中的意义
+【见解层铁律】
+1. 每条 insight 必须挂 evidence（文章依据或时间线节点），无依据的见解会被丢弃——不要产出悬空见解
+2. 确定性分级 cert 四选一：
+   - high：已验证的事实推论
+   - medium：推演·有据（凭证据链推出来的）
+   - low：假设·情景（条件成立才会如此）
+   - question：提问·指出决定成败的条件，不要预言成败结果
+3. 见解要给 logic（凭什么 A→B），关键中间环节尽量有 evidence/web_verified 支撑
+4. sparse 形态【不产出】 insight_layer/cross_insight，只给 notice + summary
 
-**6. financial_view 金融行情 (可选):**
-仅当话题命中了绑定了金融数据源的版块、且有真实行情数据可以佐证时才输出。非金融话题直接省略此字段。
-格式: {"sectors": [{"sector": "版块名", "direction": "up|down|flat|unknown", "supporting_data": "涨跌幅等支撑数据"}]}
-行情数据只作为佐证,不作为 position 的主判断依据。
+【引用格式】source_type ∈ news（来自分层新闻上下文）| tool（agent 查到的数据）；ref 指向具体 id；quote 直接摘录原话
 
-输出严格 JSON (不要 markdown 包裹,不要额外文字):
-{
-  "evolution_assessment": "一句话演进判断",
-  "position": "reinforcing|turning|expanding|fading",
-  "signals": [
-    {"lane": "持久话题泳道名", "signal": "信号描述", "mechanism": "传导/关联机制"}
-  ],
-  "evidence": [
-    {"context_id": "...", "period": "week|month|year|all", "quote": "引用原话", "source_type": "news|tool", "tool_ref": ""}
-  ],
-  "causal_chain": "因果链描述",
-  "overall": "一句话总结"
-}`
+输出严格 JSON（不要 markdown 包裹）：
+{"form":"%s","lens":"%s","analysis":{...按形态...}}`
 
-func (o *OrchestratorService) analyze(ctx context.Context, sessionID, lifelineText, contextText string, topicsData []map[string]any) (*analyzeOutput, error) {
+func (o *OrchestratorService) analyze(ctx context.Context, sessionID, form, lens, lifelineText, contextText string, topicsData []map[string]any) (*analyzeOutput, error) {
 	topicsBlock := ""
 	for _, td := range topicsData {
 		topic, _ := td["topic"].(string)
@@ -563,7 +794,7 @@ func (o *OrchestratorService) analyze(ctx context.Context, sessionID, lifelineTe
 		topicsBlock += fmt.Sprintf("【%s】\n查询数据:\n%s\n\n", topic, data)
 	}
 
-	prompt := analyzePrompt
+	prompt := fmt.Sprintf(analyzePrompt, form, lens, form, lens)
 	if contextText != "" {
 		prompt += "\n\n---\n分层新闻上下文:\n" + contextText
 	}
@@ -585,42 +816,173 @@ func (o *OrchestratorService) analyze(ctx context.Context, sessionID, lifelineTe
 	if err != nil {
 		return nil, fmt.Errorf("analyze parse: %w", err)
 	}
+	return parseAnalyzeOutput(parsed)
+}
 
-	ea, _ := parsed["evolution_assessment"].(string)
-	pos, _ := parsed["position"].(string)
-	cc, _ := parsed["causal_chain"].(string)
-	ov, _ := parsed["overall"].(string)
+// parseAnalyzeOutput builds an analyzeOutput from the parsed LLM map, enforcing
+// per-form structure and the "insight must have evidence" rule (spec: insights
+// with empty evidence are dropped with a warning).
+func parseAnalyzeOutput(parsed map[string]any) (*analyzeOutput, error) {
+	form, _ := parsed["form"].(string)
+	lens, _ := parsed["lens"].(string)
+	if !isValidForm(form) {
+		return nil, fmt.Errorf("analyze: invalid or missing form: %q", form)
+	}
+	analysisRaw, ok := parsed["analysis"].(map[string]any)
+	if !ok {
+		return nil, fmt.Errorf("analyze: missing or invalid 'analysis' field")
+	}
 
-	signalsRaw, _ := parsed["signals"].([]any)
-	signals := make([]map[string]any, 0, len(signalsRaw))
-	for _, s := range signalsRaw {
-		if sm, ok := s.(map[string]any); ok {
-			signals = append(signals, sm)
+	var body AnalysisBody
+	switch form {
+	case FormEventChain:
+		body = parseEventChainAnalysis(analysisRaw)
+	case FormThemeVein:
+		body = parseThemeVeinAnalysis(analysisRaw)
+	case FormSinglePoint:
+		body = parseSinglePointAnalysis(analysisRaw)
+	case FormSparse:
+		body = parseSparseAnalysis(analysisRaw)
+	}
+	return &analyzeOutput{Form: form, Lens: lens, Analysis: body}, nil
+}
+
+func parseEventChainAnalysis(m map[string]any) EventChainAnalysis {
+	var body EventChainAnalysis
+	if fl, ok := m["fact_layer"].([]any); ok {
+		for _, f := range fl {
+			fm, ok := f.(map[string]any)
+			if !ok {
+				continue
+			}
+			body.FactLayer = append(body.FactLayer, FactClaim{
+				Claim:    getString(fm, "claim"),
+				Evidence: parseRefs(fm["evidence"]),
+				Verified: getBool(fm, "verified"),
+			})
 		}
 	}
-
-	evidenceRaw, _ := parsed["evidence"].([]any)
-	evidence := make([]map[string]any, 0, len(evidenceRaw))
-	for _, e := range evidenceRaw {
-		if em, ok := e.(map[string]any); ok {
-			evidence = append(evidence, em)
+	if tl, ok := m["timeline"].([]any); ok {
+		for _, t := range tl {
+			tm, ok := t.(map[string]any)
+			if !ok {
+				continue
+			}
+			node := TimelineNode{Date: getString(tm, "date"), Event: getString(tm, "event")}
+			if refMap, ok := tm["ref"].(map[string]any); ok {
+				node.Ref = parseRef(refMap)
+			}
+			body.Timeline = append(body.Timeline, node)
 		}
 	}
-
-	var fv *map[string]any
-	if fvRaw, ok := parsed["financial_view"].(map[string]any); ok {
-		fv = &fvRaw
+	if il, ok := m["insight_layer"].([]any); ok {
+		for _, i := range il {
+			ins := parseInsight(i)
+			if !ins.hasEvidence() {
+				logging.Warnf("analyze: drop evidence-less insight: %q", ins.Title)
+				continue
+			}
+			body.InsightLayer = append(body.InsightLayer, ins)
+		}
 	}
+	return body
+}
 
-	return &analyzeOutput{
-		evolutionAssessment: ea,
-		position:            pos,
-		signals:             signals,
-		evidence:            evidence,
-		financialView:       fv,
-		causalChain:         cc,
-		overall:             ov,
-	}, nil
+func parseThemeVeinAnalysis(m map[string]any) ThemeVeinAnalysis {
+	var body ThemeVeinAnalysis
+	if vs, ok := m["veins"].([]any); ok {
+		for _, v := range vs {
+			vm, ok := v.(map[string]any)
+			if !ok {
+				continue
+			}
+			body.Veins = append(body.Veins, Vein{
+				Name:     getString(vm, "name"),
+				Desc:     getString(vm, "desc"),
+				Evidence: parseRefs(vm["evidence"]),
+			})
+		}
+	}
+	if ci, ok := m["cross_insight"].([]any); ok {
+		for _, i := range ci {
+			ins := parseInsight(i)
+			if !ins.hasEvidence() {
+				logging.Warnf("analyze: drop evidence-less cross_insight: %q", ins.Title)
+				continue
+			}
+			body.CrossInsight = append(body.CrossInsight, ins)
+		}
+	}
+	return body
+}
+
+func parseSinglePointAnalysis(m map[string]any) SinglePointAnalysis {
+	var body SinglePointAnalysis
+	if im, ok := m["impact"].(map[string]any); ok {
+		body.Impact = ImpactAssessment{
+			Implication: getString(im, "implication"),
+			Ripple:      getString(im, "ripple"),
+			Benchmark:   getString(im, "benchmark"),
+		}
+	}
+	body.Evidence = parseRefs(m["evidence"])
+	return body
+}
+
+func parseSparseAnalysis(m map[string]any) SparseAnalysis {
+	return SparseAnalysis{
+		Notice:  getString(m, "notice"),
+		Summary: getString(m, "summary"),
+	}
+}
+
+func parseInsight(v any) Insight {
+	im, ok := v.(map[string]any)
+	if !ok {
+		return Insight{}
+	}
+	return Insight{
+		Cert:        getString(im, "cert"),
+		Title:       getString(im, "title"),
+		Logic:       getString(im, "logic"),
+		Evidence:    parseRefs(im["evidence"]),
+		WebVerified: parseRefs(im["web_verified"]),
+	}
+}
+
+func parseRefs(v any) []Ref {
+	raw, ok := v.([]any)
+	if !ok {
+		return nil
+	}
+	out := make([]Ref, 0, len(raw))
+	for _, r := range raw {
+		if rm, ok := r.(map[string]any); ok {
+			if ref := parseRef(rm); ref != nil {
+				out = append(out, *ref)
+			}
+		}
+	}
+	return out
+}
+
+func parseRef(m map[string]any) *Ref {
+	ref := getString(m, "ref")
+	st := getString(m, "source_type")
+	if ref == "" && st == "" {
+		return nil
+	}
+	return &Ref{SourceType: st, Ref: ref, Quote: getString(m, "quote")}
+}
+
+func getString(m map[string]any, key string) string {
+	v, _ := m[key].(string)
+	return v
+}
+
+func getBool(m map[string]any, key string) bool {
+	v, _ := m[key].(bool)
+	return v
 }
 
 // ── Review Judge ────────────────────────────────────────────────────────────
@@ -649,23 +1011,46 @@ func (o *OrchestratorService) runReviewJudge(ctx context.Context, sessionID, pre
 
 	shouldReview, _ := parsed["should_review"].(bool)
 	reason, _ := parsed["reason"].(string)
-	changeSummary, _ := parsed["change_summary"].(string)
 	affectedContext, _ := parsed["affected_context"].(string)
 	confidence, _ := parsed["confidence"].(float64)
-
-	var positionChange map[string]any
-	if pcRaw, ok := parsed["position_change"].(map[string]any); ok {
-		positionChange = pcRaw
-	}
 
 	return &ReviewJudgeOutput{
 		ShouldReview:    shouldReview,
 		Reason:          reason,
-		ChangeSummary:   changeSummary,
+		NewFindings:     parseStringSlice(parsed["new_findings"]),
+		Overturned:      parseStringSlice(parsed["overturned"]),
+		ConfidenceShift: parseConfidenceShift(parsed["confidence_shift"]),
 		AffectedContext: affectedContext,
 		Confidence:      confidence,
-		PositionChange:  positionChange,
 	}, nil
+}
+
+func parseStringSlice(v any) []string {
+	raw, ok := v.([]any)
+	if !ok {
+		return nil
+	}
+	out := make([]string, 0, len(raw))
+	for _, s := range raw {
+		if str, ok := s.(string); ok && str != "" {
+			out = append(out, str)
+		}
+	}
+	return out
+}
+
+func parseConfidenceShift(v any) []map[string]any {
+	raw, ok := v.([]any)
+	if !ok {
+		return nil
+	}
+	out := make([]map[string]any, 0, len(raw))
+	for _, s := range raw {
+		if sm, ok := s.(map[string]any); ok {
+			out = append(out, sm)
+		}
+	}
+	return out
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
@@ -706,6 +1091,35 @@ func dedupKeyFor(toolName string, args map[string]any) string {
 func argsToJSON(args map[string]any) string {
 	b, _ := json.Marshal(args)
 	return string(b)
+}
+
+// explorationToolNames are the always-on tools the agent loop gets regardless
+// of board source_type: multi-level board/lane navigation plus the web_search
+// fallback. Financial (source-typed) tools are layered on top conditionally.
+var explorationToolNames = []string{"list_boards", "list_lanes", "get_lane_detail", "web_search"}
+
+// buildAgentAllowedTools returns the effective allowed-tools list for the agent
+// loop: the always-on exploration entry points + web_search, plus the board's
+// configured source-typed tools (e.g. financial ETF tools). Financial tools only
+// appear when the board's source_types include etf_quote — that mapping is done
+// upstream by board_config ToolsForSourceType and arrives in configuredTools.
+// Dedup preserves first-seen order.
+func (o *OrchestratorService) buildAgentAllowedTools(configuredTools []string) []string {
+	seen := make(map[string]bool, len(explorationToolNames)+len(configuredTools))
+	out := make([]string, 0, len(explorationToolNames)+len(configuredTools))
+	for _, t := range explorationToolNames {
+		if !seen[t] {
+			seen[t] = true
+			out = append(out, t)
+		}
+	}
+	for _, t := range configuredTools {
+		if !seen[t] {
+			seen[t] = true
+			out = append(out, t)
+		}
+	}
+	return out
 }
 
 // buildToolsDesc renders tool descriptions for the agent system prompt.
@@ -811,10 +1225,12 @@ func buildInputSnapshot(snap *contextSnapshot, reviewIDs []uint, windowDays int,
 
 // ── helper ────────────────────────────────────────────────────────────────
 
-// extractPosition extracts the "position" field from composite sectors JSON.
-// Returns empty string if sectors is old-format or position is missing.
-// Guards against review judge running on pre-transition old data. See design.md §4.3.
-func extractPosition(sectorsJSON json.RawMessage) string {
+// extractForm extracts the "form" field from the composite sectors JSON
+// ({form,lens,analysis}). Returns empty string if sectors is old-format/empty
+// or form is missing. Guards review judge against running on
+// pre-causal-analysis-agent data (old evolution-positioning sectors had no
+// form field). Spec "分析认知对比".
+func extractForm(sectorsJSON json.RawMessage) string {
 	if len(sectorsJSON) == 0 {
 		return ""
 	}
@@ -822,6 +1238,6 @@ func extractPosition(sectorsJSON json.RawMessage) string {
 	if err := json.Unmarshal(sectorsJSON, &m); err != nil {
 		return ""
 	}
-	pos, _ := m["position"].(string)
-	return pos
+	form, _ := m["form"].(string)
+	return form
 }

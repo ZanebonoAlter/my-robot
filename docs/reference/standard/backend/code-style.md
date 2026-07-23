@@ -48,16 +48,18 @@
 
 ## GORM model tag 与迁移
 
-**显式迁移管的表，model tag 只写字段名/类型/json，不写 `not null`/`default` 等 DB 约束**——让显式迁移（`postgres_migrations.go`）唯一管 DB 约束，AutoMigrate 不重复施加。
+**显式迁移管的表，model tag 不写 `not null`——让显式迁移（`postgres_migrations.go`）唯一管 NOT NULL 约束，AutoMigrate 不重复施加。** 但 **`default:` tag 是例外，必须保留**（见下「default tag 不可删」）。
 
-**为什么**：model tag 写 `not null` 会让 AutoMigrate 启动时尝试 `ADD COLUMN ... NOT NULL`，与显式迁移的"ADD NULL → 回填 → SET NOT NULL"三步竞争；在有历史数据的库上 AutoMigrate 先失败（`column ... contains null values`），污染启动日志（`ai-call-logging-schema` 的事故教训）。
+**为什么禁 `not null`**：model tag 写 `not null` 会让 AutoMigrate 启动时尝试 `ADD COLUMN ... NOT NULL`，与显式迁移的"ADD NULL → 回填 → SET NOT NULL"三步竞争；在有历史数据的库上 AutoMigrate 先失败（`column ... contains null values`），污染启动日志（`ai-call-logging-schema` 的事故教训）。
+
+**⚠️ default tag 不可删（2026-07-23 事故教训）**：`default:xxx` 不仅是 DB 约束，还**控制 GORM 的零值省略行为**——有 `default:` tag 的字段，GORM 在 Go 零值（`""`/`0`/`false`）时**省略该列**，让 DB DEFAULT 生效；没有 `default:` tag 时，GORM **显式插入零值**，覆盖 DB DEFAULT。曾一次性删除 `topic_tags.status` 的 `default:active` tag，导致新建 tag 被写成 `status=""`（而非 DB DEFAULT 的 'active'），使 `getBoardArticles`（按 `status='active'` 过滤）查不到相关 tag 和文章。**结论：标量字段（string/int/bool）的 `default:` tag 是功能必需，不可移除**；NOT NULL 由显式迁移兜底即可（见 `postgres_migrations.go` 迁移 + `constraints_test.go` 约束断言）。
 
 **正确做法**：
-- model tag：`gorm:"type:varchar(80);index:..."`（类型 + 索引 + json），不写约束
-- DB 约束（NOT NULL/DEFAULT/CHECK）：写在显式迁移
+- model tag：`gorm:"size:20;default:active;index"`（类型 + **default 保留** + 索引 + json），不写 `not null`
+- DB 约束（NOT NULL/CHECK）：写在显式迁移；DEFAULT 由 `default:` tag + 迁移双保险
 - "必填"语义：靠代码入口校验（如 `Router.Chat` 强制 `Operation != ""`），不靠 model tag 反射
 
-**JSONB 列空值**：非指针 `string` 字段写 `gorm:"type:jsonb"` 列时，零值 `""` 不是合法 JSON——入库前用 `db.Omit("col").Create()` 跳过空值列（DB 置 NULL），或改 `*string`/`datatypes.JSON`。详见 testing.md「JSONB 列空串陷阱」。
+**JSONB 列空值**：非指针 `string` 字段写 `gorm:"type:jsonb"` 列时，零值 `""` 不是合法 JSON——入库前用 `db.Omit("col").Create()` 跳过空值列（DB 置 NULL），或改 `*string`/`datatypes.JSON`。`serializer:json` 的集合字段（如 `[]string`/`map`）必须保留 `default:'[]'`/`default:'{}'`（同 default tag 零值省略原理）。详见 testing.md「JSONB 列空串陷阱」。
 
 ## Anti-Patterns（硬禁）
 

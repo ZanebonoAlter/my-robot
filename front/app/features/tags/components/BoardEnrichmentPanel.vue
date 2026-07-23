@@ -2,22 +2,26 @@
 import { ref, computed, watch } from 'vue'
 import { Icon } from '@iconify/vue'
 import { useBoardEnrichment } from '~/features/tags/composables/useBoardEnrichment'
-import type { ContextGranularity, DataSourceRow } from '~/api/boardEnrichment'
+import type { ContextGranularity, DataSourceRow, AnalyzeOutput, AnalyzeRef } from '~/api/boardEnrichment'
 import { useNotify } from '~/composables/useNotify'
-import EvolutionReport from './EvolutionReport.vue'
+import { renderMarkdown } from '~/utils/markdown'
+// 全局 .markdown-body 样式（文章阅读器同款），供新闻背景叙事 md 渲染产物使用
+import '~/components/article/ArticleContent.css'
+import CausalAnalysisReport from './CausalAnalysisReport.vue'
+import QAPanel from './QAPanel.vue'
 import DebateSection from './DebateSection.vue'
 
 /**
  * 数据增强 · 认知工作台。
  *
- * 主线重定位后（金融涨跌 → 演进定位），面板分两个子区块：
+ * 面板分两个子区块：
  *  - 「新闻背景」：循环A 新闻记忆（周期分层 contexts），只随新闻变，分析不回写。
- *  - 「演进报告」：EvolutionReport，消费最新 result 详情 + reviews，报刊式呈现
- *    四档定位（强化/转折/扩散/衰减）+ 跨泳道信号 + 双类引用。
+ *  - 「因果报告」：CausalAnalysisReport，消费最新 result 详情的 AnalyzeOutput
+ *    （{form,lens,analysis} 按形态多态：事件链/主题脉络/单点影响/骨感），报刊式呈现
+ *    事实层 + 时间线 + 推演见解（确定性分级）+ 双类引用。
  *
- * 旧的「走向预测卡片」（sectors direction/trigger）与「兑现复盘」（review verdict
- * hit/part/miss）已被演进报告取代并移除。DebateSection（FinGenius 个股辩论）作为
- * 「金融可选模块 · 独立于演进主线」默认折叠保留（tasks 4b.7 降级标注）。
+ * DebateSection（FinGenius 个股辩论）作为「金融可选模块 · 独立于因果主线」
+ * 默认折叠保留。
  */
 const props = defineProps<{
   boardId: number
@@ -37,6 +41,8 @@ const {
   dataSources, loadDataSources, saveDataSource, removeDataSource,
   // stock debates
   debates, debateTriggering, debateError, debateStage, loadDebates, triggerDebate,
+  // qa (causal-analysis-agent 阶段3：报告追问 + 沉淀)
+  qaList, qaLoading, qaError, latestAnswer, loadQA, askQuestion, sedimentAnswer,
   // workbench UI
   selectedGran, selectedPeriodIdx, periodList, currentContext,
   setGran, shiftPeriod, selectPeriod,
@@ -137,16 +143,40 @@ async function confirmGenerate() {
   }
 }
 
-// ①narrative 被演进报告引用次数：统计 result.sectors.evidence 里命中当前 context 的条数
+// ①narrative 被因果报告引用次数：扫描 result.sectors（AnalyzeOutput）里所有
+// AnalyzeRef（散落在事实层/时间线/见解层/线索/单点各处），按 context_id / period
+// 命中当前 context 计数。
+function collectAnalyzeRefs(out: AnalyzeOutput | null): AnalyzeRef[] {
+  if (!out) return []
+  const refs: AnalyzeRef[] = []
+  const pushAll = (rs: AnalyzeRef[] | undefined) => { if (Array.isArray(rs)) refs.push(...rs) }
+  const pushOne = (r: AnalyzeRef | undefined) => { if (r) refs.push(r) }
+  switch (out.form) {
+    case 'event_chain':
+      for (const f of out.analysis.fact_layer) pushAll(f.evidence)
+      for (const t of out.analysis.timeline) pushOne(t.ref)
+      for (const ins of out.analysis.insight_layer) { pushAll(ins.evidence); pushAll(ins.web_verified) }
+      break
+    case 'theme_vein':
+      for (const v of out.analysis.veins) pushAll(v.evidence)
+      for (const ins of out.analysis.cross_insight) { pushAll(ins.evidence); pushAll(ins.web_verified) }
+      break
+    case 'single_point':
+      pushAll(out.analysis.evidence)
+      break
+    case 'sparse':
+      break
+  }
+  return refs
+}
 const narrativeCiteCount = computed(() => {
   const ctx = currentContext.value
   if (!ctx) return 0
-  const evList = latestResultDetail.value?.sectors?.evidence
-  if (!Array.isArray(evList)) return 0
+  const refs = collectAnalyzeRefs(latestResultDetail.value?.sectors ?? null)
   let n = 0
-  for (const ev of evList) {
-    if (ev.context_id != null && String(ev.context_id) === String(ctx.id)) n++
-    else if (ev.period && ev.period === ctx.period) n++
+  for (const r of refs) {
+    if (r.context_id != null && String(r.context_id) === String(ctx.id)) n++
+    else if (r.period && r.period === ctx.period) n++
   }
   return n
 })
@@ -227,7 +257,7 @@ async function handleDebateRetry() {
     </p>
 
     <template v-if="hasTopic">
-      <!-- 紧凑刊头：topic + 状态 + 触发按钮（演进报告自带完整 masthead，此处只作操作入口） -->
+      <!-- 紧凑刊头：topic + 状态 + 触发按钮（因果报告自带完整 masthead，此处只作操作入口） -->
       <header class="masthead">
         <div class="eyebrow">持久话题 #{{ selectedTopicId }}</div>
         <h1 class="serif masthead-title">{{ selectedTopic?.label ?? '未命名话题' }}</h1>
@@ -249,18 +279,17 @@ async function handleDebateRetry() {
       <!-- 子区块切换：新闻背景 | 演进报告 -->
       <nav class="subtabs">
         <button type="button" class="subtab" :class="{ active: subtab === 'evolution' }" @click="subtab = 'evolution'">
-          <Icon icon="mdi:newspaper-variant-multiple-outline" width="14" /> 演进报告
+          <Icon icon="mdi:newspaper-variant-multiple-outline" width="14" /> 因果报告
         </button>
         <button type="button" class="subtab" :class="{ active: subtab === 'news' }" @click="subtab = 'news'">
           <Icon icon="mdi:archive-outline" width="14" /> 新闻背景
         </button>
       </nav>
 
-      <!-- ── 演进报告（主线） ─────────────────────────────────────────── -->
+      <!-- ── 因果报告（主线） ─────────────────────────────────────────── -->
       <section v-if="subtab === 'evolution'" class="block">
-        <EvolutionReport
+        <CausalAnalysisReport
           :result="latestResultDetail"
-          :reviews="reviews"
           :topic-label="selectedTopic?.label ?? undefined"
           :loading="latestResultDetailLoading"
         />
@@ -269,6 +298,19 @@ async function handleDebateRetry() {
             <Icon icon="mdi:content-copy" width="12" /> session_id：{{ latestResultDetail.session_id ?? '—' }}
           </span>
         </div>
+
+        <!-- 报告追问 chat（挂在最新 result 上） ──────────────────────── -->
+        <QAPanel
+          v-if="latestResultId !== null"
+          :result-id="latestResultId"
+          :qa-list="qaList"
+          :qa-loading="qaLoading"
+          :qa-error="qaError"
+          :latest-answer="latestAnswer"
+          @ask="askQuestion"
+          @sediment="sedimentAnswer"
+          @load="loadQA"
+        />
       </section>
 
       <!-- ── 新闻背景（循环A 新闻记忆） ──────────────────────────────── -->
@@ -325,10 +367,10 @@ async function handleDebateRetry() {
               <div class="seg-h-row">
                 <div class="seg-h serif">叙事脉络</div>
                 <span class="seg-cited" :class="{ empty: narrativeCiteCount === 0 }">
-                  {{ narrativeCiteCount > 0 ? `被演进报告引用 ${narrativeCiteCount} 处` : '未被报告引用' }}
+                  {{ narrativeCiteCount > 0 ? `被因果报告引用 ${narrativeCiteCount} 处` : '未被报告引用' }}
                 </span>
               </div>
-              <div class="seg-b">{{ currentContext.content }}</div>
+              <div class="seg-b markdown-body" v-html="renderMarkdown(currentContext.content)" />
               <span class="seg-edit" title="编辑" @click="startEditNarrative">✎</span>
             </template>
             <template v-else>
@@ -549,6 +591,8 @@ async function handleDebateRetry() {
 .seg:hover { background: var(--color-bg-hover); }
 .seg .seg-h { font-weight: 600; font-size: 13.5px; margin-bottom: 0.2rem; color: var(--color-text-primary); }
 .seg .seg-b { font-size: 13px; color: var(--color-text-secondary); line-height: 1.65; white-space: pre-wrap; }
+/* markdown-body 宿主：HTML 已含块结构，关掉 pre-wrap 避免标签换行被渲染成空行 */
+.seg .seg-b.markdown-body { white-space: normal; font-size: 13px; line-height: 1.65; }
 .seg .seg-b.muted { color: var(--color-text-muted); }
 .seg .seg-edit { position: absolute; right: 6px; top: 6px; opacity: 0; transition: opacity 0.12s; cursor: pointer; padding: 3px 6px; border-radius: 5px; color: var(--color-text-muted); }
 .seg:hover .seg-edit { opacity: 1; }
@@ -602,4 +646,29 @@ details.adv[open] > summary::before { content: "▾ "; }
 
 .muted { color: var(--color-text-muted); }
 .serif { font-family: Georgia, "Songti SC", "SimSun", "Source Serif 4", serif; }
+
+/* ── 窄屏适配（≤720px，对齐 daily-report 家族断点） ───────────────────── */
+@media (max-width: 720px) {
+  .ew-panel { gap: 0.75rem; }
+
+  /* topic 工具条：换行 + 话题下拉撑满一行，刷新按钮放大到触摸友好 */
+  .ew-toolbar { flex-wrap: wrap; }
+  .ew-select { max-width: 100%; flex: 1 1 auto; min-width: 0; }
+  .ew-ghost-btn { min-width: 36px; min-height: 36px; justify-content: center; }
+
+  /* 刊头标题降档 */
+  .masthead-title { font-size: 1.3rem; }
+
+  /* 触发按钮不再被 margin-left:auto 挤到行尾，自然跟排 */
+  .trigger-wrap { margin-left: 0; }
+
+  /* 子区块 tab / 粒度切换 / 翻页按钮：hit-target ≥36px */
+  .subtab { min-height: 40px; }
+  .gran-select button { min-height: 36px; }
+  .period-nav .cur { min-width: 0; }
+  .period-nav button { width: 36px; height: 36px; }
+
+  /* 叙事卡片留白收缩 */
+  .narrative { padding: 0.85rem 0.9rem; }
+}
 </style>

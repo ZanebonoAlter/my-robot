@@ -44,7 +44,6 @@ Syntopica 全部文档入口。
 | [reference/api/system.md](reference/api/system.md) | `/`, `/health` |
 | [reference/api/feeds.md](reference/api/feeds.md) | `/api/feeds` |
 | [reference/api/articles.md](reference/api/articles.md) | `/api/articles` |
-| [reference/api/summaries.md](reference/api/summaries.md) | `/api/summaries` |
 | [reference/api/ai-admin.md](reference/api/ai-admin.md) | `/api/ai` |
 | [reference/api/schedulers.md](reference/api/schedulers.md) | `/api/schedulers` |
 | ... | 更多见完整索引 |

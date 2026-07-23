@@ -9,6 +9,8 @@
 | [feeds.md](feeds.md) | 订阅 CRUD、刷新 | `/api/feeds` |
 | [articles.md](articles.md) | 文章列表、详情、状态 | `/api/articles` |
 | [ai-admin.md](ai-admin.md) | AI 设置、Provider、Route | `/api/ai` |
+| [ai-call-logs.md](ai-call-logs.md) | AI 调用日志 | `/api/ai/call-logs` |
+| [ai-sessions.md](ai-sessions.md) | 编排 session 聚合（业务日志 + 链路时间线） | `/api/ai/sessions` |
 | [opml.md](opml.md) | OPML 导入导出 | `/api/import-opml`, `/api/export-opml` |
 | [schedulers.md](schedulers.md) | 定时任务管理 | `/api/schedulers` |
 | [content-completion.md](content-completion.md) | 文章内容补全 | `/api/content-completion` |

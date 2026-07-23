@@ -11,6 +11,8 @@ import {
 	type StockDebateResult,
 	type CreateReviewBody,
 	type UpsertDataSourceBody,
+	type TopicEnrichmentQA,
+	type AskQAResponse,
 } from "~/api/boardEnrichment";
 import {
 	useDailyReportsApi,
@@ -62,6 +64,14 @@ export function useBoardEnrichment() {
 	const debateTriggering = ref(false);
 	const debateError = ref<string | null>(null);
 	let debatePollTimer: ReturnType<typeof setInterval> | null = null;
+
+	// ── qa (causal-analysis-agent 阶段3：报告追问) ──────────────────────────
+	const qaList = ref<TopicEnrichmentQA[]>([]);
+	const qaLoading = ref(false);
+	const qaError = ref<string | null>(null);
+	// 最近一次 ask 的即时响应（含 refs）。持久化 QA 行无 refs 列（后端只回显不落库），
+	// 故仅最新这轮能渲染双类引用；QAPanel 按 answer 文本匹配挂到对应行。
+	const latestAnswer = ref<AskQAResponse | null>(null);
 
 	// ── workbench UI state（原型认知工作台）───────────────────────────────
 	// ①周期筛选器：gran=按周/月/年（原型挊了 all），periodList 由 contexts 派生
@@ -452,6 +462,71 @@ export function useBoardEnrichment() {
 		}
 	}
 
+	// ── qa actions（causal-analysis-agent 阶段3：报告追问 + 沉淀）────────────
+	/** 加载某 result 的多轮追问历史（oldest first）。 */
+	async function loadQA(resultId: number): Promise<boolean> {
+		if (selectedTopicId.value === null) {
+			qaList.value = [];
+			return false;
+		}
+		qaLoading.value = true;
+		qaError.value = null;
+		const res = await api.listQA(selectedTopicId.value, resultId);
+		if (res.success && res.data) {
+			qaList.value = res.data;
+		} else {
+			qaList.value = [];
+			qaError.value = res.error || "加载追问历史失败";
+		}
+		qaLoading.value = false;
+		return res.success;
+	}
+
+	/**
+	 * 问一轮（挂 latestResultId）。
+	 * 后端 Ask 已 append 一行 source="qa" 的 QA，但响应只回 {answer,tool_calls,refs}
+	 * （缺 id/source/sedimented/created_at），无法拼出完整行，故成功后重拉列表。
+	 */
+	async function askQuestion(question: string): Promise<boolean> {
+		if (selectedTopicId.value === null) return false;
+		const resultId = latestResultId.value;
+		if (resultId === null) {
+			qaError.value = "暂无报告，无法追问";
+			notifyError(qaError.value);
+			return false;
+		}
+		qaLoading.value = true;
+		qaError.value = null;
+		try {
+			const res = await api.askQA(selectedTopicId.value, resultId, question);
+			if (res.success) {
+				// 捕获即时响应（含 refs），供 QAPanel 给最新这轮渲染双类引用。
+				latestAnswer.value = res.data ?? null;
+				await loadQA(resultId);
+				return true;
+			}
+			qaError.value = res.error || "追问失败";
+			notifyError(qaError.value);
+			return false;
+		} finally {
+			qaLoading.value = false;
+		}
+	}
+
+	/** 沉淀一轮（用后端回写的完整行替换 qaList 对应项，sedimented=true）。 */
+	async function sedimentAnswer(qaId: number): Promise<boolean> {
+		if (selectedTopicId.value === null) return false;
+		const res = await api.sedimentQA(selectedTopicId.value, qaId);
+		if (res.success && res.data) {
+			const idx = qaList.value.findIndex((q) => q.id === qaId);
+			if (idx >= 0) qaList.value[idx] = res.data;
+			notifySuccess("已沉淀");
+			return true;
+		}
+		notifyError(res.error || "沉淀失败");
+		return false;
+	}
+
 	onUnmounted(stopDebatePolling);
 
 	return {
@@ -495,6 +570,14 @@ export function useBoardEnrichment() {
 		debateStage,
 		loadDebates,
 		triggerDebate,
+		// qa (causal-analysis-agent 阶段3)
+		qaList,
+		qaLoading,
+		qaError,
+		latestAnswer,
+		loadQA,
+		askQuestion,
+		sedimentAnswer,
 		// workbench UI（原型认知工作台）
 		selectedGran,
 		selectedPeriodIdx,

@@ -99,7 +99,7 @@ func (m *mockOrchestrator) EnrichTopic(ctx context.Context, topicID uint) (*serv
 }
 
 func newTestHandler(db *gorm.DB, lifelineSvc handler.LifelineService, orch handler.Orchestrator, cfg service.BoardConfigReader) *handler.EnrichmentHandler {
-	return handler.NewHandler(repository.Repo, lifelineSvc, orch, cfg, nil, db)
+	return handler.NewHandler(repository.Repo, lifelineSvc, orch, cfg, nil, nil, db)
 }
 
 // newTestRouter creates a Gin engine with the handler routes registered.
@@ -698,5 +698,288 @@ func TestInvalidTopicID(t *testing.T) {
 	for _, tt := range tests {
 		w := doRequest(t, r, "GET", tt.path, "")
 		expectJSONError(t, w, http.StatusBadRequest)
+	}
+}
+
+// ── Report follow-up Q&A handler tests (causal-analysis-agent 阶段2b) ─────────
+
+// mockQARunner is a mock for handler.QARunner.
+type mockQARunner struct {
+	lastResultID uint
+	lastQuestion string
+	answer       *service.QAAnswer
+	shouldFail   bool
+}
+
+func (m *mockQARunner) Ask(ctx context.Context, resultID uint, question string) (*service.QAAnswer, error) {
+	m.lastResultID = resultID
+	m.lastQuestion = question
+	if m.shouldFail {
+		return nil, fmt.Errorf("mock qa error")
+	}
+	return m.answer, nil
+}
+
+// newTestHandlerWithQA builds a handler wired with a QA runner (other deps nil).
+func newTestHandlerWithQA(db *gorm.DB, qa handler.QARunner) *handler.EnrichmentHandler {
+	return handler.NewHandler(repository.Repo, nil, nil, nil, nil, qa, db)
+}
+
+func TestAskQA(t *testing.T) {
+	db := setupHandlerTestDB(t)
+	ctx := context.Background()
+
+	result := &repository.TopicEnrichmentResult{
+		PersistentTopicID: 1,
+		SessionID:         "session-qa",
+	}
+	if err := repository.Repo.CreateTopicEnrichmentResult(ctx, result); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	canned := &service.QAAnswer{
+		Answer: "油价短期承压(推演有据)",
+		Refs:   []service.Ref{{SourceType: "tool", Ref: "list_boards"}},
+	}
+	mockQA := &mockQARunner{answer: canned}
+	h := newTestHandlerWithQA(db, mockQA)
+	r := newTestRouter(h)
+
+	body := `{"question": "油价还会涨吗"}`
+	w := doRequest(t, r, "POST", fmt.Sprintf("/api/persistent-topics/1/enrichment/results/%d/qa", result.ID), body)
+	var got service.QAAnswer
+	expectJSONSuccess(t, w, &got)
+	if got.Answer != "油价短期承压(推演有据)" {
+		t.Fatalf("answer: got %q", got.Answer)
+	}
+
+	if mockQA.lastResultID != result.ID {
+		t.Fatalf("Ask called with resultID %d, want %d", mockQA.lastResultID, result.ID)
+	}
+	if mockQA.lastQuestion != "油价还会涨吗" {
+		t.Fatalf("Ask called with question %q", mockQA.lastQuestion)
+	}
+}
+
+func TestAskQA_IDORProtection(t *testing.T) {
+	db := setupHandlerTestDB(t)
+	ctx := context.Background()
+
+	// Result belongs to topic 1.
+	result := &repository.TopicEnrichmentResult{PersistentTopicID: 1, SessionID: "s"}
+	if err := repository.Repo.CreateTopicEnrichmentResult(ctx, result); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	mockQA := &mockQARunner{answer: &service.QAAnswer{Answer: "x"}}
+	h := newTestHandlerWithQA(db, mockQA)
+	r := newTestRouter(h)
+
+	// Topic 2 tries to ask against topic 1's result → 404, Ask never called.
+	body := `{"question": "x"}`
+	w := doRequest(t, r, "POST", fmt.Sprintf("/api/persistent-topics/2/enrichment/results/%d/qa", result.ID), body)
+	expectJSONError(t, w, http.StatusNotFound)
+	if mockQA.lastQuestion != "" {
+		t.Fatal("QARunner.Ask should NOT be called on cross-topic access")
+	}
+}
+
+func TestAskQA_MissingQuestion(t *testing.T) {
+	db := setupHandlerTestDB(t)
+	ctx := context.Background()
+
+	result := &repository.TopicEnrichmentResult{PersistentTopicID: 1, SessionID: "s"}
+	if err := repository.Repo.CreateTopicEnrichmentResult(ctx, result); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	h := newTestHandlerWithQA(db, &mockQARunner{})
+	r := newTestRouter(h)
+
+	w := doRequest(t, r, "POST", fmt.Sprintf("/api/persistent-topics/1/enrichment/results/%d/qa", result.ID), `{}`)
+	expectJSONError(t, w, http.StatusBadRequest)
+}
+
+func TestListQA(t *testing.T) {
+	db := setupHandlerTestDB(t)
+	ctx := context.Background()
+
+	result := &repository.TopicEnrichmentResult{PersistentTopicID: 1, SessionID: "s"}
+	if err := repository.Repo.CreateTopicEnrichmentResult(ctx, result); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	older := time.Date(2026, 7, 18, 10, 0, 0, 0, time.UTC)
+	newer := time.Date(2026, 7, 18, 10, 5, 0, 0, time.UTC)
+
+	qa1 := &repository.TopicEnrichmentQA{
+		TopicEnrichmentResultID: result.ID, Question: "第一轮", Source: "qa", CreatedAt: older,
+	}
+	qa2 := &repository.TopicEnrichmentQA{
+		TopicEnrichmentResultID: result.ID, Question: "第二轮", Source: "qa", CreatedAt: newer,
+	}
+	// Insert out of order to prove the handler returns created_at ASC.
+	_ = repository.Repo.CreateTopicEnrichmentQA(ctx, qa2)
+	_ = repository.Repo.CreateTopicEnrichmentQA(ctx, qa1)
+
+	h := newTestHandler(db, nil, nil, nil) // qa GET needs no QA runner
+	r := newTestRouter(h)
+
+	w := doRequest(t, r, "GET", fmt.Sprintf("/api/persistent-topics/1/enrichment/results/%d/qa", result.ID), "")
+	var list []repository.TopicEnrichmentQA
+	expectJSONSuccess(t, w, &list)
+	if len(list) != 2 {
+		t.Fatalf("list count = %d, want 2", len(list))
+	}
+	if list[0].Question != "第一轮" || list[1].Question != "第二轮" {
+		t.Fatalf("order = [%q, %q], want [第一轮, 第二轮] (created_at ASC)",
+			list[0].Question, list[1].Question)
+	}
+}
+
+func TestSedimentQA(t *testing.T) {
+	db := setupHandlerTestDB(t)
+	ctx := context.Background()
+
+	result := &repository.TopicEnrichmentResult{PersistentTopicID: 1, SessionID: "s"}
+	if err := repository.Repo.CreateTopicEnrichmentResult(ctx, result); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	qa := &repository.TopicEnrichmentQA{
+		TopicEnrichmentResultID: result.ID, Question: "油价还会涨吗", Answer: "短期承压", Source: "qa",
+	}
+	if err := repository.Repo.CreateTopicEnrichmentQA(ctx, qa); err != nil {
+		t.Fatalf("seed qa: %v", err)
+	}
+
+	// Snapshot the result to prove sediment never rewrites it.
+	resultBefore, _ := repository.Repo.GetTopicEnrichmentResultByID(ctx, result.ID)
+
+	h := newTestHandler(db, nil, nil, nil)
+	r := newTestRouter(h)
+
+	w := doRequest(t, r, "POST", fmt.Sprintf("/api/persistent-topics/1/enrichment/qa/%d/sediment", qa.ID), "")
+	var got repository.TopicEnrichmentQA
+	expectJSONSuccess(t, w, &got)
+	if !got.Sedimented {
+		t.Fatal("expected sedimented=true after POST sediment")
+	}
+
+	// The result table is unchanged (报告不可变).
+	resultAfter, _ := repository.Repo.GetTopicEnrichmentResultByID(ctx, result.ID)
+	beforeJSON, _ := json.Marshal(resultBefore)
+	afterJSON, _ := json.Marshal(resultAfter)
+	if string(beforeJSON) != string(afterJSON) {
+		t.Fatalf("result table must be immutable across sediment")
+	}
+}
+
+// ── IDOR protection tests for review / qa-sediment (H1) ──────────────────────
+//
+// updateReviewDeviation, applyReview, sedimentQA accept :topicId in the path
+// but historically never validated the resource belongs to that topic.
+// These tests reproduce the cross-topic access; the fix must return 404.
+
+func TestUpdateReviewDeviation_IDORProtection(t *testing.T) {
+	db := setupHandlerTestDB(t)
+	ctx := context.Background()
+
+	// Review belongs to topic 1.
+	rv := &repository.TopicEnrichmentReview{
+		PersistentTopicID: 1, CurrResultID: 10, DeviationSummary: "original",
+	}
+	if err := repository.Repo.CreateTopicEnrichmentReview(ctx, rv); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	h := newTestHandler(db, nil, nil, nil)
+	r := newTestRouter(h)
+
+	// Topic 2 tries to edit topic 1's review → 404, deviation unchanged.
+	body := `{"deviation_summary": "hijacked"}`
+	w := doRequest(t, r, "PUT", fmt.Sprintf("/api/persistent-topics/2/enrichment/reviews/%d", rv.ID), body)
+	expectJSONError(t, w, http.StatusNotFound)
+
+	// Confirm the deviation was NOT modified.
+	unchanged, _ := repository.Repo.GetTopicEnrichmentReviewByID(ctx, rv.ID)
+	if unchanged.DeviationSummary != "original" {
+		t.Fatalf("deviation should be unchanged, got %q", unchanged.DeviationSummary)
+	}
+
+	// Same-topic access → 200.
+	w2 := doRequest(t, r, "PUT", fmt.Sprintf("/api/persistent-topics/1/enrichment/reviews/%d", rv.ID), body)
+	var got repository.TopicEnrichmentReview
+	expectJSONSuccess(t, w2, &got)
+	if got.DeviationSummary != "hijacked" {
+		t.Fatalf("deviation = %q, want 'hijacked'", got.DeviationSummary)
+	}
+}
+
+func TestApplyReview_IDORProtection(t *testing.T) {
+	db := setupHandlerTestDB(t)
+	ctx := context.Background()
+
+	rv := &repository.TopicEnrichmentReview{
+		PersistentTopicID: 1, CurrResultID: 10, DeviationSummary: "x", Applied: false,
+	}
+	if err := repository.Repo.CreateTopicEnrichmentReview(ctx, rv); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	h := newTestHandler(db, nil, nil, nil)
+	r := newTestRouter(h)
+
+	// Topic 2 tries to apply topic 1's review → 404, not applied.
+	w := doRequest(t, r, "POST", fmt.Sprintf("/api/persistent-topics/2/enrichment/reviews/%d/apply", rv.ID), "")
+	expectJSONError(t, w, http.StatusNotFound)
+
+	unchanged, _ := repository.Repo.GetTopicEnrichmentReviewByID(ctx, rv.ID)
+	if unchanged.Applied {
+		t.Fatal("review should remain applied=false on cross-topic access")
+	}
+
+	// Same-topic access → 200, applied.
+	w2 := doRequest(t, r, "POST", fmt.Sprintf("/api/persistent-topics/1/enrichment/reviews/%d/apply", rv.ID), "")
+	var got repository.TopicEnrichmentReview
+	expectJSONSuccess(t, w2, &got)
+	if !got.Applied {
+		t.Fatal("expected applied=true after same-topic apply")
+	}
+}
+
+func TestSedimentQA_IDORProtection(t *testing.T) {
+	db := setupHandlerTestDB(t)
+	ctx := context.Background()
+
+	// Result (and its QA) belong to topic 1.
+	result := &repository.TopicEnrichmentResult{PersistentTopicID: 1, SessionID: "s"}
+	if err := repository.Repo.CreateTopicEnrichmentResult(ctx, result); err != nil {
+		t.Fatalf("seed result: %v", err)
+	}
+	qa := &repository.TopicEnrichmentQA{
+		TopicEnrichmentResultID: result.ID, Question: "q", Answer: "a", Source: "qa",
+	}
+	if err := repository.Repo.CreateTopicEnrichmentQA(ctx, qa); err != nil {
+		t.Fatalf("seed qa: %v", err)
+	}
+
+	h := newTestHandler(db, nil, nil, nil)
+	r := newTestRouter(h)
+
+	// Topic 2 tries to sediment topic 1's qa → 404, flag unchanged.
+	w := doRequest(t, r, "POST", fmt.Sprintf("/api/persistent-topics/2/enrichment/qa/%d/sediment", qa.ID), "")
+	expectJSONError(t, w, http.StatusNotFound)
+
+	unchanged, _ := repository.Repo.GetTopicEnrichmentQAByID(ctx, qa.ID)
+	if unchanged.Sedimented {
+		t.Fatal("qa should remain sedimented=false on cross-topic access")
+	}
+
+	// Same-topic access → 200, sedimented.
+	w2 := doRequest(t, r, "POST", fmt.Sprintf("/api/persistent-topics/1/enrichment/qa/%d/sediment", qa.ID), "")
+	var got repository.TopicEnrichmentQA
+	expectJSONSuccess(t, w2, &got)
+	if !got.Sedimented {
+		t.Fatal("expected sedimented=true after same-topic sediment")
 	}
 }

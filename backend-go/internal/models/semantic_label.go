@@ -4,25 +4,25 @@ import "time"
 
 type SemanticLabel struct {
 	ID    uint   `gorm:"primaryKey" json:"id"`
-	Label string `gorm:"size:160;not null" json:"label"`
-	Slug  string `gorm:"size:160;not null;uniqueIndex:idx_semantic_labels_slug" json:"slug"`
+	Label string `gorm:"size:160" json:"label"`
+	Slug  string `gorm:"size:160;uniqueIndex:idx_semantic_labels_slug" json:"slug"`
 	// Vector columns are declared without a fixed dimension. The actual dimension is
 	// determined at runtime by the configured embedder (see auxlabel.EnsureVectorDimensionOnce)
 	// and may differ across deployments, so hardcoding it here would race AutoMigrate.
 	Embedding      *string  `gorm:"type:vector;column:embedding" json:"-"`
 	MergeEmbedding *string  `gorm:"type:vector;column:merge_embedding" json:"-"`
-	LabelType      string   `gorm:"size:20;not null;index:idx_semantic_labels_label_type" json:"label_type"`
+	LabelType      string   `gorm:"size:20;index:idx_semantic_labels_label_type" json:"label_type"`
 	Aliases        []string `gorm:"type:jsonb;serializer:json;default:'[]'" json:"aliases"`
-	RefCount       int      `gorm:"not null;default:0" json:"ref_count"`
+	RefCount       int      `gorm:"default:0" json:"ref_count"`
 	Description    string   `gorm:"type:text" json:"description"`
-	DisplayOrder   int      `gorm:"not null;default:0" json:"display_order"`
-	Source         string   `gorm:"size:50;not null;default:llm_extract" json:"source"`
-	Status         string   `gorm:"size:20;not null;default:active;index:idx_semantic_labels_status" json:"status"`
-	Protected      bool     `gorm:"not null;default:false" json:"protected"`
+	DisplayOrder   int      `gorm:"default:0" json:"display_order"`
+	Source         string   `gorm:"size:50;default:llm_extract" json:"source"`
+	Status         string   `gorm:"size:20;default:active;index:idx_semantic_labels_status" json:"status"`
+	Protected      bool     `gorm:"default:false" json:"protected"`
 	// EnrichmentEnabled — whether cycle-B enrichment is enabled for this board (default false).
-	EnrichmentEnabled bool `gorm:"not null;default:false" json:"enrichment_enabled"`
+	EnrichmentEnabled bool `gorm:"default:false" json:"enrichment_enabled"`
 	// WindowDays — real-time detail window for cycle-B (default 14).
-	WindowDays int `gorm:"not null;default:14" json:"window_days"`
+	WindowDays int `gorm:"default:14" json:"window_days"`
 	// ContextLayers — which granularity layers the interpreter reads (default ["week","month","year","all"]).
 	ContextLayers []string  `gorm:"type:jsonb;serializer:json;default:'[\"week\",\"month\",\"year\",\"all\"]'" json:"context_layers"`
 	CreatedAt     time.Time `json:"created_at"`
@@ -34,8 +34,8 @@ func (SemanticLabel) TableName() string {
 }
 
 type TopicTagSemanticLabel struct {
-	TopicTagID      uint `gorm:"primaryKey;not null" json:"topic_tag_id"`
-	SemanticLabelID uint `gorm:"primaryKey;not null" json:"semantic_label_id"`
+	TopicTagID      uint `gorm:"primaryKey" json:"topic_tag_id"`
+	SemanticLabelID uint `gorm:"primaryKey" json:"semantic_label_id"`
 
 	TopicTag      *TopicTag      `gorm:"foreignKey:TopicTagID;constraint:OnDelete:CASCADE" json:"topic_tag,omitempty"`
 	SemanticLabel *SemanticLabel `gorm:"foreignKey:SemanticLabelID;constraint:OnDelete:CASCADE" json:"semantic_label,omitempty"`
@@ -46,12 +46,12 @@ func (TopicTagSemanticLabel) TableName() string {
 }
 
 type TopicTagBoardLabel struct {
-	TopicTagID        uint      `gorm:"primaryKey;not null" json:"topic_tag_id"`
-	SemanticBoardID   uint      `gorm:"primaryKey;not null" json:"semantic_board_id"`
-	Score             float64   `gorm:"not null;default:0" json:"score"`
+	TopicTagID        uint      `gorm:"primaryKey" json:"topic_tag_id"`
+	SemanticBoardID   uint      `gorm:"primaryKey" json:"semantic_board_id"`
+	Score             float64   `gorm:"default:0" json:"score"`
 	MatchReason       string    `gorm:"type:text" json:"match_reason"`
-	Downgraded        bool      `gorm:"not null;default:false" json:"downgraded"`
-	DirectionMismatch bool      `gorm:"not null;default:false" json:"direction_mismatch"`
+	Downgraded        bool      `gorm:"default:false" json:"downgraded"`
+	DirectionMismatch bool      `gorm:"default:false" json:"direction_mismatch"`
 	CreatedAt         time.Time `json:"created_at"`
 	UpdatedAt         time.Time `json:"updated_at"`
 
@@ -64,8 +64,8 @@ func (TopicTagBoardLabel) TableName() string {
 }
 
 type BoardComposition struct {
-	BoardID          uint `gorm:"primaryKey;not null" json:"board_id"`
-	AuxiliaryLabelID uint `gorm:"primaryKey;not null" json:"auxiliary_label_id"`
+	BoardID          uint `gorm:"primaryKey" json:"board_id"`
+	AuxiliaryLabelID uint `gorm:"primaryKey" json:"auxiliary_label_id"`
 
 	Board          *SemanticLabel `gorm:"foreignKey:BoardID;constraint:OnDelete:CASCADE" json:"board,omitempty"`
 	AuxiliaryLabel *SemanticLabel `gorm:"foreignKey:AuxiliaryLabelID;constraint:OnDelete:CASCADE" json:"auxiliary_label,omitempty"`

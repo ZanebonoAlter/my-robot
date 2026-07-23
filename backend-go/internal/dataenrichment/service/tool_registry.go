@@ -74,13 +74,51 @@ type Registry struct {
 	etfCacheMu     sync.Mutex
 	etfCache       []map[string]any
 	etfCacheLoaded bool
+
+	// Exploration tools (阶段2a-ii). Each is optional; when nil the tool returns
+	// a graceful error JSON. webSearcher defaults to NoopWebSearcher so the
+	// web_search tool degrades cleanly until a real backend is configured.
+	webSearcher        WebSearcher
+	boardLister        BoardLister
+	laneLister         LaneLister
+	laneDetailRenderer LaneDetailRenderer
 }
 
-// NewRegistry creates a tool registry with the given HTTP fetcher.
-func NewRegistry(fetcher HTTPFetcher) *Registry {
+// RegistryOption configures optional exploration dependencies on a Registry.
+// Financial ETF tools only need the HTTP fetcher and are always registered.
+type RegistryOption func(*Registry)
+
+// WithWebSearcher injects a web search backend (default NoopWebSearcher).
+func WithWebSearcher(ws WebSearcher) RegistryOption {
+	return func(r *Registry) { r.webSearcher = ws }
+}
+
+// WithBoardLister injects the board-panorama data source for list_boards.
+func WithBoardLister(bl BoardLister) RegistryOption {
+	return func(r *Registry) { r.boardLister = bl }
+}
+
+// WithLaneLister injects the persistent-topic data source for list_lanes.
+func WithLaneLister(ll LaneLister) RegistryOption {
+	return func(r *Registry) { r.laneLister = ll }
+}
+
+// WithLaneDetailRenderer injects the lifeline renderer for get_lane_detail.
+func WithLaneDetailRenderer(ldr LaneDetailRenderer) RegistryOption {
+	return func(r *Registry) { r.laneDetailRenderer = ldr }
+}
+
+// NewRegistry creates a tool registry with the given HTTP fetcher and any
+// optional exploration dependencies. Existing callers that pass only the
+// fetcher keep working (exploration tools degrade to error JSON).
+func NewRegistry(fetcher HTTPFetcher, opts ...RegistryOption) *Registry {
 	r := &Registry{
-		tools:   make(map[string]*Tool),
-		fetcher: fetcher,
+		tools:       make(map[string]*Tool),
+		fetcher:     fetcher,
+		webSearcher: NoopWebSearcher{},
+	}
+	for _, opt := range opts {
+		opt(r)
 	}
 	r.register()
 	return r
@@ -140,6 +178,58 @@ func (r *Registry) register() {
 			"properties": map[string]any{},
 		},
 		Execute: r.executeListSectors,
+	}
+
+	// ── Exploration entry points + web_search (阶段2a-ii) ──────────────────
+	// These are always registered; EnrichTopic always allows them for the agent
+	// so it has multi-level navigation + a web fallback regardless of board
+	// source_type. The financial tools above are conditionally exposed via
+	// allowedTools (board_config ToolsForSourceType).
+
+	r.tools["list_boards"] = &Tool{
+		Name:        "list_boards",
+		Description: "列出全部语义版块(全景),返回 [{id,name,active_lanes 活跃泳道数}]。无参。用于从顶层选择版块。",
+		InputSchema: map[string]any{
+			"type":       "object",
+			"properties": map[string]any{},
+		},
+		Execute: r.executeListBoards,
+	}
+
+	r.tools["list_lanes"] = &Tool{
+		Name:        "list_lanes",
+		Description: "列出某版块下的全部持久话题泳道,返回 [{lane_id,label,status,hit_count,consecutive_hits}]。先用 list_boards 拿到 board_id。",
+		InputSchema: map[string]any{
+			"type":       "object",
+			"properties": map[string]any{"board_id": map[string]any{"type": "integer"}},
+			"required":   []string{"board_id"},
+		},
+		Execute: r.executeListLanes,
+	}
+
+	r.tools["get_lane_detail"] = &Tool{
+		Name:        "get_lane_detail",
+		Description: "查看某泳道(持久话题)的近期演进详情(复用 lifeline 渲染)。先用 list_lanes 拿到 lane_id。window_days 默认 14。",
+		InputSchema: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"lane_id":     map[string]any{"type": "integer"},
+				"window_days": map[string]any{"type": "integer"},
+			},
+			"required": []string{"lane_id"},
+		},
+		Execute: r.executeGetLaneDetail,
+	}
+
+	r.tools["web_search"] = &Tool{
+		Name:        "web_search",
+		Description: "网络搜索(外部知识补充),返回 [{title,url,snippet}]。当内部数据源不足时用。若未配置会返回错误,你可基于已有数据继续或跳过。",
+		InputSchema: map[string]any{
+			"type":       "object",
+			"properties": map[string]any{"query": map[string]any{"type": "string"}},
+			"required":   []string{"query"},
+		},
+		Execute: r.executeWebSearch,
 	}
 }
 
@@ -394,4 +484,40 @@ func toStringSlice(v any) ([]string, bool) {
 		return s, true
 	}
 	return nil, false
+}
+
+// toUint coerces a JSON-decoded numeric arg to uint. Handles both float64
+// (the default json.Unmarshal type for numbers) and json.Number.
+func toUint(v any) (uint, bool) {
+	switch n := v.(type) {
+	case float64:
+		if n < 0 || n != float64(uint(n)) {
+			return 0, false
+		}
+		return uint(n), true
+	case int:
+		if n < 0 {
+			return 0, false
+		}
+		return uint(n), true
+	case int64:
+		if n < 0 {
+			return 0, false
+		}
+		return uint(n), true
+	case json.Number:
+		i, err := n.Int64()
+		if err != nil || i < 0 {
+			return 0, false
+		}
+		return uint(i), true
+	}
+	return 0, false
+}
+
+// jsonMarshal is a thin wrapper over json.Marshal that never returns an error
+// for the simple map[string]any payloads the tools build (it panics only on
+// truly impossible inputs, which the static shapes here preclude).
+func jsonMarshal(v any) ([]byte, error) {
+	return json.Marshal(v)
 }

@@ -82,3 +82,13 @@
 ### Requirement: 观察池建议自动回收
 
 系统 SHALL 对 decision=watch 的 pending 建议，在创建满 `semantic_board_upgrade_watch_gc_days`（默认 30 天，ai_settings 可配）后仍未成簇的，自动置为 dismissed，避免观察池单调膨胀。
+
+#### Scenario: 超期未成簇自动回收
+
+- **WHEN** 某 watch 建议创建已满 `semantic_board_upgrade_watch_gc_days`（默认 30 天）且仍为 pending、未成簇
+- **THEN** 系统 SHALL 在建议生成轮次或独立 GC 轮次中将其 status 置为 dismissed，并记录 resolved_at
+
+#### Scenario: 观察池未超期不受影响
+
+- **WHEN** 某 watch 建议创建未满 GC 天数
+- **THEN** 系统 SHALL 保留其 pending 状态，不做回收

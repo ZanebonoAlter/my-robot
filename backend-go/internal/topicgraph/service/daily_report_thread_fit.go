@@ -6,6 +6,7 @@ import (
 
 	"syntopica-backend/internal/platform/airouter"
 	"syntopica-backend/internal/platform/logging"
+	"syntopica-backend/internal/platform/tracing"
 	"syntopica-backend/internal/topicgraph/repository"
 )
 
@@ -28,6 +29,9 @@ func computeThreadFitDistances(
 	boardID uint,
 	embed embedFunc,
 ) {
+	ctx, span := tracing.Tracer(tracing.ServiceName).Start(ctx, "workflow.daily_report.thread_fit")
+	defer span.End()
+
 	// 1. Collect titles for threads whose owning section HAS an embedding.
 	//    Skip sections with empty Embedding and empty/whitespace titles.
 	var texts []string

@@ -204,4 +204,32 @@ describe("useBoardEnrichmentApi — endpoint contracts (data-enrichment P6)", ()
 			);
 		});
 	});
+
+	// ── QA: report follow-up (causal-analysis-agent P3) ─────────────────────
+	describe("qa — report follow-up", () => {
+		it("askQA → POST .../results/:id/qa with {question}", async () => {
+			const api = useBoardEnrichmentApi();
+			await api.askQA(7, 42, "油价还会涨吗");
+			expect(postMock).toHaveBeenCalledWith(
+				"/persistent-topics/7/enrichment/results/42/qa",
+				{ question: "油价还会涨吗" },
+			);
+		});
+
+		it("listQA → GET .../results/:id/qa", async () => {
+			const api = useBoardEnrichmentApi();
+			await api.listQA(7, 42);
+			expect(getMock).toHaveBeenCalledWith(
+				"/persistent-topics/7/enrichment/results/42/qa",
+			);
+		});
+
+		it("sedimentQA → POST .../qa/:id/sediment", async () => {
+			const api = useBoardEnrichmentApi();
+			await api.sedimentQA(7, 99);
+			expect(postMock).toHaveBeenCalledWith(
+				"/persistent-topics/7/enrichment/qa/99/sediment",
+			);
+		});
+	});
 });

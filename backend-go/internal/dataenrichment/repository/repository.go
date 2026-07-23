@@ -313,3 +313,45 @@ func (r *Repository) ListStockDebateResultsByResult(ctx context.Context, resultI
 	}
 	return list, nil
 }
+
+// ── TopicEnrichmentQA ─────────────────────────────────────────────────────
+
+// CreateTopicEnrichmentQA inserts a new append-only Q&A round. The report
+// itself is never rewritten; each round is a new row under the same result_id.
+func (r *Repository) CreateTopicEnrichmentQA(ctx context.Context, qa *TopicEnrichmentQA) error {
+	return r.db.WithContext(ctx).Create(qa).Error
+}
+
+// ListTopicEnrichmentQAByResultID returns all Q&A rounds for a result, oldest
+// first (multi-round history order). Append-only: never mutates the report.
+func (r *Repository) ListTopicEnrichmentQAByResultID(ctx context.Context, resultID uint) ([]TopicEnrichmentQA, error) {
+	var list []TopicEnrichmentQA
+	err := r.db.WithContext(ctx).
+		Where("topic_enrichment_result_id = ?", resultID).
+		Order("created_at ASC").
+		Find(&list).Error
+	if err != nil {
+		return nil, fmt.Errorf("list enrichment qa: %w", err)
+	}
+	return list, nil
+}
+
+// GetTopicEnrichmentQAByID fetches a single Q&A round by ID.
+func (r *Repository) GetTopicEnrichmentQAByID(ctx context.Context, id uint) (*TopicEnrichmentQA, error) {
+	var qa TopicEnrichmentQA
+	err := r.db.WithContext(ctx).First(&qa, id).Error
+	if err != nil {
+		return nil, fmt.Errorf("get enrichment qa: %w", err)
+	}
+	return &qa, nil
+}
+
+// MarkQASedimented pins a Q&A round as a durable note (sedimented=true).
+// Only flips the flag on the qa row — the report itself (topic_enrichment_result)
+// is never rewritten (业务约束#2: result 不可变).
+func (r *Repository) MarkQASedimented(ctx context.Context, qaID uint) error {
+	return r.db.WithContext(ctx).
+		Model(&TopicEnrichmentQA{}).
+		Where("id = ?", qaID).
+		Update("sedimented", true).Error
+}

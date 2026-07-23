@@ -61,6 +61,15 @@ func TestTopicEnrichmentReviewModelCanAutoMigrate(t *testing.T) {
 	}
 }
 
+func TestTopicEnrichmentQAModelCanAutoMigrate(t *testing.T) {
+	setupDataEnrichmentTestDB(t)
+
+	var count int64
+	if err := database.DB.Raw("SELECT COUNT(*) FROM topic_enrichment_qa").Scan(&count).Error; err != nil {
+		t.Fatalf("topic_enrichment_qa table should exist: %v", err)
+	}
+}
+
 func TestSemanticLabelHasEnrichmentFields(t *testing.T) {
 	setupDataEnrichmentTestDB(t)
 

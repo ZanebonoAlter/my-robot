@@ -77,8 +77,6 @@
 
 ## 10. 测试
 
-<!-- doc-impact: 数据增强认知闭环 -->
-
 - [ ] 10.1 后端单元测试：`go test ./internal/dataenrichment/...`（形态判断/视角候选/探索agent/见解层/review/追问 全覆盖）
 - [ ] 10.2 前端单元测试：`boardEnrichment.test.ts` 对齐 {form,lens,analysis} schema + 追问交互
 - [ ] 10.3 骨感型诚实测试：sparse 形态不产出推演见解
@@ -87,9 +85,12 @@
 
 ## 11. 文档
 
+<!-- doc-impact: flow, database, standard, api -->
+
 - [ ] 11.1 `docs/reference/database/DATABASE_FIELDS.md`：`topic_enrichment_result.Sectors` 语义变更 + `topic_enrichment_review.Verdict` 语义变更 + 新表 `topic_enrichment_qa`
 - [ ] 11.2 `docs/reference/flow/`：数据增强认知闭环流程更新（形态判断→视角选择→探索→分层见解→新发现对比→报告追问），archive 后补 §12 变更溯源
 - [ ] 11.3 `docs/reference/standard/backend/ai-logging.md`：补 `data_enrichment.interpret`(含形态+视角) / `data_enrichment.analyze`(分层见解) / `data_enrichment.qa`(报告追问) Operation 跟踪
+- [ ] 11.4 `docs/reference/api/dataenrichment.md`：补报告追问 QA 端点（POST/GET `/results/:id/qa`）+ 沉淀端点（POST `/qa/:id/sediment`）
 - [ ] 11.4 `backend-go/AGENTS.md`：domain 白名单已含 dataenrichment（确认无需改）
 - [ ] 11.5 与 data-enrichment-orchestration 关系：在其 tasks.md 标注 `[~]` 演进定位任务（3.6/4.2/5.2/7.4-7.5）作废，由本 change 接管
 

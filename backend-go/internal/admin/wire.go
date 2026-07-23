@@ -55,7 +55,10 @@ var (
 )
 
 // AI call log handlers
-var ListCallLogs = handler.ListCallLogs
+var (
+	ListCallLogs = handler.ListCallLogs
+	GetSession   = handler.GetSession
+)
 
 // Reading behavior handlers
 var (

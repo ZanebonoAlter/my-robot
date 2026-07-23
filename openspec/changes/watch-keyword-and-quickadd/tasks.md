@@ -2,7 +2,7 @@
 
 > 垂直切片，每切片独立可交付、可验证。推荐顺序：A 后端双轨判定（核心纯逻辑先行）→ B keyword 即时匹配 → C 前端类型切换 + 快捷入口。尾部遵循开发执行规范 §11 归档门禁。
 >
-> ⚠️ 前置：topic-watchlist-observability 已归档（topic-watch 主 spec + board_topic_watches 表已存在）。
+> ⚠️ 前置：`board_topic_watches` 表与 watch 切换 spec（`article-tag-watch-toggle`）已存在，watch 基础设施就绪。注意 `topic-watchlist-observability` change 仍在进行中（active，未归档），但本 change 仅依赖其已落地的表结构，不阻塞启动。
 
 ## 1. 后端：实体 type 字段 + 双轨命中判定（A · topic-watch）
 

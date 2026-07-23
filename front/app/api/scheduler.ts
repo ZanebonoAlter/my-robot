@@ -1,9 +1,10 @@
 import type { ApiResponse } from '~/types'
 import type { SchedulerStatus, SchedulerTriggerResult } from '~/types/scheduler'
 import { apiClient } from './client'
+import { buildQueryString } from '~/utils/api-helpers'
 
 async function triggerSchedulerRequest(name: string, params?: Record<string, string>): Promise<ApiResponse<SchedulerTriggerResult>> {
-  const query = params ? '?' + new URLSearchParams(params).toString() : ''
+  const query = params ? buildQueryString(params) : ''
   return apiClient.post<SchedulerTriggerResult>(`/schedulers/${name}/trigger${query}`, {})
 }
 

@@ -49,7 +49,7 @@ flowchart TB
 | 表 | 角色 | 生命周期 | 可变？ | 谁写 |
 | ----- | ------ | ---------- | -------- | ------ |
 | `topic_lifeline_context` | 新闻记忆（背景） | 滚动更新，按周期 | 可（循环A刷新/人工编辑） | 循环A（`summarize_context`） |
-| `topic_enrichment_result` | 当下判断（快照） | 一次分析一行 | **不可变** | 循环B 分析员 |
+| `topic_enrichment_result` | 当下判断（快照） | 一次分析一行 | **不可变** | 循环B 探索agent（analyze 步骤） |
 | `topic_enrichment_review` | 两次快照间的增量（反思） | 追加 | deviation_summary 可人工调 | review judge / 用户手动 |
 
 类比：**记住过去（表1）→ 形成判断（表2）→ 反思对比（表3）→ 下次判断更准（读历史 review）**。
@@ -73,66 +73,82 @@ flowchart TB
 - **week**：按周块处理。正常定时时直接汇总当前周；自愈时从 `as_of_date` 次周起逐周块增量合并补齐。
 - **month / year / all**：读「自上次汇总以来的增量 sections」+「该 granularity 旧汇总」→ LLM 合并生成新汇总。各 granularity 平行维护自己的滚动窗口，不搞层层金字塔合并。
 
-### 循环B：分析认知循环（三角色编排）
+### 循环B：分析认知循环（解读员 + 探索 agent，causal-analysis-agent）
 
-仅手动触发（CRUD 界面"重新分析"按钮），不挂日报管线。
+仅手动触发（CRUD 界面"重新分析"按钮），不挂日报管线。分析目标从旧「演进定位」改为「探索判断 agent——形态随话题变 + 见解为核心」：解读员判形态+提视角候选，探索 agent 拿多级入口+web_search 自主探索，产出分层见解（事实层+见解层，确定性分级，依据强制）。
 
 ```mermaid
 sequenceDiagram
     autonumber
     participant UI as CRUD界面
     participant Interp as 解读员
-    participant Agent as 查询员<br/>agent loop
-    participant Tool as 数据源工具
-    participant Analyzer as 分析员
-    participant Judge as review_judge
+    participant Agent as 探索agent<br/>runToolLoop
+    participant Tool as 探索工具<br/>(多级入口+web_search)
     participant AI as airouter
     participant DB as DB
 
     UI->>Interp: EnrichTopic(topicID)
-
     Interp->>DB: 读表1 context + 14天详情 + 历史 applied review
     DB-->>Interp: 分层上下文 ~2.5k token
     Interp->>AI: Chat Operation=interpret<br/>Capability=data_enrichment_analysis
-    AI-->>Interp: 产业主题 JSON（需补数据的方向）
+    AI-->>Interp: {form(形态判断), lens_candidates[](视角候选), 探索方向}
+    Note over Interp: 选定 lens（当前默认 candidates[0]；<br/>手动选择交互待 3c）
 
-    loop 每主题 max_loops=6
-        Agent->>AI: Chat Operation=tool_use<br/>Capability=data_enrichment_analysis
+    loop 探索 agent 每轮（max_loops 上限兜底）
+        Agent->>AI: Chat Operation=tool_use<br/>按 form 控深 + lens 聚焦
         AI-->>Agent: action=call_tool / finish
         alt call_tool
             Agent->>Agent: 去重拦截（相同tool+args直接挡）
-            Agent->>Tool: 执行（如 list_etf / get_quote）
+            Agent->>Tool: list_boards / list_lanes / get_lane_detail / web_search
             Tool-->>Agent: 完整结果（不截断）
-            Note over Agent: 命中0 → 换宽泛词重查
+            Note over Agent: web_search 默认 Noop 降级<br/>(未配置搜索服务，agent 自判)
         end
     end
 
-    Analyzer->>AI: Chat Operation=analyze
-    AI-->>Analyzer: evolution_assessment + sectors + causal_chain
-    Analyzer->>DB: INSERT result（含 tool_calls + input_snapshot）
+    Agent->>AI: Chat Operation=analyze<br/>分层见解(fact_layer + insight_layer)
+    AI-->>Agent: {form, lens, analysis}（insight 挂依据 + 确定性 high/medium/low/question）
+    Agent->>Agent: 解析校验：无依据 insight 丢弃
+    Agent->>DB: INSERT result.sectors={form,lens,analysis}
 
-    Judge->>DB: 读上次 result
-    Judge->>AI: Chat Operation=review_judge<br/>对比 prev vs curr
-    AI-->>Judge: {should_review, deviation_summary, affected_context}
-    Judge->>DB: INSERT review（should_review=true 时才写）
+    Note over AI: review_judge: 对比上次 insight_layer
+    AI-->>DB: INSERT review.verdict={new_findings, overturned, confidence_shift}
 ```
 
-### 6 个 LLM Operation 速查
+**形态判断**（`form`）：`event_chain`(事件链) / `theme_vein`(主题脉络) / `single_point`(单点影响) / `sparse`(骨感)，判据含 hit_count/section 数/cluster_label 发散度/内容语义，枚举可扩展。**见解层**：事实层(验证) + 见解层(推演，产出主体)，每条 insight 必挂文章/时间线依据（无依据 parse 时丢弃）+ 确定性分级（high/medium/low/question）。**骨感型**诚实标注信息不足，不硬推演。**视角机制**（模式丙）：agent 提具体问题式视角候选 → 用户选（当前默认 candidates[0]，手动选择 UI 待 3c）。
+
+### 7 个 LLM Operation 速查
 
 | Operation | Capability | 循环 | 角色 | 触发方式 |
 | ----------- | ------------ | ------ | ------ | ---------- |
 | `data_enrichment.summarize_context` | `data_enrichment_news` | A | 汇总 | 定时 + 检查自愈 + 手动 |
-| `data_enrichment.interpret` | `data_enrichment_analysis` | B | 解读员 | 手动增强 |
+| `data_enrichment.interpret` | `data_enrichment_analysis` | B | 解读员（形态判断+视角候选） | 手动增强 |
 | `data_enrichment.tool_use` | `data_enrichment_analysis` | B | 查询员每轮 | 手动增强 |
-| `data_enrichment.analyze` | `data_enrichment_analysis` | B | 分析员 | 手动增强 |
+| `data_enrichment.analyze` | `data_enrichment_analysis` | B | 分析员（分层见解） | 手动增强 |
 | `data_enrichment.review_judge` | `data_enrichment_analysis` | B | review 对比 | 增强后自动 |
 | `data_enrichment.debate_distill` | `data_enrichment_analysis` | 可选 | 辩论提炼 | 辩论完成后自动 |
+| `data_enrichment.qa_tool_use` | `data_enrichment_analysis` | B 追问 | 报告追问每轮 | 用户对已生成报告手动提问 |
 
 SessionID 规则：
 
 - 循环B：`data_enrichment_{topic_id}_{uuid8}`，一次增强内所有 LLM 调用共享
 - 循环A：`lifeline_context_{topic_id}_{granularity}_{uuid8}`，一次汇总共享
 - 个股辩论提炼：`data_enrichment_debate_{topic_id}_{result_id}`
+- 报告追问：`data_enrichment_qa_{result_id}_{uuid8}`，每次询问唯一（基于 result，同一报告多轮追问各自独立 session）
+
+### 报告追问（causal-analysis-agent D9，可选追问）
+
+报告（`topic_enrichment_result`）生成后保持**不可变**（业务约束：result 不可变）。用户可对同一报告发起多轮追问，复用循环 B 的工具循环（4 个探索工具：`list_boards` / `list_lanes` / `get_lane_detail` / `web_search`），但把报告快照（`{form, lens, analysis}`）植入系统提示而非重新研究主题。
+
+```mermaid
+flowchart LR
+    RPT[(topic_enrichment_result<br/>不可变快照)] --> QA[QAAgent.Ask<br/>Operation: qa_tool_use]
+    QA --> LOOP[复用 runToolLoop<br/>4 探索工具去重/上限防御]
+    LOOP --> ANS[QAAnswer<br/>answer + tool_calls + refs]
+    ANS --> APPEND[(topic_enrichment_qa<br/>append-only, source=qa)]
+    APPEND -.可选.-> SED[POST /qa/:id/sediment<br/>sedimented=true<br/>仅翻转 flag, 不改 result]
+```
+
+**不变量**：① 报告永不重写；② 每轮追问 append 一行 `topic_enrichment_qa`；③ `sediment` 仅翻转 qa 行的 `sedimented` flag，是用户 pin 持久笔记的手段，不回写 result。**4 个探索工具**：`list_boards`（活跃看板）/ `list_lanes`（看板下持久话题，按热度排）/ `get_lane_detail`（泳道详情，复用循环 A 的 `RenderLifelineForAgent`）/ `web_search`（网页搜索，默认 Noop 降级提示，待接入真实后端）。
 
 ### FinGenius 可选辩论（个股深度分析）
 
@@ -170,6 +186,9 @@ flowchart TB
 6. **循环 A 时段避开 daily_report**：week 每周一 03:00、month 每月 1 号 03:30、year 每年 1 月 1 号 04:00（Asia/Shanghai），与日报生成错峰。
 7. **可追溯**：每次切片的输入 + 输出均可通过 `ai_call_logs` + `result.tool_calls` jsonb + `result.input_snapshot` jsonb 重建（全链路留痕）。
 8. **FinGenius 降级 non-fatal**：FinGenius 服务不可用时循环 B 主流程照常完成，前端个股辩论区块显示连接失败提示；Syntopica 不开 FinGenius 时完全可用。辩论失败不阻塞板块方向预测。
+9. **见解依据强制**（causal-analysis-agent）：每条 insight 必须挂文章/时间线依据（evidence），无依据的 insight 在 parse 时丢弃（`Insight.hasEvidence()` 校验），不悬空发散。落地点：`service/orchestrator.go` analyze 解析。
+10. **web_search 接口降级**（causal-analysis-agent）：`web_search` 默认 `NoopWebSearcher`（未配置搜索服务时返回 error），agent 自判降级、不阻断主流程；真实搜索后端待注入（`WebSearcher` 接口可扩展）。落地点：`service/web_search.go` / `tool_registry.go`。
+11. **形态判断 + 视角机制**（causal-analysis-agent）：解读员 `interpret` 输出 `form`（四形态枚举，可扩展）+ `lens_candidates[]`（具体问题式视角）；当前选定 lens 默认取 candidates[0]，手动选择交互待 3c。落地点：`service/orchestrator.go` interpret / `service/lens_source.go`。
 
 ## 代码入口
 
@@ -227,6 +246,7 @@ flowchart TB
 
 | 日期 | 变更 | 摘要 | 归档位置 |
 |------|------|------|----------|
-| 2026-07-07 | data-enrichment-orchestration | 两独立循环（A新闻记忆 + B分析认知）+ 三表关注点分离 + FinGenius 可选辩论；6 个 LLM Operation + 2 个 Capability；stock_debate_result 表 + debate_distill 提炼；详见本 flow 文档及 DATABASE_FIELDS.md §16 / ai-logging.md | （待归档后补链接） |
+| 2026-07-23 | data-enrichment-orchestration | 两独立循环（A新闻记忆 + B分析认知）+ 三表关注点分离 + FinGenius 可选辩论；6 个 LLM Operation + 2 个 Capability；stock_debate_result 表 + debate_distill 提炼；详见本 flow 文档及 DATABASE_FIELDS.md §16 / ai-logging.md | [`openspec/changes/archive/2026-07-23-data-enrichment-orchestration`](../../../openspec/changes/archive/2026-07-23-data-enrichment-orchestration) |
+| 2026-07-23 | causal-analysis-agent | 分析主线重做：推翻 orch 的「演进定位」主线为「探索判断 agent」——话题形态判断（event_chain/theme_vein/single_point/sparse）+ 视角候选与选择 + 探索工具集（list_boards/list_lanes/get_lane_detail/web_search）+ 分层见解（事实层/见解层 + 确定性分级 high/medium/low/question）+ 报告追问（topic_enrichment_qa 多轮 + 手动沉淀）；骨架（三表/agent loop 三防御/可观测/循环A）复用 | [`openspec/changes/archive/2026-07-23-causal-analysis-agent`](../../../openspec/changes/archive/2026-07-23-causal-analysis-agent) |
 
 > 资料来源：架构设计 `openspec/changes/data-enrichment-orchestration/design.md`（§0 两循环 + §4.2b 个股辩论 + §11 六决策）；概要设计 `openspec/changes/data-enrichment-orchestration/overview.md`（mermaid 流程图 + 6 Operation 速查）。

@@ -52,7 +52,16 @@ func Init(db *gorm.DB) {
 	boardConfigReader := NewDBBoardConfigReader(db)
 	lifelineReader := NewDBLifelineReader(db)
 	renderer := service.NewLifelineRenderer()
-	toolRegistry := service.NewRegistry(service.NewDefaultHTTPFetcher())
+	boardLister := NewDBBoardLister(db)
+	laneLister := NewDBLaneLister(db)
+	laneDetailRenderer := service.NewRendererLaneDetailAdapter(lifelineReader, renderer)
+	toolRegistry := service.NewRegistry(
+		service.NewDefaultHTTPFetcher(),
+		service.WithWebSearcher(service.NoopWebSearcher{}),
+		service.WithBoardLister(boardLister),
+		service.WithLaneLister(laneLister),
+		service.WithLaneDetailRenderer(laneDetailRenderer),
+	)
 	orchestrator := service.NewOrchestratorService(
 		airouter.NewRouter(),
 		repo,
@@ -68,8 +77,13 @@ func Init(db *gorm.DB) {
 	debateDistiller := service.NewDebateDistiller(airouter.NewRouter(), CapabilityAnalysis)
 	debateSvc := service.NewDebateService(fingeniusClient, debateDistiller, repo)
 
+	// Cycle B (阶段2b): report follow-up QA agent. Reuses the SAME tool registry as
+	// the orchestrator so the exploration tools (list_boards/list_lanes/
+	// get_lane_detail/web_search) are available; never writes to the result table.
+	qaAgent := service.NewQAAgent(airouter.NewRouter(), toolRegistry, repo, CapabilityAnalysis)
+
 	// HTTP handler singleton consumed by handler.RegisterRoutes.
-	handler.InitHandler(repo, lifelineSvc, orchestrator, boardConfigReader, debateSvc, db)
+	handler.InitHandler(repo, lifelineSvc, orchestrator, boardConfigReader, debateSvc, qaAgent, db)
 }
 
 // GetLifelineService returns the cycle-A service built by Init, for scheduler

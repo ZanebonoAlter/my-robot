@@ -233,6 +233,16 @@ func (r *ReaderRepository) ListArticlesByFeed(feedID uint, order string, limit i
 	return articles, err
 }
 
+// ListArticlesByFeedAndStatuses returns articles for a feed whose summary_status
+// is in the given set, omitting heavy computed columns (tag_count, relevance_score).
+func (r *ReaderRepository) ListArticlesByFeedAndStatuses(feedID uint, statuses []string) ([]models.Article, error) {
+	var articles []models.Article
+	err := r.db.Omit("tag_count", "relevance_score").
+		Where("feed_id = ? AND summary_status IN ?", feedID, statuses).
+		Find(&articles).Error
+	return articles, err
+}
+
 func (r *ReaderRepository) DeleteArticlesByFeed(feedID uint) error {
 	return r.db.Where("feed_id = ?", feedID).Delete(&models.Article{}).Error
 }

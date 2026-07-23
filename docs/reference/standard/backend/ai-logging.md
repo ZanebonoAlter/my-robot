@@ -114,6 +114,7 @@ agent loop 里的**工具调用**（非 LLM 调用）SHALL 留痕，至少记：
 | 循环B-分析员 | `data_enrichment.analyze` | ✅ | ✅ | ✅ | ✅ | 已补齐 |
 | 循环B-review对比 | `data_enrichment.review_judge` | ✅ | ✅ | ✅ | ✅ | 已补齐 |
 | 个股辩论-结果提炼 | `data_enrichment.debate_distill` | ✅ | ✅ | ✅ | ✅ | 已补齐 |
+| 报告追问-查询员每轮 | `data_enrichment.qa_tool_use` | ✅ | ✅ | ✅ | ✅ | 已补齐 |
 
 **补齐状态**：以上日报管线 6 处调用已由 [`ai-call-logging-schema`](../../../../openspec/changes/ai-call-logging-schema) change 全部补齐（prompt/token/session_id 落地，operation 升级为一等字段且 airouter 强制校验非空），从"待补齐"转为 ✅。其他调用方（reader/tagmanagement）也已补 operation 字段。
 
@@ -122,13 +123,14 @@ agent loop 里的**工具调用**（非 LLM 调用）SHALL 留痕，至少记：
 - 循环B（`data_enrichment.interpret` / `tool_use` / `analyze` / `review_judge`）同一次增强内所有 LLM 调用共享 `data_enrichment_{topic_id}_{uuid8}`
 - 循环A（`data_enrichment.summarize_context`）一次汇总共享 `lifeline_context_{topic_id}_{granularity}_{uuid8}`
 - 个股辩论提炼（`data_enrichment.debate_distill`）共享 `data_enrichment_debate_{topic_id}_{result_id}`
+- 报告追问（`data_enrichment.qa_tool_use`）每次询问唯一，共享 `data_enrichment_qa_{result_id}_{uuid8}`（基于 result 而非 topic，同一报告多轮追问各自独立 session）
 
 **数据增强 Capability 映射**：
 
 | Capability | 归属的 Operation |
 | --- | --- |
 | `data_enrichment_news` | `data_enrichment.summarize_context`（循环A 纯新闻汇总） |
-| `data_enrichment_analysis` | `data_enrichment.interpret`（解读员）/ `data_enrichment.tool_use`（查询员每轮）/ `data_enrichment.analyze`（分析员）/ `data_enrichment.review_judge`（兑现度复盘）/ `data_enrichment.debate_distill`（FinGenius 提炼） |
+| `data_enrichment_analysis` | `data_enrichment.interpret`（解读员，含形态判断+视角候选）/ `data_enrichment.tool_use`（查询员每轮）/ `data_enrichment.analyze`（分析员，分层见解）/ `data_enrichment.review_judge`（兑现度复盘）/ `data_enrichment.debate_distill`（FinGenius 提炼）/ `data_enrichment.qa_tool_use`（报告追问每轮，复用工具循环） |
 
 ## 查询入口（规范要求，实现可排期）
 

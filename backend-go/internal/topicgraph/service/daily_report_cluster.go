@@ -9,6 +9,7 @@ import (
 	"syntopica-backend/internal/platform/airouter"
 	"syntopica-backend/internal/platform/jsonutil"
 	"syntopica-backend/internal/platform/logging"
+	"syntopica-backend/internal/platform/tracing"
 	"syntopica-backend/internal/topicgraph/repository"
 )
 
@@ -111,6 +112,9 @@ func buildClusterSystemPrompt(tagCount int, existingTopics []repository.BoardPer
 // reuses them; each returned group carries the topic id it matched (validated
 // against this set, nil when new). Pass nil/empty to cluster from scratch.
 func ClusterTags(ctx context.Context, tags []repository.TagInput, existingTopics []repository.BoardPersistentTopic, briefs map[uint][]repository.TopicRecentBrief) ([]repository.ClusterGroup, error) {
+	ctx, span := tracing.Tracer(tracing.ServiceName).Start(ctx, "workflow.daily_report.cluster_tags")
+	defer span.End()
+
 	if len(tags) == 0 {
 		return nil, nil
 	}

@@ -1,41 +1,54 @@
 package service
 
 // ReviewJudgeOutput is the structured output of the review judge LLM call.
-// See design.md §4.3 and spec "分析认知循环 review judge".
+//
+// It compares the current analysis.insight_layer against the previous one and
+// records cognitive updates: new findings, overturned insights, and confidence
+// shifts. This replaces the old position_change/change_summary schema from the
+// evolution-positioning era. Spec "分析认知对比".
+//
+// Invariant (business constraint #1): review NEVER writes back to table 1
+// (topic_lifeline_context / news memory). It only records cognitive adoption
+// in table 3 (topic_enrichment_review). News memory stays objective.
 type ReviewJudgeOutput struct {
-	ShouldReview    bool           `json:"should_review"`
-	Reason          string         `json:"reason"`
-	ChangeSummary   string         `json:"change_summary"`
-	AffectedContext string         `json:"affected_context"`
-	Confidence      float64        `json:"confidence"`
-	PositionChange  map[string]any `json:"position_change"`
+	ShouldReview    bool             `json:"should_review"`
+	Reason          string           `json:"reason"`
+	NewFindings     []string         `json:"new_findings"`     // 本次新出现的见解（上次没有的）
+	Overturned      []string         `json:"overturned"`       // 本次推翻的旧见解
+	ConfidenceShift []map[string]any `json:"confidence_shift"` // [{insight, from, to}]
+	AffectedContext string           `json:"affected_context"` // week|month|year|all
+	Confidence      float64          `json:"confidence"`
 }
 
-// reviewJudgePrompt is the LLM prompt for comparing two enrichment results.
-// Design §4.3: compare evolution positioning, not financial direction.
-const reviewJudgePrompt = `你是一位 AI 系统质量审计员。比较同一话题的两次增强分析结果，判断话题演进定位是否发生了值得记录的迁移。
+// reviewJudgePrompt is the LLM prompt comparing two enrichment analyses.
+//
+// Unlike the old evolution-positioning comparison (position 4 档迁移), this
+// compares the insight layer directly: what's new, what's overturned, what
+// shifted in certainty. Spec "分析认知对比".
+const reviewJudgePrompt = `你是一位 AI 系统质量审计员。比较同一话题的两次分析结果，判断【见解层】是否发生了值得记录的认知更新。
 
-输入:
-- 上次分析结果（JSON），含 analysis.position（reinforcing/turning/expanding/fading）、signals、evidence、causal_chain 等
+输入：
+- 上次分析结果（JSON），含 analysis.insight_layer（event_chain）或 analysis.cross_insight（theme_vein）等推演见解
 - 本次分析结果（JSON），同上结构
 
-四档定位含义（帮你理解迁移语义）：
-- reinforcing（强化）：最新进展延续并加强了既有趋势，方向未变、力度加大
-- turning（转折）：最新进展表明趋势方向发生反转，或触发质变（从缓和转紧张、从上升转下滑等）
-- expanding（扩散）：影响正在传导到新领域、新主体、新地域，话题范围在扩大
-- fading（衰减）：话题热度显著下降，新信号减弱或消失，不再有新的实质进展
+确定性分级含义（帮你对齐 confidence_shift）：
+- high：已验证的事实推论
+- medium：推演·有据
+- low：假设·情景
+- question：提问·指出决定成败的条件
 
-判断标准:
-- should_review=true：定位发生了迁移（from≠to），或出现了新的关键信号、因果链变化，值得记录认知更新
-- should_review=false：定位未变且无实质新信息，仅措辞调整或置信度微调 → 跳过以减少噪音
+判断标准（对照两次的见解层）：
+- should_review=true：出现了新的关键见解、推翻了旧见解、或见解确定性发生明显迁移 → 值得记录认知更新
+- should_review=false：见解层无实质变化（仅措辞调整、证据补充）→ 跳过以减少噪音
 
-position_change 填写要求:
-- from：上次分析里的 analysis.position
-- to：本次分析里的 analysis.position
-- summary：定位怎么变了 + 凭什么。比如"停火协议被打破，局势从缓和转向紧张，触发转折"
+字段填写要求：
+- new_findings：本次【新出现】的见解标题（上次没有的）
+- overturned：本次【推翻】的旧见解（上次有、本次否定或反转的）
+- confidence_shift：见解确定性变化，每项 {"insight":"见解标题","from":"high|medium|low|question","to":"high|medium|low|question"}
+- affected_context：建议关注的上下文层 week/month/year/all
 
-输出严格 JSON（不要其他内容）:
-{"should_review": true/false, "reason": "为什么值得/不值得复盘", "position_change": {"from": "reinforcing|turning|expanding|fading", "to": "reinforcing|turning|expanding|fading", "summary": "定位怎么变了+凭什么"}, "change_summary": "复盘说明（定位为什么变了、哪个信号触发）", "affected_context": "建议关注的上下文层 week/month/year/all", "confidence": 0.0-1.0}
+输出严格 JSON（不要其他内容）：
+{"should_review": true/false, "reason": "为什么值得/不值得复盘", "new_findings": ["新见解1","新见解2"], "overturned": ["被推翻的旧见解"], "confidence_shift": [{"insight":"...","from":"medium","to":"high"}], "affected_context": "week|month|year|all", "confidence": 0.0-1.0}
 
 ---
 上次分析结果:

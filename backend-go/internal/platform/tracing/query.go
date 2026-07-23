@@ -29,6 +29,21 @@ func QueryByTraceID(db *gorm.DB, traceID string) ([]OtelSpan, error) {
 	return spans, err
 }
 
+// QuerySpansByTraceIDs returns all spans belonging to the given trace IDs,
+// ordered by start time ascending. Used by the session aggregation endpoint
+// to assemble a timeline across every trace that one orchestration session
+// touched (trace_id is the join key written into ai_call_logs by LogCall).
+func QuerySpansByTraceIDs(db *gorm.DB, traceIDs []string) ([]OtelSpan, error) {
+	if len(traceIDs) == 0 {
+		return nil, nil
+	}
+	var spans []OtelSpan
+	err := db.Where("trace_id IN ?", traceIDs).
+		Order("start_time_unix_nano ASC").
+		Find(&spans).Error
+	return spans, err
+}
+
 func QueryRecentTraces(db *gorm.DB, limit int) ([]TraceSummary, error) {
 	if limit <= 0 {
 		limit = 50
@@ -206,28 +221,47 @@ func QueryStats(db *gorm.DB) (map[string]interface{}, error) {
 	}, nil
 }
 
+// BuildSpanTree assembles a flat span list into a parent-to-children tree.
+// Spans whose ParentSpanID is empty, all-zero, or absent from the set become
+// roots. Children are attached recursively so multi-level nesting is preserved.
+//
+// NOTE: an earlier value-copy version appended *detail into roots before
+// walking children, which dropped any grandchild span (root.Children was
+// captured before child spans were attached to it). The recursive build below
+// fixes that.
 func BuildSpanTree(spans []OtelSpan) []TraceDetail {
-	spanMap := make(map[string]*TraceDetail)
-	for i := range spans {
-		detail := &TraceDetail{
-			OtelSpan: spans[i],
-			Children: []TraceDetail{},
-		}
-		spanMap[spans[i].SpanID] = detail
+	indexOf := make(map[string]int, len(spans))
+	for i, s := range spans {
+		indexOf[s.SpanID] = i
 	}
-
-	var roots []TraceDetail
-	for i := range spans {
-		detail := spanMap[spans[i].SpanID]
-		parentID := spans[i].ParentSpanID
-		if parentID == "" || parentID == "0000000000000000" {
-			roots = append(roots, *detail)
-		} else if parent, ok := spanMap[parentID]; ok {
-			parent.Children = append(parent.Children, *detail)
+	childrenOf := make(map[string][]int)
+	var rootIdx []int
+	for i, s := range spans {
+		pid := s.ParentSpanID
+		if pid == "" || pid == "0000000000000000" {
+			rootIdx = append(rootIdx, i)
+			continue
+		}
+		if _, ok := indexOf[pid]; ok {
+			childrenOf[pid] = append(childrenOf[pid], i)
 		} else {
-			roots = append(roots, *detail)
+			rootIdx = append(rootIdx, i)
 		}
 	}
 
+	var build func(idx int) TraceDetail
+	build = func(idx int) TraceDetail {
+		s := spans[idx]
+		d := TraceDetail{OtelSpan: s, Children: []TraceDetail{}}
+		for _, ci := range childrenOf[s.SpanID] {
+			d.Children = append(d.Children, build(ci))
+		}
+		return d
+	}
+
+	roots := make([]TraceDetail, 0, len(rootIdx))
+	for _, i := range rootIdx {
+		roots = append(roots, build(i))
+	}
 	return roots
 }

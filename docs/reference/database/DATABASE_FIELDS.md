@@ -16,9 +16,9 @@
 
 ---
 
-## 完整表清单（43 张业务表 + 5 张废弃表 + 1 张框架表）
+## 完整表清单（44 张业务表 + 5 张废弃表 + 1 张框架表）
 
-### 业务表（43 张，代码权威）
+### 业务表（44 张，代码权威）
 
 | 表名 | 说明 | 对应模型 | 域 |
 | ------ | ------ | ---------- | ------ |
@@ -62,6 +62,7 @@
 | `topic_enrichment_result` | 数据增强结果快照（不可变） | `dataenrichment.TopicEnrichmentResult` | 数据增强 |
 | `topic_enrichment_review` | 数据增强认知演进反思 | `dataenrichment.TopicEnrichmentReview` | 数据增强 |
 | `stock_debate_result` | FinGenius 个股辩论结果 | `dataenrichment.StockDebateResult` | 数据增强 |
+| `topic_enrichment_qa` | 报告追问记录（多轮 append-only） | `dataenrichment.TopicEnrichmentQA` | 数据增强 |
 | `reading_behaviors` | 阅读行为 | `models.ReadingBehavior` | 用户行为 |
 | `user_preferences` | 用户偏好 | `models.UserPreference` | 用户行为 |
 | `otel_spans` | OpenTelemetry 链路追踪 | `tracing.OtelSpan` | 追踪 |
@@ -862,9 +863,9 @@
 | -------- | ------ | ------ | ------ |
 | `id` | BIGSERIAL | PK | 主键 |
 | `persistent_topic_id` | BIGINT | NOT NULL; index | 持久话题 ID |
-| `evolution_assessment` | TEXT | — | 分析员结论：演进评估文本 |
-| `sectors` | JSONB | — | 受影响产业方向 JSON：`[{sector, evolution_role, current_signal, vs_history, judgment, confidence}]` |
-| `causal_chain` | TEXT | — | 因果链文本 |
+| `evolution_assessment` | TEXT | — | ⚠️ causal-analysis-agent 起弃用（旧演进定位产物）；字段保留对齐后端 JSON，新分析产出存 `sectors.{form,lens,analysis}` |
+| `sectors` | JSONB | — | 复合对象 `{form, lens, analysis}`：`form`=话题形态（`event_chain`/`theme_vein`/`single_point`/`sparse`）；`lens`=选定的分析视角；`analysis`=按 `form` 多态的分层见解（如 `event_chain`={fact_layer,timeline,insight_layer}）。免 DDL 复用列，schema 由 `form` 决定 |
+| `causal_chain` | TEXT | — | ⚠️ causal-analysis-agent 起弃用（旧演进定位产物）；字段保留对齐后端 JSON |
 | `tool_calls` | JSONB | — | 工具调用记录（名/参数/返回摘要/耗时） |
 | `input_snapshot` | JSONB | — | 编排元数据（读的 context 层 / as_of / section 范围 / 引用 review ID） |
 | `session_id` | VARCHAR(120) | — | 编排分组键，关联 `ai_call_logs.session_id` |
@@ -880,7 +881,7 @@
 | `persistent_topic_id` | BIGINT | NOT NULL; index | 持久话题 ID |
 | `prev_result_id` | BIGINT | —（`*uint`）; index | 上次 result ID（可空，手动批注时无 prev 对比） |
 | `curr_result_id` | BIGINT | NOT NULL; index | 本次 result ID |
-| `verdict` | JSONB | — | 兑现度逐条结算：`[{sector, predicted_dir, actual, mark:"hit" | "part" | "miss"}]` |
+| `verdict` | JSONB | — | 认知对比：`{should_review, reason, new_findings[](本次新见解), overturned[](推翻的旧见解), confidence_shift[]({insight,from,to}), affected_context, confidence}`。causal-analysis-agent 起从「定位变化对比」改为「新发现/推翻对比」，免 DDL 复用列 |
 | `deviation_summary` | TEXT | NOT NULL | 偏差说明（LLM 基底 + 人工可调） |
 | `affected_context` | VARCHAR(10) | — | 建议关注的粒度层：`week` / `month` / `year` |
 | `confidence` | REAL | —（`*float64`） | review_judge 置信度 |
@@ -913,6 +914,23 @@ FinGenius 多角色辩论输出，按 `(result_id, sector, code)` 维度 append-
 | `created_at` | TIMESTAMPTZ | — | 创建时间 |
 
 **字段分工**：提炼后字段（`verdict` / `consensus` / `agents` / `votes`）由 Syntopica LLM `debate_distill` 产出；原始字段（`fingenius_research` / `fingenius_battle`）为 FinGenius 原始输出，提炼失败时降级展示原文。
+
+### 10.6 topic_enrichment_qa（报告追问记录，多轮 append-only）
+
+报告（`topic_enrichment_result`）生成后保持不可变。用户对同一报告发起的多轮追问，每轮追加一行（`source="qa"`），报告本身从不被改写。`sedimented` 标记用户手动 pin 的持久笔记，仅翻转 qa 行 flag，不回写 result。
+
+| 字段名 | 类型 | 约束/默认/索引 | 用途 |
+| -------- | ------ | ------ | ------ |
+| `id` | BIGSERIAL | PK | 主键 |
+| `topic_enrichment_result_id` | BIGINT | NOT NULL; index | 关联的增强结果 ID（报告快照） |
+| `question` | TEXT | NOT NULL | 本轮追问问题 |
+| `answer` | TEXT | — | 本轮追问答案（追问 agent 产出） |
+| `tool_calls` | JSONB | — | 本轮工具调用记录（名/参数/返回摘要） |
+| `source` | VARCHAR(12) | NOT NULL DEFAULT 'qa' | 来源：`qa`（追问 agent 追加） |
+| `sedimented` | BOOLEAN | NOT NULL DEFAULT false | 用户手动 pin 为持久笔记的标记（report 本身仍不可变） |
+| `created_at` | TIMESTAMPTZ | — | 创建时间（多轮按此列升序排列） |
+
+**不变量**：`sediment` 仅翻转 `sedimented` flag，`topic_enrichment_result` 表永不重写（业务约束：result 不可变）。`sedimented` 列由迁移 `20260723_xxxx` 补齐（幂等 `ADD COLUMN IF NOT EXISTS`）。
 
 ---
 

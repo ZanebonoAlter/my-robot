@@ -110,6 +110,52 @@ func (n *nilFetcher) Fetch(ctx context.Context, url string, headers map[string]s
 	return []byte(`{"data":{"diff":[]}}`), nil
 }
 
+// ── canned response builders (new schema) ───────────────────────────────────
+//
+// EnrichTopic LLM call order: interpret → lens(propose) → tool_use(per topic)
+// → analyze → [review_judge if prev result has form]. These helpers produce the
+// interpret/lens responses so each test stays readable.
+
+// interpretResp builds an interpret-phase response (form + research topics).
+func interpretResp(form, formReason string, topics ...[2]string) string {
+	ts := make([]string, 0, len(topics))
+	for _, t := range topics {
+		ts = append(ts, fmt.Sprintf(`{"topic":%q,"reason":%q}`, t[0], t[1]))
+	}
+	return fmt.Sprintf(`{"form":%q,"form_reason":%q,"topics":[%s]}`, form, formReason, strings.Join(ts, ","))
+}
+
+// lensResp builds a lens-source response with >=2 concrete candidates.
+func lensResp(candidates ...[2]string) string {
+	cs := make([]string, 0, len(candidates))
+	for _, c := range candidates {
+		cs = append(cs, fmt.Sprintf(`{"name":%q,"description":%q}`, c[0], c[1]))
+	}
+	return fmt.Sprintf(`{"lens_candidates":[%s]}`, strings.Join(cs, ","))
+}
+
+// defaultInterpretLens adds the standard interpret + lens pair (event_chain, 1 topic).
+func defaultInterpretLens(ar *mockAirRouter) {
+	ar.addResponse(interpretResp("event_chain", "线性因果", [2]string{"石油", "油价波动"}))
+	ar.addResponse(lensResp(
+		[2]string{"油价这轮上涨能不能持续", "供需与地缘"},
+		[2]string{"产油国博弈谁占上风", "OPEC+博弈"},
+	))
+}
+
+// defaultAnalyzeEventChain adds a minimal event_chain analyze response.
+func defaultAnalyzeEventChain(ar *mockAirRouter) {
+	ar.addResponse(`{
+		"form": "event_chain",
+		"lens": "油价这轮上涨能不能持续",
+		"analysis": {
+			"fact_layer": [{"claim": "产油国设施遭袭", "evidence": [{"source_type":"news","ref":"ctx1","quote":"设施遭袭"}], "verified": true}],
+			"timeline": [{"date": "2026-07-01", "event": "遭袭", "ref": {"source_type":"news","ref":"ctx1"}}],
+			"insight_layer": [{"cert": "medium", "title": "油价短期承压", "logic": "供应收紧", "evidence": [{"source_type":"news","ref":"ctx1","quote":"油价飙升"}]}]
+		}
+	}`)
+}
+
 // ── parseJSONResponse tests ─────────────────────────────────────────────────
 
 func TestParseJSONResponse_CleanJSON(t *testing.T) {
@@ -235,23 +281,10 @@ func TestEnrichTopicE2E_FullFlow(t *testing.T) {
 	repo := setupOrchTestDB(t)
 	airouter := newMockAirRouter()
 
-	// Sequence: interpret → tool_use (finish) → analyze → (no review, first run)
-	airouter.addResponse(`{"topics":[{"topic":"石油","reason":"油价波动"}]}`)
+	// Sequence: interpret → lens → tool_use(finish) → analyze (no review, first run)
+	defaultInterpretLens(airouter)
 	airouter.addResponse(`{"action":"finish","thought":"done","summary":"油价涨3%"}`)
-	airouter.addResponse(`{
-		"evolution_assessment": "油价上涨强化了既有能源紧张趋势",
-		"position": "reinforcing",
-		"signals": [
-			{"lane": "中东地缘紧张", "signal": "油价涨3%", "mechanism": "地缘紧张推高油价"}
-		],
-		"evidence": [
-			{"context_id": "ctx1", "period": "week", "quote": "油价飙升", "source_type": "news", "tool_ref": ""},
-			{"context_id": "tool_1", "period": "week", "quote": "布伦特原油+3.2%", "source_type": "tool", "tool_ref": "list_etf_by_keyword"}
-		],
-		"financial_view": {"sectors": [{"sector": "能源", "direction": "up", "supporting_data": "布伦特原油+3.2%，能源ETF涨2.1%"}]},
-		"causal_chain": "地缘紧张→油价涨→能源板块利好",
-		"overall": "最新进展强化了能源话题的演进方向"
-	}`)
+	defaultAnalyzeEventChain(airouter)
 
 	toolRegistry := service.NewRegistry(&nilFetcher{})
 	boardCfg := newEnabledConfig()
@@ -299,8 +332,9 @@ func TestEnrichTopicE2E_FullFlow(t *testing.T) {
 	if result.PersistentTopicID != 1 {
 		t.Fatalf("topic ID: want 1, got %d", result.PersistentTopicID)
 	}
-	if result.EvolutionAssessment == "" {
-		t.Fatal("evolution_assessment should not be empty")
+	// EvolutionAssessment is now vestigial (empty) — new schema lives in Sectors.
+	if result.EvolutionAssessment != "" {
+		t.Fatalf("evolution_assessment should be empty (vestigial), got: %q", result.EvolutionAssessment)
 	}
 	if result.SessionID == "" {
 		t.Fatal("session_id should not be empty")
@@ -309,22 +343,26 @@ func TestEnrichTopicE2E_FullFlow(t *testing.T) {
 		t.Fatalf("session_id should start with data_enrichment_1_, got: %s", result.SessionID)
 	}
 
-	// Verify sectors JSON (now stores composite: position/signals/evidence/financial_view)
+	// Verify sectors JSON now stores {form, lens, analysis}
 	var sectorsJSON map[string]any
 	if err := json.Unmarshal(result.Sectors, &sectorsJSON); err != nil {
 		t.Fatalf("sectors should be valid JSON: %v", err)
 	}
-	if sectorsJSON["position"] == nil {
-		t.Fatal("sectors JSON should have position")
+	if sectorsJSON["form"] != "event_chain" {
+		t.Fatalf("sectors.form: want event_chain, got %v", sectorsJSON["form"])
 	}
-	if sectorsJSON["signals"] == nil {
-		t.Fatal("sectors JSON should have signals")
+	if sectorsJSON["lens"] == nil {
+		t.Fatal("sectors JSON should have lens")
 	}
-	if sectorsJSON["evidence"] == nil {
-		t.Fatal("sectors JSON should have evidence")
+	analysis, ok := sectorsJSON["analysis"].(map[string]any)
+	if !ok {
+		t.Fatal("sectors JSON should have analysis object")
 	}
-	if sectorsJSON["financial_view"] == nil {
-		t.Fatal("sectors JSON should have financial_view")
+	if analysis["fact_layer"] == nil {
+		t.Fatal("analysis should have fact_layer")
+	}
+	if analysis["insight_layer"] == nil {
+		t.Fatal("analysis should have insight_layer")
 	}
 
 	// Verify tool_calls JSON
@@ -356,9 +394,9 @@ func TestEnrichTopicE2E_FullFlow(t *testing.T) {
 		t.Fatal("first run should have no review (no prev result)")
 	}
 
-	// Verify airouter calls
-	if len(airouter.Calls) < 3 {
-		t.Fatalf("expected at least 3 airouter calls, got %d", len(airouter.Calls))
+	// Verify airouter calls: interpret, lens(interpret op), tool_use, analyze.
+	if len(airouter.Calls) < 4 {
+		t.Fatalf("expected at least 4 airouter calls, got %d", len(airouter.Calls))
 	}
 
 	// Check Capability on all calls
@@ -368,15 +406,18 @@ func TestEnrichTopicE2E_FullFlow(t *testing.T) {
 		}
 	}
 
-	// Check Operations
-	ops := []string{"data_enrichment.interpret", "data_enrichment.tool_use", "data_enrichment.analyze"}
-	for i, op := range ops {
-		if i >= len(airouter.Calls) {
-			break
-		}
-		if airouter.Calls[i].Operation != op {
-			t.Fatalf("call %d: Operation = %s, want %s", i, airouter.Calls[i].Operation, op)
-		}
+	// Call order: Calls[0]=interpret, Calls[1]=lens(propose), Calls[2]=tool_use, Calls[3]=analyze.
+	if airouter.Calls[0].Operation != "data_enrichment.interpret" {
+		t.Fatalf("call 0: want interpret, got %s", airouter.Calls[0].Operation)
+	}
+	if airouter.Calls[1].Operation != "data_enrichment.interpret" {
+		t.Fatalf("call 1 (lens): want interpret op, got %s", airouter.Calls[1].Operation)
+	}
+	if airouter.Calls[2].Operation != "data_enrichment.tool_use" {
+		t.Fatalf("call 2: want tool_use, got %s", airouter.Calls[2].Operation)
+	}
+	if airouter.Calls[3].Operation != "data_enrichment.analyze" {
+		t.Fatalf("call 3: want analyze, got %s", airouter.Calls[3].Operation)
 	}
 
 	// Check SessionID on all calls
@@ -396,17 +437,17 @@ func TestEnrichTopicE2E_FullFlow(t *testing.T) {
 	}
 }
 
-// ── EnrichTopic: review judge test ──────────────────────────────────────────
+// ── EnrichTopic: review judge test (new findings / overturned) ──────────────
 
 func TestEnrichTopic_ReviewJudgeOnSecondRun(t *testing.T) {
 	repo := setupOrchTestDB(t)
 
-	// Pre-populate a previous result to trigger review judge.
+	// Pre-populate a previous result (new-format sectors with form field) to
+	// trigger review judge.
 	prevResult := &repository.TopicEnrichmentResult{
 		PersistentTopicID:   1,
-		EvolutionAssessment: "局势暂时缓和，原油承压",
-		Sectors:             json.RawMessage(`{"position":"reinforcing","signals":[],"evidence":[]}`),
-		CausalChain:         "会谈→缓和→原油跌",
+		EvolutionAssessment: "",
+		Sectors:             json.RawMessage(`{"form":"event_chain","lens":"L","analysis":{"insight_layer":[{"title":"油价将回落","cert":"medium"}]}}`),
 		SessionID:           "data_enrichment_1_prev0001",
 	}
 	if err := repo.CreateTopicEnrichmentResult(context.Background(), prevResult); err != nil {
@@ -414,24 +455,20 @@ func TestEnrichTopic_ReviewJudgeOnSecondRun(t *testing.T) {
 	}
 
 	airouter := newMockAirRouter()
-	// interpret → tool_use → analyze → review_judge
-	airouter.addResponse(`{"topics":[{"topic":"石油","reason":"油价"}]}`)
+	// interpret → lens → tool_use → analyze → review_judge
+	defaultInterpretLens(airouter)
 	airouter.addResponse(`{"action":"finish","summary":"油价涨4.2%"}`)
+	defaultAnalyzeEventChain(airouter)
+	// review_judge: new schema with new_findings/overturned/confidence_shift.
 	airouter.addResponse(`{
-		"evolution_assessment": "再趋紧张，原油强化",
-		"position": "turning",
-		"signals": [
-			{"lane": "中东地缘", "signal": "油价涨4.2%", "mechanism": "以军威胁推高"}
-		],
-		"evidence": [
-			{"context_id": "ctx2", "period": "week", "quote": "以军威胁", "source_type": "news", "tool_ref": ""}
-		],
-		"financial_view": {"sectors": [{"sector": "能源", "direction": "up", "supporting_data": "布伦特原油+4.2%"}]},
-		"causal_chain": "以军威胁→油价涨",
-		"overall": "核心判断反转，紧张加剧"
+		"should_review": true,
+		"reason": "出现新见解并推翻旧判断",
+		"new_findings": ["供应收紧或持续整季"],
+		"overturned": ["油价将回落"],
+		"confidence_shift": [{"insight": "油价短期承压", "from": "medium", "to": "high"}],
+		"affected_context": "week",
+		"confidence": 0.8
 	}`)
-	// review_judge: should_review=true (new schema with position_change)
-	airouter.addResponse(`{"should_review":true,"reason":"定位变化","position_change":{"from":"reinforcing","to":"turning","summary":"停火打破,强化→转折"},"change_summary":"冲突重启","affected_context":"week","confidence":0.8}`)
 
 	toolRegistry := service.NewRegistry(&nilFetcher{})
 	boardCfg := newEnabledConfig()
@@ -472,28 +509,31 @@ func TestEnrichTopic_ReviewJudgeOnSecondRun(t *testing.T) {
 		t.Fatalf("review source: want llm_assisted, got %s", output.Review.Source)
 	}
 	if output.Review.DeviationSummary == "" {
-		t.Fatal("review deviation_summary should not be empty")
+		t.Fatal("review deviation_summary (reason) should not be empty")
 	}
-	if output.Review.PrevResultID == nil {
-		t.Fatal("review prev_result_id should not be nil")
-	}
-	if *output.Review.PrevResultID != prevResult.ID {
-		t.Fatalf("review prev_result_id: want %d, got %d", prevResult.ID, *output.Review.PrevResultID)
+	if output.Review.PrevResultID == nil || *output.Review.PrevResultID != prevResult.ID {
+		t.Fatalf("review prev_result_id should match prev result")
 	}
 
-	// Verify position_change JSON is stored in review.Verdict column
+	// Verify Verdict stores {new_findings, overturned, confidence_shift}.
 	if output.Review.Verdict == nil {
-		t.Fatal("review verdict should not be nil when position_change is present in response")
+		t.Fatal("review verdict should store new_findings/overturned/confidence_shift")
 	}
-	var positionChange map[string]any
-	if err := json.Unmarshal(output.Review.Verdict, &positionChange); err != nil {
-		t.Fatalf("review verdict (position_change) should be valid JSON: %v", err)
+	var verdict map[string]any
+	if err := json.Unmarshal(output.Review.Verdict, &verdict); err != nil {
+		t.Fatalf("review verdict unmarshal: %v", err)
 	}
-	if positionChange["from"] != "reinforcing" {
-		t.Fatalf("position_change.from: want reinforcing, got %v", positionChange["from"])
+	nf, _ := verdict["new_findings"].([]any)
+	if len(nf) != 1 || nf[0] != "供应收紧或持续整季" {
+		t.Fatalf("new_findings: got %v", nf)
 	}
-	if positionChange["to"] != "turning" {
-		t.Fatalf("position_change.to: want turning, got %v", positionChange["to"])
+	ov, _ := verdict["overturned"].([]any)
+	if len(ov) != 1 || ov[0] != "油价将回落" {
+		t.Fatalf("overturned: got %v", ov)
+	}
+	cs, _ := verdict["confidence_shift"].([]any)
+	if len(cs) != 1 {
+		t.Fatalf("confidence_shift: got %v", cs)
 	}
 
 	// Verify airouter calls include review_judge
@@ -514,30 +554,21 @@ func TestEnrichTopic_ReviewJudgeOnSecondRun(t *testing.T) {
 func TestEnrichTopic_ReviewJudgeFalseSkips(t *testing.T) {
 	repo := setupOrchTestDB(t)
 
-	// Pre-populate a previous result.
 	prevResult := &repository.TopicEnrichmentResult{
-		PersistentTopicID:   2,
-		EvolutionAssessment: "局势稳定",
-		Sectors:             json.RawMessage(`{"position":"fading","signals":[],"evidence":[]}`),
-		SessionID:           "data_enrichment_2_prev0001",
+		PersistentTopicID: 2,
+		Sectors:           json.RawMessage(`{"form":"event_chain","lens":"L","analysis":{}}`),
+		SessionID:         "data_enrichment_2_prev0001",
 	}
 	if err := repo.CreateTopicEnrichmentResult(context.Background(), prevResult); err != nil {
 		t.Fatalf("create prev result: %v", err)
 	}
 
 	airouter := newMockAirRouter()
-	airouter.addResponse(`{"topics":[{"topic":"石油","reason":"油价"}]}`)
+	defaultInterpretLens(airouter)
 	airouter.addResponse(`{"action":"finish","summary":"油价微涨0.5%"}`)
-	airouter.addResponse(`{
-		"evolution_assessment": "延续稳定态势",
-		"position": "fading",
-		"signals": [],
-		"evidence": [],
-		"causal_chain": "",
-		"overall": "无显著变化"
-	}`)
+	defaultAnalyzeEventChain(airouter)
 	// review_judge: should_review=false → should NOT write review
-	airouter.addResponse(`{"should_review":false,"reason":"仅置信度微调，无核心判断变化","change_summary":"","affected_context":"","confidence":0.3}`)
+	airouter.addResponse(`{"should_review":false,"reason":"见解层无实质变化","new_findings":[],"overturned":[],"confidence_shift":[],"affected_context":"","confidence":0.3}`)
 
 	toolRegistry := service.NewRegistry(&nilFetcher{})
 	boardCfg := newEnabledConfig()
@@ -567,7 +598,6 @@ func TestEnrichTopic_ReviewJudgeFalseSkips(t *testing.T) {
 		t.Fatalf("EnrichTopic: %v", err)
 	}
 
-	// should_review=false → no review written
 	if output.Review != nil {
 		t.Fatal("should_review=false should not produce a review")
 	}
@@ -579,16 +609,9 @@ func TestEnrichTopic_AgentLoopNoThinkPrefix(t *testing.T) {
 	repo := setupOrchTestDB(t)
 	airouter := newMockAirRouter()
 
-	airouter.addResponse(`{"topics":[{"topic":"石油","reason":"油价"}]}`)
+	defaultInterpretLens(airouter)
 	airouter.addResponse(`{"action":"finish","summary":"done"}`)
-	airouter.addResponse(`{
-		"evolution_assessment": "test",
-		"position": "reinforcing",
-		"signals": [],
-		"evidence": [],
-		"causal_chain": "",
-		"overall": ""
-	}`)
+	defaultAnalyzeEventChain(airouter)
 
 	toolRegistry := service.NewRegistry(&nilFetcher{})
 	boardCfg := newEnabledConfig()
@@ -607,12 +630,11 @@ func TestEnrichTopic_AgentLoopNoThinkPrefix(t *testing.T) {
 		testCap,
 	)
 
-	_, err := orch.EnrichTopic(context.Background(), 1)
-	if err != nil {
+	if _, err := orch.EnrichTopic(context.Background(), 1); err != nil {
 		t.Fatalf("EnrichTopic: %v", err)
 	}
 
-	// Find the tool_use call and verify /no_think prefix in user message
+	// Find the tool_use call and verify /no_think prefix in user message.
 	for _, call := range airouter.Calls {
 		if call.Operation != "data_enrichment.tool_use" {
 			continue
@@ -635,19 +657,11 @@ func TestEnrichTopic_InputSnapshotFields(t *testing.T) {
 	repo := setupOrchTestDB(t)
 	airouter := newMockAirRouter()
 
-	airouter.addResponse(`{"topics":[{"topic":"石油","reason":"油价"}]}`)
+	defaultInterpretLens(airouter)
 	airouter.addResponse(`{"action":"finish","summary":"done"}`)
-	airouter.addResponse(`{
-		"evolution_assessment": "test",
-		"position": "reinforcing",
-		"signals": [],
-		"evidence": [],
-		"causal_chain": "",
-		"overall": ""
-	}`)
+	defaultAnalyzeEventChain(airouter)
 
 	toolRegistry := service.NewRegistry(&nilFetcher{})
-	// Use a subset of context_layers to verify config filtering
 	boardCfg := &service.BoardEnrichmentConfig{
 		EnrichmentEnabled: true,
 		WindowDays:        14,
@@ -711,22 +725,20 @@ func TestEnrichTopic_InputSnapshotFields(t *testing.T) {
 func TestEnrichTopic_ReviewDoesNotWriteToTable1(t *testing.T) {
 	repo := setupOrchTestDB(t)
 
-	// Pre-populate a previous result.
 	prevResult := &repository.TopicEnrichmentResult{
-		PersistentTopicID:   1,
-		EvolutionAssessment: "prev",
-		Sectors:             json.RawMessage(`{"position":"reinforcing","signals":[],"evidence":[]}`),
-		SessionID:           "prev",
+		PersistentTopicID: 1,
+		Sectors:           json.RawMessage(`{"form":"event_chain","lens":"L","analysis":{}}`),
+		SessionID:         "prev",
 	}
 	if err := repo.CreateTopicEnrichmentResult(context.Background(), prevResult); err != nil {
 		t.Fatalf("create prev result: %v", err)
 	}
 
 	airouter := newMockAirRouter()
-	airouter.addResponse(`{"topics":[{"topic":"石油","reason":"油价"}]}`)
+	defaultInterpretLens(airouter)
 	airouter.addResponse(`{"action":"finish","summary":"done"}`)
-	airouter.addResponse(`{"evolution_assessment":"test","position":"reinforcing","signals":[],"evidence":[],"causal_chain":"","overall":""}`)
-	airouter.addResponse(`{"should_review":true,"reason":"变更","position_change":{"from":"reinforcing","to":"turning","summary":"变了"},"change_summary":"变了","affected_context":"week","confidence":0.8}`)
+	defaultAnalyzeEventChain(airouter)
+	airouter.addResponse(`{"should_review":true,"reason":"变了","new_findings":["x"],"overturned":[],"confidence_shift":[],"affected_context":"week","confidence":0.8}`)
 
 	toolRegistry := service.NewRegistry(&nilFetcher{})
 	boardCfg := newEnabledConfig()
@@ -744,16 +756,14 @@ func TestEnrichTopic_ReviewDoesNotWriteToTable1(t *testing.T) {
 		testCap,
 	)
 
-	// Count existing contexts before
 	existingCtxs, _ := repo.ListTopicLifelineContextsByTopic(context.Background(), 1)
 	beforeCount := len(existingCtxs)
 
-	_, err := orch.EnrichTopic(context.Background(), 1)
-	if err != nil {
+	if _, err := orch.EnrichTopic(context.Background(), 1); err != nil {
 		t.Fatalf("EnrichTopic: %v", err)
 	}
 
-	// Count contexts after — should be unchanged (no write to table1)
+	// Count contexts after — should be unchanged (no write to table1).
 	afterCtxs, _ := repo.ListTopicLifelineContextsByTopic(context.Background(), 1)
 	if len(afterCtxs) != beforeCount {
 		t.Fatalf("review write should not modify topic_lifeline_context: before=%d, after=%d", beforeCount, len(afterCtxs))
@@ -768,7 +778,6 @@ func TestRandomHex_NonEmptyCorrectLength(t *testing.T) {
 		if len(got) != n {
 			t.Fatalf("randomHex(%d): len=%d, want %d", n, len(got), n)
 		}
-		// For n>0, result should not be all-zero or panic.
 		if n > 0 && got == strings.Repeat("0", n) {
 			t.Fatalf("randomHex(%d): got all zeros (extremely unlikely)", n)
 		}
@@ -776,9 +785,6 @@ func TestRandomHex_NonEmptyCorrectLength(t *testing.T) {
 }
 
 func TestRandomHex_PanicsOnError(t *testing.T) {
-	// crypto/rand.Int rarely fails, so we only assert the function
-	// returns without panicking for normal input. The defensive error
-	// handling is reviewed in the source.
 	defer func() {
 		if r := recover(); r != nil {
 			t.Fatalf("randomHex panicked: %v", r)
@@ -808,23 +814,12 @@ func TestEnrichTopic_AgentLoopDedupIntercept(t *testing.T) {
 	repo := setupOrchTestDB(t)
 	airouter := newMockAirRouter()
 
-	// Sequence: interpret → tool_use round1 (call_tool) → round2 (call_tool SAME args) → round3 (finish)
-	airouter.addResponse(`{"topics":[{"topic":"半导体","reason":"芯片"}]}`)
-	// Round 1: call_tool
+	// interpret → lens → r1(call 半导体) → r2(call 半导体重复, dedup) → r3(finish) → analyze
+	defaultInterpretLens(airouter)
 	airouter.addResponse(`{"action":"call_tool","thought":"查半导体ETF","tool":"list_etf_by_keyword","args":{"keyword":"半导体"}}`)
-	// Round 2: call_tool with SAME args → should be deduped (never reaches LLM)
-	// But our mock doesn't know about dedup, so we add a random response.
-	// Wait — actually, the dedup happens BEFORE the LLM call. So round 2 won't call the LLM.
-	// But our mock expects sequential calls. Since dedup intercepts before Chat(),
-	// round 2 won't count as a mock response consumption.
-	// So the mock's round 2 response will actually be seen by round 3.
-	// Let me structure: interpret → tool_use r1 (LLM says call_tool A) →
-	// tool_use r2 (LLM says call_tool A again → dedup blocks → no Chat →
-	// continue loop) → tool_use r3 (LLM says finish)
-	// So mock needs: interpret, tool_use r1, tool_use r3(finish)
-	// And we verify: only 3 Chat calls (interpret, r1, r3)
 	airouter.addResponse(`{"action":"call_tool","thought":"再查一次(重复)","tool":"list_etf_by_keyword","args":{"keyword":"半导体"}}`)
 	airouter.addResponse(`{"action":"finish","thought":"done","summary":"完成"}`)
+	defaultAnalyzeEventChain(airouter)
 
 	toolRegistry := service.NewRegistry(&nilFetcher{})
 	boardCfg := newEnabledConfig()
@@ -854,25 +849,18 @@ func TestEnrichTopic_AgentLoopDedupIntercept(t *testing.T) {
 		t.Fatalf("EnrichTopic: %v", err)
 	}
 
-	// The agent loop should have seen 3 rounds but only 2 Chat calls
-	// (round 2 was dedup-intercepted).
-	// Check that tool_calls has the intercepted entry.
 	if len(output.AgentLoops) != 1 {
 		t.Fatalf("expected 1 agent loop result")
 	}
 	al := output.AgentLoops[0]
 
-	// Should have 3 tool_calls: r1=call+execute, r2=call+dedup, r3=finish(not a tool call)
-	// Actually, finish doesn't produce a tool call record.
-	// So we should have 2: r1 executed, r2 dedup-intercepted.
+	// 2 tool_calls: r1 executed, r2 dedup-intercepted (finish is not a tool call).
 	if len(al.ToolCalls) != 2 {
 		t.Fatalf("expected 2 tool calls (1 exec + 1 dedup), got %d", len(al.ToolCalls))
 	}
-	// First should be normal execution
 	if al.ToolCalls[0].ResultFull == "" {
 		t.Fatal("first tool call should have result")
 	}
-	// Second should have dedup marker
 	if !strings.Contains(al.ToolCalls[1].Thought, "被拦:重复") {
 		t.Fatalf("second tool call should be dedup-intercepted, got thought: %s", al.ToolCalls[1].Thought)
 	}
@@ -884,13 +872,11 @@ func TestEnrichTopic_AgentLoopMaxLoops(t *testing.T) {
 	repo := setupOrchTestDB(t)
 	airouter := newMockAirRouter()
 
-	// Sequence: interpret → tool_use r1-r6 (all call_tool, never finish) → analyze
-	airouter.addResponse(`{"topics":[{"topic":"石油","reason":"油价"}]}`)
+	defaultInterpretLens(airouter)
 	for i := 0; i < 6; i++ {
-		// Change args slightly each time to avoid dedup triggering maxLoops exhaustion.
 		airouter.addResponse(fmt.Sprintf(`{"action":"call_tool","thought":"step%d","tool":"list_etf_by_keyword","args":{"keyword":"石油%d"}}`, i, i))
 	}
-	airouter.addResponse(`{"evolution_assessment":"test","position":"reinforcing","signals":[],"evidence":[],"causal_chain":"","overall":""}`)
+	defaultAnalyzeEventChain(airouter)
 
 	toolRegistry := service.NewRegistry(&nilFetcher{})
 	boardCfg := newEnabledConfig()
@@ -914,11 +900,7 @@ func TestEnrichTopic_AgentLoopMaxLoops(t *testing.T) {
 		t.Fatalf("EnrichTopic: %v", err)
 	}
 
-	if len(output.AgentLoops) != 1 {
-		t.Fatalf("expected 1 agent loop result")
-	}
 	al := output.AgentLoops[0]
-
 	if al.Loops != 6 {
 		t.Fatalf("agent loop should exhaust maxLoops=6, got %d", al.Loops)
 	}
@@ -936,10 +918,10 @@ func TestEnrichTopic_AgentLoopHistoryFullResult(t *testing.T) {
 	repo := setupOrchTestDB(t)
 	airouter := newMockAirRouter()
 
-	// Sequence: interpret → tool_use r1 (call_tool with large result expected) → r2 (finish)
-	airouter.addResponse(`{"topics":[{"topic":"石油","reason":"油价"}]}`)
+	defaultInterpretLens(airouter)
 	airouter.addResponse(`{"action":"call_tool","thought":"查","tool":"list_etf_by_keyword","args":{"keyword":"石油"}}`)
 	airouter.addResponse(`{"action":"finish","thought":"done","summary":"完成"}`)
+	defaultAnalyzeEventChain(airouter)
 
 	toolRegistry := service.NewRegistry(&nilFetcher{})
 	boardCfg := newEnabledConfig()
@@ -970,15 +952,10 @@ func TestEnrichTopic_AgentLoopHistoryFullResult(t *testing.T) {
 	}
 
 	al := output.AgentLoops[0]
-	// The tool_calls record should have full result (not truncated).
-	// The history block fed to LLM should contain the full result (not just preview).
-	// Since we can't check the history block directly (it's constructed internally),
-	// we verify that tool_calls contains ResultFull which is the complete result.
 	for _, tc := range al.ToolCalls {
 		if tc.ResultFull == "" {
 			t.Fatal("tool call should have ResultFull")
 		}
-		// ResultPreview should be a subset of ResultFull (or same if short).
 		if len(tc.ResultPreview) > len(tc.ResultFull) {
 			t.Fatal("ResultPreview should not be longer than ResultFull")
 		}
@@ -990,9 +967,9 @@ func TestEnrichTopic_AgentLoopHistoryFullResult(t *testing.T) {
 func TestEnrichTopic_InterpretIncludesContextLayers(t *testing.T) {
 	repo := setupOrchTestDB(t)
 	airouter := newMockAirRouter()
-	airouter.addResponse(`{"topics":[{"topic":"石油","reason":"油价"}]}`)
+	defaultInterpretLens(airouter)
 	airouter.addResponse(`{"action":"finish","summary":"done"}`)
-	airouter.addResponse(`{"evolution_assessment":"test","position":"reinforcing","signals":[],"evidence":[],"causal_chain":"","overall":""}`)
+	defaultAnalyzeEventChain(airouter)
 
 	toolRegistry := service.NewRegistry(&nilFetcher{})
 	boardCfg := newEnabledConfig()
@@ -1012,7 +989,6 @@ func TestEnrichTopic_InterpretIncludesContextLayers(t *testing.T) {
 	}
 	renderer := service.NewLifelineRenderer()
 
-	// Pre-create a context layer in the DB.
 	ctxLayer := &repository.TopicLifelineContext{
 		PersistentTopicID: 1,
 		Granularity:       "week",
@@ -1025,7 +1001,6 @@ func TestEnrichTopic_InterpretIncludesContextLayers(t *testing.T) {
 		t.Fatalf("create context layer: %v", err)
 	}
 
-	// Pre-create an applied review.
 	review := &repository.TopicEnrichmentReview{
 		PersistentTopicID: 1,
 		CurrResultID:      999,
@@ -1042,37 +1017,33 @@ func TestEnrichTopic_InterpretIncludesContextLayers(t *testing.T) {
 		testCap,
 	)
 
-	_, err := orch.EnrichTopic(context.Background(), 1)
-	if err != nil {
+	if _, err := orch.EnrichTopic(context.Background(), 1); err != nil {
 		t.Fatalf("EnrichTopic: %v", err)
 	}
 
-	// The interpret call should include context layer content and review text.
-	// Check the airouter interpret call's prompt for these.
-	foundInterpret := false
-	for _, call := range airouter.Calls {
-		if call.Operation == "data_enrichment.interpret" {
-			foundInterpret = true
-			for _, msg := range call.Messages {
-				// Check that prompt contains context layer content
-				if !strings.Contains(msg.Content, "本周油价上涨") {
-					t.Fatal("interpret prompt should contain context layer content")
-				}
-				if !strings.Contains(msg.Content, "层级上下文") {
-					t.Fatal("interpret prompt should contain context layer header")
-				}
-				if !strings.Contains(msg.Content, "误判黄金跌") {
-					t.Fatal("interpret prompt should contain applied review text")
-				}
-				if !strings.Contains(msg.Content, "历史认知记录") {
-					t.Fatal("interpret prompt should contain review section header")
-				}
-			}
-			break
-		}
+	// The FIRST interpret call (Calls[0]) is the form-classification call; it
+	// must include context layer content AND applied review text. (The lens
+	// propose call that follows includes context but not review text.)
+	if len(airouter.Calls) == 0 {
+		t.Fatal("no airouter calls")
 	}
-	if !foundInterpret {
-		t.Fatal("no interpret call found in airouter calls")
+	first := airouter.Calls[0]
+	if first.Operation != "data_enrichment.interpret" {
+		t.Fatalf("first call should be interpret, got %s", first.Operation)
+	}
+	for _, msg := range first.Messages {
+		if !strings.Contains(msg.Content, "本周油价上涨") {
+			t.Fatal("interpret prompt should contain context layer content")
+		}
+		if !strings.Contains(msg.Content, "层级上下文") {
+			t.Fatal("interpret prompt should contain context layer header")
+		}
+		if !strings.Contains(msg.Content, "误判黄金跌") {
+			t.Fatal("interpret prompt should contain applied review text")
+		}
+		if !strings.Contains(msg.Content, "历史认知记录") {
+			t.Fatal("interpret prompt should contain review section header")
+		}
 	}
 }
 
@@ -1081,9 +1052,9 @@ func TestEnrichTopic_InterpretIncludesContextLayers(t *testing.T) {
 func TestEnrichTopic_AnalyzeIncludesContextLayers(t *testing.T) {
 	repo := setupOrchTestDB(t)
 	airouter := newMockAirRouter()
-	airouter.addResponse(`{"topics":[{"topic":"石油","reason":"油价"}]}`)
+	defaultInterpretLens(airouter)
 	airouter.addResponse(`{"action":"finish","summary":"油价涨3%"}`)
-	airouter.addResponse(`{"evolution_assessment":"test","position":"reinforcing","signals":[],"evidence":[],"causal_chain":"","overall":""}`)
+	defaultAnalyzeEventChain(airouter)
 
 	toolRegistry := service.NewRegistry(&nilFetcher{})
 	boardCfg := newEnabledConfig()
@@ -1103,7 +1074,6 @@ func TestEnrichTopic_AnalyzeIncludesContextLayers(t *testing.T) {
 	}
 	renderer := service.NewLifelineRenderer()
 
-	// Pre-create context layers.
 	for _, gran := range []string{"week", "month"} {
 		ctxLayer := &repository.TopicLifelineContext{
 			PersistentTopicID: 1,
@@ -1123,31 +1093,29 @@ func TestEnrichTopic_AnalyzeIncludesContextLayers(t *testing.T) {
 		testCap,
 	)
 
-	_, err := orch.EnrichTopic(context.Background(), 1)
-	if err != nil {
+	if _, err := orch.EnrichTopic(context.Background(), 1); err != nil {
 		t.Fatalf("EnrichTopic: %v", err)
 	}
 
-	// The analyze call should include context layer content and topics data.
 	foundAnalyze := false
 	for _, call := range airouter.Calls {
-		if call.Operation == "data_enrichment.analyze" {
-			foundAnalyze = true
-			for _, msg := range call.Messages {
-				if !strings.Contains(msg.Content, "分层新闻上下文") {
-					t.Fatal("analyze prompt should contain context layer header")
-				}
-				if !strings.Contains(msg.Content, "week 层内容") {
-					t.Fatal("analyze prompt should contain week context")
-				}
-				if !strings.Contains(msg.Content, "各主题实时数据") {
-					t.Fatal("analyze prompt should contain topics data section")
-				}
-				if !strings.Contains(msg.Content, "油价涨3%") {
-					t.Fatal("analyze prompt should contain agent loop data")
-				}
+		if call.Operation != "data_enrichment.analyze" {
+			continue
+		}
+		foundAnalyze = true
+		for _, msg := range call.Messages {
+			if !strings.Contains(msg.Content, "分层新闻上下文") {
+				t.Fatal("analyze prompt should contain context layer header")
 			}
-			break
+			if !strings.Contains(msg.Content, "week 层内容") {
+				t.Fatal("analyze prompt should contain week context")
+			}
+			if !strings.Contains(msg.Content, "各主题实时数据") {
+				t.Fatal("analyze prompt should contain topics data section")
+			}
+			if !strings.Contains(msg.Content, "油价涨3%") {
+				t.Fatal("analyze prompt should contain agent loop data")
+			}
 		}
 	}
 	if !foundAnalyze {
@@ -1174,12 +1142,11 @@ func periodByGran(g string) string {
 func TestEnrichTopic_ContextLayersSkippedWhenMissing(t *testing.T) {
 	repo := setupOrchTestDB(t)
 	airouter := newMockAirRouter()
-	airouter.addResponse(`{"topics":[{"topic":"石油","reason":"油价"}]}`)
+	defaultInterpretLens(airouter)
 	airouter.addResponse(`{"action":"finish","summary":"done"}`)
-	airouter.addResponse(`{"evolution_assessment":"test","position":"reinforcing","signals":[],"evidence":[],"causal_chain":"","overall":""}`)
+	defaultAnalyzeEventChain(airouter)
 
 	toolRegistry := service.NewRegistry(&nilFetcher{})
-	// Config requests 4 layers, but only "week" exists in DB.
 	boardCfg := newEnabledConfig()
 	boardReader := &mockBoardConfigReader{cfg: boardCfg}
 
@@ -1197,7 +1164,6 @@ func TestEnrichTopic_ContextLayersSkippedWhenMissing(t *testing.T) {
 	}
 	renderer := service.NewLifelineRenderer()
 
-	// Only create "week" context — month/year/all are missing.
 	ctxLayer := &repository.TopicLifelineContext{
 		PersistentTopicID: 1,
 		Granularity:       "week",
@@ -1220,7 +1186,6 @@ func TestEnrichTopic_ContextLayersSkippedWhenMissing(t *testing.T) {
 		t.Fatalf("EnrichTopic: %v", err)
 	}
 
-	// input_snapshot should only include "week" (others skipped).
 	var snap map[string]any
 	if err := json.Unmarshal(output.Result.InputSnapshot, &snap); err != nil {
 		t.Fatalf("parse snapshot: %v", err)
@@ -1239,12 +1204,11 @@ func TestEnrichTopic_ContextLayersSkippedWhenMissing(t *testing.T) {
 func TestEnrichTopic_ContextLayersConfigFilter(t *testing.T) {
 	repo := setupOrchTestDB(t)
 	airouter := newMockAirRouter()
-	airouter.addResponse(`{"topics":[{"topic":"石油","reason":"油价"}]}`)
+	defaultInterpretLens(airouter)
 	airouter.addResponse(`{"action":"finish","summary":"done"}`)
-	airouter.addResponse(`{"evolution_assessment":"test","position":"reinforcing","signals":[],"evidence":[],"causal_chain":"","overall":""}`)
+	defaultAnalyzeEventChain(airouter)
 
 	toolRegistry := service.NewRegistry(&nilFetcher{})
-	// Config only requests week.
 	boardCfg := &service.BoardEnrichmentConfig{
 		EnrichmentEnabled: true,
 		WindowDays:        14,
@@ -1266,7 +1230,6 @@ func TestEnrichTopic_ContextLayersConfigFilter(t *testing.T) {
 	}
 	renderer := service.NewLifelineRenderer()
 
-	// Create both week and month context, but config only requests week.
 	for _, gran := range []string{"week", "month"} {
 		ctxLayer := &repository.TopicLifelineContext{
 			PersistentTopicID: 1,
@@ -1291,7 +1254,6 @@ func TestEnrichTopic_ContextLayersConfigFilter(t *testing.T) {
 		t.Fatalf("EnrichTopic: %v", err)
 	}
 
-	// input_snapshot should only include week (config filtered).
 	var snap map[string]any
 	_ = json.Unmarshal(output.Result.InputSnapshot, &snap)
 	layers, _ := snap["context_layers"].(map[string]any)
@@ -1306,250 +1268,127 @@ func TestEnrichTopic_ContextLayersConfigFilter(t *testing.T) {
 	}
 }
 
-// ── Analyze: evolution position schema ──────────────────────────────────────
+// ── Analyze: layered insight schema (event_chain end-to-end) ────────────────
 
-func TestAnalyze_EvolutionPositionSchema(t *testing.T) {
-	t.Run("full schema with financial_view", func(t *testing.T) {
-		repo := setupOrchTestDB(t)
-		airouter := newMockAirRouter()
+func TestAnalyze_LayeredInsightSchema(t *testing.T) {
+	repo := setupOrchTestDB(t)
+	airouter := newMockAirRouter()
 
-		// Full new-schema analyze response with position/signals/evidence/financial_view
-		airouter.addResponse(`{"topics":[{"topic":"原油","reason":"地缘"}]}`)
-		airouter.addResponse(`{"action":"finish","thought":"done","summary":"油价涨3%"}`)
-		airouter.addResponse(`{
-			"evolution_assessment": "油价上涨强化了既有能源紧张趋势",
-			"position": "reinforcing",
-			"signals": [
-				{"lane": "中东地缘", "signal": "布伦特原油突破85美元", "mechanism": "产油国遭袭→供应收紧"},
-				{"lane": "航运安全", "signal": "霍尔木兹海峡通行费上涨", "mechanism": "地缘紧张推高航运成本"}
+	defaultInterpretLens(airouter)
+	airouter.addResponse(`{"action":"finish","thought":"done","summary":"油价涨3%"}`)
+	airouter.addResponse(`{
+		"form": "event_chain",
+		"lens": "油价这轮上涨能不能持续",
+		"analysis": {
+			"fact_layer": [
+				{"claim": "霍尔木兹海峡局势升级", "evidence": [{"source_type":"news","ref":"ctx_week_1","quote":"海峡局势升级"}], "verified": true},
+				{"claim": "布伦特原油+3.2%", "evidence": [{"source_type":"tool","ref":"tool_resp_1","quote":"+3.2%"}], "verified": true}
 			],
-			"evidence": [
-				{"context_id": "ctx_week_1", "period": "week", "quote": "霍尔木兹海峡局势升级", "source_type": "news", "tool_ref": ""},
-				{"context_id": "tool_resp_1", "period": "week", "quote": "布伦特原油+3.2%", "source_type": "tool", "tool_ref": "list_etf_by_keyword"}
+			"timeline": [
+				{"date": "2026-07-01", "event": "产油国遭袭", "ref": {"source_type":"news","ref":"ctx_week_1"}}
 			],
-			"financial_view": {"sectors": [{"sector": "能源", "direction": "up", "supporting_data": "布伦特原油+3.2%"}]},
-			"causal_chain": "中东紧张→原油供应担忧→油价上涨→能源板块受益",
-			"overall": "地缘冲突持续推高能源价格，强化了既有演进方向"
-		}`)
+			"insight_layer": [
+				{"cert": "high", "title": "短期供应收紧", "logic": "遭袭→产能下降→供应收紧", "evidence": [{"source_type":"news","ref":"ctx_week_1","quote":"设施遭袭"}]},
+				{"cert": "medium", "title": "能源板块受益", "logic": "油价涨→能源股估值抬升", "evidence": [{"source_type":"tool","ref":"tool_resp_1"}]},
+				{"cert": "question", "title": "下季能否补产", "logic": "取决于其他产油国是否释放储备", "evidence": [{"source_type":"news","ref":"ctx_week_1"}]}
+			]
+		}
+	}`)
 
-		toolRegistry := service.NewRegistry(&nilFetcher{})
-		boardCfg := newEnabledConfig()
-		boardReader := &mockBoardConfigReader{cfg: boardCfg}
+	toolRegistry := service.NewRegistry(&nilFetcher{})
+	boardCfg := newEnabledConfig()
+	boardReader := &mockBoardConfigReader{cfg: boardCfg}
 
-		lifelineReader := &orchMockLifelineReader{
-			data: service.SectionTimelineData{
-				Topic: service.TopicBrief{
-					ID:              1,
-					Label:           "中东地缘紧张",
-					Status:          "active",
-					FirstSeenDate:   mustParseTime("2026-07-01"),
-					LastSeenDate:    mustParseTime("2026-07-05"),
-					HitCount:        5,
-					ConsecutiveHits: 5,
-				},
-				Sections: []service.TimelineSectionNode{
-					{
-						SectionID: 10001, PeriodDate: mustParseTime("2026-07-01"),
-						ClusterLabel: "中东局势", Status: "emerging",
-						TopicMatchConfidence: "auto_new", ArticleCount: 5, ThreadCount: 2,
-						ThreadTitles: []string{"油价飙升"},
-					},
+	lifelineReader := &orchMockLifelineReader{
+		data: service.SectionTimelineData{
+			Topic: service.TopicBrief{
+				ID: 1, Label: "中东地缘紧张", Status: "active",
+				FirstSeenDate: mustParseTime("2026-07-01"), LastSeenDate: mustParseTime("2026-07-05"),
+				HitCount: 5, ConsecutiveHits: 5,
+			},
+			Sections: []service.TimelineSectionNode{
+				{SectionID: 10001, PeriodDate: mustParseTime("2026-07-01"),
+					ClusterLabel: "中东局势", Status: "emerging",
+					TopicMatchConfidence: "auto_new", ArticleCount: 5, ThreadCount: 2,
+					ThreadTitles: []string{"油价飙升"},
 				},
 			},
-		}
-		renderer := service.NewLifelineRenderer()
+		},
+	}
+	renderer := service.NewLifelineRenderer()
 
-		orch := service.NewOrchestratorService(
-			airouter, repo, lifelineReader, renderer, toolRegistry, boardReader,
-			testCap,
-		)
+	orch := service.NewOrchestratorService(
+		airouter, repo, lifelineReader, renderer, toolRegistry, boardReader,
+		testCap,
+	)
 
-		output, err := orch.EnrichTopic(context.Background(), 1)
-		if err != nil {
-			t.Fatalf("EnrichTopic: %v", err)
-		}
+	output, err := orch.EnrichTopic(context.Background(), 1)
+	if err != nil {
+		t.Fatalf("EnrichTopic: %v", err)
+	}
 
-		result := output.Result
-		if result == nil {
-			t.Fatal("result should not be nil")
-		}
+	var sectors map[string]any
+	if err := json.Unmarshal(output.Result.Sectors, &sectors); err != nil {
+		t.Fatalf("sectors unmarshal: %v", err)
+	}
+	if sectors["form"] != "event_chain" {
+		t.Fatalf("form: want event_chain, got %v", sectors["form"])
+	}
+	analysis := sectors["analysis"].(map[string]any)
 
-		// Verify Sectors JSON contains new-schema fields
-		var sectorsJSON map[string]any
-		if err := json.Unmarshal(result.Sectors, &sectorsJSON); err != nil {
-			t.Fatalf("sectors JSON unmarshal: %v", err)
+	// 事实层与见解层分离
+	factLayer := analysis["fact_layer"].([]any)
+	if len(factLayer) != 2 {
+		t.Fatalf("fact_layer: want 2, got %d", len(factLayer))
+	}
+	insightLayer := analysis["insight_layer"].([]any)
+	if len(insightLayer) != 3 {
+		t.Fatalf("insight_layer: want 3, got %d", len(insightLayer))
+	}
+	// 见解挂依据
+	for _, ins := range insightLayer {
+		im := ins.(map[string]any)
+		ev, _ := im["evidence"].([]any)
+		if len(ev) == 0 {
+			t.Fatalf("insight %q must carry evidence", im["title"])
 		}
-
-		// position
-		if pos, ok := sectorsJSON["position"].(string); !ok || pos != "reinforcing" {
-			t.Fatalf("position: want reinforcing, got %v", sectorsJSON["position"])
+	}
+	// 确定性分级存在
+	certs := map[string]bool{}
+	for _, ins := range insightLayer {
+		certs[ins.(map[string]any)["cert"].(string)] = true
+	}
+	for _, c := range []string{"high", "medium", "question"} {
+		if !certs[c] {
+			t.Fatalf("cert %q missing", c)
 		}
-
-		// signals
-		signals, ok := sectorsJSON["signals"].([]any)
-		if !ok {
-			t.Fatal("signals should be an array")
-		}
-		if len(signals) != 2 {
-			t.Fatalf("signals length: want 2, got %d", len(signals))
-		}
-		sig1 := signals[0].(map[string]any)
-		if sig1["lane"] != "中东地缘" {
-			t.Fatalf("signal[0].lane: want 中东地缘, got %v", sig1["lane"])
-		}
-		if sig1["signal"] == "" {
-			t.Fatal("signal[0].signal should not be empty")
-		}
-		if sig1["mechanism"] == "" {
-			t.Fatal("signal[0].mechanism should not be empty")
-		}
-
-		// evidence
-		evidence, ok := sectorsJSON["evidence"].([]any)
-		if !ok {
-			t.Fatal("evidence should be an array")
-		}
-		if len(evidence) != 2 {
-			t.Fatalf("evidence length: want 2, got %d", len(evidence))
-		}
-		ev1 := evidence[0].(map[string]any)
-		if ev1["source_type"] != "news" {
-			t.Fatalf("evidence[0].source_type: want news, got %v", ev1["source_type"])
-		}
-		ev2 := evidence[1].(map[string]any)
-		if ev2["source_type"] != "tool" {
-			t.Fatalf("evidence[1].source_type: want tool, got %v", ev2["source_type"])
-		}
-		if ev2["tool_ref"] == "" {
-			t.Fatal("evidence[1].tool_ref should not be empty (tool source)")
-		}
-
-		// financial_view should be present
-		fv, ok := sectorsJSON["financial_view"].(map[string]any)
-		if !ok {
-			t.Fatal("financial_view should be present")
-		}
-		fvSectors, ok := fv["sectors"].([]any)
-		if !ok || len(fvSectors) == 0 {
-			t.Fatal("financial_view.sectors should not be empty")
-		}
-
-		// Verify EvolutionAssessment and CausalChain stored directly
-		if result.EvolutionAssessment == "" {
-			t.Fatal("EvolutionAssessment should not be empty")
-		}
-		if result.CausalChain == "" {
-			t.Fatal("CausalChain should not be empty")
-		}
-	})
-
-	t.Run("missing financial_view does not error", func(t *testing.T) {
-		repo := setupOrchTestDB(t)
-		airouter := newMockAirRouter()
-
-		// Analyze response WITHOUT financial_view (non-financial topic)
-		airouter.addResponse(`{"topics":[{"topic":"AI监管","reason":"政策"}]}`)
-		airouter.addResponse(`{"action":"finish","thought":"done","summary":"欧盟通过AI法案"}`)
-		airouter.addResponse(`{
-			"evolution_assessment": "AI监管话题持续扩散",
-			"position": "expanding",
-			"signals": [
-				{"lane": "AI监管", "signal": "欧盟AI法案正式通过", "mechanism": "欧盟→全球监管趋严"}
-			],
-			"evidence": [
-				{"context_id": "ctx_news_1", "period": "month", "quote": "欧洲议会通过AI法案", "source_type": "news", "tool_ref": ""}
-			],
-			"causal_chain": "AI快速发展→伦理争议→监管立法→全球跟进",
-			"overall": "欧盟AI法案标志全球AI治理进入新阶段"
-		}`)
-
-		toolRegistry := service.NewRegistry(&nilFetcher{})
-		boardCfg := newEnabledConfig()
-		boardReader := &mockBoardConfigReader{cfg: boardCfg}
-
-		lifelineReader := &orchMockLifelineReader{
-			data: service.SectionTimelineData{
-				Topic: service.TopicBrief{
-					ID:              2,
-					Label:           "AI监管",
-					Status:          "active",
-					FirstSeenDate:   mustParseTime("2026-06-01"),
-					LastSeenDate:    mustParseTime("2026-07-05"),
-					HitCount:        3,
-					ConsecutiveHits: 3,
-				},
-				Sections: []service.TimelineSectionNode{
-					{
-						SectionID: 20001, PeriodDate: mustParseTime("2026-07-01"),
-						ClusterLabel: "AI监管", Status: "continuing",
-						TopicMatchConfidence: "anchor_hit", ArticleCount: 8, ThreadCount: 3,
-						ThreadTitles: []string{"欧盟AI法案"},
-					},
-				},
-			},
-		}
-		renderer := service.NewLifelineRenderer()
-
-		orch := service.NewOrchestratorService(
-			airouter, repo, lifelineReader, renderer, toolRegistry, boardReader,
-			testCap,
-		)
-
-		output, err := orch.EnrichTopic(context.Background(), 2)
-		if err != nil {
-			t.Fatalf("EnrichTopic: %v", err)
-		}
-
-		var sectorsJSON map[string]any
-		if err := json.Unmarshal(output.Result.Sectors, &sectorsJSON); err != nil {
-			t.Fatalf("sectors JSON unmarshal: %v", err)
-		}
-
-		// financial_view should be nil / omitted for non-financial topic
-		if _, exists := sectorsJSON["financial_view"]; exists {
-			t.Fatal("financial_view should be absent for non-financial topic")
-		}
-
-		// position and other fields should still be present
-		if sectorsJSON["position"] != "expanding" {
-			t.Fatalf("position: want expanding, got %v", sectorsJSON["position"])
-		}
-		if sectorsJSON["signals"] == nil {
-			t.Fatal("signals should be present")
-		}
-		if sectorsJSON["evidence"] == nil {
-			t.Fatal("evidence should be present")
-		}
-	})
+	}
 }
 
-// ── Review Judge: position_change schema tests ─────────────────────────────
+// ── Review Judge: new_findings / overturned / confidence_shift schema ───────
 
-func TestRunReviewJudge_PositionChangeSchema(t *testing.T) {
+func TestRunReviewJudge_NewFindingsOverturned(t *testing.T) {
 	repo := setupOrchTestDB(t)
 
-	// Seed prev result with new-format sectors (position field present).
 	prevResult := &repository.TopicEnrichmentResult{
-		PersistentTopicID:   1,
-		EvolutionAssessment: "局势缓和",
-		Sectors:             json.RawMessage(`{"position":"reinforcing","signals":[],"evidence":[]}`),
-		SessionID:           "data_enrichment_1_prev_pc",
+		PersistentTopicID: 1,
+		Sectors:           json.RawMessage(`{"form":"event_chain","lens":"L","analysis":{"insight_layer":[{"title":"油价将回落","cert":"medium"}]}}`),
+		SessionID:         "data_enrichment_1_prev_pc",
 	}
 	if err := repo.CreateTopicEnrichmentResult(context.Background(), prevResult); err != nil {
 		t.Fatalf("create prev result: %v", err)
 	}
 
 	airouter := newMockAirRouter()
-	// Sequence: interpret → tool_use → analyze → review_judge
-	airouter.addResponse(`{"topics":[{"topic":"石油","reason":"油价"}]}`)
+	defaultInterpretLens(airouter)
 	airouter.addResponse(`{"action":"finish","summary":"done"}`)
-	airouter.addResponse(`{"evolution_assessment":"再趋紧张","position":"turning","signals":[],"evidence":[],"causal_chain":"","overall":""}`)
-	// review_judge: full new-schema response with position_change and change_summary.
+	defaultAnalyzeEventChain(airouter)
 	airouter.addResponse(`{
 		"should_review": true,
-		"reason": "定位从强化转为转折，冲突重启",
-		"position_change": {"from": "reinforcing", "to": "turning", "summary": "停火协议被打破，局势从缓和转向紧张，触发转折"},
-		"change_summary": "上一次判断停火=缓和，本次以军事行动打破预期",
+		"reason": "新见解出现且推翻旧判断",
+		"new_findings": ["供应收紧或持续整季", "航运成本上升"],
+		"overturned": ["油价将回落"],
+		"confidence_shift": [{"insight": "油价短期承压", "from": "medium", "to": "high"}],
 		"affected_context": "week",
 		"confidence": 0.85
 	}`)
@@ -1582,61 +1421,54 @@ func TestRunReviewJudge_PositionChangeSchema(t *testing.T) {
 		t.Fatalf("EnrichTopic: %v", err)
 	}
 
-	// Should have a review with position_change stored in Verdict column.
 	if output.Review == nil {
 		t.Fatal("should produce a review")
 	}
-
-	// Verify Verdict column contains position_change (new schema).
-	if output.Review.Verdict == nil {
-		t.Fatal("review verdict should contain position_change JSON")
-	}
+	// Verdict stores new_findings/overturned/confidence_shift.
 	var pc map[string]any
 	if err := json.Unmarshal(output.Review.Verdict, &pc); err != nil {
-		t.Fatalf("review verdict unmarshal: %v", err)
+		t.Fatalf("verdict unmarshal: %v", err)
 	}
-	if pc["from"] != "reinforcing" {
-		t.Fatalf("position_change.from: want reinforcing, got %v", pc["from"])
+	nf, _ := pc["new_findings"].([]any)
+	if len(nf) != 2 {
+		t.Fatalf("new_findings: want 2, got %d", len(nf))
 	}
-	if pc["to"] != "turning" {
-		t.Fatalf("position_change.to: want turning, got %v", pc["to"])
+	ov, _ := pc["overturned"].([]any)
+	if len(ov) != 1 || ov[0] != "油价将回落" {
+		t.Fatalf("overturned: got %v", ov)
 	}
-	if pc["summary"] == "" {
-		t.Fatal("position_change.summary should not be empty")
+	cs, _ := pc["confidence_shift"].([]any)
+	if len(cs) != 1 {
+		t.Fatalf("confidence_shift: want 1, got %d", len(cs))
 	}
-
-	// Verify DeviationSummary column contains change_summary (new field).
+	// DeviationSummary stores reason.
 	if output.Review.DeviationSummary == "" {
-		t.Fatal("review deviation_summary (change_summary) should not be empty")
+		t.Fatal("deviation_summary (reason) should not be empty")
 	}
-
-	// Verify other fields unchanged.
 	if output.Review.Source != "llm_assisted" {
 		t.Fatalf("review source: want llm_assisted, got %s", output.Review.Source)
 	}
-	if output.Review.PrevResultID == nil || *output.Review.PrevResultID != prevResult.ID {
-		t.Fatalf("review prev_result_id should match")
-	}
 }
+
+// ── Review judge skipped when prev result has no form (old-format/empty) ─────
 
 func TestEnrichTopic_SkipReviewOnOldFormatPrev(t *testing.T) {
 	repo := setupOrchTestDB(t)
 
-	// Seed prev result with OLD-format sectors (bare array, no position field).
+	// Seed prev result with OLD-format sectors (bare array, no form field).
 	prevResult := &repository.TopicEnrichmentResult{
-		PersistentTopicID:   3,
-		EvolutionAssessment: "旧格式数据",
-		Sectors:             json.RawMessage(`[{"sector":"能源","direction":"up"}]`),
-		SessionID:           "data_enrichment_3_prev_old",
+		PersistentTopicID: 3,
+		Sectors:           json.RawMessage(`[{"sector":"能源","direction":"up"}]`),
+		SessionID:         "data_enrichment_3_prev_old",
 	}
 	if err := repo.CreateTopicEnrichmentResult(context.Background(), prevResult); err != nil {
 		t.Fatalf("create prev result: %v", err)
 	}
 
 	airouter := newMockAirRouter()
-	airouter.addResponse(`{"topics":[{"topic":"石油","reason":"油价"}]}`)
+	defaultInterpretLens(airouter)
 	airouter.addResponse(`{"action":"finish","summary":"done"}`)
-	airouter.addResponse(`{"evolution_assessment":"test","position":"reinforcing","signals":[],"evidence":[],"causal_chain":"","overall":""}`)
+	defaultAnalyzeEventChain(airouter)
 
 	toolRegistry := service.NewRegistry(&nilFetcher{})
 	boardCfg := newEnabledConfig()
@@ -1665,12 +1497,10 @@ func TestEnrichTopic_SkipReviewOnOldFormatPrev(t *testing.T) {
 		t.Fatalf("EnrichTopic: %v", err)
 	}
 
-	// Old-format prev → extractPosition returns "" → guard skips review judge entirely.
+	// Old-format prev (no form) → guard skips review judge entirely.
 	if output.Review != nil {
 		t.Fatal("old-format prev should NOT trigger review judge")
 	}
-
-	// No review_judge airouter call should have been made.
 	for _, call := range airouter.Calls {
 		if call.Operation == "data_enrichment.review_judge" {
 			t.Fatal("review_judge should NOT have been called for old-format prev")
@@ -1681,7 +1511,6 @@ func TestEnrichTopic_SkipReviewOnOldFormatPrev(t *testing.T) {
 // ── ToolsForSourceType mapping unit test ──────────────────────────────────
 
 func TestToolsForSourceType(t *testing.T) {
-	// etf_quote → 3 financial tools
 	tools := service.ToolsForSourceType("etf_quote")
 	if len(tools) != 3 {
 		t.Fatalf("etf_quote: want 3 tools, got %d", len(tools))
@@ -1693,21 +1522,13 @@ func TestToolsForSourceType(t *testing.T) {
 		}
 	}
 
-	// exchange_rate → empty (no tools yet)
-	tools = service.ToolsForSourceType("exchange_rate")
-	if len(tools) != 0 {
+	if tools := service.ToolsForSourceType("exchange_rate"); len(tools) != 0 {
 		t.Fatalf("exchange_rate: want 0 tools, got %d", len(tools))
 	}
-
-	// gdelt_event → empty (no tools yet)
-	tools = service.ToolsForSourceType("gdelt_event")
-	if len(tools) != 0 {
+	if tools := service.ToolsForSourceType("gdelt_event"); len(tools) != 0 {
 		t.Fatalf("gdelt_event: want 0 tools, got %d", len(tools))
 	}
-
-	// unknown source_type → empty
-	tools = service.ToolsForSourceType("bogus")
-	if len(tools) != 0 {
+	if tools := service.ToolsForSourceType("bogus"); len(tools) != 0 {
 		t.Fatalf("bogus: want 0 tools, got %d", len(tools))
 	}
 }
@@ -1718,16 +1539,13 @@ func TestEnrichTopic_OnlyAllowedToolsAdvertised(t *testing.T) {
 	repo := setupOrchTestDB(t)
 	airouter := newMockAirRouter()
 
-	// Sequence: interpret → tool_use r1(call get_etf_quote, not allowed) →
-	// tool_use r2(call list_etf_by_keyword, allowed) → tool_use r3(finish) → analyze
-	airouter.addResponse(`{"topics":[{"topic":"半导体","reason":"芯片"}]}`)
+	defaultInterpretLens(airouter)
 	airouter.addResponse(`{"action":"call_tool","thought":"查行情","tool":"get_etf_quote","args":{"codes":["512480"]}}`)
 	airouter.addResponse(`{"action":"call_tool","thought":"查ETF","tool":"list_etf_by_keyword","args":{"keyword":"半导体"}}`)
 	airouter.addResponse(`{"action":"finish","thought":"done","summary":"芯片ETF涨2%"}`)
-	airouter.addResponse(`{"evolution_assessment":"test","position":"reinforcing","signals":[],"evidence":[],"causal_chain":"","overall":""}`)
+	defaultAnalyzeEventChain(airouter)
 
 	toolRegistry := service.NewRegistry(&nilFetcher{})
-	// Only list_etf_by_keyword is allowed — get_etf_quote and list_sectors are blocked.
 	boardCfg := &service.BoardEnrichmentConfig{
 		EnrichmentEnabled: true,
 		WindowDays:        14,
@@ -1760,18 +1578,10 @@ func TestEnrichTopic_OnlyAllowedToolsAdvertised(t *testing.T) {
 		t.Fatalf("EnrichTopic: %v", err)
 	}
 
-	// Verify agent loop results.
-	if len(output.AgentLoops) != 1 {
-		t.Fatalf("expected 1 agent loop, got %d", len(output.AgentLoops))
-	}
 	al := output.AgentLoops[0]
-
-	// Should have 3 tool_calls: r1=get_etf_quote(blocked), r2=list_etf_by_keyword(executed), r3=finish(not a tool call)
 	if len(al.ToolCalls) != 2 {
 		t.Fatalf("expected 2 tool calls (1 blocked + 1 executed), got %d", len(al.ToolCalls))
 	}
-
-	// First call: get_etf_quote should be blocked.
 	tc1 := al.ToolCalls[0]
 	if tc1.Tool != "get_etf_quote" {
 		t.Fatalf("first tool call: want get_etf_quote, got %s", tc1.Tool)
@@ -1783,7 +1593,6 @@ func TestEnrichTopic_OnlyAllowedToolsAdvertised(t *testing.T) {
 		t.Fatalf("first tool result should say 该工具当前不可用, got: %s", tc1.ResultFull)
 	}
 
-	// Second call: list_etf_by_keyword should be executed normally.
 	tc2 := al.ToolCalls[1]
 	if tc2.Tool != "list_etf_by_keyword" {
 		t.Fatalf("second tool call: want list_etf_by_keyword, got %s", tc2.Tool)
@@ -1792,22 +1601,16 @@ func TestEnrichTopic_OnlyAllowedToolsAdvertised(t *testing.T) {
 		t.Fatal("second tool call should NOT be blocked")
 	}
 
-	// Verify tool_use system prompt: only list_etf_by_keyword tool desc should appear.
-	// (Note: the workflow instructions in the template also mention tool names inline,
-	// so we check for the bold **toolname** markup that only buildToolsDesc produces.)
-	foundToolUse := false
+	// System prompt advertises only list_etf_by_keyword.
 	for _, call := range airouter.Calls {
 		if call.Operation != "data_enrichment.tool_use" {
 			continue
 		}
-		foundToolUse = true
 		for _, msg := range call.Messages {
 			if msg.Role == "system" {
-				// Allowed: bold markup present.
 				if !strings.Contains(msg.Content, "**list_etf_by_keyword**") {
 					t.Fatal("system prompt should mention **list_etf_by_keyword** tool desc")
 				}
-				// Blocked: bold markup absent.
 				if strings.Contains(msg.Content, "**get_etf_quote**") {
 					t.Fatal("system prompt should NOT have **get_etf_quote** tool desc (not allowed)")
 				}
@@ -1817,9 +1620,6 @@ func TestEnrichTopic_OnlyAllowedToolsAdvertised(t *testing.T) {
 			}
 		}
 	}
-	if !foundToolUse {
-		t.Fatal("no tool_use call found")
-	}
 }
 
 // ── AllowedTools: empty list → no tools advertised, agent finishes directly ─
@@ -1828,13 +1628,11 @@ func TestEnrichTopic_EmptyAllowedToolsNoToolsAdvertised(t *testing.T) {
 	repo := setupOrchTestDB(t)
 	airouter := newMockAirRouter()
 
-	// Sequence: interpret → tool_use(finish immediately, no tools available) → analyze
-	airouter.addResponse(`{"topics":[{"topic":"Rust发布","reason":"技术动向"}]}`)
+	defaultInterpretLens(airouter)
 	airouter.addResponse(`{"action":"finish","thought":"无可用工具，直接完成","summary":"(无可查数据)"}`)
-	airouter.addResponse(`{"evolution_assessment":"test","position":"reinforcing","signals":[],"evidence":[],"causal_chain":"","overall":""}`)
+	defaultAnalyzeEventChain(airouter)
 
 	toolRegistry := service.NewRegistry(&nilFetcher{})
-	// Empty AllowedTools — no tools should be advertised.
 	boardCfg := &service.BoardEnrichmentConfig{
 		EnrichmentEnabled: true,
 		WindowDays:        14,
@@ -1867,10 +1665,6 @@ func TestEnrichTopic_EmptyAllowedToolsNoToolsAdvertised(t *testing.T) {
 		t.Fatalf("EnrichTopic: %v", err)
 	}
 
-	// Verify agent loop completed without errors.
-	if len(output.AgentLoops) != 1 {
-		t.Fatalf("expected 1 agent loop, got %d", len(output.AgentLoops))
-	}
 	al := output.AgentLoops[0]
 	if al.Error != "" {
 		t.Fatalf("agent loop should have no error, got: %s", al.Error)
@@ -1882,31 +1676,19 @@ func TestEnrichTopic_EmptyAllowedToolsNoToolsAdvertised(t *testing.T) {
 		t.Fatalf("no tool calls should have been made, got %d", len(al.ToolCalls))
 	}
 
-	// Verify system prompt: tools section is empty (no bold tool markup).
-	// (The workflow instructions still mention tool names inline, but buildToolsDesc
-	// outputs nothing when allowedTools is empty.)
-	foundToolUse := false
 	for _, call := range airouter.Calls {
 		if call.Operation != "data_enrichment.tool_use" {
 			continue
 		}
-		foundToolUse = true
 		for _, msg := range call.Messages {
 			if msg.Role == "system" {
-				// No bold tool descriptions should appear — buildToolsDesc returns "".
 				if strings.Contains(msg.Content, "**list_etf_by_keyword**") {
 					t.Fatal("system prompt should NOT have **list_etf_by_keyword** tool desc (no tools allowed)")
 				}
 				if strings.Contains(msg.Content, "**get_etf_quote**") {
 					t.Fatal("system prompt should NOT have **get_etf_quote** tool desc (no tools allowed)")
 				}
-				if strings.Contains(msg.Content, "**list_sectors**") {
-					t.Fatal("system prompt should NOT have **list_sectors** tool desc (no tools allowed)")
-				}
 			}
 		}
-	}
-	if !foundToolUse {
-		t.Fatal("no tool_use call found")
 	}
 }

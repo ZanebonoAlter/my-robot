@@ -122,25 +122,25 @@ function handleWatchClick(tag: ArticleTag) {
 }
 
 .article-tag--event {
-  background: rgba(245, 158, 11, 0.12);
-  color: #9a5c00;
+  background: var(--color-tag-event-bg);
+  color: var(--color-tag-event);
 }
 
 .article-tag--person {
-  background: rgba(16, 185, 129, 0.12);
-  color: #0d7a56;
+  background: var(--color-tag-person-bg);
+  color: var(--color-tag-person);
 }
 
 .article-tag--keyword {
-  background: rgba(59, 107, 135, 0.12);
-  color: #234d66;
+  background: var(--color-tag-keyword-bg);
+  color: var(--color-tag-keyword);
 }
 
 .article-tag--highlighted {
-  border-color: rgba(193, 47, 47, 0.38);
-  background: rgba(193, 47, 47, 0.12);
-  color: var(--raw-red-700);
-  box-shadow: inset 0 0 0 1px rgba(193, 47, 47, 0.08);
+  border-color: var(--color-accent-hover);
+  background: var(--color-accent-subtle);
+  color: var(--color-accent);
+  box-shadow: inset 0 0 0 1px var(--color-accent-subtle);
 }
 
 .article-tag__count {

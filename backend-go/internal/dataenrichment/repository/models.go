@@ -133,6 +133,29 @@ type StockDebateResult struct {
 
 func (StockDebateResult) TableName() string { return "stock_debate_result" }
 
+// TopicEnrichmentQA stores an append-only report follow-up Q&A round tied to
+// one immutable TopicEnrichmentResult snapshot. Multiple rounds may share a
+// result_id; the report itself is never rewritten (报告不可变).
+// Table: topic_enrichment_qa
+//
+// Added by causal-analysis-agent: 分析目标从「演进定位」改为「探索判断 agent」，
+// 报告追问交互层需要独立的新表，旧演进定位数据(result/review)由迁移清空。
+type TopicEnrichmentQA struct {
+	ID                      uint            `gorm:"primarykey" json:"id"`
+	TopicEnrichmentResultID uint            `gorm:"not null;index" json:"topic_enrichment_result_id"`
+	Question                string          `gorm:"type:text;not null" json:"question"`
+	Answer                  string          `gorm:"type:text" json:"answer"`
+	ToolCalls               json.RawMessage `gorm:"type:jsonb" json:"tool_calls"`
+	Source                  string          `gorm:"size:12;not null;default:qa" json:"source"`
+	// Sedimented marks a Q&A round the user manually pinned as a durable note.
+	// Sediment only flips this flag on the qa row; the report itself (result) is
+	// never rewritten (业务约束#2: result 不可变). Default false.
+	Sedimented bool      `gorm:"not null;default:false" json:"sedimented"`
+	CreatedAt  time.Time `json:"created_at"`
+}
+
+func (TopicEnrichmentQA) TableName() string { return "topic_enrichment_qa" }
+
 func init() {
 	database.RegisterModels(
 		&BoardDataSource{},
@@ -140,5 +163,6 @@ func init() {
 		&TopicEnrichmentResult{},
 		&TopicEnrichmentReview{},
 		&StockDebateResult{},
+		&TopicEnrichmentQA{},
 	)
 }

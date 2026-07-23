@@ -15,6 +15,9 @@
 | POST | `/api/persistent-topics/:topicId/enrichment/results/trigger` | 手动触发该话题的增强计算 |
 | POST | `/api/persistent-topics/:topicId/enrichment/results/:id/debates` | 触发指定结果的多空辩论 |
 | GET | `/api/persistent-topics/:topicId/enrichment/results/:id/debates` | 列出指定结果的辩论历史 |
+| POST | `/api/persistent-topics/:topicId/enrichment/results/:id/qa` | 对指定结果发起一轮报告追问 |
+| GET | `/api/persistent-topics/:topicId/enrichment/results/:id/qa` | 列出指定结果的多轮追问历史 |
+| POST | `/api/persistent-topics/:topicId/enrichment/qa/:id/sediment` | 将某轮追问沉淀为持久笔记 |
 | GET | `/api/persistent-topics/:topicId/enrichment/reviews` | 列出话题的复盘评审 |
 | POST | `/api/persistent-topics/:topicId/enrichment/reviews` | 新建复盘评审 |
 | PUT | `/api/persistent-topics/:topicId/enrichment/reviews/:id` | 更新评审的偏离摘要 |
@@ -202,6 +205,77 @@
 ### GET /api/persistent-topics/:topicId/enrichment/results/:id/debates
 
 列出指定结果的历史辩论记录。
+
+---
+
+## 报告追问 Q&A
+
+报告（`topic_enrichment_result`）生成后保持**不可变**（业务约束：result 不可变）。用户可对同一报告发起多轮追问：每轮复用增强 agent 的工具循环（`list_boards` / `list_lanes` / `get_lane_detail` / `web_search`），把报告快照植入系统提示，产出答案并 append 一行 `topic_enrichment_qa`（`source="qa"`）。报告本身从不被改写。
+
+### POST /api/persistent-topics/:topicId/enrichment/results/:id/qa
+
+对指定增强结果发起一轮报告追问。带 IDOR 校验（结果必须属于 `:topicId`）。
+
+**请求体**
+
+```json
+{
+  "question": "油价还会涨吗？"
+}
+```
+
+| 字段 | 必填 | 说明 |
+|------|------|------|
+| `question` | 是 | 追问问题，字符串 |
+
+`question` 缺失返回 `400`。
+
+**响应示例**
+
+```json
+{
+  "success": true,
+  "data": {
+    "answer": "油价短期承压（推演有据）……",
+    "tool_calls": [],
+    "refs": [ { "source_type": "tool", "ref": "list_boards" } ]
+  }
+}
+```
+
+| 字段 | 说明 |
+|------|------|
+| `answer` | 追问答案文本 |
+| `tool_calls` | 本轮工具调用记录 |
+| `refs` | 引用来源（双类：新闻来自报告上下文 + 工具来自本轮） |
+
+追问内部 LLM 调用走 Operation `data_enrichment.qa_tool_use`，session_id 为 `data_enrichment_qa_{resultID}_{hex8}`（每次询问唯一）。
+
+### GET /api/persistent-topics/:topicId/enrichment/results/:id/qa
+
+列出指定结果的多轮追问历史，按 `created_at` 升序（最旧优先）。
+
+**响应示例**
+
+```json
+{
+  "success": true,
+  "data": [ { /* TopicEnrichmentQA */ } ]
+}
+```
+
+### POST /api/persistent-topics/:topicId/enrichment/qa/:id/sediment
+
+将某轮追问标记为已沉淀（`sedimented=true`）——用户手动 pin 为持久笔记。仅翻转 qa 行的 flag，**报告（result）永不重写**。带 IDOR 校验（经 qa → result → topic 间接校验归属）。
+
+**响应示例**
+
+```json
+{
+  "success": true,
+  "data": { /* 更新后的 TopicEnrichmentQA，sedimented=true */ }
+}
+```
 
 ---
 

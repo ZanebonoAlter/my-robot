@@ -9,6 +9,7 @@ import (
 	"syntopica-backend/internal/platform/airouter"
 	"syntopica-backend/internal/platform/jsonutil"
 	"syntopica-backend/internal/platform/logging"
+	"syntopica-backend/internal/platform/tracing"
 	"syntopica-backend/internal/topicgraph/repository"
 )
 
@@ -32,6 +33,9 @@ const highlightsSystemPrompt = `你是一名专业的新闻分析师。你收到
 
 // GenerateHighlights produces 2-3 highlights for the report.
 func GenerateHighlights(ctx context.Context, tags []repository.TagInput, clusters []repository.ClusterGroup) ([]repository.Highlight, error) {
+	ctx, span := tracing.Tracer(tracing.ServiceName).Start(ctx, "workflow.daily_report.highlights")
+	defer span.End()
+
 	if len(tags) == 0 {
 		return nil, nil
 	}
@@ -148,6 +152,9 @@ const threadsSystemPrompt = `你是一名专业的新闻叙事分析师。你收
 
 // GenerateClusterThreads produces threads for a single cluster.
 func GenerateClusterThreads(ctx context.Context, cluster repository.ClusterGroup, tags []repository.TagInput) ([]repository.Thread, error) {
+	ctx, span := tracing.Tracer(tracing.ServiceName).Start(ctx, "workflow.daily_report.cluster_threads")
+	defer span.End()
+
 	clusterTags := filterTagsByIDs(tags, cluster.TagIDs)
 	if len(clusterTags) == 0 {
 		return nil, nil
@@ -255,6 +262,9 @@ type llmMergePair struct {
 
 // llmArbitrateMerges uses LLM to decide whether gray-zone section pairs should be merged.
 func llmArbitrateMerges(ctx context.Context, sections []repository.DailyReportSection, pairs []llmMergePair, tagLabelMap map[uint]string) ([]llmMergePair, error) {
+	ctx, span := tracing.Tracer(tracing.ServiceName).Start(ctx, "workflow.daily_report.merge_arbitration")
+	defer span.End()
+
 	var sb strings.Builder
 	sb.WriteString("以下是一些同日生成的叙事分组（section）配对，它们语义相似但不确定是否属于同一叙事框架。\n")
 	sb.WriteString("请判断每对是否应该合并为一个 section。合并标准：它们描述的是同一个更大的叙事/故事。\n\n")

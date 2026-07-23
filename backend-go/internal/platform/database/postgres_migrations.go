@@ -31,6 +31,39 @@ func tableExists(db *gorm.DB, table string) bool {
 	return exists
 }
 
+// columnIsNullable reports whether a column is nullable (is_nullable = 'YES').
+// Returns true (treat as nullable/safe-to-constrain) on any lookup error so
+// callers proceed to apply the constraint.
+func columnIsNullable(db *gorm.DB, table, column string) bool {
+	var nullable string
+	if err := db.Raw(
+		`SELECT is_nullable FROM information_schema.columns WHERE table_schema='public' AND table_name=? AND column_name=?`,
+		table, column,
+	).Row().Scan(&nullable); err != nil {
+		return true
+	}
+	return nullable == "YES"
+}
+
+// ensureNotNullDefault backfills NULL rows with a literal default value, then
+// sets the column NOT NULL — but only if it is currently nullable, so the
+// migration is idempotent (re-running on an already-NOT-NULL column no-ops).
+// defaultLit is a raw SQL literal (e.g. ”, 0, false, 'active') used for the
+// one-shot backfill UPDATE. SET DEFAULT (if needed) is the caller's separate
+// responsibility and is itself idempotent in PostgreSQL.
+func ensureNotNullDefault(db *gorm.DB, table, column, defaultLit string) error {
+	if !columnIsNullable(db, table, column) {
+		return nil // already NOT NULL — idempotent no-op
+	}
+	if err := db.Exec(fmt.Sprintf(`UPDATE %s SET %s = %s WHERE %s IS NULL`, table, column, defaultLit, column)).Error; err != nil {
+		return fmt.Errorf("backfill %s.%s: %w", table, column, err)
+	}
+	if err := db.Exec(fmt.Sprintf(`ALTER TABLE %s ALTER COLUMN %s SET NOT NULL`, table, column)).Error; err != nil {
+		return fmt.Errorf("set %s.%s NOT NULL: %w", table, column, err)
+	}
+	return nil
+}
+
 // postgresMigrations returns versioned migrations for operations that GORM AutoMigrate
 // cannot handle: extensions, custom indexes, triggers, data migrations, column/table drops.
 //
@@ -1104,6 +1137,192 @@ func postgresMigrations() []Migration {
 			Version:     "20260717_0002",
 			Description: "Merge auxiliary label text variant duplicates by normalize_key grouping, reusing MergeAuxiliaryLabelAlias.",
 			Up:          runAuxLabelDupMerge,
+		},
+
+		// ── causal-analysis-agent: clear stale 演进定位 enrichment data ──
+		// 分析目标从「演进定位」改为「探索判断 agent」(causal-analysis-agent)。
+		// 旧 result 的 position/signals、旧 review 的 verdict 语义随之作废，与新
+		// agent 产出不兼容，不可复用，清空后由新 agent 重跑。报告追问交互层
+		// (topic_enrichment_qa) 为另起新表，不在此清理范围。
+		// 幂等：TRUNCATE 本身幂等 + RESTART IDENTITY 复位序列；版本迁移按 Version 去重只跑一次。
+		{
+			Version:     "20260718_0001",
+			Description: "TRUNCATE topic_enrichment_result/topic_enrichment_review — stale 演进定位 (position/signals/verdict) semantics retired for causal-analysis-agent (探索判断). Idempotent.",
+			Up: func(db *gorm.DB) error {
+				// 两张表由 AutoMigrate 在版本迁移前一并创建；result 表不存在则无需清理。
+				if !tableExists(db, "topic_enrichment_result") {
+					return nil
+				}
+				// 这两张表无 DB 级 FK（模型未声明 GORM relation），无需 CASCADE。
+				if err := db.Exec("TRUNCATE TABLE topic_enrichment_result, topic_enrichment_review RESTART IDENTITY").Error; err != nil {
+					return fmt.Errorf("truncate enrichment stale data: %w", err)
+				}
+				return nil
+			},
+		},
+
+		// ── causal-analysis-agent 阶段2b: qa 沉淀标记列 ──
+		// topic_enrichment_qa 加 sedimented 列（用户手动沉淀某轮追问为持久笔记）。
+		// 沉淀只翻转 qa 行上的标志，绝不改 topic_enrichment_result 主表（业务约束#2）。
+		// 幂等：ADD COLUMN IF NOT EXISTS + 版本迁移按 Version 去重只跑一次。
+		{
+			Version:     "20260719_0001",
+			Description: "Add topic_enrichment_qa.sedimented column (user-pinned Q&A note flag; report itself stays immutable). Idempotent.",
+			Up: func(db *gorm.DB) error {
+				if !tableExists(db, "topic_enrichment_qa") {
+					return nil
+				}
+				if err := db.Exec(`ALTER TABLE topic_enrichment_qa ADD COLUMN IF NOT EXISTS sedimented BOOLEAN NOT NULL DEFAULT false`).Error; err != nil {
+					return fmt.Errorf("add topic_enrichment_qa.sedimented column: %w", err)
+				}
+				return nil
+			},
+		},
+
+		// ── model tag 治理：把 NOT NULL/DEFAULT 约束从 GORM model tag 收敛到显式迁移 ──
+		// 背景：见 standard/backend/code-style.md「GORM model tag 与迁移」。model tag 写
+		// not null/default 会让 AutoMigrate 与显式迁移竞争（ai-call-logging-schema 事故）。
+		// 本迁移把 ai_models/topic_graph/semantic_label 三个文件的列级约束落地到 DB，
+		// 之后即可从 model tag 安全移除 not null/default（让显式迁移唯一管约束）。
+		// 幂等：SET DEFAULT 本身幂等；SET NOT NULL 经 columnIsNullable 检查只在可空时执行。
+		{
+			Version:     "20260723_0001",
+			Description: "Materialize NOT NULL/DEFAULT constraints (previously driven by GORM tags) for ai_models/topic_graph/semantic_label tables, so model tags can be stripped. Idempotent.",
+			Up: func(db *gorm.DB) error {
+				// helper: set DEFAULT then backfill+NOT NULL for one column.
+				constrain := func(table, column, defaultLit string, notNull bool) error {
+					if defaultLit != "" {
+						if err := db.Exec(fmt.Sprintf(`ALTER TABLE %s ALTER COLUMN %s SET DEFAULT %s`, table, column, defaultLit)).Error; err != nil {
+							return fmt.Errorf("set default %s.%s: %w", table, column, err)
+						}
+						if err := ensureNotNullDefault(db, table, column, defaultLit); err != nil {
+							return err
+						}
+					}
+					if notNull && defaultLit == "" {
+						// No default: cannot backfill generically; rely on ensureNotNullDefault's
+						// empty-string backfill only for text-like columns. Caller passes "" to skip.
+						if err := ensureNotNullDefault(db, table, column, "''"); err != nil {
+							return err
+						}
+					}
+					return nil
+				}
+
+				type col struct {
+					table, column, def string
+					notNull            bool
+				}
+				// Columns with a DEFAULT value: backfill uses the default, then SET NOT NULL.
+				cols := []col{
+					// ── ai_models.go ──
+					{"scheduler_tasks", "check_interval", "60", true},
+					{"scheduler_tasks", "status", "'idle'", false},
+					{"scheduler_tasks", "total_executions", "0", false},
+					{"scheduler_tasks", "successful_executions", "0", false},
+					{"scheduler_tasks", "failed_executions", "0", false},
+					{"scheduler_tasks", "consecutive_failures", "0", false},
+					{"ai_providers", "provider_type", "'openai_compatible'", true},
+					{"ai_providers", "enabled", "true", true},
+					{"ai_providers", "timeout_seconds", "120", true},
+					{"ai_providers", "enable_thinking", "false", true},
+					{"ai_routes", "enabled", "true", true},
+					{"ai_routes", "priority", "100", true},
+					{"ai_routes", "strategy", "'ordered_failover'", true},
+					{"ai_routes", "max_concurrency", "0", true},
+					{"ai_route_providers", "priority", "100", true},
+					{"ai_route_providers", "enabled", "true", true},
+					{"ai_call_logs", "is_fallback", "false", true},
+					// ── topic_graph.go ──
+					{"topic_tags", "category", "'keyword'", true},
+					{"topic_tags", "is_canonical", "false", false},
+					{"topic_tags", "source", "'llm'", false},
+					{"topic_tags", "feed_count", "0", false},
+					{"topic_tags", "status", "'active'", true},
+					{"topic_tags", "is_watched", "false", false},
+					{"topic_tags", "quality_score", "0", false},
+					{"topic_tags", "metadata", "'{}'::jsonb", false},
+					{"topic_tags", "kind", "'keyword'", false},
+					{"topic_tag_embeddings", "embedding_type", "'identity'", true},
+					{"tag_merge_suggestions", "status", "'pending'", true},
+					{"tag_merge_suggestions", "source", "'incremental'", true},
+					{"article_topic_tags", "score", "0", false},
+					{"article_topic_tags", "source", "'llm'", false},
+					// ── semantic_label.go ──
+					{"semantic_labels", "ref_count", "0", true},
+					{"semantic_labels", "display_order", "0", true},
+					{"semantic_labels", "source", "'llm_extract'", true},
+					{"semantic_labels", "status", "'active'", true},
+					{"semantic_labels", "protected", "false", true},
+					{"semantic_labels", "enrichment_enabled", "false", true},
+					{"semantic_labels", "window_days", "14", true},
+					{"semantic_labels", "aliases", "'[]'::jsonb", false},
+					{"semantic_labels", "context_layers", `'["week","month","year","all"]'::jsonb`, false},
+					{"topic_tag_board_labels", "score", "0", true},
+					{"topic_tag_board_labels", "downgraded", "false", true},
+					{"topic_tag_board_labels", "direction_mismatch", "false", true},
+				}
+				for _, c := range cols {
+					if !tableExists(db, c.table) {
+						continue
+					}
+					if err := constrain(c.table, c.column, c.def, c.notNull); err != nil {
+						return err
+					}
+				}
+
+				// Columns with NOT NULL but NO default: string columns backfill '' then NOT NULL.
+				// FK/PK uint columns and bool(success)/float(similarity/dimension) cannot be
+				// safely backfilled with a blanket value — these tables are populated only via
+				// code paths that always set the value, so on a healthy DB they have no NULLs.
+				// We still SET NOT NULL (idempotent via columnIsNullable); if NULLs exist the
+				// migration fails loudly (preferred over silent constraint vacuum).
+				notNullOnly := []col{
+					{"scheduler_tasks", "name", "", true},
+					{"ai_settings", "key", "", true},
+					{"ai_providers", "name", "", true},
+					{"ai_providers", "base_url", "", true},
+					{"ai_providers", "model", "", true},
+					{"ai_routes", "name", "", true},
+					{"ai_routes", "capability", "", true},
+					{"ai_route_providers", "route_id", "0", true},
+					{"ai_route_providers", "provider_id", "0", true},
+					{"ai_call_logs", "capability", "", true},
+					{"ai_call_logs", "route_name", "", true},
+					{"ai_call_logs", "provider_name", "", true},
+					{"ai_call_logs", "success", "false", true},
+					{"topic_tags", "slug", "", true},
+					{"topic_tags", "label", "", true},
+					{"topic_tag_embeddings", "topic_tag_id", "0", true},
+					{"topic_tag_embeddings", "dimension", "0", true},
+					{"topic_tag_embeddings", "model", "", true},
+					{"tag_merge_suggestions", "new_tag_id", "0", true},
+					{"tag_merge_suggestions", "existing_tag_id", "0", true},
+					{"tag_merge_suggestions", "new_label", "", true},
+					{"tag_merge_suggestions", "existing_label", "", true},
+					{"tag_merge_suggestions", "category", "", true},
+					{"tag_merge_suggestions", "similarity", "0", true},
+					{"article_topic_tags", "article_id", "0", true},
+					{"article_topic_tags", "topic_tag_id", "0", true},
+					{"semantic_labels", "label", "", true},
+					{"semantic_labels", "slug", "", true},
+					{"semantic_labels", "label_type", "", true},
+				}
+				for _, c := range notNullOnly {
+					if !tableExists(db, c.table) {
+						continue
+					}
+					// String columns: backfill '' (empty); numeric/bool: backfill the literal.
+					backfill := "''"
+					if c.def != "" {
+						backfill = c.def
+					}
+					if err := ensureNotNullDefault(db, c.table, c.column, backfill); err != nil {
+						return err
+					}
+				}
+				return nil
+			},
 		},
 	}
 }

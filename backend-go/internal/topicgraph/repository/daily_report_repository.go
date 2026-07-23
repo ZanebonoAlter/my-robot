@@ -991,4 +991,26 @@ func (r *TopicGraphRepository) ListTopicRecentBriefs(boardID uint, sinceDays int
 	return result, nil
 }
 
+// CountSectionsByTopic aggregates the section count per persistent_topic_id across
+// all daily_report_sections (null topics excluded). Returns a map[topicID]count.
+func (r *TopicGraphRepository) CountSectionsByTopic() (map[uint]int, error) {
+	type countRow struct {
+		PersistentTopicID uint
+		N                 int
+	}
+	var counts []countRow
+	if err := r.db.Table("daily_report_sections").
+		Select("persistent_topic_id, count(*) AS n").
+		Where("persistent_topic_id IS NOT NULL").
+		Group("persistent_topic_id").
+		Scan(&counts).Error; err != nil {
+		return nil, err
+	}
+	result := make(map[uint]int, len(counts))
+	for _, cr := range counts {
+		result[cr.PersistentTopicID] = cr.N
+	}
+	return result, nil
+}
+
 // =============================================================================

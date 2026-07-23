@@ -3,8 +3,9 @@
 > 参考实现：`tests/data_enrichment_poc/`（Python PoC，已验证三角色 + 三防御）。
 > 架构总览见 `design.md` §0（两个独立循环 + 三表认知闭环）。
 
-> **进度图例**：`[x]` 已实现且符合制品 ｜ `[ ]` 未实现 ｜ `[~]` ★ 已实现但**重定位待重做**（旧走向预测语义，需改为演进定位）｜ `[f]` 冻结（FinGenius，保留不发展）
+> **进度图例**：`[x]` 已实现且符合制品 ｜ `[ ]` 未实现 ｜ `[~]` ★ **已作废**（旧走向预测/演进定位语义，由 [causal-analysis-agent](../causal-analysis-agent/) 接管重做为探索判断 agent，不再在本 change 重做）｜ `[f]` 冻结（FinGenius，保留不发展）
 > 2026-07-09 重定位：主线从「金融走向预测 + 涨跌兑现」拉回到「持久话题演进定位」。骨架保留；分析员输出 / review / 触发 / 前端报告 需重做（见 §11）。FinGenius 冻结。
+> ⚠️ **2026-07-23 再次推翻（causal-analysis-agent 接管，归档前定稿）**：「演进定位」主线再次被推翻为「探索判断 agent——形态随话题变 + 见解为核心」。下方 `[~]` 任务（3.6 / 4.2 / 5.2 / 7.4 / 7.5）**全部作废**，由 [causal-analysis-agent](../causal-analysis-agent/) 接管实现（探索判断 agent，非演进定位）。骨架（三表分离、agent loop 三防御、可观测性、循环A）保留复用。归档时主 spec 合并两者（见 `openspec/specs/data-enrichment/spec.md`）。
 > 原型方向已验证：`prototype/evolution-report.html`（报刊式演进分析报告 + 双类引用）。
 
 ## 1. 数据源与板块配置层

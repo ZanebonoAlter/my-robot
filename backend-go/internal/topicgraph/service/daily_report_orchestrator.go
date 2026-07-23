@@ -11,11 +11,15 @@ import (
 	"syntopica-backend/internal/models"
 	"syntopica-backend/internal/platform/airouter"
 	"syntopica-backend/internal/platform/logging"
+	"syntopica-backend/internal/platform/tracing"
 	tagging "syntopica-backend/internal/tagmanagement"
 	"syntopica-backend/internal/topicgraph/repository"
 )
 
 func GenerateDailyReport(ctx context.Context, boardID uint, date time.Time) (*repository.BoardDailyReport, []repository.DailyReportSection, [][]repository.DailyReportThread, error) {
+	ctx, span := tracing.Tracer(tracing.ServiceName).Start(ctx, "workflow.daily_report.generate")
+	defer span.End()
+
 	startOfDay := repository.NormalizeReportDate(date)
 
 	// Step 1: Collect board event tags
@@ -34,7 +38,7 @@ func GenerateDailyReport(ctx context.Context, boardID uint, date time.Time) (*re
 	}
 
 	// Step 2: Deduplicate
-	tags = DeduplicateTags(tags, articleCounts)
+	tags = DeduplicateTags(ctx, tags, articleCounts)
 
 	// Step 2.5: Quality filter
 	tags = filterTagsByQuality(tags)
@@ -253,7 +257,8 @@ func GenerateDailyReport(ctx context.Context, boardID uint, date time.Time) (*re
 		}
 	}
 	if len(embedTexts) > 0 {
-		embedResult, embedErr := airouter.NewRouter().Embed(ctx, airouter.EmbeddingRequest{
+		embedCtx, embedSpan := tracing.Tracer(tracing.ServiceName).Start(ctx, "workflow.daily_report.section_embedding")
+		embedResult, embedErr := airouter.NewRouter().Embed(embedCtx, airouter.EmbeddingRequest{
 			Input:     embedTexts,
 			Operation: "section.embedding",
 			SessionID: SessionIDFromContext(ctx),
@@ -262,6 +267,7 @@ func GenerateDailyReport(ctx context.Context, boardID uint, date time.Time) (*re
 				"board_id":  boardID,
 			},
 		}, airouter.CapabilityEmbedding)
+		embedSpan.End()
 		if embedErr != nil {
 			logging.Warnf("daily-report: section embedding failed for board %d: %v", boardID, embedErr)
 		} else if len(embedResult.Embeddings) >= len(embedTexts) {

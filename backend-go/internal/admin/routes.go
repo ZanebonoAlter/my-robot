@@ -18,6 +18,7 @@ func RegisterRoutes(rg *gin.RouterGroup) {
 		ai.POST("/settings", SaveSettings)
 		ai.POST("/test", TestConnection)
 		ai.GET("/call-logs", ListCallLogs)
+		ai.GET("/sessions/:session_id", GetSession)
 	}
 
 	schedulers := rg.Group("/schedulers")

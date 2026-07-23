@@ -7,6 +7,7 @@
 #   C. 前端结构（ESLint 配置、Token 三层、双主题）
 #   D. 防孤立引用（每个 standard/*.md 被至少一处 AGENTS.md / README 引用）
 #   E. flow 变更溯源链接（archive change 被某 flow 文档「变更溯源」表引用，归档后校验）
+#   H. model tag 守门（Top3 密集文件禁止 GORM tag 里的 not null，约束由显式迁移兜底）
 #
 # 用法： bash scripts/check-standards.sh
 # 退出码：0 全过；1 有失败。
@@ -200,6 +201,27 @@ for f in docs/reference/*.md; do [ -f "$f" ] && NAV_FILES="$NAV_FILES $f"; done
 for f in $NAV_FILES; do
 	[ -f "$f" ] || continue
 	check_md_links "$f"
+done
+
+echo ""
+echo "== H. model tag 守门（Top3 密集文件禁止 not null）=="
+# 规范（standard/backend/code-style.md「GORM model tag 与迁移」）：显式迁移管的表，
+# model tag 只写字段名/类型/json，不写 not null——让显式迁移唯一管 DB 约束。
+# 这 3 个文件已由迁移 20260723_0001 把约束收敛到 DB 层，tag 里不得再出现 not null。
+# 注：serializer:json 字段的 default:'xxx' 是必要例外（影响 GORM 零值省略），本段不禁 default。
+MODEL_TAG_FILES="backend-go/internal/models/ai_models.go backend-go/internal/models/topic_graph.go backend-go/internal/models/semantic_label.go"
+for f in $MODEL_TAG_FILES; do
+	if [ ! -f "$f" ]; then
+		fail "缺失 $f（H 段无法扫描）"
+		continue
+	fi
+	# 只匹配 GORM tag 里的 not null（排除 Go 代码注释/字符串）。gorm tag 形如 `gorm:"...;not null;..."`
+	if grep -qE 'gorm:"[^"]*\bnot null\b' "$f"; then
+		count=$(grep -cE 'gorm:"[^"]*\bnot null\b' "$f")
+		fail "$(basename "$f") 仍有 $count 处 not null（应由迁移 20260723_0001 兜底，tag 里禁止）"
+	else
+		ok "$(basename "$f") 无 not null（约束已收敛到显式迁移）"
+	fi
 done
 
 echo ""

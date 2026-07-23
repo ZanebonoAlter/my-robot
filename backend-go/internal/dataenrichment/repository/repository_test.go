@@ -2,8 +2,10 @@ package repository_test
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"testing"
+	"time"
 
 	"github.com/glebarez/sqlite"
 	"gorm.io/gorm"
@@ -503,5 +505,151 @@ func TestTopicEnrichmentReview_UpdateFields(t *testing.T) {
 	got, _ = repository.Repo.GetTopicEnrichmentReviewByID(ctx, rv.ID)
 	if !got.Applied {
 		t.Fatal("expected applied=true after ApplyTopicEnrichmentReview")
+	}
+}
+
+// ── TopicEnrichmentQA ─────────────────────────────────────────────────────
+
+func TestTopicEnrichmentQA_TableName(t *testing.T) {
+	if got := (repository.TopicEnrichmentQA{}).TableName(); got != "topic_enrichment_qa" {
+		t.Fatalf("TableName = %q, want %q", got, "topic_enrichment_qa")
+	}
+}
+
+func TestTopicEnrichmentQA_CreateAndListByResultID(t *testing.T) {
+	setupRepoTestDB(t)
+	ctx := context.Background()
+
+	qa := &repository.TopicEnrichmentQA{
+		TopicEnrichmentResultID: 42,
+		Question:                "这个板块的核心驱动力是什么？",
+		Answer:                  "主要受政策预期与库存周期共振驱动。",
+		ToolCalls:               json.RawMessage(`[{"name":"search","args":{"q":"半导体"}}]`),
+		Source:                  "qa",
+	}
+	if err := repository.Repo.CreateTopicEnrichmentQA(ctx, qa); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if qa.ID == 0 {
+		t.Fatal("expected ID after create")
+	}
+
+	list, err := repository.Repo.ListTopicEnrichmentQAByResultID(ctx, 42)
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(list) != 1 {
+		t.Fatalf("list count = %d, want 1", len(list))
+	}
+	if list[0].Question != qa.Question {
+		t.Fatalf("question = %q, want %q", list[0].Question, qa.Question)
+	}
+	if list[0].Answer != qa.Answer {
+		t.Fatalf("answer = %q, want %q", list[0].Answer, qa.Answer)
+	}
+	if list[0].TopicEnrichmentResultID != 42 {
+		t.Fatalf("result id = %d, want 42", list[0].TopicEnrichmentResultID)
+	}
+
+	// A different result_id must not leak in.
+	other, err := repository.Repo.ListTopicEnrichmentQAByResultID(ctx, 999)
+	if err != nil {
+		t.Fatalf("list other result: %v", err)
+	}
+	if len(other) != 0 {
+		t.Fatalf("other result count = %d, want 0", len(other))
+	}
+}
+
+// TestTopicEnrichmentQA_MultiRoundOrdering verifies that multiple QA rounds
+// on the same result_id are returned in chronological (created_at ASC) order,
+// regardless of insertion order. Append-only: report rows are never rewritten.
+func TestTopicEnrichmentQA_MultiRoundOrdering(t *testing.T) {
+	setupRepoTestDB(t)
+	ctx := context.Background()
+
+	older := time.Date(2026, 7, 18, 10, 0, 0, 0, time.UTC)
+	newer := time.Date(2026, 7, 18, 10, 5, 0, 0, time.UTC)
+
+	qa1 := &repository.TopicEnrichmentQA{
+		TopicEnrichmentResultID: 7,
+		Question:                "第一轮追问",
+		CreatedAt:               older,
+	}
+	qa2 := &repository.TopicEnrichmentQA{
+		TopicEnrichmentResultID: 7,
+		Question:                "第二轮追问",
+		CreatedAt:               newer,
+	}
+	// Insert out of order to prove List sorts by created_at ASC, not insert order.
+	if err := repository.Repo.CreateTopicEnrichmentQA(ctx, qa2); err != nil {
+		t.Fatalf("create qa2: %v", err)
+	}
+	if err := repository.Repo.CreateTopicEnrichmentQA(ctx, qa1); err != nil {
+		t.Fatalf("create qa1: %v", err)
+	}
+
+	list, err := repository.Repo.ListTopicEnrichmentQAByResultID(ctx, 7)
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(list) != 2 {
+		t.Fatalf("list count = %d, want 2", len(list))
+	}
+	if list[0].Question != "第一轮追问" || list[1].Question != "第二轮追问" {
+		t.Fatalf("order = [%q, %q], want [第一轮追问, 第二轮追问] (created_at ASC)",
+			list[0].Question, list[1].Question)
+	}
+}
+
+// TestMarkQASedimented proves sediment flips Sedimented=true on the qa row and
+// does NOT touch the immutable result table (业务约束#2).
+func TestMarkQASedimented(t *testing.T) {
+	setupRepoTestDB(t)
+	ctx := context.Background()
+
+	// Seed a result + a qa row under it.
+	result := &repository.TopicEnrichmentResult{
+		PersistentTopicID: 1,
+		SessionID:         "data_enrichment_1_seed",
+	}
+	if err := repository.Repo.CreateTopicEnrichmentResult(ctx, result); err != nil {
+		t.Fatalf("create result: %v", err)
+	}
+	qa := &repository.TopicEnrichmentQA{
+		TopicEnrichmentResultID: result.ID,
+		Question:                "油价还会涨吗",
+		Answer:                  "短期承压",
+		Source:                  "qa",
+	}
+	if err := repository.Repo.CreateTopicEnrichmentQA(ctx, qa); err != nil {
+		t.Fatalf("create qa: %v", err)
+	}
+	if qa.Sedimented {
+		t.Fatal("new qa row should default to sedimented=false")
+	}
+
+	// Snapshot the result before sediment to prove immutability.
+	resultBefore, _ := repository.Repo.GetTopicEnrichmentResultByID(ctx, result.ID)
+
+	if err := repository.Repo.MarkQASedimented(ctx, qa.ID); err != nil {
+		t.Fatalf("MarkQASedimented: %v", err)
+	}
+
+	// The qa row is now flagged.
+	after, err := repository.Repo.GetTopicEnrichmentQAByID(ctx, qa.ID)
+	if err != nil {
+		t.Fatalf("get qa after: %v", err)
+	}
+	if !after.Sedimented {
+		t.Fatal("Sedimented should be true after MarkQASedimented")
+	}
+
+	// The result table is byte-for-byte unchanged.
+	resultAfter, _ := repository.Repo.GetTopicEnrichmentResultByID(ctx, result.ID)
+	beforeJSON, _ := json.Marshal(resultBefore)
+	afterJSON, _ := json.Marshal(resultAfter)
+	if string(beforeJSON) != string(afterJSON) {
+		t.Fatalf("result table must be immutable across sediment:\nbefore=%s\nafter =%s", beforeJSON, afterJSON)
 	}
 }

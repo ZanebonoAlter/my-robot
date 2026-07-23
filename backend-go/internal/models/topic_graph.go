@@ -46,19 +46,19 @@ func GetCategoryMeta(category string) TagCategoryMeta {
 // Tags are categorized into event, person, or keyword
 type TopicTag struct {
 	ID           uint        `gorm:"primaryKey" json:"id"`
-	Slug         string      `gorm:"size:120;not null;index:idx_topic_tags_category_slug" json:"slug"`
-	Label        string      `gorm:"size:160;not null" json:"label"`
-	Category     string      `gorm:"size:20;not null;default:keyword;index:idx_topic_tags_category_slug" json:"category"` // event, person, keyword
-	Icon         string      `gorm:"size:100" json:"icon"`                                                                // Iconify icon id, overrides category default
-	Aliases      string      `gorm:"type:text" json:"aliases"`                                                            // JSON array of alias strings
-	Description  string      `gorm:"type:text" json:"description"`                                                        // LLM-generated tag description
-	IsCanonical  bool        `gorm:"default:false" json:"is_canonical"`                                                   // true if this is a canonical tag (not merged)
-	Source       string      `gorm:"size:20;default:llm" json:"source"`                                                   // llm, heuristic, manual
-	FeedCount    int         `gorm:"default:0" json:"feed_count"`                                                         // distinct feed count referencing this tag
-	Status       string      `gorm:"size:20;not null;default:active;index" json:"status"`                                 // active, merged
-	MergedIntoID *uint       `gorm:"index" json:"merged_into_id,omitempty"`                                               // points to target tag when merged
-	IsWatched    bool        `gorm:"default:false" json:"is_watched"`                                                     // user-watched tag for feed filtering
-	WatchedAt    *time.Time  `json:"watched_at,omitempty"`                                                                // when the tag was watched
+	Slug         string      `gorm:"size:120;index:idx_topic_tags_category_slug" json:"slug"`
+	Label        string      `gorm:"size:160" json:"label"`
+	Category     string      `gorm:"size:20;default:keyword;index:idx_topic_tags_category_slug" json:"category"` // event, person, keyword
+	Icon         string      `gorm:"size:100" json:"icon"`                                                       // Iconify icon id, overrides category default
+	Aliases      string      `gorm:"type:text" json:"aliases"`                                                   // JSON array of alias strings
+	Description  string      `gorm:"type:text" json:"description"`                                               // LLM-generated tag description
+	IsCanonical  bool        `gorm:"default:false" json:"is_canonical"`                                          // true if this is a canonical tag (not merged)
+	Source       string      `gorm:"size:20;default:llm" json:"source"`                                          // llm, heuristic, manual
+	FeedCount    int         `gorm:"default:0" json:"feed_count"`                                                // distinct feed count referencing this tag
+	Status       string      `gorm:"size:20;default:active;index" json:"status"`                                 // active, merged
+	MergedIntoID *uint       `gorm:"index" json:"merged_into_id,omitempty"`                                      // points to target tag when merged
+	IsWatched    bool        `gorm:"default:false" json:"is_watched"`                                            // user-watched tag for feed filtering
+	WatchedAt    *time.Time  `json:"watched_at,omitempty"`                                                       // when the tag was watched
 	QualityScore float64     `gorm:"default:0" json:"quality_score"`
 	Metadata     MetadataMap `gorm:"type:jsonb;serializer:json;default:'{}'" json:"metadata,omitempty"`
 	CreatedAt    time.Time   `json:"created_at"`
@@ -118,11 +118,11 @@ func (TopicTag) TableName() string {
 // TopicTagEmbedding stores vector embeddings for tag similarity matching
 type TopicTagEmbedding struct {
 	ID            uint      `gorm:"primaryKey" json:"id"`
-	TopicTagID    uint      `gorm:"not null;uniqueIndex:idx_topic_tag_embeddings_tag_type_hash" json:"topic_tag_id"`
-	EmbeddingType string    `gorm:"size:20;not null;default:identity;uniqueIndex:idx_topic_tag_embeddings_tag_type_hash" json:"embedding_type"`
+	TopicTagID    uint      `gorm:"uniqueIndex:idx_topic_tag_embeddings_tag_type_hash" json:"topic_tag_id"`
+	EmbeddingType string    `gorm:"size:20;default:identity;uniqueIndex:idx_topic_tag_embeddings_tag_type_hash" json:"embedding_type"`
 	EmbeddingVec  string    `gorm:"type:vector;column:embedding" json:"-"`
-	Dimension     int       `gorm:"not null" json:"dimension"`                                                   // Vector dimension (e.g., 2048 for text-embedding-3-large)
-	Model         string    `gorm:"size:50;not null" json:"model"`                                               // Model used: "text-embedding-ada-002"
+	Dimension     int       `gorm:"" json:"dimension"`                                                           // Vector dimension (e.g., 2048 for text-embedding-3-large)
+	Model         string    `gorm:"size:50" json:"model"`                                                        // Model used: "text-embedding-ada-002"
 	TextHash      string    `gorm:"size:64;uniqueIndex:idx_topic_tag_embeddings_tag_type_hash" json:"text_hash"` // Hash of (label + aliases + category) for re-embedding detection
 	CreatedAt     time.Time `json:"created_at"`
 	UpdatedAt     time.Time `json:"updated_at"`
@@ -138,14 +138,14 @@ func (TopicTagEmbedding) TableName() string {
 // TagMergeSuggestion records a pair of similar tags proposed for manual merging.
 type TagMergeSuggestion struct {
 	ID            uint      `gorm:"primaryKey" json:"id"`
-	NewTagID      uint      `gorm:"not null;uniqueIndex:idx_tag_merge_suggestion_pair" json:"new_tag_id"`
-	ExistingTagID uint      `gorm:"not null;uniqueIndex:idx_tag_merge_suggestion_pair" json:"existing_tag_id"`
-	NewLabel      string    `gorm:"size:160;not null" json:"new_label"`
-	ExistingLabel string    `gorm:"size:160;not null" json:"existing_label"`
-	Category      string    `gorm:"size:20;not null" json:"category"`
-	Similarity    float64   `gorm:"not null;index:idx_tag_merge_suggestion_status_sim" json:"similarity"`
-	Status        string    `gorm:"size:20;not null;default:pending;index:idx_tag_merge_suggestion_status_sim" json:"status"` // pending, merged, dismissed
-	Source        string    `gorm:"size:20;not null;default:incremental" json:"source"`                                       // incremental, full_scan
+	NewTagID      uint      `gorm:"uniqueIndex:idx_tag_merge_suggestion_pair" json:"new_tag_id"`
+	ExistingTagID uint      `gorm:"uniqueIndex:idx_tag_merge_suggestion_pair" json:"existing_tag_id"`
+	NewLabel      string    `gorm:"size:160" json:"new_label"`
+	ExistingLabel string    `gorm:"size:160" json:"existing_label"`
+	Category      string    `gorm:"size:20" json:"category"`
+	Similarity    float64   `gorm:"index:idx_tag_merge_suggestion_status_sim" json:"similarity"`
+	Status        string    `gorm:"size:20;default:pending;index:idx_tag_merge_suggestion_status_sim" json:"status"` // pending, merged, dismissed
+	Source        string    `gorm:"size:20;default:incremental" json:"source"`                                       // incremental, full_scan
 	LLMVerdict    string    `gorm:"type:text" json:"llm_verdict"`
 	CreatedAt     time.Time `json:"created_at"`
 	UpdatedAt     time.Time `json:"updated_at"`
@@ -155,8 +155,8 @@ type TagMergeSuggestion struct {
 // This allows individual articles to be tagged for more granular topic tracking
 type ArticleTopicTag struct {
 	ID         uint      `gorm:"primaryKey" json:"id"`
-	ArticleID  uint      `gorm:"index:idx_article_topic_tag_article;uniqueIndex:idx_article_topic_tags_link;not null" json:"article_id"`
-	TopicTagID uint      `gorm:"index:idx_article_topic_tag_topic;uniqueIndex:idx_article_topic_tags_link;not null" json:"topic_tag_id"`
+	ArticleID  uint      `gorm:"index:idx_article_topic_tag_article;uniqueIndex:idx_article_topic_tags_link" json:"article_id"`
+	TopicTagID uint      `gorm:"index:idx_article_topic_tag_topic;uniqueIndex:idx_article_topic_tags_link" json:"topic_tag_id"`
 	Score      float64   `gorm:"default:0" json:"score"`
 	Source     string    `gorm:"size:20;default:llm" json:"source"` // llm, heuristic, manual
 	CreatedAt  time.Time `json:"created_at"`

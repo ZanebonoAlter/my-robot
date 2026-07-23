@@ -52,12 +52,14 @@ const LANE_LABEL_MAX = 8    // 泳道标签截断阈值（避让右侧 hover 操
 const LANE_LABEL_W = 180 // 左侧话题标签列宽（容结标签 + hover 操作菜单，避免重叠）
 
 // --- Status styling ---
+// Colors reference Layer 2 theme tokens (defined in main.css as
+// --color-thread-status-*), so they adapt to editorial/dark themes.
 const statusColorMap: Record<string, string> = {
-  emerging: '#34d399',
-  continuing: '#60a5fa',
-  split: '#fb923c',
-  merge: '#c084fc',
-  ending: '#9ca3af',
+  emerging: 'var(--color-thread-status-emerging)',
+  continuing: 'var(--color-thread-status-continuing)',
+  split: 'var(--color-thread-status-split)',
+  merge: 'var(--color-thread-status-merge)',
+  ending: 'var(--color-thread-status-ending)',
 }
 
 const statusLabels: Record<string, string> = {
@@ -69,7 +71,7 @@ const statusLabels: Record<string, string> = {
 }
 
 function statusFill(status: string): string {
-  return statusColorMap[status] || '#9ca3af'
+  return statusColorMap[status] || 'var(--color-thread-status-ending)'
 }
 
 // --- Detective wall entry: only on large screens with WebGL support ---

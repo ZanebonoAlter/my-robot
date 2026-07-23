@@ -13,7 +13,7 @@
 ## 技术选型
 
 | 组件 | 当前实现 | 说明 |
-|------|----------|------|
+| ------ | ---------- | ------ |
 | Trace SDK | `go.opentelemetry.io/otel` / `go.opentelemetry.io/otel/sdk` | OpenTelemetry 官方 Go SDK |
 | HTTP 中间件 | `otelgin` | 为 Gin 请求自动创建 `SERVER` span |
 | 自动注入 | `go-instrument` 生成后的代码已提交到仓库 | 当前不是运行时 agent，而是直接把生成代码写回 `.go` 文件 |
@@ -71,7 +71,7 @@ defer span.End()
 目前已落地的自动注入方法：
 
 | 文件 | 方法 | 当前效果 |
-|------|------|----------|
+| ------ | ------ | ---------- |
 | `backend-go/internal/reader/service/feed_service.go` | `FeedService.RefreshFeed` | 自动创建 span，自动记录 named error |
 | `backend-go/internal/reader/service/firecrawl_service.go` | `FirecrawlService.ScrapePage` | 自动创建 span，自动记录 named error |
 | `backend-go/internal/reader/service/content_completion_service.go` | `ContentCompletionService.CompleteArticle` | 自动创建 span，只有薄包装，无自动错误记录 |
@@ -123,18 +123,14 @@ tracing.TraceSchedulerTick("auto_refresh", "cron", func(ctx context.Context) {
 
 ### 5. 异步 trace helper 的实际状态
 
-`backend-go/internal/platform/tracing/helpers.go` 中已经提供：
+> **勘误（2026-07-22，`otel-tracing-completion` apply 核验）**：早期文档称 `helpers.go` 提供 `GoWithTrace` / `TraceAsyncOp`，实测**不存在**——`helpers.go` 仅余 `Tracer()`，`scheduler.go` 仅余 `TraceSchedulerTick()`，全仓 `GoWithTrace|TraceAsyncOp|parent_trace_id` 零命中。本 change 原计划接入异步 helper 已因此移出本批（见 change tasks.md 范围变更留痕）。
 
-- `GoWithTrace`
-- `TraceAsyncOp`
+现状：异步 trace 关联 helper **未落地**。跨 goroutine 的异步任务（如 `topic_watch` 评估）当前完全脱离 trace 上下文。若要重建：
 
-当前实现并不是把 goroutine 继续挂在原 span 下面，而是：
+- 在 `helpers.go` 实现 `GoWithTrace`：新起 `WithNewRoot()` 异步 root span + `parent_trace_id` attribute 软关联来源 trace（跨 goroutine 不硬挂子 span，OTel 不推荐）
+- 或用现有 `TraceSchedulerTick` 给异步任务开独立 root span（牺牲 parent 关联）
 
-- 新起一个 `WithNewRoot()` 的异步 root span
-- 用 attribute `parent_trace_id` 记录来源 trace
-- 再附带 `async.operation`
-
-目前仓库里还没有实际业务代码调用 `GoWithTrace` / `TraceAsyncOp`，所以这部分属于“工具已就位，业务尚未接入”。
+优先级：低于编排 span（task 2 已补）与 session 聚合端点（task 1 已补），后续单独 change。
 
 ## `go-instrument` 第一版的真实约束
 
@@ -171,7 +167,7 @@ tracing.TraceSchedulerTick("auto_refresh", "cron", func(ctx context.Context) {
 核心字段如下：
 
 | 字段 | 说明 |
-|------|------|
+| ------ | ------ |
 | `trace_id` | 32 位十六进制 trace ID |
 | `span_id` | 16 位十六进制 span ID |
 | `parent_span_id` | 父 span；根 span 可能为空或全零 |
@@ -289,12 +285,12 @@ tracing.TraceSchedulerTick("auto_refresh", "cron", func(ctx context.Context) {
 当前 tracing 基础设施集中在 `backend-go/internal/platform/tracing/`：
 
 | 文件 | 作用 |
-|------|------|
+| ------ | ------ |
 | `config.go` | tracing 默认配置 |
 | `model.go` | `otel_spans` 表结构与 JSON 序列化辅助 |
 | `exporter.go` | `SQLiteSpanExporter`（名称保留历史，实际写入 PostgreSQL）、入库、过期清理 |
 | `provider.go` | 初始化全局 `TracerProvider` 与 propagator |
-| `helpers.go` | `Tracer`、`StartSpan`、`GoWithTrace` 等工具 |
+| `helpers.go` | `Tracer()`（仅此；早期文档称有 `GoWithTrace`/`TraceAsyncOp`，实测不存在，见 §5） |
 | `scheduler.go` | scheduler / async 的包装入口 |
 | `query.go` | trace 查询、统计、树结构构建 |
 | `handler.go` | `/api/traces` HTTP handler |
@@ -306,11 +302,11 @@ tracing.TraceSchedulerTick("auto_refresh", "cron", func(ctx context.Context) {
 1. `go-instrument` 注入的方法多数还没补 attributes / events
 2. 外部调用还没有系统化区分 `CLIENT` span
 3. 前端虽然支持 `traceparent`，但后端没有显式回写响应头
-4. 异步 helper 已经存在，但暂无真实业务调用
+4. 异步 helper **不存在**（早期文档过时，见 §5）；跨 goroutine 任务脱离 trace
 5. 查询 API 已可用，但筛选能力仍偏基础
 
 如果继续往下推进，优先级建议是：
 
-1. 给 `FirecrawlService.ScrapePage`、`Router.Chat`、`FeedService.RefreshFeed` 补关键 attributes / events（注：`ai-call-logging-schema` change 已把 `Router.Chat`/`Router.Embed` 的 `ai.operation`/`ai.session_id`/`ai.capability` attribute 改为从 `ChatRequest`/`EmbeddingRequest` 一等字段注入；日报编排业务 span、events、其他外部调用 attributes 仍待补，见 `otel-tracing-completion` change）
+1. 给 `FirecrawlService.ScrapePage`、`Router.Chat`、`FeedService.RefreshFeed` 补关键 attributes / events（注：`ai-call-logging-schema` 已把 `Router.Chat`/`Router.Embed` 的 `ai.operation`/`ai.session_id`/`ai.capability` 从 `ChatRequest`/`EmbeddingRequest` 一等字段注入；`otel-tracing-completion` 已补日报编排业务 span `workflow.daily_report.*` + session 聚合端点 `GET /api/ai/sessions/:session_id`；但编排 span 的 **attributes/events 仍待补**，其他外部调用 attributes 仍待补）
 2. 明确哪些外部调用要手动补 `SpanKind=CLIENT`
 3. 再决定是否把 `go-instrument` 接入 `go generate` 或脚本化流程

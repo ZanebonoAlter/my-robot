@@ -33,6 +33,11 @@ type DebateRunner interface {
 	RunDebate(ctx context.Context, resultID, topicID uint, sessionID string, symbols []service.DebateSymbol) ([]*repository.StockDebateResult, error)
 }
 
+// QARunner abstracts QAAgent.Ask for handler testing.
+type QARunner interface {
+	Ask(ctx context.Context, resultID uint, question string) (*service.QAAnswer, error)
+}
+
 // EnrichmentHandler serves the data enrichment CRUD API.
 // Dependencies are injected via InitHandler (called from runtime.go).
 type EnrichmentHandler struct {
@@ -41,6 +46,7 @@ type EnrichmentHandler struct {
 	orchestrator      Orchestrator
 	boardConfigReader service.BoardConfigReader
 	debateSvc         DebateRunner
+	qaRunner          QARunner
 	db                *gorm.DB
 }
 
@@ -53,6 +59,7 @@ func InitHandler(
 	orchestrator Orchestrator,
 	boardConfigReader service.BoardConfigReader,
 	debateSvc DebateRunner,
+	qaRunner QARunner,
 	db *gorm.DB,
 ) {
 	instance = &EnrichmentHandler{
@@ -61,6 +68,7 @@ func InitHandler(
 		orchestrator:      orchestrator,
 		boardConfigReader: boardConfigReader,
 		debateSvc:         debateSvc,
+		qaRunner:          qaRunner,
 		db:                db,
 	}
 }
@@ -72,6 +80,7 @@ func NewHandler(
 	orchestrator Orchestrator,
 	boardConfigReader service.BoardConfigReader,
 	debateSvc DebateRunner,
+	qaRunner QARunner,
 	db *gorm.DB,
 ) *EnrichmentHandler {
 	return &EnrichmentHandler{
@@ -80,6 +89,7 @@ func NewHandler(
 		orchestrator:      orchestrator,
 		boardConfigReader: boardConfigReader,
 		debateSvc:         debateSvc,
+		qaRunner:          qaRunner,
 		db:                db,
 	}
 }
@@ -118,6 +128,16 @@ func (h *EnrichmentHandler) RegisterRoutes(rg *gin.RouterGroup) {
 		// Stock debate (FinGenius)
 		results.POST("/:id/debates", h.triggerDebate)
 		results.GET("/:id/debates", h.listDebates)
+
+		// Report follow-up Q&A (causal-analysis-agent 阶段2b)
+		results.POST("/:id/qa", h.askQA)
+		results.GET("/:id/qa", h.listQA)
+	}
+
+	// Table 4: topic_enrichment_qa sediment (manual pin; report stays immutable)
+	qa := enrichment.Group("/qa")
+	{
+		qa.POST("/:id/sediment", h.sedimentQA)
 	}
 
 	// Table 3: topic_enrichment_review
@@ -511,6 +531,114 @@ func (h *EnrichmentHandler) listDebates(c *gin.Context) {
 	respondOK(c, debates)
 }
 
+// ── Report follow-up Q&A (causal-analysis-agent 阶段2b) ────────────────────
+
+// askQA runs one follow-up round against an immutable report and returns the
+// answer. The report itself is never modified; each round appends a
+// topic_enrichment_qa row (source="qa").
+// POST /persistent-topics/:topicId/enrichment/results/:id/qa
+// Body: { "question": "..." }
+func (h *EnrichmentHandler) askQA(c *gin.Context) {
+	topicID, ok := parseTopicID(c)
+	if !ok {
+		return
+	}
+
+	resultID, ok := parseIDParam(c, "id")
+	if !ok {
+		return
+	}
+
+	// IDOR protection: validate the result belongs to this topic.
+	result, err := h.repo.GetTopicEnrichmentResultByID(c.Request.Context(), resultID)
+	if err != nil {
+		respondError(c, http.StatusNotFound, err.Error())
+		return
+	}
+	if result.PersistentTopicID != topicID {
+		respondError(c, http.StatusNotFound, "result not found for this topic")
+		return
+	}
+
+	var req struct {
+		Question string `json:"question" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		respondError(c, http.StatusBadRequest, "question is required")
+		return
+	}
+
+	answer, err := h.qaRunner.Ask(c.Request.Context(), resultID, req.Question)
+	if err != nil {
+		respondError(c, http.StatusInternalServerError, fmt.Sprintf("qa failed: %v", err))
+		return
+	}
+
+	respondOK(c, answer)
+}
+
+// listQA returns the multi-round follow-up history for a report, oldest first.
+// GET /persistent-topics/:topicId/enrichment/results/:id/qa
+func (h *EnrichmentHandler) listQA(c *gin.Context) {
+	resultID, ok := parseIDParam(c, "id")
+	if !ok {
+		return
+	}
+
+	list, err := h.repo.ListTopicEnrichmentQAByResultID(c.Request.Context(), resultID)
+	if err != nil {
+		respondError(c, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	respondOK(c, list)
+}
+
+// sedimentQA pins a follow-up round as a durable note (sedimented=true).
+// Only flips the flag on the qa row; the report (topic_enrichment_result) is
+// never rewritten (业务约束#2: result 不可变).
+// POST /persistent-topics/:topicId/enrichment/qa/:id/sediment
+func (h *EnrichmentHandler) sedimentQA(c *gin.Context) {
+	topicID, ok := parseTopicID(c)
+	if !ok {
+		return
+	}
+
+	qaID, ok := parseIDParam(c, "id")
+	if !ok {
+		return
+	}
+
+	// IDOR protection: qa has no PersistentTopicID, so validate via its result.
+	qa, err := h.repo.GetTopicEnrichmentQAByID(c.Request.Context(), qaID)
+	if err != nil {
+		respondError(c, http.StatusNotFound, err.Error())
+		return
+	}
+	result, err := h.repo.GetTopicEnrichmentResultByID(c.Request.Context(), qa.TopicEnrichmentResultID)
+	if err != nil {
+		respondError(c, http.StatusNotFound, err.Error())
+		return
+	}
+	if result.PersistentTopicID != topicID {
+		respondError(c, http.StatusNotFound, "qa not found for this topic")
+		return
+	}
+
+	if err := h.repo.MarkQASedimented(c.Request.Context(), qaID); err != nil {
+		respondError(c, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	qa, err = h.repo.GetTopicEnrichmentQAByID(c.Request.Context(), qaID)
+	if err != nil {
+		respondError(c, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	respondOK(c, qa)
+}
+
 // extractSymbolsFromSectors parses the sectors JSONB to extract symbols from each sector.
 func extractSymbolsFromSectors(sectorsJSON json.RawMessage) []service.DebateSymbol {
 	if len(sectorsJSON) == 0 {
@@ -567,8 +695,24 @@ func (h *EnrichmentHandler) listReviews(c *gin.Context) {
 // PUT /persistent-topics/:topicId/enrichment/reviews/:id
 // Body: { "deviation_summary": "..." }
 func (h *EnrichmentHandler) updateReviewDeviation(c *gin.Context) {
+	topicID, ok := parseTopicID(c)
+	if !ok {
+		return
+	}
+
 	id, ok := parseIDParam(c, "id")
 	if !ok {
+		return
+	}
+
+	// IDOR protection: validate the review belongs to this topic before mutating.
+	review, err := h.repo.GetTopicEnrichmentReviewByID(c.Request.Context(), id)
+	if err != nil {
+		respondError(c, http.StatusNotFound, err.Error())
+		return
+	}
+	if review.PersistentTopicID != topicID {
+		respondError(c, http.StatusNotFound, "review not found for this topic")
 		return
 	}
 
@@ -586,7 +730,7 @@ func (h *EnrichmentHandler) updateReviewDeviation(c *gin.Context) {
 	}
 
 	// Fetch the updated review.
-	review, err := h.repo.GetTopicEnrichmentReviewByID(c.Request.Context(), id)
+	review, err = h.repo.GetTopicEnrichmentReviewByID(c.Request.Context(), id)
 	if err != nil {
 		respondError(c, http.StatusInternalServerError, err.Error())
 		return
@@ -599,8 +743,24 @@ func (h *EnrichmentHandler) updateReviewDeviation(c *gin.Context) {
 // Does NOT write back to table 1 (context) per design §4.3.
 // POST /persistent-topics/:topicId/enrichment/reviews/:id/apply
 func (h *EnrichmentHandler) applyReview(c *gin.Context) {
+	topicID, ok := parseTopicID(c)
+	if !ok {
+		return
+	}
+
 	id, ok := parseIDParam(c, "id")
 	if !ok {
+		return
+	}
+
+	// IDOR protection: validate the review belongs to this topic before mutating.
+	review, err := h.repo.GetTopicEnrichmentReviewByID(c.Request.Context(), id)
+	if err != nil {
+		respondError(c, http.StatusNotFound, err.Error())
+		return
+	}
+	if review.PersistentTopicID != topicID {
+		respondError(c, http.StatusNotFound, "review not found for this topic")
 		return
 	}
 
@@ -609,7 +769,7 @@ func (h *EnrichmentHandler) applyReview(c *gin.Context) {
 		return
 	}
 
-	review, err := h.repo.GetTopicEnrichmentReviewByID(c.Request.Context(), id)
+	review, err = h.repo.GetTopicEnrichmentReviewByID(c.Request.Context(), id)
 	if err != nil {
 		respondError(c, http.StatusInternalServerError, err.Error())
 		return

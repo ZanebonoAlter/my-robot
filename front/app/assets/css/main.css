@@ -151,6 +151,13 @@
   --color-match-max-sim:    #f59e0b;
   --color-match-weighted:   #94a3b8;
 
+  /* Thread lifecycle status (BoardThreadBrowser) */
+  --color-thread-status-emerging:  #16a34a;
+  --color-thread-status-continuing: #2563eb;
+  --color-thread-status-split:      #ea580c;
+  --color-thread-status-merge:      #9333ea;
+  --color-thread-status-ending:     #64748b;
+
   /* Interactive/link blue */
   --color-link:            rgba(63, 124, 255, 0.9);
   --color-link-hover:      rgba(63, 124, 255, 1);
@@ -226,6 +233,13 @@
   --color-match-hit-rate:   #60a5fa;
   --color-match-max-sim:    #fbbf24;
   --color-match-weighted:   #94a3b8;
+
+  /* Thread lifecycle status (BoardThreadBrowser) — brighter on dark bg */
+  --color-thread-status-emerging:  #34d399;
+  --color-thread-status-continuing: #60a5fa;
+  --color-thread-status-split:      #fb923c;
+  --color-thread-status-merge:      #c084fc;
+  --color-thread-status-ending:     #9ca3af;
 
   /* Interactive/link blue */
   --color-link:            rgba(99, 179, 237, 0.9);

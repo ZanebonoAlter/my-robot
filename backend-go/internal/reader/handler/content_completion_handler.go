@@ -3,9 +3,9 @@ package handler
 import (
 	"fmt"
 	"net/http"
+	"strconv"
 
 	"github.com/gin-gonic/gin"
-	"syntopica-backend/internal/models"
 	"syntopica-backend/internal/platform/airouter"
 	"syntopica-backend/internal/reader/repository"
 	"syntopica-backend/internal/reader/service"
@@ -108,8 +108,8 @@ func CompleteFeedArticles(c *gin.Context) {
 	// Reload AI settings to pick up configuration changes made after startup.
 	loadCompletionAISettings()
 
-	var articles []models.Article
-	if err := repository.Repo.DB().Omit("tag_count", "relevance_score").Where("feed_id = ? AND summary_status IN ?", feedID, []string{"incomplete", "failed"}).Find(&articles).Error; err != nil {
+	articles, err := repository.Repo.ListArticlesByFeedAndStatuses(feedID, []string{"incomplete", "failed"})
+	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": err.Error()})
 		return
 	}
@@ -140,8 +140,14 @@ func GetCompletionStatus(c *gin.Context) {
 		return
 	}
 
-	var article models.Article
-	if err := repository.Repo.DB().First(&article, id).Error; err != nil {
+	articleID, err := strconv.ParseUint(id, 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "Invalid article ID"})
+		return
+	}
+
+	article, err := repository.Repo.GetArticle(uint(articleID))
+	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"success": false, "error": "Article not found"})
 		return
 	}

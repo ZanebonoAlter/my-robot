@@ -1343,6 +1343,32 @@ func postgresMigrations() []Migration {
 				return nil
 			},
 		},
+		{
+			Version:     "20260724_0001",
+			Description: "Re-apply DEFAULT+NOT NULL on status columns (topic_tags/tag_merge_suggestions/semantic_labels). 20260723_0001 intended this after stripping GORM default tags, but a DB rebuilt afterwards left column_default empty, producing empty/NULL status rows that broke strict status filters (e.g. board match tt.status='active'). Also backfills empty-string '' here — 20260723_0001's ensureNotNullDefault only handled NULL. Idempotent.",
+			Up: func(db *gorm.DB) error {
+				targets := []struct{ table, column, def string }{
+					{"topic_tags", "status", "'active'"},
+					{"tag_merge_suggestions", "status", "'pending'"},
+					{"semantic_labels", "status", "'active'"},
+				}
+				for _, t := range targets {
+					if !tableExists(db, t.table) {
+						continue
+					}
+					if err := db.Exec(fmt.Sprintf(`ALTER TABLE %s ALTER COLUMN %s SET DEFAULT %s`, t.table, t.column, t.def)).Error; err != nil {
+						return fmt.Errorf("set default %s.%s: %w", t.table, t.column, err)
+					}
+					if err := db.Exec(fmt.Sprintf(`UPDATE %s SET %s = %s WHERE %s IS NULL OR %s = ''`, t.table, t.column, t.def, t.column, t.column)).Error; err != nil {
+						return fmt.Errorf("backfill %s.%s: %w", t.table, t.column, err)
+					}
+					if err := db.Exec(fmt.Sprintf(`ALTER TABLE %s ALTER COLUMN %s SET NOT NULL`, t.table, t.column)).Error; err != nil {
+						return fmt.Errorf("set %s.%s NOT NULL: %w", t.table, t.column, err)
+					}
+				}
+				return nil
+			},
+		},
 	}
 }
 

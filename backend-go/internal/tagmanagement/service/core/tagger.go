@@ -161,6 +161,7 @@ func findOrCreateTag(ctx context.Context, tag TopicTag, source string, articleCo
 		Aliases:     string(aliasesJSON),
 		IsCanonical: true,
 		Source:      source,
+		Status:      "active",
 		Description: tagDescriptionForCategory(tag.Description, category),
 	}
 	if err := repository.Repo.DB().Create(&newTag).Error; err != nil {

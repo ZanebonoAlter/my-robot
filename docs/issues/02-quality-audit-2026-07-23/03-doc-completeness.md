@@ -120,11 +120,12 @@ scripts/check-standards.sh
 - **证据**: 声称「前置 topic-watchlist-observability 已归档」，但 `ls openspec/changes/archive/ | grep topic-watch` = **空**，topic-watchlist-observability 仍在 active 区（32/49）
 - **建议**: 要么先推进 topic-watchlist-observability 归档，要么修正前置声明
 
-#### [Medium] — otel-tracing-completion 停滞 18 天 + 0/12
+#### [Medium] — otel-tracing-completion 已归档（2026-07-24）
 
-- **位置**: `openspec/changes/otel-tracing-completion/`
-- **证据**: 最后提交 2026-07-05，至 2026-07-23 已停滞 18 天，tasks 0/12；且依赖前置 `ai-call-logging-schema` 已于 2026-07-05 归档（前置已满足），可恢复
-- **建议**: 确认是否废弃，或排期重启
+- **位置**: `openspec/changes/archive/2026-07-24-otel-tracing-completion/`
+- **状态**: ✅ 已归档。审计时（07-23）记录「停滞 18 天、0/12」，但提交 `8d66dbf`（07-23/07-24「数据增强实现优化，otel可视化调整基础实现」）已实质完成全部功能：聚合端点 `session_handler.go` + 路由 + `BuildSpanTree` + 5 个 `workflow.daily_report.*` 埋点 + root span + 拓扑测试（2 PASS）+ session 测试（4 PASS）；文档 `ai-sessions.md` + `tracing.md` 已入库。
+- **归档处置**（2026-07-24）：补勾 tasks.md 11 checkbox + 修正 doc-impact 声明（去掉 flow/database/standard 启发式误伤域，只留实际更新的 api/architecture）+ `openspec archive`（spec sync `otel-business-tracing` +2）。
+- **遗留教训**：该 change 曾导致 `check-standards.sh` F 段误判 FAIL——因改动已在混合提交 `8d66dbf` 入库，`doc-impact verify --base HEAD` 只看工作树未提交 diff，看不到已提交改动。这是 verify 对「已提交+悬空 change」的固有局限，归档后从 active 区移走即清零。
 
 ### 四、openspec changes 进行中状态总览
 
@@ -137,7 +138,7 @@ scripts/check-standards.sh
 | board-discovery-expansion | 20/46 (43%) | 2026-07-19 | 活跃 |
 | causal-analysis-agent | 0/63 (0%) | 2026-07-23（最新） | ⚠️ **代码先行，task 未勾 + 文档未补** |
 | watch-keyword-and-quickadd | 0/43 (0%) | 2026-07-04 | ⚠️ **未启动 + 前置声明错误** |
-| otel-tracing-completion | 0/12 (0%) | 2026-07-05 | ⚠️ **停滞 18 天** |
+| otel-tracing-completion | 0/12 (0%) tasks（代码已完成） | 2026-07-24（`8d66dbf`） | ✅ **已归档** `archive/2026-07-24-otel-tracing-completion`（补勾 checkbox + 修正 doc-impact 声明后归档）|
 
 **[Low]** 大部分 active change 未声明 doc-impact（仅 causal-analysis-agent 声明）——属过渡期正常，check-standards F 段判定 OK。
 

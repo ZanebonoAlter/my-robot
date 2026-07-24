@@ -61,6 +61,29 @@
 
 **JSONB 列空值**：非指针 `string` 字段写 `gorm:"type:jsonb"` 列时，零值 `""` 不是合法 JSON——入库前用 `db.Omit("col").Create()` 跳过空值列（DB 置 NULL），或改 `*string`/`datatypes.JSON`。`serializer:json` 的集合字段（如 `[]string`/`map`）必须保留 `default:'[]'`/`default:'{}'`（同 default tag 零值省略原理）。详见 testing.md「JSONB 列空串陷阱」。
 
+## 迁移编写规范（`postgres_migrations.go`）
+
+显式迁移结构体 `Migration` 除 `Version`/`Description`/`Up` 外，还有两个声明性字段 + 一个锁守卫 helper，用于应对事务兼容性与大表锁表风险：
+
+**`RunOutsideTx bool`——仅用于单条事务不兼容 DDL**。默认 false：`Up` 与版本记录共用一个事务（原子提交/回滚，失败下次重试）。设 true 时 `Up` 在裸连接上跑（无外层事务），成功后单独记录版本——**这是 `CREATE INDEX CONCURRENTLY` 等事务内必报错（SQLSTATE 25001）操作的唯一出路**。⚠️ 只用于单条事务不兼容语句；需要原子性的多步操作（ALTER → UPDATE → DROP）必须留在事务内（默认路径）。事务外 `Up` 失败不记录版本（下次重试），因此迁移自身必须幂等（`IF NOT EXISTS` / 开头清残留），尤其 CONCURRENTLY 失败会留 INVALID 索引，闭包应先 `DROP INDEX IF EXISTS` 再建。
+
+**`Down func(db *gorm.DB) error`——声明性占位，nil = 不可逆**。当前无回滚执行器（无 CLI/HTTP 入口，按 AGENTS.md「Simplicity First」不预先实现）。破坏性迁移（TRUNCATE/DROP）`Down` 留 nil，**在 `Description` 末尾标注「⚠️ 不可逆 TRUNCATE（破坏性，受 `MIGRATIONS_ALLOW_DESTRUCTIVE` 守卫；生产执行前需备份）」**——TRUNCATE 数据物理不可恢复，写"恢复 DDL"是假象，诚实标注比假回滚好。
+
+**`withLockTimeout(db, timeout, fn)`——长锁 DDL 必须用**。`ALTER COLUMN TYPE`（全表重写）和 `ADD CONSTRAINT UNIQUE`（扫全表验证）会拿 AccessExclusiveLock，大表上无限阻塞写入。helper 用 `SET LOCAL lock_timeout`（事务内有效，结束自动复位，且有防御性显式复位防连接池泄漏）包裹语句，超时让语句失败而非无限阻塞——**有意的安全收紧**。默认 timeout `"5s"`。用法：
+
+```go
+if err := withLockTimeout(db, "5s", func(tx *gorm.DB) error {
+    if err := tx.Exec("ALTER TABLE t ALTER COLUMN c TYPE vector(4096)").Error; err != nil {
+        return fmt.Errorf("alter column: %w", err)
+    }
+    return nil
+}); err != nil {
+    return err
+}
+```
+
+短操作（小表 `CREATE INDEX IF NOT EXISTS`、CHECK 约束的 `DO $$ ... END $$`、单行级联 FK）不需要守卫——统一注入会误杀正常路径。
+
 ## Anti-Patterns（硬禁）
 
 - ❌ `router.go` 里写业务逻辑

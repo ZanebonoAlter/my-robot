@@ -3,6 +3,8 @@
 Syntopica 数据库全景概览与索引/约束权威清单。
 
 > **真相源 = 代码**：GORM struct gorm tag（`internal/models/*.go`、`internal/dataenrichment/repository/models.go`、`internal/topicgraph/repository/daily_report_models.go`、`internal/platform/tracing/model.go`）+ 迁移 DDL（`internal/platform/database/postgres_migrations.go`）+ 运行时建索引代码。本页据此重写。
+>
+> **迁移执行器能力**（`internal/platform/database/migrator.go`）：`Migration` 结构体除 `Version/Description/Up` 外，支持 `RunOutsideTx`（事务外执行，为 `CREATE INDEX CONCURRENTLY` 解锁）、`Down`（声明性占位，nil = 不可逆）；长锁 DDL（`ALTER TYPE`/`ADD CONSTRAINT UNIQUE`）用 `withLockTimeout` 守卫防大表无限阻塞。编写规范见 [`standard/backend/code-style.md`](../standard/backend/code-style.md)「迁移编写规范」。
 
 ---
 

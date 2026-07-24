@@ -28,7 +28,10 @@
 | **D-Med-5 SET NOT NULL 幂等** | ✅ 已修复（07-24） | `20260704_0001` 改用 `ensureNotNullDefault`（幂等） |
 | **M-High-3 tag 剥离（30 处 default）** | ✅ 已修复（07-24） | ai_models/topic_graph/semantic_label 三文件剥离 default/not null（保留 3 个 jsonb serializer 例外）；check-standards H 段守门验证计数 |
 | **D-High-6 假注释** | ✅ 已修复（07-24，注释部分） | `embedding.go:449` IVFFlat 假注释改为如实描述；3 套逻辑统一（helper 抽取）留架构 change |
-| **DDL 迁移层专项（架构级，D-High-1/3/4/5/6）** | ⏳ 待执行（change `db-ddl-hardening-architecture`） | migrator 事务外迁移、向量维度去硬编码、3 套逻辑统一、大表索引 CONCURRENTLY |
+| **D-High-3 migrator 事务外迁移（根因）** | ✅ 已修复（07-24，切片2a `db-ddl-hardening-architecture`） | `Migration` 加 `RunOutsideTx bool` 字段；`runMigrationsList` 分事务内/外两路径，事务外 Up 失败不记录版本（可重试）。为切片2b 的 CONCURRENTLY 索引解锁 |
+| **D-Med-7 无 down/回滚迁移** | ✅ 已修复（07-24，切片2a） | `Migration` 加 `Down` 字段（声明性占位，nil=不可逆，不实现执行器）；3 条破坏性迁移 Description 标注「⚠️ 不可逆」 |
+| **D-High-4 ALTER TYPE/ADD CONSTRAINT 无 lock_timeout（迁移层）** | ✅ 已修复（07-24，切片2a） | 新增 `withLockTimeout` helper（SET LOCAL，复用 daily_report 先例）；给 3 处长锁 DDL 加 5s 守卫（20260403_0003 vector ALTER + 20260603/0620_0001 UNIQUE 约束）。运行时 ensurer 4 处 lock_timeout 留切片2b |
+| **DDL 迁移层专项（架构级，D-High-1/5 + 运行时 lock_timeout + tag 收口）** | ⏳ 待执行（切片2b） | 大表索引 CONCURRENTLY（依赖切片2a RunOutsideTx）、向量维度去硬编码、运行时 ensurer 4 处 lock_timeout + 3 套逻辑统一、M-High-2 tag 长尾收口 |
 
 > **门禁**：本次为只读审计，未改动代码。下方所有优化方案均为建议，执行前需按 `开发执行规范.md §0.6` 走 openspec change 编排。
 

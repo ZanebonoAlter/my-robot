@@ -3,4 +3,16 @@ package database
 // export_test.go exposes unexported migration helpers to the external test
 // package (database_test) so integration tests can drive them directly with
 // seeded data. These vars exist only in the test build.
-var ExportedRunAuxLabelDupMerge = runAuxLabelDupMerge
+var (
+	ExportedRunAuxLabelDupMerge = runAuxLabelDupMerge
+
+	// RunMigrationsList exposes the core migration loop so tests can run a
+	// hand-built migration list (e.g. a probe migration with RunOutsideTx=true)
+	// against a testcontainer without mutating the production
+	// postgresMigrations() slice. See db-migration-execution capability.
+	RunMigrationsList = runMigrationsList
+
+	// WithLockTimeout exposes the lock_timeout guard helper so integration tests
+	// can assert its SET LOCAL semantics (GUC applies during fn, resets after).
+	WithLockTimeout = withLockTimeout
+)

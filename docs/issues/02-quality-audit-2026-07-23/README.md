@@ -41,7 +41,7 @@
 | 后端代码设计 | B− | **B**（model tag Top3 治理 + 4 处 handler 下沉 + 守门） |
 | 前端代码设计 | B | **B**（机械项已清，大重构未做维持 B） |
 | 文档完整性 | B | **B+**（High 全修 + doc-impact 全绿） |
-| **数据库 DDL/迁移**（07-24 补） | 迁移层 **B−** / 模型层 **B+** | 迁移层 **B**（07-24 修复破坏性迁移守卫 D-High-7 + SET NOT NULL 幂等 D-Med-5 + tag 剥离 M-High-3 + 假注释 D-High-6；架构级 D-High-1/3/4/5 留 `db-ddl-hardening-architecture` change）/ 模型层 **A−**（tag 长尾 13 文件待收口） |
+| **数据库 DDL/迁移**（07-24 补） | 迁移层 **B−** / 模型层 **B+** | 迁移层 **B+**（07-24 切片1 修复破坏性迁移守卫 D-High-7 + SET NOT NULL 幂等 D-Med-5 + tag 剥离 M-High-3 + 假注释 D-High-6；切片2a 修复 migrator 事务外迁移 D-High-3 + Down 字段 D-Med-7 + lock_timeout 守卫 D-High-4 迁移层部分；留切片2b：CONCURRENTLY 索引 D-High-1 + 向量维度 D-High-5 + 运行时 lock_timeout + tag 长尾 M-High-2）/ 模型层 **A−**（tag 长尾 13 文件待收口） |
 
 ## 一、审计背景与依据
 
@@ -116,7 +116,7 @@
 
 ## 五、Low 级问题（择机处理）
 
-> 详见各分报告。代表性：多处 best-effort 吞错无日志（`_ = ...`）、`components/dialog/` 混放各域业务对话框、`preferences.ts` computed 内原地 sort、otel-tracing-completion 停滞 18 天等。
+> 详见各分报告。代表性：多处 best-effort 吞错无日志（`_ = ...`）、`components/dialog/` 混放各域业务对话框、`preferences.ts` computed 内原地 sort、otel-tracing-completion 已归档等。
 
 ## 六、正面发现（值得保持的工程亮点）
 
@@ -149,7 +149,7 @@
 ### 第三优先（执行规范回潮）
 
 8. 前端主题硬编码治理（M6）、`as unknown as` → unwrapResponse（M8）、补核心 composable 单测（M9）。
-9. 流程纪律：修正 watch-keyword 前置声明（H6）、处置 otel-tracing 停滞。
+9. 流程纪律：修正 watch-keyword 前置声明（H6）、otel-tracing-completion 已归档（详见 03 报告）。
 
 ## 八、分报告索引
 

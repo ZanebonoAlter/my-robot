@@ -64,6 +64,36 @@ func ensureNotNullDefault(db *gorm.DB, table, column, defaultLit string) error {
 	return nil
 }
 
+// withLockTimeout runs fn inside a lock_timeout guard, resetting lock_timeout to
+// DEFAULT after fn returns. Use it around long-locking DDL (ALTER COLUMN TYPE,
+// ADD CONSTRAINT UNIQUE) so a large table is not blocked indefinitely — if the
+// statement cannot acquire the lock within timeout, it fails fast instead of
+// stalling writers forever.
+//
+// timeout is a PostgreSQL interval-style string such as "5s" or "10s". It uses
+// SET LOCAL (effective for the rest of the current transaction), and the
+// trailing reset is defensive: migrations run inside a transaction so SET LOCAL
+// would auto-reset at COMMIT anyway, but the explicit reset protects against
+// this helper ever being reused on a bare/pooled connection where SET LOCAL
+// would otherwise leak to the next caller.
+//
+// timeout is a hardcoded constant string supplied by the migration author (e.g.
+// "5s"), never external/user input, so the fmt.Sprintf SQL build below is not a
+// SQL injection vector — hence the inline #nosec G201 (mirrors the
+// daily_report_models.go:299 precedent for SET LOCAL lock_timeout).
+func withLockTimeout(db *gorm.DB, timeout string, fn func(*gorm.DB) error) error {
+	if err := db.Exec(fmt.Sprintf("SET LOCAL lock_timeout = %q" /* #nosec G201 */, timeout)).Error; err != nil {
+		return fmt.Errorf("set lock_timeout=%s: %w", timeout, err)
+	}
+	if err := fn(db); err != nil {
+		return err
+	}
+	// Defensive reset (SET LOCAL auto-resets at tx end, but guard against GUC
+	// leakage on pooled/bare connections if this helper is ever reused there).
+	_ = db.Exec("SET LOCAL lock_timeout = DEFAULT").Error
+	return nil
+}
+
 // postgresMigrations returns versioned migrations for operations that GORM AutoMigrate
 // cannot handle: extensions, custom indexes, triggers, data migrations, column/table drops.
 //
@@ -89,8 +119,16 @@ func postgresMigrations() []Migration {
 				if err := db.Exec("ALTER TABLE topic_tag_embeddings ADD COLUMN IF NOT EXISTS embedding vector(4096)").Error; err != nil {
 					return fmt.Errorf("add topic_tag_embeddings.embedding column: %w", err)
 				}
-				if err := db.Exec("ALTER TABLE topic_tag_embeddings ALTER COLUMN embedding TYPE vector(4096)").Error; err != nil {
-					return fmt.Errorf("set topic_tag_embeddings.embedding dimensions: %w", err)
+				// ALTER COLUMN TYPE rewrites the whole table under an
+				// AccessExclusiveLock — guard with lock_timeout so a large table
+				// fails fast instead of blocking writers indefinitely.
+				if err := withLockTimeout(db, "5s", func(tx *gorm.DB) error {
+					if err := tx.Exec("ALTER TABLE topic_tag_embeddings ALTER COLUMN embedding TYPE vector(4096)").Error; err != nil {
+						return fmt.Errorf("set topic_tag_embeddings.embedding dimensions: %w", err)
+					}
+					return nil
+				}); err != nil {
+					return err
 				}
 				return nil
 			},
@@ -592,11 +630,20 @@ func postgresMigrations() []Migration {
 				`).Error; err != nil {
 					return fmt.Errorf("drop old constraint: %w", err)
 				}
-				if err := db.Exec(`
-					ALTER TABLE daily_report_section_relations
-					ADD CONSTRAINT uq_section_relations_pair UNIQUE (from_section_id, to_section_id)
-				`).Error; err != nil {
-					return fmt.Errorf("add unique constraint: %w", err)
+				// ADD CONSTRAINT UNIQUE scans the whole table to verify
+				// uniqueness under an AccessExclusiveLock — guard with
+				// lock_timeout so a large table fails fast instead of blocking
+				// writers indefinitely.
+				if err := withLockTimeout(db, "5s", func(tx *gorm.DB) error {
+					if err := tx.Exec(`
+						ALTER TABLE daily_report_section_relations
+						ADD CONSTRAINT uq_section_relations_pair UNIQUE (from_section_id, to_section_id)
+					`).Error; err != nil {
+						return fmt.Errorf("add unique constraint: %w", err)
+					}
+					return nil
+				}); err != nil {
+					return err
 				}
 
 				// 2. Migrate existing prev_section_id data into relations (if column exists)
@@ -864,11 +911,20 @@ func postgresMigrations() []Migration {
 				`).Error; err != nil {
 					return fmt.Errorf("drop old section_relations pair constraint: %w", err)
 				}
-				if err := db.Exec(`
-					ALTER TABLE daily_report_section_relations
-					ADD CONSTRAINT uq_section_relations_pair UNIQUE (from_section_id, to_section_id, relation_type)
-				`).Error; err != nil {
-					return fmt.Errorf("add widened section_relations pair constraint: %w", err)
+				// ADD CONSTRAINT UNIQUE (widened to include relation_type) scans
+				// the whole table to verify uniqueness under an
+				// AccessExclusiveLock — guard with lock_timeout so a large table
+				// fails fast instead of blocking writers indefinitely.
+				if err := withLockTimeout(db, "5s", func(tx *gorm.DB) error {
+					if err := tx.Exec(`
+						ALTER TABLE daily_report_section_relations
+						ADD CONSTRAINT uq_section_relations_pair UNIQUE (from_section_id, to_section_id, relation_type)
+					`).Error; err != nil {
+						return fmt.Errorf("add widened section_relations pair constraint: %w", err)
+					}
+					return nil
+				}); err != nil {
+					return err
 				}
 				return nil
 			},
@@ -1057,7 +1113,7 @@ func postgresMigrations() []Migration {
 		// ── Lifeline context: period-archival model change ──────────
 		{
 			Version:     "20260706_0001",
-			Description: "Drop old idx_topic_gran unique index; TRUNCATE topic_lifeline_context old data (pre-period model). Destructive — guarded by MIGRATIONS_ALLOW_DESTRUCTIVE.",
+			Description: "Drop old idx_topic_gran unique index; TRUNCATE topic_lifeline_context old data (pre-period model). Destructive — guarded by MIGRATIONS_ALLOW_DESTRUCTIVE. ⚠️ 不可逆 TRUNCATE（破坏性，受 `MIGRATIONS_ALLOW_DESTRUCTIVE` 守卫；生产执行前需备份）",
 			Up: func(db *gorm.DB) error {
 				// Destructive (TRUNCATE): skip unless MIGRATIONS_ALLOW_DESTRUCTIVE=1.
 				// Production never enables this; dev/test set the env to clean pre-period data.
@@ -1095,7 +1151,7 @@ func postgresMigrations() []Migration {
 		// stock_debate_result FK 引用 result，一并清。幂等：TRUNCATE 本身幂等 + 框架按 Version 去重。
 		{
 			Version:     "20260712_0001",
-			Description: "TRUNCATE topic_enrichment_result/topic_enrichment_review/stock_debate_result — old 涨跌+兑现 schema incompatible with 演进定位 rewrite (§11.5). Destructive — guarded by MIGRATIONS_ALLOW_DESTRUCTIVE.",
+			Description: "TRUNCATE topic_enrichment_result/topic_enrichment_review/stock_debate_result — old 涨跌+兑现 schema incompatible with 演进定位 rewrite (§11.5). Destructive — guarded by MIGRATIONS_ALLOW_DESTRUCTIVE. ⚠️ 不可逆 TRUNCATE（破坏性，受 `MIGRATIONS_ALLOW_DESTRUCTIVE` 守卫；生产执行前需备份）",
 			Up: func(db *gorm.DB) error {
 				// Destructive (TRUNCATE): skip unless MIGRATIONS_ALLOW_DESTRUCTIVE=1.
 				if !IsDestructiveAllowed() {
@@ -1161,7 +1217,7 @@ func postgresMigrations() []Migration {
 		// 幂等：TRUNCATE 本身幂等 + RESTART IDENTITY 复位序列；版本迁移按 Version 去重只跑一次。
 		{
 			Version:     "20260718_0001",
-			Description: "TRUNCATE topic_enrichment_result/topic_enrichment_review — stale 演进定位 (position/signals/verdict) semantics retired for causal-analysis-agent (探索判断). Destructive — guarded by MIGRATIONS_ALLOW_DESTRUCTIVE.",
+			Description: "TRUNCATE topic_enrichment_result/topic_enrichment_review — stale 演进定位 (position/signals/verdict) semantics retired for causal-analysis-agent (探索判断). Destructive — guarded by MIGRATIONS_ALLOW_DESTRUCTIVE. ⚠️ 不可逆 TRUNCATE（破坏性，受 `MIGRATIONS_ALLOW_DESTRUCTIVE` 守卫；生产执行前需备份）",
 			Up: func(db *gorm.DB) error {
 				// Destructive (TRUNCATE): skip unless MIGRATIONS_ALLOW_DESTRUCTIVE=1.
 				if !IsDestructiveAllowed() {

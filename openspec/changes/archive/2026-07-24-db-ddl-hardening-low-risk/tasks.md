@@ -4,12 +4,12 @@
 >
 > 垂直切片，每切片独立可交付、可验证。推荐顺序：A 配置+守卫（堵生产丢数据）→ B 测试适配 → C 注释/幂等/tag 机械修复。尾部遵循《开发执行规范》§11 归档门禁。
 
-<!-- doc-impact: configuration, deployment, database, flow -->
+<!-- doc-impact: configuration, deployment, database -->
 <!--
   database 域：启发式命中（改了 internal/models/），但 tag 剥离不改 DB schema
     （NOT NULL/DEFAULT 约束由 20260723_0001 兜底），DATABASE_FIELDS.md 无需更新。
   flow 域：启发式命中（改了 tagmanagement/service/core/ 注释），但仅删假 IVFFlat
-    注释、不改业务流程，flow/ 无需更新。
+    注释、不改业务流程，flow/ 无需更新——无 flow 影响，按《开发执行规范》§12.2 豁免溯源。
   实际更新的文档：configuration.md（env 表）、deployment.md（破坏性迁移开关节）。
 -->
 

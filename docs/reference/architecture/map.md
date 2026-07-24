@@ -40,7 +40,7 @@ flowchart LR
 | 路由面 | [runtime.md](runtime.md) §当前路由面 | `internal/app/router.go` |
 | 链路追踪（OpenTelemetry） | [tracing.md](tracing.md) | `internal/platform/tracing/` |
 | WebSocket / 事件流 | [frontend.md](frontend.md) §实时事件流 | `internal/platform/ws/`、前端 `composables/useEventStream` |
-| 数据库 | [overview.md](overview.md)、[database/](../database/) | `internal/platform/database/` |
+| 数据库 | [overview.md](overview.md)、[database/](../database/) | `internal/platform/database/`（迁移执行器支持事务外执行 `RunOutsideTx` / 声明性 `Down` / `withLockTimeout` 锁守卫，编写规范见 [standard/backend/code-style.md](../standard/backend/code-style.md)「迁移编写规范」） |
 
 ## 代码规约去哪查
 

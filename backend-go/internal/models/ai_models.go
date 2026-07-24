@@ -9,16 +9,16 @@ type SchedulerTask struct {
 	ID                    uint       `gorm:"primaryKey" json:"id"`
 	Name                  string     `gorm:"size:50;unique;index" json:"name"`
 	Description           string     `gorm:"size:200" json:"description"`
-	CheckInterval         int        `gorm:"default:60" json:"check_interval"` // seconds
+	CheckInterval         int        `json:"check_interval"` // seconds
 	LastExecutionTime     *time.Time `json:"last_execution_time"`
 	NextExecutionTime     *time.Time `json:"next_execution_time"`
-	Status                string     `gorm:"size:20;default:idle;index" json:"status"`
+	Status                string     `gorm:"size:20;index" json:"status"`
 	LastError             string     `gorm:"type:text" json:"last_error"`
 	LastErrorTime         *time.Time `json:"last_error_time"`
-	TotalExecutions       int        `gorm:"default:0" json:"total_executions"`
-	SuccessfulExecutions  int        `gorm:"default:0" json:"successful_executions"`
-	FailedExecutions      int        `gorm:"default:0" json:"failed_executions"`
-	ConsecutiveFailures   int        `gorm:"default:0" json:"consecutive_failures"`
+	TotalExecutions       int        `json:"total_executions"`
+	SuccessfulExecutions  int        `json:"successful_executions"`
+	FailedExecutions      int        `json:"failed_executions"`
+	ConsecutiveFailures   int        `json:"consecutive_failures"`
 	LastExecutionDuration *float64   `json:"last_execution_duration"` // seconds
 	LastExecutionResult   string     `gorm:"type:text" json:"last_execution_result"`
 	CreatedAt             time.Time  `json:"created_at"`
@@ -65,18 +65,18 @@ type AISettings struct {
 type AIProvider struct {
 	ID             uint     `gorm:"primaryKey" json:"id"`
 	Name           string   `gorm:"size:100;unique;index" json:"name"`
-	ProviderType   string   `gorm:"size:50;default:openai_compatible;index" json:"provider_type"`
+	ProviderType   string   `gorm:"size:50;index" json:"provider_type"`
 	BaseURL        string   `gorm:"size:500" json:"base_url"`
 	APIKey         string   `gorm:"type:text" json:"api_key"`
 	Model          string   `gorm:"size:100" json:"model"`
-	Enabled        bool     `gorm:"default:true;index" json:"enabled"`
-	TimeoutSeconds int      `gorm:"default:120" json:"timeout_seconds"`
+	Enabled        bool     `gorm:"index" json:"enabled"`
+	TimeoutSeconds int      `json:"timeout_seconds"`
 	MaxTokens      *int     `json:"max_tokens,omitempty"`
 	Temperature    *float64 `json:"temperature,omitempty"`
 	// EnableThinking controls whether the request propagates
 	// chat_template_kwargs.enable_thinking=true, letting the model reason.
 	// (Previously this flag only stripped <think> tags from responses after-the-fact.)
-	EnableThinking bool      `gorm:"default:false" json:"enable_thinking"`
+	EnableThinking bool      `json:"enable_thinking"`
 	Metadata       string    `gorm:"type:text" json:"metadata"`
 	CreatedAt      time.Time `json:"created_at"`
 	UpdatedAt      time.Time `json:"updated_at"`
@@ -90,11 +90,11 @@ type AIRoute struct {
 	ID             uint              `gorm:"primaryKey" json:"id"`
 	Name           string            `gorm:"size:100;index:idx_ai_routes_capability_name,unique" json:"name"`
 	Capability     string            `gorm:"size:50;index:idx_ai_routes_capability_name,unique;index" json:"capability"`
-	Enabled        bool              `gorm:"default:true;index" json:"enabled"`
-	Priority       int               `gorm:"default:100;index" json:"priority"`
-	Strategy       string            `gorm:"size:50;default:ordered_failover" json:"strategy"`
+	Enabled        bool              `gorm:"index" json:"enabled"`
+	Priority       int               `gorm:"index" json:"priority"`
+	Strategy       string            `gorm:"size:50" json:"strategy"`
 	Description    string            `gorm:"size:255" json:"description"`
-	MaxConcurrency int               `gorm:"default:0" json:"max_concurrency"` // 0 means use default per capability
+	MaxConcurrency int               `json:"max_concurrency"` // 0 means use default per capability
 	RouteProviders []AIRouteProvider `gorm:"foreignKey:RouteID" json:"route_providers,omitempty"`
 	CreatedAt      time.Time         `json:"created_at"`
 	UpdatedAt      time.Time         `json:"updated_at"`
@@ -108,8 +108,8 @@ type AIRouteProvider struct {
 	ID         uint       `gorm:"primaryKey" json:"id"`
 	RouteID    uint       `gorm:"index:idx_ai_route_provider_link,unique" json:"route_id"`
 	ProviderID uint       `gorm:"index:idx_ai_route_provider_link,unique" json:"provider_id"`
-	Priority   int        `gorm:"default:100;index" json:"priority"`
-	Enabled    bool       `gorm:"default:true;index" json:"enabled"`
+	Priority   int        `gorm:"index" json:"priority"`
+	Enabled    bool       `gorm:"index" json:"enabled"`
 	Provider   AIProvider `gorm:"foreignKey:ProviderID" json:"provider"`
 	CreatedAt  time.Time  `json:"created_at"`
 	UpdatedAt  time.Time  `json:"updated_at"`
@@ -127,7 +127,7 @@ type AICallLog struct {
 	ProviderName    string    `gorm:"size:100" json:"provider_name"`
 	Model           string    `gorm:"size:100" json:"model,omitempty"`
 	Success         bool      `gorm:"index" json:"success"`
-	IsFallback      bool      `gorm:"default:false" json:"is_fallback"`
+	IsFallback      bool      `json:"is_fallback"`
 	LatencyMs       int       `json:"latency_ms"`
 	ErrorCode       string    `gorm:"size:100" json:"error_code"`
 	ErrorMessage    string    `gorm:"type:text" json:"error_message"`

@@ -7,12 +7,26 @@ import (
 	"gorm.io/gorm"
 
 	"syntopica-backend/internal/models"
+	"syntopica-backend/internal/platform/config"
+	"syntopica-backend/internal/platform/logging"
 )
 
 type Migration struct {
 	Version     string
 	Description string
 	Up          func(db *gorm.DB) error
+}
+
+// allowDestructive controls whether destructive migrations (TRUNCATE/DROP) run.
+// Initialized in RunMigrations from config.AppConfig.Database.AllowDestructiveMigrations
+// (env MIGRATIONS_ALLOW_DESTRUCTIVE=1). Defaults to false (production-safe).
+// Migrations read it via IsDestructiveAllowed() to self-guard destructive operations.
+var allowDestructive bool
+
+// IsDestructiveAllowed reports whether destructive migrations are permitted.
+// Call at the top of a migration Up closure to self-guard TRUNCATE/DROP operations.
+func IsDestructiveAllowed() bool {
+	return allowDestructive
 }
 
 // extraModels holds domain-specific models registered via RegisterModels.
@@ -70,6 +84,17 @@ func RunAutoMigrate(db *gorm.DB) error {
 func RunMigrations(db *gorm.DB) error {
 	if db == nil {
 		return fmt.Errorf("database connection is required")
+	}
+
+	// Initialize the destructive-migration gate from config. Production never sets
+	// MIGRATIONS_ALLOW_DESTRUCTIVE, so allowDestructive stays false and destructive
+	// migrations self-skip. See db-migration-safety capability.
+	allowDestructive = false
+	if config.AppConfig != nil {
+		allowDestructive = config.AppConfig.Database.AllowDestructiveMigrations
+	}
+	if allowDestructive {
+		logging.Warnf("Destructive migrations ENABLED (MIGRATIONS_ALLOW_DESTRUCTIVE=1): TRUNCATE/DROP migrations will execute")
 	}
 
 	if err := ensureSchemaMigrationsTable(db); err != nil {

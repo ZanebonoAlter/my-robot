@@ -1001,8 +1001,6 @@ func postgresMigrations() []Migration {
 					"ALTER TABLE ai_call_logs ADD COLUMN IF NOT EXISTS token_usage JSONB",
 					"ALTER TABLE ai_call_logs ADD COLUMN IF NOT EXISTS session_id VARCHAR(120)",
 					"ALTER TABLE ai_call_logs ADD COLUMN IF NOT EXISTS model VARCHAR(100)",
-					"UPDATE ai_call_logs SET operation='unknown' WHERE operation IS NULL",
-					"ALTER TABLE ai_call_logs ALTER COLUMN operation SET NOT NULL",
 					"CREATE INDEX IF NOT EXISTS idx_call_logs_session ON ai_call_logs(session_id)",
 					"CREATE INDEX IF NOT EXISTS idx_call_logs_op_time ON ai_call_logs(operation, created_at)",
 				}
@@ -1010,6 +1008,12 @@ func postgresMigrations() []Migration {
 					if err := db.Exec(s).Error; err != nil {
 						return fmt.Errorf("ai_call_logs schema migration: %w", err)
 					}
+				}
+				// Backfill + SET NOT NULL via the idempotent helper (re-running this
+				// migration on an already-NOT-NULL column is a no-op, unlike a bare
+				// ALTER COLUMN ... SET NOT NULL which errors on a non-nullable column).
+				if err := ensureNotNullDefault(db, "ai_call_logs", "operation", "'unknown'"); err != nil {
+					return fmt.Errorf("ai_call_logs.operation NOT NULL: %w", err)
 				}
 				return nil
 			},
@@ -1053,8 +1057,14 @@ func postgresMigrations() []Migration {
 		// ── Lifeline context: period-archival model change ──────────
 		{
 			Version:     "20260706_0001",
-			Description: "Drop old idx_topic_gran unique index; TRUNCATE topic_lifeline_context old data (pre-period model).",
+			Description: "Drop old idx_topic_gran unique index; TRUNCATE topic_lifeline_context old data (pre-period model). Destructive — guarded by MIGRATIONS_ALLOW_DESTRUCTIVE.",
 			Up: func(db *gorm.DB) error {
+				// Destructive (TRUNCATE): skip unless MIGRATIONS_ALLOW_DESTRUCTIVE=1.
+				// Production never enables this; dev/test set the env to clean pre-period data.
+				if !IsDestructiveAllowed() {
+					logging.Warnf("skipping destructive migration 20260706_0001 (set MIGRATIONS_ALLOW_DESTRUCTIVE=1 to enable)")
+					return nil
+				}
 				// Drop old 2-column unique index (replaced by idx_topic_gran_period).
 				if tableExists(db, "topic_lifeline_context") {
 					if err := db.Exec(`
@@ -1071,7 +1081,6 @@ func postgresMigrations() []Migration {
 						return fmt.Errorf("drop old idx_topic_gran: %w", err)
 					}
 					// TRUNCATE old data (no period field → cannot satisfy new 3-col UNIQUE).
-					// Dev env only — production would need a backfill script.
 					if err := db.Exec("TRUNCATE topic_lifeline_context").Error; err != nil {
 						return fmt.Errorf("truncate topic_lifeline_context: %w", err)
 					}
@@ -1086,8 +1095,13 @@ func postgresMigrations() []Migration {
 		// stock_debate_result FK 引用 result，一并清。幂等：TRUNCATE 本身幂等 + 框架按 Version 去重。
 		{
 			Version:     "20260712_0001",
-			Description: "TRUNCATE topic_enrichment_result/topic_enrichment_review/stock_debate_result — old 涨跌+兑现 schema incompatible with 演进定位 rewrite (§11.5). Idempotent.",
+			Description: "TRUNCATE topic_enrichment_result/topic_enrichment_review/stock_debate_result — old 涨跌+兑现 schema incompatible with 演进定位 rewrite (§11.5). Destructive — guarded by MIGRATIONS_ALLOW_DESTRUCTIVE.",
 			Up: func(db *gorm.DB) error {
+				// Destructive (TRUNCATE): skip unless MIGRATIONS_ALLOW_DESTRUCTIVE=1.
+				if !IsDestructiveAllowed() {
+					logging.Warnf("skipping destructive migration 20260712_0001 (set MIGRATIONS_ALLOW_DESTRUCTIVE=1 to enable)")
+					return nil
+				}
 				// 三张表由 AutoMigrate 在版本迁移前一并创建；result 表不存在则无需清理。
 				if !tableExists(db, "topic_enrichment_result") {
 					return nil
@@ -1147,8 +1161,13 @@ func postgresMigrations() []Migration {
 		// 幂等：TRUNCATE 本身幂等 + RESTART IDENTITY 复位序列；版本迁移按 Version 去重只跑一次。
 		{
 			Version:     "20260718_0001",
-			Description: "TRUNCATE topic_enrichment_result/topic_enrichment_review — stale 演进定位 (position/signals/verdict) semantics retired for causal-analysis-agent (探索判断). Idempotent.",
+			Description: "TRUNCATE topic_enrichment_result/topic_enrichment_review — stale 演进定位 (position/signals/verdict) semantics retired for causal-analysis-agent (探索判断). Destructive — guarded by MIGRATIONS_ALLOW_DESTRUCTIVE.",
 			Up: func(db *gorm.DB) error {
+				// Destructive (TRUNCATE): skip unless MIGRATIONS_ALLOW_DESTRUCTIVE=1.
+				if !IsDestructiveAllowed() {
+					logging.Warnf("skipping destructive migration 20260718_0001 (set MIGRATIONS_ALLOW_DESTRUCTIVE=1 to enable)")
+					return nil
+				}
 				// 两张表由 AutoMigrate 在版本迁移前一并创建；result 表不存在则无需清理。
 				if !tableExists(db, "topic_enrichment_result") {
 					return nil

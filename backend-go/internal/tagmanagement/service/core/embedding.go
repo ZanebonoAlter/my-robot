@@ -446,7 +446,9 @@ func (s *EmbeddingService) SaveEmbedding(embedding *models.TopicTagEmbedding) er
 
 // ensureVectorDimension checks if the embedding column matches the required dimension
 // and alters it (plus the index) if not. Drops index before ALTER, recreates after.
-// For dimensions > 2000, uses IVFFlat instead of HNSW (HNSW limit is 2000).
+// For dimensions > 2000, skips index creation (pgvector HNSW limit is 2000);
+// aux-label dedup falls back to Go-side cosine via process cache (see sqlMergeMatcher),
+// not a DB-side ANN index.
 func ensureVectorDimension(dim int) error {
 	var typeStr string
 	if err := repository.Repo.DB().Raw(`
@@ -482,7 +484,10 @@ func ensureVectorDimension(dim int) error {
 			logging.Warnf("Failed to recreate HNSW index: %v", err)
 		}
 	} else {
-		logging.Infof("Dimension %d exceeds HNSW limit (2000), skipping vector index", dim)
+		// No DB-side vector index (>2000 dim exceeds pgvector HNSW limit of 2000).
+		// aux-label dedup uses Go-side cosine over the process-cached embeddings
+		// (sqlMergeMatcher), so queries still work without an ANN index here.
+		logging.Infof("Dimension %d exceeds pgvector HNSW limit (2000); skipping DB vector index (aux-label dedup falls back to Go-side cosine via cache)", dim)
 	}
 
 	return nil

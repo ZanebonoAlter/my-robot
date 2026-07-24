@@ -15,6 +15,7 @@ Syntopica 使用分层配置系统：后端 YAML 配置文件、覆盖文件值�
 | `DATABASE_DRIVER` | 否 | `"postgres"` | 数据库驱动，主分支仅支持 `"postgres"` |
 | `DATABASE_DSN` | 否 | `"host=127.0.0.1 user=postgres password=postgres dbname=syntopica port=5432 sslmode=disable TimeZone=Asia/Shanghai"` | PostgreSQL 连接字符串 |
 | `CORS_ORIGINS` | 否 | `"http://localhost:3000,http://localhost:3000"` | 逗号分隔的允许 CORS 来源列表 |
+| `MIGRATIONS_ALLOW_DESTRUCTIVE` | 否 | *(未设置)* | 仅设为 `"1"` 时启用破坏性数据库迁移（含 `TRUNCATE`/`DROP` 的历史数据清理迁移）。**生产环境绝不设置**；dev/本地开发设 `"1"` 以执行历史数据清理。见 [部署指南](deployment.md#破坏性迁移开关)。 |
 
 ### 前端（Nuxt）
 

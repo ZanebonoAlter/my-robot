@@ -173,7 +173,7 @@ func SetupTestDB(t *testing.T) *gorm.DB {
 	// Build the golden schema (migrations + seed snapshot) exactly once per
 	// process. Later SetupTestDB calls skip this and reset via ResetTestData.
 	migrateOnce.Do(func() {
-		if err := runTestMigrations(db); err != nil {
+		if err := runTestMigrations(t, db); err != nil {
 			goldenSchemaErr = fmt.Errorf("build golden schema: %w", err)
 			return
 		}
@@ -215,7 +215,7 @@ func ReimportTestDB(t *testing.T, db *gorm.DB) *gorm.DB {
 	if err := db.Exec("CREATE SCHEMA public").Error; err != nil {
 		t.Fatalf("create test schema: %v", err)
 	}
-	if err := runTestMigrations(db); err != nil {
+	if err := runTestMigrations(t, db); err != nil {
 		t.Fatalf("import production database state: %v", err)
 	}
 
@@ -430,7 +430,12 @@ func PadVector(vec []float64, dim int) []float64 {
 // parts of this by hand (manual embedding column DDL, manual ai_settings /
 // embedding_config seeds) — those duplicated production and drifted, so they
 // were removed in favor of running the real migration path.
-func runTestMigrations(db *gorm.DB) error {
+//
+// t enables destructive migrations (MIGRATIONS_ALLOW_DESTRUCTIVE=1) so the test
+// golden schema matches production + historical data cleanup. Production never
+// sets this env (destructive migrations self-skip); see db-migration-safety.
+func runTestMigrations(t *testing.T, db *gorm.DB) error {
+	t.Setenv("MIGRATIONS_ALLOW_DESTRUCTIVE", "1")
 	atomic.AddInt64(&migrationsRunCount, 1)
 	// Enable pgvector extension (mirrors the first production migration).
 	if err := db.Exec("CREATE EXTENSION IF NOT EXISTS vector").Error; err != nil {

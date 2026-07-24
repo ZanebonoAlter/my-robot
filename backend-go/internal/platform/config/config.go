@@ -38,6 +38,12 @@ type DatabaseConfig struct {
 	Driver   string
 	DSN      string
 	Postgres PostgresConfig
+
+	// AllowDestructiveMigrations controls whether destructive migrations
+	// (TRUNCATE/DROP) execute. Defaults to false (production-safe). Set via
+	// env MIGRATIONS_ALLOW_DESTRUCTIVE=1 for dev/test environments that need
+	// historical data cleanup. See db-migration-safety capability.
+	AllowDestructiveMigrations bool
 }
 
 type PostgresConfig struct {
@@ -125,6 +131,10 @@ func applyEnvOverrides(cfg *Config) {
 	if value := strings.TrimSpace(os.Getenv("CORS_ORIGINS")); value != "" {
 		cfg.CORS.Origins = splitCommaSeparated(value)
 	}
+
+	// MIGRATIONS_ALLOW_DESTRUCTIVE=1 enables destructive migrations (TRUNCATE/DROP).
+	// Defaults to false: production never sets this, refusing destructive migrations.
+	cfg.Database.AllowDestructiveMigrations = os.Getenv("MIGRATIONS_ALLOW_DESTRUCTIVE") == "1"
 }
 
 func splitCommaSeparated(value string) []string {

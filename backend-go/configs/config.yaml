@@ -10,6 +10,10 @@ database:
     max_open_conns: 25
     conn_max_lifetime_minutes: 60
     conn_max_idle_time_minutes: 10
+  # allow_destructive_migrations is intentionally NOT set here — it is only
+  # enabled via the env override MIGRATIONS_ALLOW_DESTRUCTIVE=1 (dev/test).
+  # Production never sets it, refusing destructive (TRUNCATE/DROP) migrations.
+  # See docs/reference/deployment.md#破坏性迁移开关.
 
 cors:
   origins:

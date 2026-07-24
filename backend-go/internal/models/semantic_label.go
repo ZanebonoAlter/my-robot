@@ -13,16 +13,16 @@ type SemanticLabel struct {
 	MergeEmbedding *string  `gorm:"type:vector;column:merge_embedding" json:"-"`
 	LabelType      string   `gorm:"size:20;index:idx_semantic_labels_label_type" json:"label_type"`
 	Aliases        []string `gorm:"type:jsonb;serializer:json;default:'[]'" json:"aliases"`
-	RefCount       int      `gorm:"default:0" json:"ref_count"`
+	RefCount       int      `json:"ref_count"`
 	Description    string   `gorm:"type:text" json:"description"`
-	DisplayOrder   int      `gorm:"default:0" json:"display_order"`
-	Source         string   `gorm:"size:50;default:llm_extract" json:"source"`
-	Status         string   `gorm:"size:20;default:active;index:idx_semantic_labels_status" json:"status"`
-	Protected      bool     `gorm:"default:false" json:"protected"`
+	DisplayOrder   int      `json:"display_order"`
+	Source         string   `gorm:"size:50" json:"source"`
+	Status         string   `gorm:"size:20;index:idx_semantic_labels_status" json:"status"`
+	Protected      bool     `json:"protected"`
 	// EnrichmentEnabled — whether cycle-B enrichment is enabled for this board (default false).
-	EnrichmentEnabled bool `gorm:"default:false" json:"enrichment_enabled"`
+	EnrichmentEnabled bool `json:"enrichment_enabled"`
 	// WindowDays — real-time detail window for cycle-B (default 14).
-	WindowDays int `gorm:"default:14" json:"window_days"`
+	WindowDays int `json:"window_days"`
 	// ContextLayers — which granularity layers the interpreter reads (default ["week","month","year","all"]).
 	ContextLayers []string  `gorm:"type:jsonb;serializer:json;default:'[\"week\",\"month\",\"year\",\"all\"]'" json:"context_layers"`
 	CreatedAt     time.Time `json:"created_at"`
@@ -48,10 +48,10 @@ func (TopicTagSemanticLabel) TableName() string {
 type TopicTagBoardLabel struct {
 	TopicTagID        uint      `gorm:"primaryKey" json:"topic_tag_id"`
 	SemanticBoardID   uint      `gorm:"primaryKey" json:"semantic_board_id"`
-	Score             float64   `gorm:"default:0" json:"score"`
+	Score             float64   `json:"score"`
 	MatchReason       string    `gorm:"type:text" json:"match_reason"`
-	Downgraded        bool      `gorm:"default:false" json:"downgraded"`
-	DirectionMismatch bool      `gorm:"default:false" json:"direction_mismatch"`
+	Downgraded        bool      `json:"downgraded"`
+	DirectionMismatch bool      `json:"direction_mismatch"`
 	CreatedAt         time.Time `json:"created_at"`
 	UpdatedAt         time.Time `json:"updated_at"`
 

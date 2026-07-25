@@ -4,7 +4,6 @@ import AIRouterSettingsPanel from '~/features/ai/components/AIRouterSettingsPane
 import EmbeddingQueuePanel from '~/features/ai/components/EmbeddingQueuePanel.vue'
 import TagQueuePanel from '~/features/settings/components/TagQueuePanel.vue'
 import FeedSettingsPanel from '~/components/dialog/FeedSettingsPanel.vue'
-import ReadingPreferencesPanel from '~/components/dialog/ReadingPreferencesPanel.vue'
 import FirecrawlConfigPanel from '~/components/dialog/FirecrawlConfigPanel.vue'
 import SchedulerStatusPanel from '~/components/dialog/SchedulerStatusPanel.vue'
 import { useGlobalSettings } from '~/composables/useGlobalSettings'
@@ -39,7 +38,6 @@ const {
           { key: 'feeds', label: '订阅源配置' },
           { key: 'general', label: '通用设置' },
           { key: 'queues', label: '标签 & 队列' },
-          { key: 'preferences', label: '阅读偏好' },
           { key: 'firecrawl', label: 'Firecrawl' },
           { key: 'schedulers', label: '定时任务' },
         ] as const)"
@@ -69,8 +67,6 @@ const {
         @refresh-feed="refreshFeed"
         @toggle-collapse="collapsedCategories[$event] = !collapsedCategories[$event]"
       />
-
-      <ReadingPreferencesPanel v-if="activeTab === 'preferences'" />
 
       <div v-if="activeTab === 'general'" class="space-y-6">
         <AIRouterSettingsPanel />

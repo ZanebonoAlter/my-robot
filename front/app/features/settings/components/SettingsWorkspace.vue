@@ -13,6 +13,7 @@ export type SectionKey =
   | 'queues'
   | 'preferences'
   | 'firecrawl'
+  | 'rsshub'
   | 'schedulers'
 
 interface SectionMeta {
@@ -27,8 +28,9 @@ const sections: SectionMeta[] = [
   { key: 'ai-providers', label: 'AI 模型', description: '配置主模型与备用模型提供商', icon: 'mdi:brain' },
   { key: 'capability-routes', label: '能力路由', description: '按能力分配模型优先级与降级顺序', icon: 'mdi:routes' },
   { key: 'queues', label: '队列', description: 'Embedding 与标签打标队列的监控', icon: 'mdi:format-list-bulleted' },
-  { key: 'preferences', label: '阅读偏好', description: '阅读统计、来源评分与推荐偏好', icon: 'mdi:chart-bar' },
+  { key: 'preferences', label: '兴趣画像', description: '按版块查看兴趣标签与权重，驱动订阅源推荐', icon: 'mdi:account-heart-outline' },
   { key: 'firecrawl', label: 'Firecrawl', description: 'Firecrawl 服务配置与抓取参数', icon: 'mdi:spider' },
+  { key: 'rsshub', label: 'RSSHub', description: '订阅源发现的 RSSHub 实例地址', icon: 'mdi:radiotower' },
   { key: 'schedulers', label: '定时任务', description: '定时任务状态与手动触发', icon: 'mdi:clock-outline' },
 ]
 

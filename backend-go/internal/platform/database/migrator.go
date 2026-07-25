@@ -86,7 +86,11 @@ func RunAutoMigrate(db *gorm.DB) error {
 		&models.AIRouteProvider{},
 		&models.AICallLog{},
 		&models.ReadingBehavior{},
-		&models.UserPreference{},
+		// preference-vector-feed-discovery: 偏好向量 / RSSHub 路由目录 / 订阅源推荐
+		&models.PreferenceVector{},
+		&models.RSSHubRoute{},
+		&models.RouteEmbedding{},
+		&models.FeedRecommendation{},
 		&models.FirecrawlJob{},
 		&models.TagJob{},
 		&models.NarrativeSummary{},

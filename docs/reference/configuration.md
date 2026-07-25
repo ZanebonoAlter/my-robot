@@ -161,6 +161,7 @@ AI 相关配置不存储在文件或环境变量中 — 通过 Web UI 管理并�
 | `auto_summary_config` | 自动摘要调度器设置（时间范围、模型参数） |
 | `firecrawl_config` | Firecrawl 集成设置（启用、API URL、API key、模式、超时、最大内容长度） |
 | `open_notebook_config` | Open Notebook digest 导出设置（启用、base URL、API key、model、目标笔记本、prompt 模式、自动发送日报/周报） |
+| `rsshub_config` | RSSHub 实例配置（订阅源发现用，见下「订阅源发现」节；`rsshub_base_url` 缺省回落 `http://47.110.71.194:1200`） |
 | `daily_report_time` | 日报生成时刻（HH:MM 格式，默认 `21:00`） |
 | `persistent_topic_match_threshold` | 新 section 锚定已有话题的余弦距离阈值（默认 `0.30`） |
 | `persistent_topic_upgrade_threshold` | candidate 允许人工确认所需、同时为管理 UI 可见门槛的连续命中天数（默认 `3`；不会自动转 active） |
@@ -210,4 +211,43 @@ AI 相关配置不存储在文件或环境变量中 — 通过 Web UI 管理并�
 3. （可选）调整 `window_days`（默认 14）和 `context_layers`（默认 `["week","month","year","all"]`）
 
 管理员无需额外配置；以上操作均可通过 Web UI 完成。
+
+### 订阅源发现（Feed Discovery）
+
+订阅源发现（偏好向量画像 × RSSHub 路由目录 → 向量粗筛 + LLM 精排 → 推荐卡片）依赖以下配置。链路与业务约束见 [flow/discovery.md](flow/discovery.md)。
+
+#### 1. RSSHub 实例地址（`rsshub_config`）
+
+通过设置工作台「RSSHub」section（`GET/POST /api/settings/rsshub`）配置，存 `ai_settings.rsshub_config`：
+
+| 字段 | 默认值 | 说明 |
+|------|--------|------|
+| `rsshub_base_url` | `http://47.110.71.194:1200`（`DefaultRSSHubBaseURL`） | 自建 RSSHub 实例地址；缺省/空回落默认值。目录同步与推荐订阅落地共用，改一处全链路生效 |
+
+#### 2. `ai_routes` 表 seed 一条 Capability
+
+| capability | 路由建议名 | 说明 |
+|------------|-----------|------|
+| `feed_discovery` | `feed-discovery-rerank` | 推荐精排 LLM（手动刷新 / 问答低频突发，并发 2）。**不与总结（`summary`/`digest_polish`）共用**，便于分清用量与单独配模型。问答与路由 embedding 仍用通用 `embedding` capability |
+
+需在 `ai_routes` 表 seed 为启用状态并绑定至少一个 provider。未配置时精排会失败，问答/刷新返回错误（粗筛与状态机仍可用）。
+
+#### 3. 调度间隔（可由 `/api/schedulers/:name/interval` 覆盖）
+
+| 调度器 | 默认间隔 | 说明 |
+|--------|----------|------|
+| `preference_profile_update` | 3600 秒 | 偏好向量画像全量重算（纯向量算术，零 LLM） |
+| `rsshub_catalog_sync` | 86400 秒（每日） | 拉取实例 `/api/namespace` 全量同步 + 增量可用性校验 + 新路由 embedding |
+
+#### 4. 发现参数默认值（代码常量，当前不可经 UI 配置）
+
+| 参数 | 默认值 | 说明 |
+|------|--------|------|
+| `RecommendationTopNDefault` | 8 | 每版块粗筛 top-N |
+| `DismissCooldownDaysDefault` | 30 天 | 推荐 dismiss 冷却期（跨 source 生效） |
+| `SeedMatchThresholdDefault` | 0.5 | 问答 embedding 与板块向量匹配阈值（低于则落全局桶） |
+| `SeedMergeAlphaDefault` | 0.4 | 种子加权合并系数 `new = normalize(α×incoming + (1−α)×existing)` |
+| 可用性校验速率 | 2 req/s | example 路径异步限流 GET 的默认速率（`CheckAvailability` 参数可覆盖） |
+
+管理员无需额外配置即可使用；以上发现参数为代码默认值，调优需改 `internal/admin/service/discovery_helpers.go` 常量。
 

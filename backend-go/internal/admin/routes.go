@@ -38,9 +38,26 @@ func RegisterRoutes(rg *gin.RouterGroup) {
 		readingBehavior.GET("/stats", GetReadingStats)
 	}
 
-	preferences := rg.Group("/user-preferences")
+	preferenceProfile := rg.Group("/preference-profile")
 	{
-		preferences.GET("", GetUserPreferences)
-		preferences.POST("/update", TriggerPreferenceUpdate)
+		preferenceProfile.GET("", GetPreferenceProfile)
+		preferenceProfile.POST("/recompute", RecomputePreferenceProfile)
+	}
+
+	discovery := rg.Group("/discovery")
+	{
+		discovery.POST("/catalog/sync", SyncCatalog)
+		discovery.GET("/catalog/status", GetCatalogStatus)
+		discovery.GET("/recommendations", GetRecommendations)
+		discovery.POST("/recommendations/refresh", RefreshRecommendations)
+		discovery.POST("/recommendations/:id/accept", AcceptRecommendation)
+		discovery.POST("/recommendations/:id/dismiss", DismissRecommendation)
+		discovery.POST("/ask", Ask)
+	}
+
+	settings := rg.Group("/settings")
+	{
+		settings.GET("/rsshub", GetRSSHubSettings)
+		settings.POST("/rsshub", SaveRSSHubSettings)
 	}
 }

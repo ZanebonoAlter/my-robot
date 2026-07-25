@@ -115,6 +115,9 @@ agent loop 里的**工具调用**（非 LLM 调用）SHALL 留痕，至少记：
 | 循环B-review对比 | `data_enrichment.review_judge` | ✅ | ✅ | ✅ | ✅ | 已补齐 |
 | 个股辩论-结果提炼 | `data_enrichment.debate_distill` | ✅ | ✅ | ✅ | ✅ | 已补齐 |
 | 报告追问-查询员每轮 | `data_enrichment.qa_tool_use` | ✅ | ✅ | ✅ | ✅ | 已补齐 |
+| 订阅源发现-推荐精排 | `discovery.recommendation_rerank` | ✅ | ✅ | ✅ | N/A | 已接入（手动刷新/问答共用，capability `feed_discovery`） |
+| 订阅源发现-问答 embedding | `discovery.ask` | ✅ | N/A | ✅ | N/A | 已接入（capability `embedding`，单次调用非编排） |
+| 订阅源发现-路由 embedding | `discovery.route_embedding` | ✅ | N/A | ✅ | N/A | 已接入（后台 worker 逐条 embed，capability `embedding`） |
 
 **补齐状态**：以上日报管线 6 处调用已由 [`ai-call-logging-schema`](../../../../openspec/changes/ai-call-logging-schema) change 全部补齐（prompt/token/session_id 落地，operation 升级为一等字段且 airouter 强制校验非空），从"待补齐"转为 ✅。其他调用方（reader/tagmanagement）也已补 operation 字段。
 
@@ -131,6 +134,15 @@ agent loop 里的**工具调用**（非 LLM 调用）SHALL 留痕，至少记：
 | --- | --- |
 | `data_enrichment_news` | `data_enrichment.summarize_context`（循环A 纯新闻汇总） |
 | `data_enrichment_analysis` | `data_enrichment.interpret`（解读员，含形态判断+视角候选）/ `data_enrichment.tool_use`（查询员每轮）/ `data_enrichment.analyze`（分析员，分层见解）/ `data_enrichment.review_judge`（兑现度复盘）/ `data_enrichment.debate_distill`（FinGenius 提炼）/ `data_enrichment.qa_tool_use`（报告追问每轮，复用工具循环） |
+
+**订阅源发现 Capability 映射**（preference-vector-feed-discovery）：
+
+| Capability | 归属的 Operation |
+| --- | --- |
+| `feed_discovery` | `discovery.recommendation_rerank`（推荐精排，手动刷新 + 问答共用，低频突发并发 2） |
+| `embedding` | `discovery.ask`（问答问题 embedding）/ `discovery.route_embedding`（路由元数据 embedding，后台 worker） |
+
+> 订阅源发现的调用均为单次 request-response（非 agent loop / 多步管线），session_id 按规范豁免（N/A）；`operation` 为语义化一等字段，已强制非空。
 
 ## 查询入口（规范要求，实现可排期）
 

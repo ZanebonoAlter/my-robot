@@ -16,7 +16,7 @@
 
 ---
 
-## 完整表清单（44 张业务表 + 5 张废弃表 + 1 张框架表）
+## 完整表清单（47 张业务表 + 5 张废弃表 + 1 张框架表）
 
 ### 业务表（44 张，代码权威）
 
@@ -64,8 +64,13 @@
 | `stock_debate_result` | FinGenius 个股辩论结果 | `dataenrichment.StockDebateResult` | 数据增强 |
 | `topic_enrichment_qa` | 报告追问记录（多轮 append-only） | `dataenrichment.TopicEnrichmentQA` | 数据增强 |
 | `reading_behaviors` | 阅读行为 | `models.ReadingBehavior` | 用户行为 |
-| `user_preferences` | 用户偏好 | `models.UserPreference` | 用户行为 |
+| `preference_vectors` | 偏好向量画像（按 SemanticBoard 聚合） | `models.PreferenceVector` | 偏好/发现 |
+| `rsshub_routes` | RSSHub 路由目录 | `models.RSSHubRoute` | 偏好/发现 |
+| `route_embeddings` | RSSHub 路由向量 | `models.RouteEmbedding` | 偏好/发现 |
+| `feed_recommendations` | 订阅源推荐卡片 | `models.FeedRecommendation` | 偏好/发现 |
 | `otel_spans` | OpenTelemetry 链路追踪 | `tracing.OtelSpan` | 追踪 |
+
+> 旧 `user_preferences` 表已删除（preference-vector-feed-discovery，迁移 `20260725_0001` DROP；偏好转向 `preference_vectors` 向量画像）。
 
 ### 废弃表（5 张，无对应 model，保留标注）
 
@@ -934,7 +939,7 @@ FinGenius 多角色辩论输出，按 `(result_id, sector, code)` 维度 append-
 
 ---
 
-## §11 用户行为域
+## §11 用户行为与偏好发现域
 
 ### 11.1 reading_behaviors（阅读行为）
 
@@ -952,18 +957,78 @@ FinGenius 多角色辩论输出，按 `(result_id, sector, code)` 维度 append-
 
 > `feed_id` / `created_at` 均为各自单列索引（非复合）。
 
-### 11.2 user_preferences（用户偏好）
+### 11.2 preference_vectors（偏好向量画像）
+
+按 SemanticBoard（`board_id=NULL` 为全局桶）聚合的偏好向量。`source=behavior` 由 scheduler 全量重算（不覆盖 `seed` 行）；`source=seed` 由问答加权合并累积。pgvector 列写法沿用 `topic_tag_embeddings`。
 
 | 字段名 | 类型 | 约束/默认/索引 | 用途 |
 | -------- | ------ | ------ | ------ |
 | `id` | SERIAL | PK | 主键 |
-| `feed_id` | INTEGER | —（`*uint`）; index | 订阅源 ID |
-| `category_id` | INTEGER | —（`*uint`）; index | 分类 ID |
-| `preference_score` | FLOAT | DEFAULT 0 | 偏好评分 |
-| `avg_reading_time` | INTEGER | DEFAULT 0 | 平均阅读时间 |
-| `interaction_count` | INTEGER | DEFAULT 0 | 交互次数 |
-| `scroll_depth_avg` | FLOAT | DEFAULT 0 | 平均滚动深度 |
-| `last_interaction_at` | TIMESTAMP | —（`*time.Time`）; index | 最后交互时间 |
+| `board_id` | INTEGER | `*uint`（NULL=全局桶）；`uniqueIndex:idx_preference_vectors_board_source` + index | 所属 SemanticLabel（版块） |
+| `source` | VARCHAR(20) | `uniqueIndex:idx_preference_vectors_board_source` | `behavior` \| `seed` |
+| `embedding` | vector | type:vector; column:embedding | 偏好向量（运行时维度） |
+| `dimension` | INTEGER | — | 向量维度 |
+| `model` | VARCHAR(50) | — | 生成模型 |
+| `tag_weights` | JSONB | default `'{}'`（MetadataMap serializer） | 画像可视化用 `{tag_label: weight}` top 列表 |
+| `last_computed_at` | TIMESTAMP | — | 最后计算时间 |
+| `created_at` | TIMESTAMP | — | 创建时间 |
+| `updated_at` | TIMESTAMP | — | 更新时间 |
+
+> `UNIQUE(board_id, source)`：board_id 非 NULL 组合由 GORM uniqueIndex 保证；全局桶（board_id IS NULL）单行由 service 层 upsert 保证（PG 普通 unique 允许多 NULL）。
+
+### 11.3 rsshub_routes（RSSHub 路由目录）
+
+从自建 RSSHub 实例 `/api/namespace` 同步的路由元数据。`requires_parameters`/`usable_directly` 入库时按 path 参数段解析。
+
+| 字段名 | 类型 | 约束/默认/索引 | 用途 |
+| -------- | ------ | ------ | ------ |
+| `id` | SERIAL | PK | 主键 |
+| `namespace` | VARCHAR(100) | `uniqueIndex:idx_rsshub_routes_ns_path` | 命名空间 |
+| `path` | VARCHAR(255) | `uniqueIndex:idx_rsshub_routes_ns_path` | 路由路径（含 `:param`/`:param?`） |
+| `name` | VARCHAR(255) | — | 路由名 |
+| `url` | TEXT | — | 源 URL 模板 |
+| `description` | TEXT | — | 描述 |
+| `parameters` | JSONB | column:parameters | 原始 JSON 参数说明（数组/对象） |
+| `example` | TEXT | — | 示例路径 |
+| `requires_parameters` | BOOLEAN | — | path 存在必填 `:param` |
+| `usable_directly` | BOOLEAN | — | path 无参数段或全可选 |
+| `content_hash` | VARCHAR(64) | index | namespace+path+name+description+parameters 的 hash（diff 用） |
+| `status` | VARCHAR(20) | index; default `'unknown'` | `unknown` \| `ok` \| `broken` \| `gone` |
+| `last_checked_at` | TIMESTAMP | `*time.Time` | 最后可用性校验时间 |
+| `created_at` | TIMESTAMP | — | 创建时间 |
+| `updated_at` | TIMESTAMP | — | 更新时间 |
+
+### 11.4 route_embeddings（RSSHub 路由向量）
+
+路由的语义向量（文本取 namespace+name+description 摘要）。`UNIQUE(route_id)` 单路由单向量，`text_hash` 变更入队重算。
+
+| 字段名 | 类型 | 约束/默认/索引 | 用途 |
+| -------- | ------ | ------ | ------ |
+| `id` | SERIAL | PK | 主键 |
+| `route_id` | INTEGER | `uniqueIndex:idx_route_embeddings_route` | 关联 `rsshub_routes`（OnDelete CASCADE） |
+| `embedding` | vector | type:vector; column:embedding | 路由向量（运行时维度） |
+| `dimension` | INTEGER | — | 向量维度 |
+| `model` | VARCHAR(50) | — | 生成模型 |
+| `text_hash` | VARCHAR(64) | index | 源文本 hash（变更检测） |
+| `created_at` | TIMESTAMP | — | 创建时间 |
+| `updated_at` | TIMESTAMP | — | 更新时间 |
+
+### 11.5 feed_recommendations（订阅源推荐卡片）
+
+`recommendation_hash = hash(route_id + board_id)`，**不含 source**——qa 与 manual_refresh 共享幂等池与 dismiss 冷却池。
+
+| 字段名 | 类型 | 约束/默认/索引 | 用途 |
+| -------- | ------ | ------ | ------ |
+| `id` | SERIAL | PK | 主键 |
+| `route_id` | INTEGER | index; `index:idx_feed_rec_status` | 关联 `rsshub_routes` |
+| `board_id` | INTEGER | `*uint`; index | 关联 `semantic_labels`（NULL=全局桶/问答） |
+| `source` | VARCHAR(20) | — | `manual_refresh` \| `qa` |
+| `score` | FLOAT | `index:idx_feed_rec_status` | 粗筛相似度 |
+| `llm_reason` | TEXT | — | LLM 推荐理由 |
+| `status` | VARCHAR(20) | `index:idx_feed_rec_status`; default `'pending'` | `pending` \| `accepted` \| `dismissed` |
+| `accepted_feed_id` | INTEGER | `*uint`; index | 接受后创建的 `feeds.id` |
+| `recommendation_hash` | VARCHAR(64) | `uniqueIndex:idx_feed_recommendations_hash` | route_id+board_id 幂等指纹 |
+| `dismissed_at` | TIMESTAMP | `*time.Time` | 拒绝时间（冷却计算用） |
 | `created_at` | TIMESTAMP | — | 创建时间 |
 | `updated_at` | TIMESTAMP | — | 更新时间 |
 
@@ -1099,6 +1164,22 @@ FinGenius 多角色辩论输出，按 `(result_id, sector, code)` 维度 append-
 | `idx_narrative_boards_period` | narrative_boards | `(period_date)` |
 | `idx_narrative_boards_scope` | narrative_boards | `(scope_category_id)` |
 
+### 偏好/发现域索引（gorm tag）
+
+| 索引名 | 表 | 列 |
+| -------- | ------ | ------ |
+| `idx_preference_vectors_board_source` | preference_vectors | UNIQUE `(board_id, source)` |
+| `idx_rsshub_routes_ns_path` | rsshub_routes | UNIQUE `(namespace, path)` |
+| `idx_rsshub_routes_content_hash` | rsshub_routes | `(content_hash)` |
+| `idx_rsshub_routes_status` | rsshub_routes | `(status)` |
+| `idx_route_embeddings_route` | route_embeddings | UNIQUE `(route_id)` |
+| `idx_route_embeddings_text_hash` | route_embeddings | `(text_hash)` |
+| `idx_feed_recommendations_hash` | feed_recommendations | UNIQUE `(recommendation_hash)` |
+| `idx_feed_rec_status` | feed_recommendations | `(status, score)` |
+| `idx_feed_recommendations_route_id` | feed_recommendations | `(route_id)` |
+| `idx_feed_recommendations_board_id` | feed_recommendations | `(board_id)` |
+| `idx_feed_recommendations_accepted_feed_id` | feed_recommendations | `(accepted_feed_id)` |
+
 ### AI 调用日志索引（迁移 `20260704_0001`）
 
 | 索引名 | 表 | 列 |
@@ -1156,12 +1237,21 @@ FinGenius 多角色辩论输出，按 `(result_id, sector, code)` 维度 append-
 | `daily_report_sections.embedding` | 运行时 | `ensureSectionEmbeddingDimension` |
 | `daily_report_threads.embedding` | 运行时 | （随分区维度） |
 | `board_persistent_topics.embedding` | 运行时 | `ensurePersistentTopicEmbeddingDimension` |
+| `preference_vectors.embedding` | 运行时 | 偏好画像重算时按 `topic_tag_embeddings` semantic 轨维度写入（入库记 `dimension`/`model`，粗筛前校验一致） |
+| `route_embeddings.embedding` | 运行时 | 路由向量，与偏好向量同空间（入库记 `dimension`/`model`） |
 
 > HNSW 索引仅当维度 ≤ 2000 时创建（pgvector 限制）；> 2000 时跳过 HNSW，仅保留向量列。
 
 ---
 
 ## 更新日志
+
+### 2026-07-25（preference-vector-feed-discovery）
+
+- 删除 `user_preferences` 表（迁移 `20260725_0001` DROP，破坏性；偏好转向 `preference_vectors` 向量画像）。
+- 新增 4 表：`preference_vectors` / `rsshub_routes` / `route_embeddings` / `feed_recommendations`（业务表 44→**47**）。
+- §11 重命名为「用户行为与偏好发现域」，补 11.2–11.5 完整字段表 + 偏好/发现域索引节。
+- 向量维度规则补 `preference_vectors.embedding` / `route_embeddings.embedding`。
 
 ### 2026-07-18（全面对齐代码审计）
 

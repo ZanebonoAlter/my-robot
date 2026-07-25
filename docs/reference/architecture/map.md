@@ -22,6 +22,7 @@ flowchart LR
 | 业务域 | 流程设计（flow/） | 架构骨架（architecture/） | 后端入口 | 前端入口 |
 | -------- | ------------------ | -------------------------- | ---------- | ---------- |
 | 阅读 | [reading.md](../flow/reading.md) | [frontend.md](frontend.md) §页面骨架 | `internal/reader/{handler,service}/` | `features/articles/`、`features/shell/`、`stores/` |
+| 偏好画像与订阅源发现 | [discovery.md](../flow/discovery.md) | [backend.md](backend.md) | `internal/admin/`（preference_profile/recommendation/catalog_sync service + handler + 两 scheduler job） | `features/discovery/`、`pages/discovery.vue`、`features/settings/`（兴趣画像 / RSSHub 实例配置 section） |
 | 内容增强 | [content-enrichment.md](../flow/content-enrichment.md) | [backend.md](backend.md) §具体数据链路示例 | `internal/reader/handler/`、`internal/platform/`(firecrawl) | `features/articles/`、`app/api/` |
 | 数据富化编排 | [data-enrichment.md](../flow/data-enrichment.md) | [backend.md](backend.md) | `internal/dataenrichment/` | `features/tags/`(`BoardEnrichmentPanel.vue` 数据增强 tab、`DebateSection.vue`、`composables/useBoardEnrichment.ts`) |
 | AI 调用路由 | [ai-summary.md](../flow/ai-summary.md) | [backend.md](backend.md) | `internal/platform/airouter/`、`internal/reader/`(调用方)、`internal/platform/ws/` | `features/ai/`(AI 路由/供应商配置面板 + 嵌入队列面板；非日报/叙事入口) |

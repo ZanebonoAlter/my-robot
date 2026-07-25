@@ -15,6 +15,7 @@ import (
 
 const openNotebookConfigKey = "open_notebook_config"
 const firecrawlConfigKey = "firecrawl_config"
+const rsshubConfigKey = "rsshub_config"
 const dailyReportTimeKey = "daily_report_time"
 const defaultDailyReportTime = "21:00"
 const boardUpgradeSuggestTimeKey = "semantic_board_upgrade_suggest_time"
@@ -88,6 +89,16 @@ func LoadOpenNotebookConfig() (map[string]interface{}, *models.AISettings, error
 
 func SaveOpenNotebookConfig(config map[string]interface{}, description string) error {
 	return saveConfigByKey(openNotebookConfigKey, config, description)
+}
+
+// LoadRSSHubConfig 读取 rsshub_config（RSSHub 实例地址等，design E）。
+func LoadRSSHubConfig() (map[string]interface{}, *models.AISettings, error) {
+	return loadConfigByKey(rsshubConfigKey)
+}
+
+// SaveRSSHubConfig 写入 rsshub_config。
+func SaveRSSHubConfig(config map[string]interface{}, description string) error {
+	return saveConfigByKey(rsshubConfigKey, config, description)
 }
 
 // LoadDailyReportTimeConfig loads the daily_report_time setting from ai_settings.

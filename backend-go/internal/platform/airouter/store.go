@@ -22,6 +22,7 @@ const (
 	CapabilityDigestPolish       Capability = "digest_polish"
 	CapabilityOpenNotebook       Capability = "open_notebook"
 	CapabilityEmbedding          Capability = "embedding"
+	CapabilityFeedDiscovery      Capability = "feed_discovery"
 	DefaultRouteName             string     = "default"
 	DefaultProviderName          string     = "default-primary"
 	ProviderTypeOpenAICompatible string     = "openai_compatible"

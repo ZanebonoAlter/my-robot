@@ -6,11 +6,13 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+
 	"syntopica-backend/internal/admin/repository"
-	adminservice "syntopica-backend/internal/admin/service"
 	"syntopica-backend/internal/models"
-	"syntopica-backend/internal/platform/logging"
 )
+
+// ── reading-behavior handler（采集链路保留，preference-vector-feed-discovery D9）──
+// user-preferences 端点已随旧偏好功能废弃删除；reading_behaviors 采集继续作为新偏好权重源。
 
 type TrackBehaviorRequest struct {
 	ArticleID   uint   `json:"article_id" binding:"required"`
@@ -29,15 +31,11 @@ type BatchTrackBehaviorRequest struct {
 func TrackReadingBehavior(c *gin.Context) {
 	var req TrackBehaviorRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"success": false,
-			"error":   "Invalid request body",
-		})
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "Invalid request body"})
 		return
 	}
 
 	categoryID := req.CategoryID
-
 	if categoryID == nil || *categoryID == 0 {
 		var feed models.Feed
 		if err := repository.Repo.DB().Select("category_id").First(&feed, req.FeedID).Error; err == nil {
@@ -57,35 +55,24 @@ func TrackReadingBehavior(c *gin.Context) {
 	}
 
 	if err := repository.Repo.DB().Create(&behavior).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"success": false,
-			"error":   err.Error(),
-		})
+		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": err.Error()})
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"success": true,
-		"data":    behavior.ToDict(),
-	})
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": behavior.ToDict()})
 }
 
 func BatchTrackReadingBehavior(c *gin.Context) {
 	var req BatchTrackBehaviorRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"success": false,
-			"error":   "Invalid request body",
-		})
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "Invalid request body"})
 		return
 	}
 
 	feedCategoryMap := make(map[uint]*uint)
-
 	behaviors := make([]models.ReadingBehavior, len(req.Events))
 	for i, event := range req.Events {
 		categoryID := event.CategoryID
-
 		if categoryID == nil || *categoryID == 0 {
 			if cachedCategoryID, exists := feedCategoryMap[event.FeedID]; exists {
 				categoryID = cachedCategoryID
@@ -97,31 +84,19 @@ func BatchTrackReadingBehavior(c *gin.Context) {
 				}
 			}
 		}
-
 		behaviors[i] = models.ReadingBehavior{
-			ArticleID:   event.ArticleID,
-			FeedID:      event.FeedID,
-			CategoryID:  categoryID,
-			SessionID:   event.SessionID,
-			EventType:   event.EventType,
-			ScrollDepth: event.ScrollDepth,
-			ReadingTime: event.ReadingTime,
-			CreatedAt:   time.Now(),
+			ArticleID: event.ArticleID, FeedID: event.FeedID, CategoryID: categoryID,
+			SessionID: event.SessionID, EventType: event.EventType,
+			ScrollDepth: event.ScrollDepth, ReadingTime: event.ReadingTime, CreatedAt: time.Now(),
 		}
 	}
 
 	if err := repository.Repo.DB().Create(&behaviors).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"success": false,
-			"error":   err.Error(),
-		})
+		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": err.Error()})
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"success": true,
-		"message": len(behaviors),
-	})
+	c.JSON(http.StatusOK, gin.H{"success": true, "message": len(behaviors)})
 }
 
 func GetReadingStats(c *gin.Context) {
@@ -134,28 +109,17 @@ func GetReadingStats(c *gin.Context) {
 		MostActiveCategory uint    `json:"most_active_category"`
 	}
 
-	repository.Repo.DB().Model(&models.ReadingBehavior{}).
-		Distinct("article_id").
-		Count(&stats.TotalArticles)
-
-	repository.Repo.DB().Model(&models.ReadingBehavior{}).
-		Select("COALESCE(SUM(reading_time), 0)").
-		Scan(&stats.TotalReadingTime)
+	repository.Repo.DB().Model(&models.ReadingBehavior{}).Distinct("article_id").Count(&stats.TotalArticles)
+	repository.Repo.DB().Model(&models.ReadingBehavior{}).Select("COALESCE(SUM(reading_time), 0)").Scan(&stats.TotalReadingTime)
 
 	var avgTime sql.NullFloat64
-	repository.Repo.DB().Model(&models.ReadingBehavior{}).
-		Where("reading_time > 0").
-		Select("AVG(reading_time)").
-		Scan(&avgTime)
+	repository.Repo.DB().Model(&models.ReadingBehavior{}).Where("reading_time > 0").Select("AVG(reading_time)").Scan(&avgTime)
 	if avgTime.Valid {
 		stats.AvgReadingTime = avgTime.Float64
 	}
 
 	var avgDepth sql.NullFloat64
-	repository.Repo.DB().Model(&models.ReadingBehavior{}).
-		Where("scroll_depth > 0").
-		Select("AVG(scroll_depth)").
-		Scan(&avgDepth)
+	repository.Repo.DB().Model(&models.ReadingBehavior{}).Where("scroll_depth > 0").Select("AVG(scroll_depth)").Scan(&avgDepth)
 	if avgDepth.Valid {
 		stats.AvgScrollDepth = avgDepth.Float64
 	}
@@ -165,12 +129,7 @@ func GetReadingStats(c *gin.Context) {
 		Count  int64
 	}
 	var feedCounts []FeedCount
-	repository.Repo.DB().Model(&models.ReadingBehavior{}).
-		Select("feed_id, COUNT(*) as count").
-		Group("feed_id").
-		Order("count DESC").
-		Limit(1).
-		Scan(&feedCounts)
+	repository.Repo.DB().Model(&models.ReadingBehavior{}).Select("feed_id, COUNT(*) as count").Group("feed_id").Order("count DESC").Limit(1).Scan(&feedCounts)
 	if len(feedCounts) > 0 {
 		stats.MostActiveFeedID = feedCounts[0].FeedID
 	}
@@ -180,107 +139,10 @@ func GetReadingStats(c *gin.Context) {
 		Count      int64
 	}
 	var categoryCounts []CategoryCount
-	repository.Repo.DB().Model(&models.ReadingBehavior{}).
-		Select("category_id, COUNT(*) as count").
-		Where("category_id IS NOT NULL").
-		Group("category_id").
-		Order("count DESC").
-		Limit(1).
-		Scan(&categoryCounts)
+	repository.Repo.DB().Model(&models.ReadingBehavior{}).Select("category_id, COUNT(*) as count").Where("category_id IS NOT NULL").Group("category_id").Order("count DESC").Limit(1).Scan(&categoryCounts)
 	if len(categoryCounts) > 0 && categoryCounts[0].CategoryID != nil {
 		stats.MostActiveCategory = *categoryCounts[0].CategoryID
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"success": true,
-		"data":    stats,
-	})
-}
-
-func GetUserPreferences(c *gin.Context) {
-	preferenceType := c.Query("type")
-
-	var preferences []models.UserPreference
-	query := repository.Repo.DB().Model(&models.UserPreference{})
-
-	switch preferenceType {
-	case "feed":
-		query = query.Joins("JOIN feeds ON feeds.id = user_preferences.feed_id").
-			Where("user_preferences.feed_id IS NOT NULL")
-	case "category":
-		query = query.Joins("JOIN categories ON categories.id = user_preferences.category_id").
-			Where("user_preferences.category_id IS NOT NULL")
-	default:
-		query = query.Where(`
-			(user_preferences.feed_id IS NOT NULL AND EXISTS (
-				SELECT 1 FROM feeds WHERE feeds.id = user_preferences.feed_id
-			)) OR
-			(user_preferences.category_id IS NOT NULL AND EXISTS (
-				SELECT 1 FROM categories WHERE categories.id = user_preferences.category_id
-			))
-		`)
-	}
-
-	if err := query.
-		Preload("Feed").
-		Preload("Category").
-		Order("preference_score DESC").
-		Find(&preferences).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"success": false,
-			"error":   err.Error(),
-		})
-		return
-	}
-
-	data := make([]map[string]interface{}, 0, len(preferences))
-	for _, pref := range preferences {
-		prefData := pref.ToDict()
-		if prefData["feed_title"] == "" && prefData["category_name"] == "" {
-			continue
-		}
-		data = append(data, prefData)
-	}
-
-	c.JSON(http.StatusOK, gin.H{
-		"success": true,
-		"data":    data,
-	})
-}
-
-func TriggerPreferenceUpdate(c *gin.Context) {
-	if s, ok := Reg.Get("preference_update"); ok && s != nil {
-		if scheduler, ok := s.(interface{ TriggerNow() map[string]interface{} }); ok {
-			result := scheduler.TriggerNow()
-			message, _ := result["message"].(string)
-			accepted, _ := result["accepted"].(bool)
-			if accepted {
-				c.JSON(http.StatusOK, gin.H{
-					"success": true,
-					"message": message,
-					"data":    result,
-				})
-				return
-			}
-
-			c.JSON(http.StatusConflict, gin.H{
-				"success": false,
-				"error":   message,
-				"data":    result,
-			})
-			return
-		}
-	}
-
-	go func() {
-		service := adminservice.NewPreferenceService(repository.Repo.DB())
-		if err := service.UpdateAllPreferences(); err != nil {
-			logging.Warnf("UpdateAllPreferences failed: %v", err)
-		}
-	}()
-
-	c.JSON(http.StatusOK, gin.H{
-		"success": true,
-		"message": "Preference update triggered",
-	})
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": stats})
 }

@@ -44,6 +44,18 @@
 - [ ] 6.2 前端删除：`ReadingPreferencesPanel.vue`、`useReadingPreferences.ts`、`stores/preferences.ts`、`types/reading_behavior.ts` 的 `UserPreference`、`SettingsSectionPreferences.vue` 旧引用（由 5.3 接替）
 - [ ] 6.3 确认 `reading_behaviors` 采集与 `/api/reading-behavior/*` 不受影响（grep 验证）
 
+## 7. 配置 UI 扩展（apply 验收后补充，2026-07-25）
+
+- [ ] 7.1 feed_discovery 独立 capability route：airouter 加 `CapabilityFeedDiscovery` 常量；recommendation_service 精排(rerank)改用 `CapabilityFeedDiscovery`（替代 `CapabilitySummary`，不与总结共用，便于分清用量与单独配模型）；问答 Ask 的 embedding 仍用 `CapabilityEmbedding`（通用）；前端 `AIRouterCapabilityRoutes` 能配 feed_discovery route（若前端硬编码 capability 列表则补一项）
+- [ ] 7.2 RSSHub 实例配置 UI：后端 `rsshub_base_url` 从 `ai_settings` 表读（key=`rsshub_config`，仿 summary_config/firecrawl_config 模式），`catalog_sync_service`/`recommendation_service` 改读配置（缺省回落 DefaultRSSHubBaseURL）；加 `GET/POST /api/settings/rsshub` 读写 API；前端新增 `SettingsSectionRsshub.vue`（填实例地址 + 连通测试可选）+ 注册 SettingsWorkspace sidebar
+- [ ] 7.3 门禁：后端 capability/config 改动单测；前端 SettingsSectionRsshub + capability route 配置 typecheck/build/test:unit（cmd.exe）
+
+## 8. 推荐卡片 UX 打磨（2026-07-25 验收补充）
+
+- [ ] 8.1 直订卡片分类选择：usable_directly 一键订阅也提供「订阅到分类」下拉（统一填参/直订流程，复用 DiscoveryCard 现有 categoryId + categories 数据）
+- [ ] 8.2 推荐依据可视化：卡片显示相似度 score（%）+ 匹配版块 board_label（数据已有 card.score/card.boardLabel，补展示），让推荐不再是黑盒
+- [ ] 8.3（待定）匹配标签依据：后端粗筛记录贡献匹配的偏好 tag，卡片展示「匹配标签：AI/芯片」——中等改动，待用户确认是否要做
+
 ## 测试
 
 - [ ] T1 后端：`go test ./internal/<改动包>` 按 §AI Behavior Rules 只跑影响包（新增 service/handler 包 + admin + reader）

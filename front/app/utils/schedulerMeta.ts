@@ -45,7 +45,8 @@ export function getSchedulerDisplayName(name: string): string {
 		firecrawl: "全文爬取",
 		tag_hierarchy_cleanup: "标签清理",
 		aux_label_cleanup: "辅助标签清理",
-		preference_update: "阅读偏好更新",
+		preference_profile_update: "兴趣画像重算",
+		rsshub_catalog_sync: "订阅源目录同步",
 		tag_quality_score: "标签质量评分",
 		log_cleanup: "日志清理",
 		daily_report: "每日报告",
@@ -69,7 +70,8 @@ export function getSchedulerIcon(name: string): string {
 		firecrawl: "mdi:spider-web",
 		tag_hierarchy_cleanup: "mdi:tag-remove-outline",
 		aux_label_cleanup: "mdi:tag-minus-outline",
-		preference_update: "mdi:account-cog-outline",
+		preference_profile_update: "mdi:account-heart-outline",
+		rsshub_catalog_sync: "mdi:radar",
 		tag_quality_score: "mdi:tag-star-outline",
 		log_cleanup: "mdi:broom",
 		daily_report: "mdi:newspaper-variant-outline",
@@ -92,7 +94,8 @@ export function getSchedulerColor(name: string): string {
 		firecrawl: "from-rose-500 to-orange-500",
 		tag_hierarchy_cleanup: "from-violet-500 to-purple-600",
 		aux_label_cleanup: "from-teal-500 to-emerald-500",
-		preference_update: "from-indigo-500 to-blue-500",
+		preference_profile_update: "from-indigo-500 to-blue-500",
+		rsshub_catalog_sync: "from-cyan-500 to-blue-500",
 		tag_quality_score: "from-purple-500 to-pink-500",
 		log_cleanup: "from-slate-500 to-gray-500",
 		daily_report: "from-amber-500 to-yellow-500",
@@ -201,11 +204,18 @@ export function formatLastRunSummary(
 			if (count !== undefined) return `恢复了 ${count} 篇文章`;
 			return summary.reason || "";
 		}
-		case "preference_update": {
-			const count = (summary as Record<string, unknown>).updated_count as
+		case "preference_profile_update": {
+			const count = (summary as Record<string, unknown>).boards_computed as
 				| number
 				| undefined;
-			if (count !== undefined) return `更新了 ${count} 项偏好`;
+			if (count !== undefined) return `重算了 ${count} 个版块的兴趣画像`;
+			return summary.reason || "";
+		}
+		case "rsshub_catalog_sync": {
+			const count = (summary as Record<string, unknown>).total as
+				| number
+				| undefined;
+			if (count !== undefined) return `目录共 ${count} 条路由`;
 			return summary.reason || "";
 		}
 		case "daily_report": {

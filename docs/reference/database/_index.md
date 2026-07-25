@@ -12,12 +12,12 @@ Syntopica 数据库全景概览与索引/约束权威清单。
 
 | 指标 | 值 | 说明 |
 | ------ | ----- | ------ |
-| 真实业务表数 | **43** | 30 Core + 5 DataEnrichment + 7 TopicGraph 日报域 + 1 Tracing（见下方清单，不含 `schema_migrations`） |
+| 真实业务表数 | **46** | 33 Core + 5 DataEnrichment + 7 TopicGraph 日报域 + 1 Tracing（见下方清单，不含 `schema_migrations`） |
 | DB 级 FK 约束 | **1** | 仅 `topic_tags_merged_into_id_fkey`（ON DELETE CASCADE，迁移 `20260601_0001` 重建）。GORM 关闭了外键迁移（`DisableForeignKeyConstraintWhenMigrating: true`），且该迁移主动 drop 了历史上的全部 `fk_*`。其余表间关系均为 **GORM 逻辑关联，DB 层不强制**。 |
 | CHECK 约束 | **3** | `chk_board_persistent_topics_status` / `chk_board_persistent_topics_source` / `chk_board_topic_watches_status`（见下） |
 | 业务域 | **7** | Core 文章流、Topic Tags 图谱、Semantic Labels/Board、AI Infrastructure、Narrative 叙事、Daily Report 日报域、DataEnrichment 数据增强 |
 | 枢纽表 | `topic_tags` | 被多表引用（`article_topic_tags` / `topic_tag_embeddings` / `topic_tag_semantic_labels` / `topic_tag_board_labels` / `topic_tag_analyses` / `topic_tag_relations` / `embedding_queues` / `merge_reembedding_queues` 等） |
-| 向量表（pgvector） | `topic_tag_embeddings`(固定 vector(4096))、`semantic_labels`(embedding + merge_embedding)、`daily_report_sections`、`daily_report_threads`、`board_persistent_topics` | 维度运行时决定，HNSW 索引仅在维度 ≤ 2000 时创建 |
+| 向量表（pgvector） | `topic_tag_embeddings`(固定 vector(4096))、`semantic_labels`(embedding + merge_embedding)、`daily_report_sections`、`daily_report_threads`、`board_persistent_topics`、`preference_vectors`、`route_embeddings` | 维度运行时决定，HNSW 索引仅在维度 ≤ 2000 时创建（`preference_vectors`/`route_embeddings` 同维不强制 HNSW，粗筛走顺序扫描） |
 | 全文搜索 | `articles.search_vector` | GIN 索引 + 触发器 `articles_search_vector_trigger` |
 | 预留/已废弃表 | 4 | `ai_summaries` / `ai_summary_feeds` / `ai_summary_topics` / `topic_analysis_jobs` / `digest_configs`：无对应 model、无 Go 代码引用 |
 
@@ -25,8 +25,10 @@ Syntopica 数据库全景概览与索引/约束权威清单。
 
 ## 真实表清单（43 张，按代码权威对齐）
 
-**Core（`migrator.go` allModels，30 张）**：
-`categories` `feeds` `articles` `topic_tags` `semantic_labels` `topic_tag_semantic_labels` `topic_tag_board_labels` `board_composition` `board_upgrade_suggestions` `topic_tag_embeddings` `topic_tag_analyses` `topic_analysis_cursors` `article_topic_tags` `tag_merge_suggestions` `topic_tag_relations` `scheduler_tasks` `ai_settings` `embedding_config` `embedding_queues` `merge_reembedding_queues` `ai_providers` `ai_routes` `ai_route_providers` `ai_call_logs` `reading_behaviors` `user_preferences` `firecrawl_jobs` `tag_jobs` `narrative_summaries` `narrative_boards`
+**Core（`migrator.go` allModels，33 张）**：
+`categories` `feeds` `articles` `topic_tags` `semantic_labels` `topic_tag_semantic_labels` `topic_tag_board_labels` `board_composition` `board_upgrade_suggestions` `topic_tag_embeddings` `topic_tag_analyses` `topic_analysis_cursors` `article_topic_tags` `tag_merge_suggestions` `topic_tag_relations` `scheduler_tasks` `ai_settings` `embedding_config` `embedding_queues` `merge_reembedding_queues` `ai_providers` `ai_routes` `ai_route_providers` `ai_call_logs` `reading_behaviors` `firecrawl_jobs` `tag_jobs` `narrative_summaries` `narrative_boards` `preference_vectors` `rsshub_routes` `route_embeddings` `feed_recommendations`
+
+> 旧 `user_preferences` 表已删除（preference-vector-feed-discovery，偏好转向向量画像，迁移 `20260725_0001` DROP）。
 
 **DataEnrichment（RegisterModels，5 张）**：
 `board_data_sources` `topic_lifeline_context` `topic_enrichment_result` `topic_enrichment_review` `stock_debate_result`
@@ -53,9 +55,10 @@ Syntopica 数据库全景概览与索引/约束权威清单。
 | `feeds` | `idx_feeds_category_id(category_id)` [migr]；`idx_feeds_category_id(category_id)` [gorm]（AutoMigrate 同名） |
 | `categories` | （无业务索引） |
 | `reading_behaviors` | 单列索引各一 [gorm]：`idx_reading_behaviors_article_id`、`idx_reading_behaviors_feed_id`、`idx_reading_behaviors_category_id`、`idx_reading_behaviors_session_id`、`idx_reading_behaviors_event_type`、`idx_reading_behaviors_created_at` |
-| `user_preferences` | 单列索引各一 [gorm]：feed_id、category_id、last_interaction_at |
 
 > **勘误**：旧文档列的复合索引 `idx_reading_behaviors_feed_created_at` **不存在**，实际是 feed_id、created_at 两个独立单列索引。
+>
+> 旧 `user_preferences` 表已删除（偏好转向向量画像），其索引随表一同 DROP。
 
 ### Topic Tags 图谱域
 
@@ -112,6 +115,17 @@ Syntopica 数据库全景概览与索引/约束权威清单。
 |----|-----------|
 | `narrative_summaries` | `idx_narrative_scope(scope_category_id)` [migr]；`idx_narrative_scope_period(scope_type, scope_category_id, period_date)` **复合** [migr]；`idx_narrative_summaries_board_id(board_id)` [migr]；`idx_narrative_period_date(period_date)` [gorm]；单列 [gorm]：status、board_id |
 | `narrative_boards` | `idx_narrative_boards_period(period_date)` [gorm+migr]；`idx_narrative_boards_scope(scope_category_id)` [gorm+migr]；`idx_narrative_boards_semantic_board_id(semantic_board_id)` [migr] |
+
+### 偏好向量与订阅源发现域（preference-vector-feed-discovery）
+
+| 表 | 索引/约束 |
+| ---- | ----------- |
+| `preference_vectors` | `idx_preference_vectors_board_source(board_id, source)` **UNIQUE** [gorm]（board_id 允许多 NULL，全局桶单行由 service 层 upsert 保证）；逻辑关联 `semantic_labels`(board_id)；向量列 `embedding vector`（运行时维度，无固定列维度） |
+| `rsshub_routes` | `idx_rsshub_routes_ns_path(namespace, path)` **UNIQUE** [gorm]；单列 [gorm]：`content_hash`、`status` |
+| `route_embeddings` | `idx_route_embeddings_route(route_id)` **UNIQUE** [gorm]；单列 [gorm]：`text_hash`；逻辑关联 `rsshub_routes`(route_id, OnDelete CASCADE)；向量列 `embedding vector` |
+| `feed_recommendations` | `idx_feed_recommendations_hash(recommendation_hash)` **UNIQUE** [gorm]；复合 `idx_feed_rec_status(status, score)` [gorm]；单列 [gorm]：`route_id`、`board_id`、`accepted_feed_id`；逻辑关联 `rsshub_routes`(route_id) / `semantic_labels`(board_id) / `feeds`(accepted_feed_id) |
+
+> `recommendation_hash = hash(route_id + board_id)`，**不含 source**，qa 与 manual_refresh 共享幂等池与 dismiss 冷却池（见 `flow/discovery.md`）。
 
 ### Daily Report 日报域
 
@@ -185,6 +199,12 @@ Syntopica 数据库全景概览与索引/约束权威清单。
 ---
 
 ## 更新日志
+
+### 2026-07-25
+
+- 偏好转向量画像（preference-vector-feed-discovery）：删除 `user_preferences` 表（迁移 `20260725_0001` DROP，破坏性），新增 4 张表 `preference_vectors` / `rsshub_routes` / `route_embeddings` / `feed_recommendations`（Core 30→33，总数 43→**46**）
+- 新增「偏好向量与订阅源发现域」索引节（4 表的唯一/复合/单列索引）
+- 向量表清单补 `preference_vectors` / `route_embeddings`
 
 ### 2026-07-19
 

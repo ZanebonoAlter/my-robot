@@ -1425,6 +1425,23 @@ func postgresMigrations() []Migration {
 				return nil
 			},
 		},
+		// ── preference-vector-feed-discovery: DROP 旧 user_preferences 表（D9，纯派生数据无迁移负担）──
+		{
+			Version:     "20260725_0001",
+			Description: "DROP user_preferences table — old preference feature removed (preference-vector-feed-discovery D9). Destructive — guarded by MIGRATIONS_ALLOW_DESTRUCTIVE. user_preferences 为行为派生数据，可由 reading_behaviors 重算重建。",
+			Up: func(db *gorm.DB) error {
+				if !IsDestructiveAllowed() {
+					logging.Warnf("skipping destructive migration 20260725_0001 (set MIGRATIONS_ALLOW_DESTRUCTIVE=1 to enable)")
+					return nil
+				}
+				if tableExists(db, "user_preferences") {
+					if err := db.Exec("DROP TABLE IF EXISTS user_preferences CASCADE").Error; err != nil {
+						return fmt.Errorf("drop user_preferences: %w", err)
+					}
+				}
+				return nil
+			},
+		},
 	}
 }
 

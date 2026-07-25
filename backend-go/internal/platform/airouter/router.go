@@ -26,6 +26,8 @@ var defaultConcurrency = map[Capability]int{
 	CapabilityDigestPolish: 2,
 	CapabilityOpenNotebook: 2,
 	CapabilityEmbedding:    5,
+	// CapabilityFeedDiscovery: 推荐精排 LLM，低频突发（手动刷新/问答），与总结同档并发。
+	CapabilityFeedDiscovery: 2,
 }
 
 func truncateSnippet(s string) string {

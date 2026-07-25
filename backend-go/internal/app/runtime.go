@@ -119,13 +119,25 @@ func StartRuntime() *Runtime {
 	}))
 
 	// Medium schedulers: with SchedulerTask DB persistence
-	registry.Register("preference_update", scheduler.New(scheduler.Config{
-		Name:        "Preference Update",
-		Description: "Update reading preferences from behavior data",
-		Interval:    1800 * time.Second,
-		Job:         admin.PreferenceUpdateJob,
-		Persistence: admin.NewTaskPersistence("preference_update",
-			"Update reading preferences from behavior data"),
+
+	// preference-vector-feed-discovery: 偏好向量画像重算（D1，零 LLM/embedding）。
+	registry.Register("preference_profile_update", scheduler.New(scheduler.Config{
+		Name:        "Preference Profile Update",
+		Description: "重算偏好向量画像（行为加权标签向量质心，按版块分桶）",
+		Interval:    3600 * time.Second,
+		Job:         admin.PreferenceProfileUpdateJob,
+		Persistence: admin.NewTaskPersistence("preference_profile_update",
+			"重算偏好向量画像"),
+	}))
+
+	// preference-vector-feed-discovery: RSSHub 路由目录同步（D2/D8，自建实例 /api/namespace）。
+	registry.Register("rsshub_catalog_sync", scheduler.New(scheduler.Config{
+		Name:        "RSSHub Catalog Sync",
+		Description: "同步 RSSHub 路由目录（自建实例 /api/namespace）",
+		Interval:    24 * time.Hour,
+		Job:         admin.RSSHubCatalogSyncJob,
+		Persistence: admin.NewTaskPersistence("rsshub_catalog_sync",
+			"同步 RSSHub 路由目录"),
 	}))
 
 	registry.Register("tag_quality_score", scheduler.New(scheduler.Config{

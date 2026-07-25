@@ -8,9 +8,10 @@ const routeLabels: Record<string, string> = {
   topic_tagging: '主题提取',
   digest_polish: '日报润色',
   embedding: '向量嵌入',
+  feed_discovery: '订阅源发现',
 }
 
-const capabilityOrder = ['summary', 'topic_tagging', 'digest_polish', 'embedding']
+const capabilityOrder = ['summary', 'topic_tagging', 'digest_polish', 'embedding', 'feed_discovery']
 
 export function useAIRouterSettings() {
   const loading = ref(false)

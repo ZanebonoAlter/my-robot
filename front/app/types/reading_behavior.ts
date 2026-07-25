@@ -35,25 +35,3 @@ export interface ReadingStats {
   read_ratio?: number
   fav_ratio?: number
 }
-
-/**
- * 用户偏好数据
- */
-export interface UserPreference {
-  id: number
-  /** @deprecated use id */
-  preference_id?: number
-  feed_id?: number
-  category_id?: number
-  preference_score: number
-  read_score?: number
-  interest_score?: number
-  avg_reading_time: number
-  interaction_count: number
-  scroll_depth_avg: number
-  last_interaction_at?: string
-  created_at: string
-  updated_at: string
-  feed_title?: string
-  category_name?: string
-}

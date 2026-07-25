@@ -189,6 +189,9 @@ feed_recommendations(
 - **A 种子累积**：seed 写入做加权合并（`normalize(α×incoming+(1−α)×existing)`，α=0.4 可配），保 `UNIQUE(board_id, source)` 单行不放宽。多次问答落同版块 = 累积非覆盖。
 - **B 去重粒度**：粗筛按 route_id 维度状态机去重（accepted/dismissed 的 route 不再推），`feeds.url` 仅对 `usable_directly` 补一道。
 - **C hash 粒度**：`recommendation_hash` = route_id+board_id，**不含 source**；qa 与 manual_refresh 共享幂等池与 dismiss 冷却池，跨 source 生效。
+- **D feed_discovery 独立 route**（2026-07-25 验收补充）：推荐精排(rerank)用独立 `CapabilityFeedDiscovery`，不与总结(CapabilitySummary)共用，便于分清用量与单独配模型；问答 embedding 仍用通用 CapabilityEmbedding。
+- **E RSSHub 配置 UI**（2026-07-25 验收补充）：`rsshub_base_url` 从硬编码常量改为 `ai_settings` 可配置（key=`rsshub_config`，缺省回落自建实例 `DefaultRSSHubBaseURL`），前端新增 `SettingsSectionRsshub` 让用户填实例地址。
+- **M1 qa 桶维度**（2026-07-25 review 文档化）：Ask 问答推荐恒落全局桶（board_id=NULL），不强行匹配版块；与 manual_refresh 的版块桶推荐仅在全局桶层面共享幂等池。已知限制非 bug——避免问答与版块桶 hash 维度错位。
 
 ## Open Questions
 

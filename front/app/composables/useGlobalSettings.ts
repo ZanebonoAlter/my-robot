@@ -9,7 +9,7 @@ export function useGlobalSettings() {
   const feedsStore = useFeedsStore()
 
   // ---- Dialog state ----
-  const activeTab = ref<'feeds' | 'general' | 'queues' | 'preferences' | 'firecrawl' | 'schedulers'>('feeds')
+  const activeTab = ref<'feeds' | 'general' | 'queues' | 'firecrawl' | 'schedulers'>('feeds')
   const collapsedCategories = ref<Record<string, boolean>>({})
   const loading = ref(false)
   const error = ref<string | null>(null)

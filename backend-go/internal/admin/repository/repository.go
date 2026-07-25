@@ -235,18 +235,6 @@ func (r *AdminRepository) GetFeedByID(id uint) (*models.Feed, error) {
 	return &feed, nil
 }
 
-func (r *AdminRepository) GetUserPreferences() ([]models.UserPreference, error) {
-	var preferences []models.UserPreference
-	if err := r.db.Model(&models.UserPreference{}).
-		Preload("Feed").
-		Preload("Category").
-		Order("preference_score DESC").
-		Find(&preferences).Error; err != nil {
-		return nil, err
-	}
-	return preferences, nil
-}
-
 // ============================================================================
 // Narrative operations
 // ============================================================================

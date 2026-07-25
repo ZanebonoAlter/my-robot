@@ -67,10 +67,23 @@ var (
 	GetReadingStats           = handler.GetReadingStats
 )
 
-// User preference handlers
+// Preference profile handlers (preference-vector-feed-discovery)
 var (
-	GetUserPreferences      = handler.GetUserPreferences
-	TriggerPreferenceUpdate = handler.TriggerPreferenceUpdate
+	GetPreferenceProfile       = handler.GetPreferenceProfile
+	RecomputePreferenceProfile = handler.RecomputePreferenceProfile
+)
+
+// Discovery handlers (preference-vector-feed-discovery)
+var (
+	SyncCatalog            = handler.SyncCatalog
+	GetCatalogStatus       = handler.GetCatalogStatus
+	GetRecommendations     = handler.GetRecommendations
+	RefreshRecommendations = handler.RefreshRecommendations
+	AcceptRecommendation   = handler.AcceptRecommendation
+	DismissRecommendation  = handler.DismissRecommendation
+	Ask                    = handler.Ask
+	GetRSSHubSettings      = handler.GetRSSHubSettings
+	SaveRSSHubSettings     = handler.SaveRSSHubSettings
 )
 
 // ============================================================================
@@ -103,15 +116,16 @@ var (
 
 // Job functions (for use in runtime.go when creating schedulers).
 var (
-	LogCleanupJob             = scheduler.LogCleanupJob
-	AuxLabelCleanupJob        = scheduler.AuxLabelCleanupJob
-	BlockedArticleRecoveryJob = scheduler.BlockedArticleRecoveryJob
-	PreferenceUpdateJob       = scheduler.PreferenceUpdateJob
-	TagQualityScoreJob        = scheduler.TagQualityScoreJob
-	AutoRefreshJob            = scheduler.AutoRefreshJob
-	ContentCompletionJob      = scheduler.ContentCompletionJob
-	DailyReportJob            = scheduler.DailyReportJob
-	BoardUpgradeSuggestJob    = scheduler.BoardUpgradeSuggestJob
-	FirecrawlJob              = scheduler.FirecrawlJob
-	FirecrawlStatusEnricher   = scheduler.FirecrawlStatusEnricher
+	LogCleanupJob              = scheduler.LogCleanupJob
+	AuxLabelCleanupJob         = scheduler.AuxLabelCleanupJob
+	BlockedArticleRecoveryJob  = scheduler.BlockedArticleRecoveryJob
+	PreferenceProfileUpdateJob = scheduler.PreferenceProfileUpdateJob
+	RSSHubCatalogSyncJob       = scheduler.RSSHubCatalogSyncJob
+	TagQualityScoreJob         = scheduler.TagQualityScoreJob
+	AutoRefreshJob             = scheduler.AutoRefreshJob
+	ContentCompletionJob       = scheduler.ContentCompletionJob
+	DailyReportJob             = scheduler.DailyReportJob
+	BoardUpgradeSuggestJob     = scheduler.BoardUpgradeSuggestJob
+	FirecrawlJob               = scheduler.FirecrawlJob
+	FirecrawlStatusEnricher    = scheduler.FirecrawlStatusEnricher
 )

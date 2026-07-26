@@ -1,0 +1,640 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>OTel 基础设施自动埋点 · 设计概要</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,600;12..96,700;12..96,800&family=JetBrains+Mono:wght@400;500;600&family=Manrope:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  /* ============ 设计系统 ============ */
+  :root{
+    --bg:#0a0e16;
+    --bg-grad:#0c1119;
+    --surface:#10161f;
+    --surface-2:#161e2a;
+    --surface-3:#1d2735;
+    --border:#233044;
+    --border-soft:#1a2433;
+    --text:#d5ddea;
+    --text-dim:#8593ac;
+    --text-mute:#515f78;
+    --teal:#2dd4bf;          /* 已有主链路 */
+    --teal-dim:#0f3d39;
+    --cyan:#22d3ee;
+    --amber:#fbbf24;         /* 新增 ★ */
+    --amber-2:#f59e0b;
+    --rose:#fb7185;          /* 黑洞/断链 */
+    --indigo:#818cf8;        /* HTTP SERVER */
+    --green:#4ade80;
+    --shadow:0 24px 60px -20px rgba(0,0,0,.6);
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html{scroll-behavior:smooth}
+  body{
+    font-family:'Manrope',system-ui,sans-serif;
+    background:var(--bg);
+    color:var(--text);
+    line-height:1.6;
+    -webkit-font-smoothing:antialiased;
+    background-image:
+      radial-gradient(ellipse 80% 50% at 50% -10%, rgba(45,212,191,.07), transparent 60%),
+      radial-gradient(ellipse 60% 40% at 90% 100%, rgba(129,140,248,.05), transparent 60%),
+      linear-gradient(rgba(255,255,255,.012) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(255,255,255,.012) 1px, transparent 1px);
+    background-size:auto,auto,44px 44px,44px 44px;
+    background-attachment:fixed;
+    overflow-x:hidden;
+  }
+  ::selection{background:rgba(45,212,191,.3);color:#fff}
+  .wrap{max-width:1120px;margin:0 auto;padding:0 28px}
+
+  /* ============ 字体角色 ============ */
+  .display{font-family:'Bricolage Grotesque',serif;font-weight:800;letter-spacing:-.02em}
+  .mono{font-family:'JetBrains Mono',ui-monospace,monospace}
+
+  /* ============ Hero ============ */
+  header.hero{padding:88px 0 56px;position:relative}
+  .eyebrow{
+    display:inline-flex;align-items:center;gap:10px;
+    font-family:'JetBrains Mono',monospace;font-size:12px;font-weight:500;
+    color:var(--teal);letter-spacing:.14em;text-transform:uppercase;
+    padding:7px 14px;border:1px solid rgba(45,212,191,.3);border-radius:100px;
+    background:rgba(45,212,191,.06);margin-bottom:28px;
+  }
+  .eyebrow::before{content:"";width:6px;height:6px;border-radius:50%;background:var(--teal);box-shadow:0 0 12px var(--teal)}
+  h1.title{font-size:clamp(40px,6.5vw,76px);line-height:1.02;color:#fff;margin-bottom:22px}
+  h1.title .accent{color:var(--teal)}
+  h1.title .strike{position:relative;color:var(--text-dim)}
+  .lede{font-size:clamp(17px,2vw,21px);color:var(--text-dim);max-width:680px;font-weight:400}
+  .lede strong{color:var(--amber);font-weight:600}
+  .meta-row{display:flex;flex-wrap:wrap;gap:10px;margin-top:34px}
+  .chip{
+    font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--text-dim);
+    padding:6px 12px;border:1px solid var(--border);border-radius:6px;background:var(--surface);
+  }
+  .chip b{color:var(--text);font-weight:600}
+
+  /* ============ Section 框架 ============ */
+  section{padding:64px 0;border-top:1px solid var(--border-soft)}
+  .sec-head{display:flex;align-items:baseline;gap:18px;margin-bottom:40px}
+  .sec-num{font-family:'JetBrains Mono',monospace;font-size:13px;color:var(--teal);font-weight:600;letter-spacing:.1em}
+  .sec-title{font-family:'Bricolage Grotesque',serif;font-weight:700;font-size:clamp(26px,3.4vw,38px);color:#fff;letter-spacing:-.015em;line-height:1.1}
+  .sec-sub{color:var(--text-dim);font-size:16px;margin-top:8px;max-width:680px}
+
+  /* ============ §01 现状断裂 ============ */
+  .break-track{
+    background:var(--surface);border:1px solid var(--border);border-radius:14px;
+    padding:28px;margin-bottom:28px;box-shadow:var(--shadow);
+  }
+  .track-label{font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--text-mute);letter-spacing:.12em;text-transform:uppercase;margin-bottom:18px}
+  .track-flow{display:flex;align-items:center;gap:0;flex-wrap:wrap}
+  .seg{
+    flex:1;min-width:90px;text-align:center;padding:14px 10px;border-radius:8px;
+    font-family:'JetBrains Mono',monospace;font-size:12.5px;font-weight:500;
+    position:relative;
+  }
+  .seg.ok{background:rgba(45,212,191,.1);color:var(--teal);border:1px solid rgba(45,212,191,.25)}
+  .seg.brk{
+    background:repeating-linear-gradient(45deg,rgba(251,113,133,.08),rgba(251,113,133,.08) 6px,transparent 6px,transparent 12px);
+    color:var(--rose);border:1px dashed rgba(251,113,133,.4);
+  }
+  .seg.brk::after{content:"断裂";position:absolute;top:-9px;right:6px;font-size:9px;background:var(--bg);padding:0 5px;color:var(--rose)}
+  .arrow{color:var(--text-mute);font-size:18px;padding:0 4px;flex:0 0 auto}
+  .arrow.dead{color:var(--rose)}
+
+  .hole-grid{display:grid;grid-template-columns:1fr 1fr;gap:18px;margin-top:8px}
+  .hole{
+    background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:26px;
+    position:relative;overflow:hidden;
+  }
+  .hole::before{content:"";position:absolute;top:0;left:0;right:0;height:3px;background:var(--rose);opacity:.6}
+  .hole h3{font-family:'Bricolage Grotesque',serif;font-size:21px;color:#fff;margin-bottom:10px;font-weight:700}
+  .hole .tag{font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--rose);margin-bottom:14px;letter-spacing:.08em}
+  .hole p{color:var(--text-dim);font-size:14.5px}
+  .hole p code{font-family:'JetBrains Mono',monospace;font-size:13px;color:var(--amber);background:rgba(251,191,36,.08);padding:1px 6px;border-radius:4px}
+
+  /* ============ §02 Span 树瀑布图 ============ */
+  .trace-panel{
+    background:linear-gradient(180deg,#0d1219,#0a0e16);
+    border:1px solid var(--border);border-radius:16px;overflow:hidden;box-shadow:var(--shadow);
+  }
+  .trace-head{
+    display:flex;align-items:center;justify-content:space-between;
+    padding:16px 22px;border-bottom:1px solid var(--border);background:rgba(255,255,255,.015);
+  }
+  .trace-head .op{font-family:'JetBrains Mono',monospace;font-size:13px;color:var(--text)}
+  .trace-head .op b{color:var(--teal)}
+  .trace-head .dur{font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--text-dim)}
+  .trace-head .dur span{color:#fff;font-weight:600}
+
+  .legend{display:flex;gap:16px;padding:12px 22px;border-bottom:1px solid var(--border-soft);flex-wrap:wrap}
+  .lg{display:flex;align-items:center;gap:7px;font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--text-dim)}
+  .lg .d{width:10px;height:10px;border-radius:3px}
+  .lg.new{color:var(--amber)}
+
+  .spans{padding:8px 8px 18px}
+  .span-row{
+    display:grid;grid-template-columns:1fr 46%;align-items:center;gap:18px;
+    padding:9px 14px;border-radius:7px;transition:background .15s;
+    position:relative;
+  }
+  .span-row:hover{background:rgba(255,255,255,.025)}
+  .span-info{display:flex;align-items:center;gap:10px;min-width:0}
+  .indent{display:flex;align-items:center;flex:0 0 auto;height:18px}
+  .indent i{display:block;width:18px;height:100%;border-left:1px solid var(--border);margin-right:0;position:relative}
+  .indent i:last-child{border-left:1px solid var(--border)}
+  .indent i.ell::after{content:"";position:absolute;left:-1px;top:50%;width:10px;height:1px;background:var(--border)}
+  .swatch{width:4px;height:22px;border-radius:2px;flex:0 0 auto}
+  .sname{font-family:'JetBrains Mono',monospace;font-size:13px;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .new-star{color:var(--amber);font-weight:700;margin-left:6px;font-size:12px}
+
+  .span-right{display:flex;align-items:center;gap:10px}
+  .kind{
+    font-family:'JetBrains Mono',monospace;font-size:9.5px;font-weight:600;letter-spacing:.06em;
+    padding:2px 7px;border-radius:4px;flex:0 0 auto;white-space:nowrap;
+  }
+  .track{flex:1;height:16px;background:rgba(255,255,255,.025);border-radius:4px;position:relative;overflow:hidden;min-width:60px}
+  .bar{position:absolute;top:0;bottom:0;border-radius:4px;transform-origin:left;animation:grow 1s cubic-bezier(.2,.8,.2,1) both}
+  .bar.server{background:linear-gradient(90deg,var(--indigo),#6366f1)}
+  .bar.internal{background:linear-gradient(90deg,var(--teal),#14b8a6)}
+  .bar.db{background:linear-gradient(90deg,var(--amber),var(--amber-2));box-shadow:0 0 14px rgba(251,191,36,.35)}
+  .bar.client{background:linear-gradient(90deg,var(--amber),#d97706);box-shadow:0 0 14px rgba(251,191,36,.3)}
+  .dur-lbl{font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--text-mute);flex:0 0 auto;width:42px;text-align:right}
+
+  @keyframes grow{from{transform:scaleX(0)}to{transform:scaleX(1)}}
+
+  /* ============ §03 三块改造 ============ */
+  .pillar-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:18px}
+  .pillar{
+    background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:28px;
+    position:relative;overflow:hidden;transition:transform .25s,border-color .25s;
+  }
+  .pillar:hover{transform:translateY(-4px);border-color:var(--teal)}
+  .pillar::after{content:"";position:absolute;top:-40px;right:-40px;width:120px;height:120px;border-radius:50%;background:radial-gradient(circle,rgba(45,212,191,.1),transparent 70%)}
+  .p-icon{
+    width:44px;height:44px;border-radius:11px;display:grid;place-items:center;
+    background:rgba(45,212,191,.1);border:1px solid rgba(45,212,191,.25);
+    font-family:'JetBrains Mono',monospace;font-size:18px;color:var(--teal);font-weight:600;margin-bottom:20px;
+  }
+  .pillar h3{font-family:'Bricolage Grotesque',serif;font-size:20px;color:#fff;margin-bottom:6px;font-weight:700}
+  .pillar .pkg{font-family:'JetBrains Mono',monospace;font-size:11.5px;color:var(--text-mute);margin-bottom:14px}
+  .pillar p{font-size:14px;color:var(--text-dim);margin-bottom:16px}
+  .invas{display:inline-flex;align-items:center;gap:6px;font-family:'JetBrains Mono',monospace;font-size:11px;padding:4px 10px;border-radius:5px}
+  .invas.zero{background:rgba(74,222,128,.1);color:var(--green);border:1px solid rgba(74,222,128,.25)}
+  .invas.light{background:rgba(251,191,36,.1);color:var(--amber);border:1px solid rgba(251,191,36,.25)}
+
+  /* ============ §04 边界对比 ============ */
+  .vs-grid{display:grid;grid-template-columns:1fr auto 1fr;gap:0;align-items:stretch}
+  .vs-col{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:28px}
+  .vs-col.go{border-color:rgba(129,140,248,.3)}
+  .vs-col.this{border-color:rgba(45,212,191,.3)}
+  .vs-col h3{font-family:'Bricolage Grotesque',serif;font-size:19px;margin-bottom:4px;font-weight:700}
+  .vs-col.go h3{color:var(--indigo)}
+  .vs-col.this h3{color:var(--teal)}
+  .vs-col .sub{font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--text-mute);margin-bottom:18px}
+  .vs-col ul{list-style:none}
+  .vs-col li{font-size:14px;color:var(--text-dim);padding:8px 0;border-bottom:1px solid var(--border-soft);display:flex;gap:10px}
+  .vs-col li:last-child{border-bottom:none}
+  .vs-col li b{color:var(--text);font-weight:600;min-width:64px;flex:0 0 auto}
+  .vs-mid{display:grid;place-items:center;padding:0 18px}
+  .vs-mid span{
+    font-family:'Bricolage Grotesque',serif;font-weight:800;font-size:22px;color:var(--text-mute);
+    writing-mode:vertical-rl;letter-spacing:.1em;
+  }
+  .shared{
+    margin-top:20px;background:rgba(45,212,191,.05);border:1px dashed rgba(45,212,191,.3);border-radius:10px;
+    padding:14px 20px;font-size:13.5px;color:var(--text-dim);text-align:center;
+  }
+  .shared code{font-family:'JetBrains Mono',monospace;color:var(--teal);font-size:12.5px}
+
+  /* ============ §05 决策 ============ */
+  .decisions{display:flex;flex-direction:column;gap:14px}
+  .dec{
+    display:grid;grid-template-columns:48px 1fr;gap:20px;
+    background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:22px 26px;
+  }
+  .dec-n{font-family:'Bricolage Grotesque',serif;font-size:30px;font-weight:800;color:var(--teal);line-height:1;opacity:.5}
+  .dec h4{font-family:'Bricolage Grotesque',serif;font-size:17px;color:#fff;margin-bottom:8px;font-weight:700}
+  .dec p{font-size:14px;color:var(--text-dim)}
+  .dec .alt{font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--text-mute);margin-top:8px}
+  .dec .alt b{color:var(--rose)}
+
+  /* ============ §06 风险 ============ */
+  .risk-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  .risk{
+    background:var(--surface);border:1px solid var(--border);border-left:3px solid var(--rose);border-radius:10px;padding:20px 22px;
+  }
+  .risk .r{font-size:14px;color:var(--text);margin-bottom:10px}
+  .risk .r b{color:var(--rose)}
+  .risk .m{font-size:13px;color:var(--text-dim);padding-top:10px;border-top:1px solid var(--border-soft);display:flex;gap:8px}
+  .risk .m b{color:var(--green);flex:0 0 auto}
+
+  /* ============ Footer ============ */
+  footer{padding:56px 0 80px;border-top:1px solid var(--border-soft);margin-top:24px}
+  .foot-grid{display:grid;grid-template-columns:1fr 1fr;gap:18px}
+  .foot-card{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:22px}
+  .foot-card h5{font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--text-mute);letter-spacing:.12em;text-transform:uppercase;margin-bottom:12px}
+  .foot-card p{font-size:14px;color:var(--text-dim)}
+  .foot-card p code{font-family:'JetBrains Mono',monospace;font-size:12.5px;color:var(--teal);background:rgba(45,212,191,.07);padding:1px 6px;border-radius:4px}
+  .sign{margin-top:32px;font-family:'JetBrains Mono',monospace;font-size:11.5px;color:var(--text-mute);display:flex;justify-content:space-between;flex-wrap:wrap;gap:12px}
+
+  /* ============ 入场动画 ============ */
+  .reveal{opacity:0;transform:translateY(18px);animation:rise .7s cubic-bezier(.2,.8,.2,1) forwards}
+  @keyframes rise{to{opacity:1;transform:none}}
+  .d1{animation-delay:.05s}.d2{animation-delay:.12s}.d3{animation-delay:.19s}.d4{animation-delay:.26s}.d5{animation-delay:.33s}.d6{animation-delay:.4s}
+
+  /* span 树逐行 stagger */
+  .spans .span-row{opacity:0;animation:rise .5s ease forwards}
+  .spans .span-row:nth-child(1){animation-delay:.3s}
+  .spans .span-row:nth-child(2){animation-delay:.38s}
+  .spans .span-row:nth-child(3){animation-delay:.46s}
+  .spans .span-row:nth-child(4){animation-delay:.54s}
+  .spans .span-row:nth-child(5){animation-delay:.62s}
+  .spans .span-row:nth-child(6){animation-delay:.7s}
+  .spans .span-row:nth-child(7){animation-delay:.78s}
+  .spans .span-row:nth-child(8){animation-delay:.86s}
+
+  @media (prefers-reduced-motion: reduce){
+    *{animation:none!important;transition:none!important}
+    .reveal,.spans .span-row{opacity:1;transform:none}
+    .bar{transform:none}
+  }
+
+  @media(max-width:820px){
+    .hole-grid,.pillar-grid,.risk-grid,.foot-grid,.vs-grid{grid-template-columns:1fr}
+    .vs-mid{padding:10px 0}
+    .vs-mid span{writing-mode:horizontal-tb}
+    .span-row{grid-template-columns:1fr}
+    .span-right{grid-column:1}
+    .track{display:none}
+  }
+</style>
+</head>
+<body>
+
+<div class="wrap">
+
+  <!-- ============ HERO ============ -->
+  <header class="hero">
+    <span class="eyebrow reveal d1">openspec change · add-otel-infra-instrumentation</span>
+    <h1 class="title display reveal d2">
+      OTel 基础设施<span class="accent">自动埋点</span><br>
+      <span class="strike">把链路里的两个黑洞补上</span>
+    </h1>
+    <p class="lede reveal d3">
+      补 <strong>go-instrument 管不到</strong> 的两层 —— 每条 GORM 操作、每个出站 HTTP 调用 ——
+      让"调用链路 + 耗时"<strong>零业务代码改动</strong>地自动进 trace。
+    </p>
+    <div class="meta-row reveal d4">
+      <span class="chip">方向 <b>A · 基础设施全自动</b></span>
+      <span class="chip">后端 <b>Go / Gin</b></span>
+      <span class="chip">单用户 · <b>PostgreSQL</b></span>
+      <span class="chip">采样 <b>ParentBased · 默认全采</b></span>
+    </div>
+  </header>
+
+  <!-- ============ §01 现状 ============ -->
+  <section id="now">
+    <div class="sec-head">
+      <span class="sec-num reveal d1">01 / 现状</span>
+      <div>
+        <h2 class="sec-title reveal d2">链路在两处断裂</h2>
+        <p class="sec-sub reveal d3">HTTP 入站和业务方法已经有 span，但 DB 操作和出站 HTTP 是黑洞 —— 一次请求里 SQL 跑了几条、LLM 调用耗多少，trace 里看不到。</p>
+      </div>
+    </div>
+
+    <div class="break-track reveal d3">
+      <div class="track-label">一次请求经过的环节</div>
+      <div class="track-flow">
+        <div class="seg ok">otelgin<br>HTTP 入站</div>
+        <span class="arrow">→</span>
+        <div class="seg ok">go-instrument<br>方法 span</div>
+        <span class="arrow">→</span>
+        <div class="seg brk">DB 操作<br>GORM</div>
+        <span class="arrow dead">⤫</span>
+        <div class="seg brk">出站 HTTP<br>LLM / 爬虫</div>
+      </div>
+    </div>
+
+    <div class="hole-grid">
+      <div class="hole reveal d4">
+        <div class="tag mono">BLACK BOX · DB</div>
+        <h3>数据库操作零 span</h3>
+        <p>仅 <code>SlowLogger</code> 记慢 SQL，与 trace 割裂。一个请求跑了多少 SQL、哪条慢、链路在 SQL 上耗多少时间 —— 全看不到。</p>
+      </div>
+      <div class="hole reveal d5">
+        <div class="tag mono">BLACK BOX · OUTBOUND HTTP</div>
+        <h3>出站 HTTP 零 span</h3>
+        <p><code>airouter</code>（LLM/Embedding）、<code>firecrawl</code>、<code>fingenius</code> 全是裸 <code>&http.Client{}</code>。链路一到"调外部"就断，日报核心耗时直接消失。</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ §02 Span 树瀑布图 ============ -->
+  <section id="tree">
+    <div class="sec-head">
+      <span class="sec-num reveal d1">02 / 目标</span>
+      <div>
+        <h2 class="sec-title reveal d2">一条完整链路长这样</h2>
+        <p class="sec-sub reveal d3">补全后，★ 标记的就是本次自动加上的 span —— 全部零业务代码，DB 细节和出站调用耗时自然挂在业务节点下。</p>
+      </div>
+    </div>
+
+    <div class="trace-panel reveal d3">
+      <div class="trace-head">
+        <div class="op mono">POST <b>/api/daily-report/generate</b></div>
+        <div class="dur mono">trace · <span>1.42s</span> · 8 spans</div>
+      </div>
+      <div class="legend">
+        <div class="lg"><span class="d" style="background:var(--indigo)"></span>SERVER · HTTP 入站</div>
+        <div class="lg"><span class="d" style="background:var(--teal)"></span>INTERNAL · 业务 span</div>
+        <div class="lg new"><span class="d" style="background:var(--amber)"></span>★ 本次新增（自动）</div>
+      </div>
+
+      <div class="spans">
+        <!-- 行结构: 左 span 信息, 右 [kind标签 + 耗时轨道 + 时长] -->
+
+        <div class="span-row">
+          <div class="span-info">
+            <span class="swatch" style="background:var(--indigo)"></span>
+            <span class="sname">POST /api/daily-report/generate</span>
+          </div>
+          <div class="span-right">
+            <span class="kind" style="background:rgba(129,140,248,.15);color:var(--indigo)">SERVER</span>
+            <div class="track"><div class="bar server" style="left:0;width:100%;animation-delay:.3s"></div></div>
+            <span class="dur-lbl">1.42s</span>
+          </div>
+        </div>
+
+        <div class="span-row">
+          <div class="span-info">
+            <span class="indent"><i></i></span>
+            <span class="swatch" style="background:var(--teal)"></span>
+            <span class="sname">workflow.daily_report.generate</span>
+          </div>
+          <div class="span-right">
+            <span class="kind" style="background:rgba(45,212,191,.13);color:var(--teal)">INTERNAL</span>
+            <div class="track"><div class="bar internal" style="left:2%;width:94%;animation-delay:.4s"></div></div>
+            <span class="dur-lbl">1.33s</span>
+          </div>
+        </div>
+
+        <div class="span-row">
+          <div class="span-info">
+            <span class="indent"><i></i><i></i></span>
+            <span class="swatch" style="background:var(--teal)"></span>
+            <span class="sname">workflow.daily_report.dedup</span>
+          </div>
+          <div class="span-right">
+            <span class="kind" style="background:rgba(45,212,191,.13);color:var(--teal)">INTERNAL</span>
+            <div class="track"><div class="bar internal" style="left:4%;width:6%;animation-delay:.5s"></div></div>
+            <span class="dur-lbl">80ms</span>
+          </div>
+        </div>
+
+        <div class="span-row">
+          <div class="span-info">
+            <span class="indent"><i></i><i></i></span>
+            <span class="swatch" style="background:var(--amber)"></span>
+            <span class="sname">SELECT * FROM articles WHERE ...<span class="new-star">★</span></span>
+          </div>
+          <div class="span-right">
+            <span class="kind" style="background:rgba(251,191,36,.15);color:var(--amber)">DB · CLIENT</span>
+            <div class="track"><div class="bar db" style="left:10%;width:5%;animation-delay:.6s"></div></div>
+            <span class="dur-lbl">62ms</span>
+          </div>
+        </div>
+
+        <div class="span-row">
+          <div class="span-info">
+            <span class="indent"><i></i><i></i></span>
+            <span class="swatch" style="background:var(--teal)"></span>
+            <span class="sname">workflow.daily_report.cluster_tags</span>
+          </div>
+          <div class="span-right">
+            <span class="kind" style="background:rgba(45,212,191,.13);color:var(--teal)">INTERNAL</span>
+            <div class="track"><div class="bar internal" style="left:15%;width:60%;animation-delay:.62s"></div></div>
+            <span class="dur-lbl">850ms</span>
+          </div>
+        </div>
+
+        <div class="span-row">
+          <div class="span-info">
+            <span class="indent"><i></i><i></i><i></i></span>
+            <span class="swatch" style="background:var(--amber)"></span>
+            <span class="sname">HTTP POST llm/chat/completions<span class="new-star">★</span></span>
+          </div>
+          <div class="span-right">
+            <span class="kind" style="background:rgba(251,191,36,.15);color:var(--amber)">CLIENT</span>
+            <div class="track"><div class="bar client" style="left:17%;width:56%;animation-delay:.7s"></div></div>
+            <span class="dur-lbl">790ms</span>
+          </div>
+        </div>
+
+        <div class="span-row">
+          <div class="span-info">
+            <span class="indent"><i></i><i></i><i></i><i></i></span>
+            <span class="swatch" style="background:var(--teal)"></span>
+            <span class="sname">Router.Chat</span>
+          </div>
+          <div class="span-right">
+            <span class="kind" style="background:rgba(45,212,191,.13);color:var(--teal)">INTERNAL</span>
+            <div class="track"><div class="bar internal" style="left:18%;width:55%;animation-delay:.78s"></div></div>
+            <span class="dur-lbl">780ms</span>
+          </div>
+        </div>
+
+        <div class="span-row">
+          <div class="span-info">
+            <span class="indent"><i></i><i></i></span>
+            <span class="swatch" style="background:var(--amber)"></span>
+            <span class="sname">INSERT INTO daily_reports ...<span class="new-star">★</span></span>
+          </div>
+          <div class="span-right">
+            <span class="kind" style="background:rgba(251,191,36,.15);color:var(--amber)">DB · CLIENT</span>
+            <div class="track"><div class="bar db" style="left:92%;width:4%;animation-delay:.86s"></div></div>
+            <span class="dur-lbl">45ms</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ §03 三块改造 ============ -->
+  <section id="how">
+    <div class="sec-head">
+      <span class="sec-num reveal d1">03 / 改造</span>
+      <div>
+        <h2 class="sec-title reveal d2">三块，都不进业务逻辑</h2>
+        <p class="sec-sub reveal d3">otelgorm 是真零侵入；otelhttp 需改约 10 处客户端构造点（全在 platform / 客户端层，不碰 domain）；采样是配置层一行。</p>
+      </div>
+    </div>
+
+    <div class="pillar-grid">
+      <div class="pillar reveal d3">
+        <div class="p-icon mono">DB</div>
+        <h3>otelgorm</h3>
+        <div class="pkg mono">gorm.io/plugin/opentelemetry</div>
+        <p>db 初始化处一行 <code style="color:var(--teal);font-family:'JetBrains Mono',monospace;font-size:12.5px">db.Use(gormotel.NewPlugin())</code>，每个 GORM 操作自动成 Client span，附 db.statement / db.operation。</p>
+        <span class="invas zero">● 零业务侵入</span>
+      </div>
+      <div class="pillar reveal d4">
+        <div class="p-icon mono">→</div>
+        <h3>otelhttp 工厂</h3>
+        <div class="pkg mono">internal/platform/httpclient</div>
+        <p>统一 <code style="color:var(--teal);font-family:'JetBrains Mono',monospace;font-size:12.5px">httpclient.New(opts...)</code>，内部 otelhttp.NewTransport 包 transport + 透传 traceparent。裸 client 全换它。</p>
+        <span class="invas light">● 客户端层轻改 · ~10 处</span>
+      </div>
+      <div class="pillar reveal d5">
+        <div class="p-icon mono">%</div>
+        <h3>采样 + 配置外化</h3>
+        <div class="pkg mono">ParentBased(TraceIDRatioBased)</div>
+        <p>root 按 ratio 决定整条链路记不记，被采则子 span 全保留不断链。配置从环境变量读，默认 1.0 全采。</p>
+        <span class="invas zero">● 零业务侵入</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ §04 边界 ============ -->
+  <section id="boundary">
+    <div class="sec-head">
+      <span class="sec-num reveal d1">04 / 边界</span>
+      <div>
+        <h2 class="sec-title reveal d2">与 go-instrument 互补，不重复</h2>
+        <p class="sec-sub reveal d3">项目已在用 go-instrument 做方法级自动 span（改源码，覆盖 6 个方法）。本 change 走基础设施中间件路线，补它管不到的层 —— 两者共享同一 TracerProvider。</p>
+      </div>
+    </div>
+
+    <div class="vs-grid">
+      <div class="vs-col go reveal d3">
+        <h3>go-instrument</h3>
+        <div class="sub mono">已存在 · 方法级自动</div>
+        <ul>
+          <li><b>路线</b>AST 改源码注入 span</li>
+          <li><b>覆盖</b>6 个方法（Router.Chat 等）</li>
+          <li><b>约束</b>需 ctx 第一参 + named err</li>
+          <li><b>短板</b>attributes / events 待补</li>
+          <li><b>侵入</b>改业务源文件</li>
+        </ul>
+      </div>
+      <div class="vs-mid reveal d4"><span>互补</span></div>
+      <div class="vs-col this reveal d5">
+        <h3>本 change</h3>
+        <div class="sub mono">新增 · 基础设施级自动</div>
+        <ul>
+          <li><b>路线</b>中间件（gormotel / otelhttp）</li>
+          <li><b>覆盖</b>所有 GORM + 所有出站 HTTP</li>
+          <li><b>约束</b>无（挂中间件即生效）</li>
+          <li><b>短板</b>无业务语义 attributes</li>
+          <li><b>侵入</b>不动业务源码</li>
+        </ul>
+      </div>
+    </div>
+    <div class="shared reveal d6">
+      共享同一 <code>TracerProvider</code> —— 本 change 的采样策略同时作用于 go-instrument 生成的 span。go-instrument 的扩覆盖 / 脚本化属独立 change（已声明 out of scope）。
+    </div>
+  </section>
+
+  <!-- ============ §05 决策 ============ -->
+  <section id="decisions">
+    <div class="sec-head">
+      <span class="sec-num reveal d1">05 / 决策</span>
+      <div>
+        <h2 class="sec-title reveal d2">五个关键技术选择</h2>
+      </div>
+    </div>
+
+    <div class="decisions">
+      <div class="dec reveal d2">
+        <div class="dec-n">1</div>
+        <div>
+          <h4>DB 层用 gormotel 插件，不自己包 GORM logger</h4>
+          <p>官方插件，自动建 Client span + 标准 DB semantic attributes，挂当前 trace。零维护。</p>
+          <div class="alt">备选：自己写 Plugin → 重造轮子；只留 SlowLogger → 与 trace 割裂</div>
+        </div>
+      </div>
+      <div class="dec reveal d3">
+        <div class="dec-n">2</div>
+        <div>
+          <h4>出站 HTTP 用统一工厂，不替换全局 DefaultTransport</h4>
+          <p>Go net/http 无全局 hook；替换 DefaultTransport 风险大（波及第三方库）。工厂显式可控，Timeout 经 opts 保留。airouter 优先。</p>
+          <div class="alt">备选：替换 <b>http.DefaultTransport</b> → 影响面失控</div>
+        </div>
+      </div>
+      <div class="dec reveal d4">
+        <div class="dec-n">3</div>
+        <div>
+          <h4>采样用 ParentBased(TraceIDRatioBased)</h4>
+          <p>OTel 官方推荐默认。语义恰好"整条链路要么完整要么不记"，不在中间断链。ratio=1.0 全采，嫌吵调小。</p>
+          <div class="alt">备选：AlwaysOn → 不可调；按 name 过滤 GORM → 增复杂度，树形展示不淹没</div>
+        </div>
+      </div>
+      <div class="dec reveal d5">
+        <div class="dec-n">4</div>
+        <div>
+          <h4>配置外化到环境变量</h4>
+          <p>SampleRatio / InstrumentGORM / InstrumentHTTP 从 env 读。不配则默认全采全开，行为等同现状。生产可降采样、可临时关 DB trace 排障。</p>
+        </div>
+      </div>
+      <div class="dec reveal d6">
+        <div class="dec-n">5</div>
+        <div>
+          <h4>明确与 go-instrument 的边界</h4>
+          <p>不动它已注入的 6 个方法；本 change 只补它管不到的 DB / 出站 HTTP 层。扩覆盖 / 脚本化留给独立 change。</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ §06 风险 ============ -->
+  <section id="risks">
+    <div class="sec-head">
+      <span class="sec-num reveal d1">06 / 风险</span>
+      <div>
+        <h2 class="sec-title reveal d2">已知风险与缓解</h2>
+      </div>
+    </div>
+
+    <div class="risk-grid">
+      <div class="risk reveal d2">
+        <div class="r"><b>otel_spans 涨量</b> · 加 otelgorm 后每请求多若干 DB span</div>
+        <div class="m"><b>缓解 →</b>ParentBased 采样 + 现有 7 天 retention 兜底；SampleRatio 可调</div>
+      </div>
+      <div class="risk reveal d3">
+        <div class="r"><b>timeline 噪音</b> · GORM SELECT 类 span 数量多</div>
+        <div class="m"><b>缓解 →</b>树形 BuildSpanTree 挂业务 span 下不平铺；展示层折叠属后续</div>
+      </div>
+      <div class="risk reveal d4">
+        <div class="r"><b>出站 client 改 ~10 处</b> · 替换面散落</div>
+        <div class="m"><b>缓解 →</b>机械替换 &http.Client{} → httpclient.New(...)，Timeout 透传，每包测试</div>
+      </div>
+      <div class="risk reveal d5">
+        <div class="r"><b>记录含参数 SQL</b> · 可能记敏感参数</div>
+        <div class="m"><b>缓解 →</b>GORM 默认占位符化；单用户本地风险低；必要时禁 statement 记录</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ FOOTER ============ -->
+  <footer>
+    <div class="foot-grid">
+      <div class="foot-card reveal d2">
+        <h5>部署影响</h5>
+        <p>otel_spans 行数显著增加（无 schema 变更，复用现有表）；新增 <code>TRACE_SAMPLE_RATIO</code> 等环境变量，不配则行为等同现状。<b style="color:var(--amber)">无需手动迁移</b>。</p>
+      </div>
+      <div class="foot-card reveal d3">
+        <h5>下一步</h5>
+        <p>review proposal / design / specs / tasks 四制品 → 进 <code>apply</code>（按《开发执行规范》§0.6 编排：主线程建上下文 + 跑 doc-impact，子线程实现，归档前 verify + check-standards）。</p>
+      </div>
+    </div>
+    <div class="sign">
+      <span>openspec/changes/add-otel-infra-instrumentation/</span>
+      <span>design-overview.html · Syntopica</span>
+    </div>
+  </footer>
+
+</div>
+</body>
+</html>

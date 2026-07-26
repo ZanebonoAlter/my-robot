@@ -8,6 +8,8 @@ import (
 
 	"github.com/JohannesKaufmann/html-to-markdown"
 	"github.com/go-shiori/go-readability"
+
+	"syntopica-backend/internal/platform/httpclient"
 )
 
 // minUsableContentRunes 是判定 readability 结果"合格可用"的最小正文字数（按 rune 计）。
@@ -60,7 +62,7 @@ type ReadabilityCrawler struct {
 // NewReadabilityCrawler 构造一个进程内 readability 抓取器。
 func NewReadabilityCrawler() *ReadabilityCrawler {
 	return &ReadabilityCrawler{
-		client: &http.Client{Timeout: 30 * time.Second},
+		client: httpclient.New(httpclient.WithTimeout(30 * time.Second)),
 	}
 }
 

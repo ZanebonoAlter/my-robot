@@ -13,6 +13,7 @@ import (
 	"github.com/mmcdole/gofeed"
 
 	"syntopica-backend/internal/models"
+	"syntopica-backend/internal/platform/httpclient"
 )
 
 type RSSParser struct {
@@ -21,9 +22,7 @@ type RSSParser struct {
 
 func NewRSSParser() *RSSParser {
 	return &RSSParser{
-		client: &http.Client{
-			Timeout: 20 * time.Second,
-		},
+		client: httpclient.New(httpclient.WithTimeout(20 * time.Second)),
 	}
 }
 

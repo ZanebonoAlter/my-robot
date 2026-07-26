@@ -8,6 +8,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"syntopica-backend/internal/platform/httpclient"
 )
 
 type AIService struct {
@@ -50,7 +52,7 @@ func NewAIService(baseURL, apiKey, model string) *AIService {
 		BaseURL: baseURL,
 		APIKey:  apiKey,
 		Model:   model,
-		client:  &http.Client{Timeout: 120 * time.Second},
+		client:  httpclient.New(httpclient.WithTimeout(120 * time.Second)),
 	}
 }
 

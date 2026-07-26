@@ -48,6 +48,7 @@ func InitTracerProvider(db *gorm.DB, cfg Config) (*sdktrace.TracerProvider, erro
 
 	opts := []sdktrace.TracerProviderOption{
 		sdktrace.WithResource(res),
+		sdktrace.WithSampler(sdktrace.ParentBased(sdktrace.TraceIDRatioBased(cfg.SampleRatio))),
 	}
 	for _, sp := range spanProcessors {
 		opts = append(opts, sdktrace.WithSpanProcessor(sp))

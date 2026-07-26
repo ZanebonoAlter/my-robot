@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"syntopica-backend/internal/models"
+	"syntopica-backend/internal/platform/httpclient"
 	// "syntopica-backend/internal/platform/logging"
 )
 
@@ -118,7 +119,7 @@ func (c *openAICompatibleClient) Chat(ctx context.Context, provider models.AIPro
 	if timeout <= 0 {
 		timeout = 120 * time.Second
 	}
-	resp, err := (&http.Client{Timeout: timeout}).Do(httpReq)
+	resp, err := httpclient.New(httpclient.WithTimeout(timeout)).Do(httpReq)
 	if err != nil {
 		return nil, &ProviderError{Message: err.Error(), Code: "network_error", Retryable: true}
 	}
@@ -276,7 +277,7 @@ func (c *openAICompatibleClient) Embed(ctx context.Context, provider models.AIPr
 		timeout = 60 * time.Second
 	}
 
-	resp, err := (&http.Client{Timeout: timeout}).Do(httpReq)
+	resp, err := httpclient.New(httpclient.WithTimeout(timeout)).Do(httpReq)
 	if err != nil {
 		return nil, &ProviderError{Message: err.Error(), Code: "network_error", Retryable: true}
 	}

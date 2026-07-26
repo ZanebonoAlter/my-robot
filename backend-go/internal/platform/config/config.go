@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 
 	"github.com/spf13/viper"
@@ -13,6 +14,7 @@ type Config struct {
 	Database DatabaseConfig
 	CORS     CORSConfig
 	Log      LogConfig
+	Tracing  TracingConfig
 }
 
 type LogConfig struct {
@@ -59,6 +61,12 @@ type CORSConfig struct {
 	AllowHeaders []string
 }
 
+type TracingConfig struct {
+	SampleRatio    float64 `mapstructure:"sample_ratio"`
+	InstrumentGORM bool    `mapstructure:"instrument_gorm"`
+	InstrumentHTTP bool    `mapstructure:"instrument_http"`
+}
+
 var AppConfig *Config
 
 func LoadConfig(configPath string) error {
@@ -88,6 +96,10 @@ func LoadConfig(configPath string) error {
 	viper.SetDefault("log.file.max_backups", 30)
 	viper.SetDefault("log.file.max_age_days", 30)
 	viper.SetDefault("log.file.compress", true)
+
+	viper.SetDefault("tracing.sample_ratio", 1.0)
+	viper.SetDefault("tracing.instrument_gorm", true)
+	viper.SetDefault("tracing.instrument_http", true)
 
 	if err := viper.ReadInConfig(); err != nil {
 		if _, ok := err.(viper.ConfigFileNotFoundError); !ok {
@@ -135,6 +147,19 @@ func applyEnvOverrides(cfg *Config) {
 	// MIGRATIONS_ALLOW_DESTRUCTIVE=1 enables destructive migrations (TRUNCATE/DROP).
 	// Defaults to false: production never sets this, refusing destructive migrations.
 	cfg.Database.AllowDestructiveMigrations = os.Getenv("MIGRATIONS_ALLOW_DESTRUCTIVE") == "1"
+
+	// Tracing (defaults via viper SetDefault above; env overrides when set)
+	if v := strings.TrimSpace(os.Getenv("TRACE_SAMPLE_RATIO")); v != "" {
+		if r, err := strconv.ParseFloat(v, 64); err == nil {
+			cfg.Tracing.SampleRatio = r
+		}
+	}
+	if v := os.Getenv("TRACE_INSTRUMENT_GORM"); v != "" {
+		cfg.Tracing.InstrumentGORM = v != "0"
+	}
+	if v := os.Getenv("TRACE_INSTRUMENT_HTTP"); v != "" {
+		cfg.Tracing.InstrumentHTTP = v != "0"
+	}
 }
 
 func splitCommaSeparated(value string) []string {

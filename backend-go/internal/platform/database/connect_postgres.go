@@ -8,6 +8,7 @@ import (
 	"gorm.io/gorm"
 
 	"syntopica-backend/internal/platform/config"
+	"syntopica-backend/internal/platform/tracing"
 )
 
 func connectPostgres(cfg *config.Config, gormCfg *gorm.Config) (*gorm.DB, error) {
@@ -18,6 +19,12 @@ func connectPostgres(cfg *config.Config, gormCfg *gorm.Config) (*gorm.DB, error)
 	db, err := gorm.Open(dialector, gormCfg)
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect postgres database: %w", err)
+	}
+
+	if cfg.Tracing.InstrumentGORM {
+		if err := db.Use(tracing.NewGORMPlugin()); err != nil {
+			return nil, fmt.Errorf("failed to mount gorm tracing plugin: %w", err)
+		}
 	}
 
 	sqlDB, err := db.DB()

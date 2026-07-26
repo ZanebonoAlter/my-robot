@@ -12,6 +12,7 @@ import (
 	"syntopica-backend/internal/dataenrichment"
 	"syntopica-backend/internal/platform/config"
 	"syntopica-backend/internal/platform/database"
+	"syntopica-backend/internal/platform/httpclient"
 	"syntopica-backend/internal/platform/logging"
 	"syntopica-backend/internal/platform/middleware"
 	"syntopica-backend/internal/platform/tracing"
@@ -60,6 +61,12 @@ func main() {
 	taggingdomain.EnsureVectorDimensionOnce(context.Background())
 
 	traceCfg := tracing.DefaultConfig()
+	if config.AppConfig != nil {
+		traceCfg.SampleRatio = config.AppConfig.Tracing.SampleRatio
+		traceCfg.InstrumentGORM = config.AppConfig.Tracing.InstrumentGORM
+		traceCfg.InstrumentHTTP = config.AppConfig.Tracing.InstrumentHTTP
+	}
+	httpclient.SetInstrumentation(traceCfg.InstrumentHTTP)
 	tp, err := tracing.InitTracerProvider(database.DB, traceCfg)
 	if err != nil {
 		logging.Warnf("Failed to initialize tracing: %v", err)

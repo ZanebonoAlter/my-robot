@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"syntopica-backend/internal/models"
+	"syntopica-backend/internal/platform/httpclient"
 )
 
 // TestResult 是连通性测试的结果。
@@ -36,7 +37,7 @@ func TestConnection(ctx context.Context, provider models.AIProvider) (*TestResul
 		httpReq.Header.Set("Authorization", "Bearer "+provider.APIKey)
 	}
 
-	resp, err := (&http.Client{Timeout: timeout}).Do(httpReq)
+	resp, err := httpclient.New(httpclient.WithTimeout(timeout)).Do(httpReq)
 	if err != nil {
 		return nil, fmt.Errorf("无法连接 %s: %w", endpoint, err)
 	}

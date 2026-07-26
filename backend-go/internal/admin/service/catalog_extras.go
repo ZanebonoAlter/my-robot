@@ -12,6 +12,7 @@ import (
 
 	"syntopica-backend/internal/models"
 	"syntopica-backend/internal/platform/airouter"
+	"syntopica-backend/internal/platform/httpclient"
 	"syntopica-backend/internal/platform/logging"
 )
 
@@ -136,7 +137,7 @@ func hashRouteText(text string) string {
 
 // newAvailabilityClient 构造可用性校验 HTTP 客户端（15s 超时）。
 func newAvailabilityClient() *http.Client {
-	return &http.Client{Timeout: 15 * time.Second}
+	return httpclient.New(httpclient.WithTimeout(15 * time.Second))
 }
 
 // checkOne 对单个 example URL 发起 GET：200 + 非空响应体 → "ok"，否则 "broken"。

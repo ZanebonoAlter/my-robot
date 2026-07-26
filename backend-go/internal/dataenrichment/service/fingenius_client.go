@@ -10,6 +10,8 @@ import (
 	"os"
 	"strconv"
 	"time"
+
+	"syntopica-backend/internal/platform/httpclient"
 )
 
 // ── Contract types (aligned with FinGenius service API) ─────────────────────
@@ -140,10 +142,8 @@ type FinGeniusHTTPClient struct {
 func NewFinGeniusHTTPClient() *FinGeniusHTTPClient {
 	cfg := loadFingeniusConfig()
 	return &FinGeniusHTTPClient{
-		cfg: cfg,
-		client: &http.Client{
-			Timeout: cfg.Timeout,
-		},
+		cfg:    cfg,
+		client: httpclient.New(httpclient.WithTimeout(cfg.Timeout)),
 	}
 }
 
@@ -151,10 +151,8 @@ func NewFinGeniusHTTPClient() *FinGeniusHTTPClient {
 // NewFinGeniusHTTPClientWithConfig creates a FinGeniusHTTPClient with explicit config (for testing).
 func NewFinGeniusHTTPClientWithConfig(cfg FingeniusConfig) *FinGeniusHTTPClient {
 	return &FinGeniusHTTPClient{
-		cfg: cfg,
-		client: &http.Client{
-			Timeout: cfg.Timeout,
-		},
+		cfg:    cfg,
+		client: httpclient.New(httpclient.WithTimeout(cfg.Timeout)),
 	}
 }
 

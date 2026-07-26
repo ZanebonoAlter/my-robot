@@ -59,6 +59,16 @@ Gin 全局中间件已经覆盖 HTTP 请求入口，根 span 由 `otelgin` 自�
 - `GET /api/traces/recent`
 - `POST /api/feeds/:id/refresh`
 
+### 1b. 基础设施自动埋点（DB + 出站 HTTP）—— `add-otel-infra-instrumentation`
+
+除 HTTP 入站外，两个基础设施数据层也自动产生 `SpanKind=Client` span，**零业务代码改动**：
+
+- **DB 操作（`GORMTracePlugin`）**：`internal/platform/tracing/gorm_plugin.go` 自写 GORM 插件，在 `connect_postgres.go` 的 `gorm.Open` 后 `db.Use(tracing.NewGORMPlugin())` 挂载。为 create/query/update/delete/row/raw 注册 before/after callback，每个操作产生 `gorm.<op>` span（attributes：`db.system`/`db.operation`/`db.statement`），挂当前 trace 父节点。**跳过 `otel_spans` 表自身**（避免 DatabaseSpanExporter 写入触发 span→export→写入自循环导致表指数膨胀）。自写而非用 `gorm.io/plugin/opentelemetry`：后者最新版强制 gorm v1.30 升级，超 change 范围。
+- **出站 HTTP（`httpclient` 工厂）**：`internal/platform/httpclient` 提供 `httpclient.New(opts...)`，内部 `otelhttp.NewTransport` 包装 transport + 透传 `traceparent`。所有出站调用（`airouter` LLM/Embedding、`firecrawl`、`readability`、`rss_parser`、`fingenius`、`admin catalog`）经此构造，产生 `HTTP POST/GET`（`SpanKind=Client`）span。
+- **采样（`ParentBased(TraceIDRatioBased)`）**：`provider.go` 配置，root span 按 `SampleRatio` 决定整条链路记不记，被采则子 span 全保留。`SampleRatio`/`InstrumentGORM`/`InstrumentHTTP` 经环境变量配置（见 [configuration.md](../configuration.md)），默认全采全开。
+
+> 与下方 §2（go-instrument 方法级自动）互补：本节覆盖 go-instrument 管不到的 DB/出站 HTTP 层。两者共享同一 `TracerProvider`。
+
 ### 2. `go-instrument` 自动注入的方法
 
 当前仓库中已经能看到注入后的代码，表现为方法体开头直接出现：
@@ -286,21 +296,24 @@ tracing.TraceSchedulerTick("auto_refresh", "cron", func(ctx context.Context) {
 
 | 文件 | 作用 |
 | ------ | ------ |
-| `config.go` | tracing 默认配置 |
+| `config.go` | tracing 配置（采样比例 / GORM·HTTP 开关 / retention / buffer） |
 | `model.go` | `otel_spans` 表结构与 JSON 序列化辅助 |
-| `exporter.go` | `SQLiteSpanExporter`（名称保留历史，实际写入 PostgreSQL）、入库、过期清理 |
-| `provider.go` | 初始化全局 `TracerProvider` 与 propagator |
+| `exporter.go` | `DatabaseSpanExporter`（历史名 SQLiteSpanExporter，实际写入 PostgreSQL）、入库、过期清理 |
+| `provider.go` | 初始化全局 `TracerProvider`（含 `ParentBased` 采样器）与 propagator |
+| `gorm_plugin.go` | 自写 GORM trace 插件（DB 操作自动 span），跳过 `otel_spans` 表避免自循环 |
 | `helpers.go` | `Tracer()`（仅此；早期文档称有 `GoWithTrace`/`TraceAsyncOp`，实测不存在，见 §5） |
 | `scheduler.go` | scheduler / async 的包装入口 |
 | `query.go` | trace 查询、统计、树结构构建 |
 | `handler.go` | `/api/traces` HTTP handler |
+
+出站 HTTP 自动埋点在独立包 `backend-go/internal/platform/httpclient/`（工厂 + otelhttp 包装）。
 
 ## 当前问题与下一步建议
 
 从仓库现状看，这一版 tracing 已经能用于排查，但还属于“基础链路通了，业务语义待补”的阶段：
 
 1. `go-instrument` 注入的方法多数还没补 attributes / events
-2. 外部调用还没有系统化区分 `CLIENT` span
+2. ~~外部调用还没有系统化区分 `CLIENT` span~~ → **已由 `add-otel-infra-instrumentation` 补齐**（DB 经自写 `GORMTracePlugin`、出站 HTTP 经 `httpclient` 工厂的 otelhttp 包装，均自动产生 `SpanKind=Client` span）
 3. 前端虽然支持 `traceparent`，但后端没有显式回写响应头
 4. 异步 helper **不存在**（早期文档过时，见 §5）；跨 goroutine 任务脱离 trace
 5. 查询 API 已可用，但筛选能力仍偏基础
@@ -308,5 +321,4 @@ tracing.TraceSchedulerTick("auto_refresh", "cron", func(ctx context.Context) {
 如果继续往下推进，优先级建议是：
 
 1. 给 `FirecrawlService.ScrapePage`、`Router.Chat`、`FeedService.RefreshFeed` 补关键 attributes / events（注：`ai-call-logging-schema` 已把 `Router.Chat`/`Router.Embed` 的 `ai.operation`/`ai.session_id`/`ai.capability` 从 `ChatRequest`/`EmbeddingRequest` 一等字段注入；`otel-tracing-completion` 已补日报编排业务 span `workflow.daily_report.*` + session 聚合端点 `GET /api/ai/sessions/:session_id`；但编排 span 的 **attributes/events 仍待补**，其他外部调用 attributes 仍待补）
-2. 明确哪些外部调用要手动补 `SpanKind=CLIENT`
-3. 再决定是否把 `go-instrument` 接入 `go generate` 或脚本化流程
+2. **把 `go-instrument` 接入 `go generate` / 脚本化流程并扩大覆盖**（方法级全自动）—— 见 change `add-method-auto-instrumentation`（选型原型阶段）

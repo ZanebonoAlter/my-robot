@@ -8,6 +8,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"syntopica-backend/internal/platform/httpclient"
 )
 
 // HTTPFetcher abstracts HTTP GET requests for testability.
@@ -23,7 +25,7 @@ type DefaultHTTPFetcher struct {
 // NewDefaultHTTPFetcher creates a fetcher with 5s timeout.
 func NewDefaultHTTPFetcher() *DefaultHTTPFetcher {
 	return &DefaultHTTPFetcher{
-		client: &http.Client{Timeout: 5 * time.Second},
+		client: httpclient.New(httpclient.WithTimeout(5 * time.Second)),
 	}
 }
 

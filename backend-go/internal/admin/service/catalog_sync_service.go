@@ -14,6 +14,7 @@ import (
 	"gorm.io/gorm"
 
 	"syntopica-backend/internal/models"
+	"syntopica-backend/internal/platform/httpclient"
 	"syntopica-backend/internal/platform/logging"
 )
 
@@ -255,7 +256,7 @@ func (s *CatalogSyncService) httpFetchNamespace(ctx context.Context) (map[string
 		return nil, err
 	}
 	req.Header.Set("User-Agent", "syntopica-catalog-sync")
-	client := &http.Client{Timeout: 60 * time.Second}
+	client := httpclient.New(httpclient.WithTimeout(60 * time.Second))
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, err

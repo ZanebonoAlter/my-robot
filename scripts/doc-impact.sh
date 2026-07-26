@@ -6,6 +6,7 @@
 #   suggest [--base <ref>]    按 git diff 启发式预勾选 + 命中理由 + 声明注释模板
 #   context [--base <ref>]    按 git diff 命中 domain dump 相关 flow「业务约束与不变量」节（apply 改代码前必读）
 #   verify <change-dir> [--base <ref>]  归档前对账（声明↔git diff + 反向启发式 + 文件存在性）
+#     tasks.md 可加 <!-- doc-impact-excuse: domain=理由; ... --> 豁免"疑似遗漏"误报
 #
 # 详见 openspec/changes/docs-harness-consolidation/design.md §1。
 # WSL bash 可跑。退出码：0 过；1 有失败（仅 verify 会非零）。
@@ -282,6 +283,13 @@ cmd_verify() {
 	decl_raw="$(echo "$decl_line" | sed -E 's/.*<!-- doc-impact: *//; s/ *-->.*//; s/none\([^)]*\)/none/')"
 	local declared_domains=" $decl_raw "
 
+	# --- 解析豁免声明 <!-- doc-impact-excuse: domain=理由; ... --> ---
+	# 豁免的域不触发"疑似遗漏"（巬发式过严/多 change 脏工作树的误报兑底）
+	local excuse_line excused_domains
+	excuse_line="$(grep -m1 '<!-- doc-impact-excuse:' "$tasks" 2>/dev/null || true)"
+	excused_domains="$(echo "$excuse_line" | sed -E 's/.*<!-- doc-impact-excuse: *//; s/ *-->.*//' | tr ';' '\n' | sed -E 's/=.*//' | tr -d ' ' | tr '\n' ' ')"
+	excused_domains=" $excused_domains "
+
 	# --- 解析 (b) 文档节 checkbox 文件路径 ---
 	# 取「## N. 文档」节内 - [ ] 后的路径
 	local declared_files
@@ -302,7 +310,7 @@ cmd_verify() {
 	else
 		# --- 规则 3：反向启发式命中未声明域 ---
 		for domain in flow api database architecture standard configuration deployment; do
-			if [ -n "$(heuristic_hit "$domain" "$base")" ] && ! echo "$declared_domains" | grep -qw "$domain"; then
+			if [ -n "$(heuristic_hit "$domain" "$base")" ] && ! echo "$declared_domains" | grep -qw "$domain" && ! echo "$excused_domains" | grep -qw "$domain"; then
 				add_fail "疑似遗漏: 改了 ${domain} 相关代码未声明 $domain"
 			fi
 		done

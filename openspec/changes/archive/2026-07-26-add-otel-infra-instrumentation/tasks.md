@@ -56,6 +56,7 @@
 ## 7. 文档
 
 <!-- doc-impact: architecture configuration -->
+<!-- doc-impact-excuse: database=接入点挂载非schema; flow=其他change脏文件 -->
 
 - [x] `docs/reference/architecture/tracing.md`：新增 §1b「基础设施自动埋点（DB + 出站 HTTP）」+ 代码结构表补 `gorm_plugin.go`/`httpclient` + 下一步建议勾掉「外部调用 CLIENT span」项（已补）
 - [x] `docs/reference/configuration.md`：后端环境变量表补 `TRACE_SAMPLE_RATIO` / `TRACE_INSTRUMENT_GORM` / `TRACE_INSTRUMENT_HTTP` + 默认值表补采样默认

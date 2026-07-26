@@ -233,10 +233,14 @@ func firstCtxParam(ft *ast.FuncType) (string, bool) {
 	if len(field.Names) == 0 {
 		return "", false // unnamed, e.g. func(context.Context)
 	}
+	name := field.Names[0].Name
+	if name == "_" {
+		return "", false // discarded ctx: caller does not propagate it, skip
+	}
 	if !isContextType(field.Type) {
 		return "", false
 	}
-	return field.Names[0].Name, true
+	return name, true
 }
 
 func isContextType(t ast.Expr) bool {

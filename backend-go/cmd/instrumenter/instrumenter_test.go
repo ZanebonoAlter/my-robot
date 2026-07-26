@@ -314,3 +314,29 @@ func (s *S) private(ctx context.Context) error {
 		t.Fatalf("file with no eligible methods should be unchanged;\n--- got ---\n%s", out)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Test 11: a method whose first param is a discarded ctx (`_ context.Context`)
+// is skipped -- the blank identifier cannot be referenced, and the caller does
+// not propagate the context, so injecting a span is invalid/meaningless.
+// ---------------------------------------------------------------------------
+
+func TestInstrument_DiscardedCtxParamSkipped(t *testing.T) {
+	src := []byte(`package svc
+
+import "context"
+
+type S struct{}
+
+func (s *S) Discard(_ context.Context, id int) error {
+	return nil
+}
+`)
+	out, err := instrumentSource("svc.go", src)
+	if err != nil {
+		t.Fatalf("instrumentSource: %v", err)
+	}
+	if string(out) != string(src) {
+		t.Fatalf("method with discarded ctx param should be untouched;\n--- got ---\n%s", out)
+	}
+}

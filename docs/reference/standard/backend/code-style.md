@@ -84,11 +84,35 @@ if err := withLockTimeout(db, "5s", func(tx *gorm.DB) error {
 
 短操作（小表 `CREATE INDEX IF NOT EXISTS`、CHECK 约束的 `DO $$ ... END $$`、单行级联 FK）不需要守卫——统一注入会误杀正常路径。
 
+## 日报聚类（topicgraph）代码规约
+
+日报归属采用**泳道驱动**（lane-driven，`daily-report-lane-driven-clustering`）：当天 tag 按 topic **质心**距离分 L1/L2/L3 三桶，LLM 退化为弱区裁决。改 `internal/topicgraph/` 聚类 / 归属代码前必读，违反会重建形态 4 错锚根因。
+
+**分层归属（铁律）**：
+- 归属逻辑在 **repository 层**（`daily_report_assignment.go` 的 `planTopicAssignments` / `assignAndUpdateTopics`），**不在 service**。service 只负责分桶（`daily_report_lane.go`）+ 编排（`daily_report_orchestrator.go`）。
+- 归属路由键是 `section.LaneTier` + `section.MatchedTopicID`（由上游分桶设定）：`l1_direct`/`l2_llm` 且有 `MatchedTopicID` → `anchor_hit`；`l3_new` 或无 `MatchedTopicID` → `auto_new`；section 无 embedding → `unmatched`。**旧的「embedding AND-gate 双重确认」已移除，不要再加回来。**
+
+**质心是匹配锚点（取代首义向量）**：
+- topic 的匹配锚点 = `board_persistent_topics.centroid`（近 `centroid_window` 默认 30 条 section embedding 均权平均），`ComputeTopicCentroid` 计算；section<2 退化首义向量（`embedding` 字段）。
+- `embedding`（首义）字段**保留**作退化兑底，不要删。`topicAnchorVec` 优先 centroid、退化 embedding。
+- SaveReport 提交后异步刷新质心：`UpdateCentroidOnSectionChange`（事务外、读 r.db、失败仅告警不阻断保存）。
+
+**吸尘器降级**：质心过宽的 topic（`strong/(strong+mid) < vacuum_ratio`）标 `is_vacuum=true`；挂到它的 tag 从 L1 降级 L2 交 LLM 裁决。`RecomputeVacuumStats` 在 SaveReport 提交后按 `vacuum_window`（默认 7 天）重算。
+
+**LLM 只处理 L2/L3**（`ClusterTagsLane`）：L1 直挂不调 LLM；L2 在 top-K（`l2_candidate_k` 默认 5）候选上做「留/换/新」，target 不在候选集降级 new；L3 起新叙事。遗留 `ClusterTags`（全量自由聚类）**仅调试 CLI `cmd/verify-cluster-prompt` 使用**，生产管线不走。
+
+**section embedding 不可删**：用途从「匹配 topic」变为「更新 topic 质心 + `computeThreadFitDistances`」，计算入口仍在 orchestrator（`cluster_label` 文本向量）。
+
+**配置集中**：6 个阈值在 `PersistentTopicConfig`（`daily_report_topic_repository.go`）+ `DefaultPersistentTopicConfig`（默认值）+ `LoadPersistentTopicConfig`（从 `ai_settings` 加载，缺失降级默认），迁移 `20260727_0001` seed。新增阈值走这三处 + 迁移 seed，不要散落代码常量。
+
 ## Anti-Patterns（硬禁）
 
 - ❌ `router.go` 里写业务逻辑
 - ❌ Handler 直接访问 DB
 - ❌ `panic` 处理错误
+- ❌ 在 service 层重写日报归属逻辑（归属在 `repository/daily_report_assignment.go`）
+- ❌ 删 section embedding 或 topic centroid/首义向量（质心是匹配锚点，embedding 是退化兑底 + thread fit 源）
+- ❌ 给新 section 不设 `LaneTier` 就调 SaveReport（新契约要求分桶阶段设 lane_tier；历史 section lane_tier=NULL 视为旧数据）
 
 ## 资料来源
 

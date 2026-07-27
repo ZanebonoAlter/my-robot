@@ -174,6 +174,12 @@ AI 相关配置不存储在文件或环境变量中 — 通过 Web UI 管理并�
 | `persistent_topic_candidate_decay_window` | candidate 被注入聚类 prompt 的观察窗口天数（默认 `7`）；仅用于 prompt 卫生过滤，不触发状态变更 |
 | `persistent_topic_candidate_prompt_limit` | 每次聚类注入与归属锚定集合的 candidate 数量上限（默认 `20`） |
 | `persistent_topic_cluster_threshold` | 历史回刷 complete-link 聚类阈值（默认 `0.28`） |
+| `persistent_topic_lane_l1_threshold` | Lane L1 直挂阈值：当天 tag 到 topic **质心**余弦距离 < 此值直接归属该 topic（不调 LLM）。默认 `0.18`（实测把强挂率从首义向量 14% 提到 62%） |
+| `persistent_topic_lane_l2_threshold` | Lane L2 弱区上限：距离在 `[l1, l2]` 的 tag 交 LLM 在 top-K 候选上做「留/换/新」三选一。默认 `0.30` |
+| `persistent_topic_vacuum_ratio` | 吸尘器判定：topic 近窗口 `strong/(strong+mid)` < 此值则 `is_vacuum=true`，挂到它的 tag 从 L1 降级 L2 交 LLM 裁决。默认 `0.20` |
+| `persistent_topic_centroid_window` | 质心计算取最近 N 条 section embedding 做均权平均；section<2 退化首义向量。默认 `30` |
+| `persistent_topic_vacuum_window` | 吸尘器吸引统计窗口（天）：按近 N 天归属该 topic 的 section 统计 strong/mid。默认 `7` |
+| `persistent_topic_l2_candidate_k` | L2 LLM prompt 注入的 top-K 候选 topic 数（按质心距离排序）。默认 `5` |
 
 这些设置通过 `aisettings.LoadSummaryConfig()`、`aisettings.LoadFirecrawlConfig()` 等函数加载，在前端设置页面中配置。
 

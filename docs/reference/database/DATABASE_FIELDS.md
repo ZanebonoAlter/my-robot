@@ -726,6 +726,7 @@
 | `topic_match_distance` | FLOAT | — | 归属匹配距离 |
 | `topic_match_confidence` | VARCHAR(20) | — | 归属置信度：`anchor_hit` / `auto_new` / `unmatched` / **`manual`** |
 | `topic_status_at_report` | VARCHAR(20) | —（`*string`，可空，迁移 `20260627_0001`） | 报告生成时话题状态快照（`candidate` / `active` / NULL） |
+| `lane_tier` | VARCHAR(16) | —（迁移 `20260727_0001`） | 泳道归属标记：`l1_direct`（质心强挂直归属）/ `l2_llm`（弱区 LLM 留/换）/ `l3_new`（新开 candidate）。NULL = 迁移前历史 section（旧流程产出，不回刷） |
 | `created_at` | TIMESTAMP | — | 创建时间 |
 
 > HNSW 索引 `idx_daily_report_sections_embedding`：运行时由 `ensureSectionEmbeddingDimension` 创建（dim ≤ 2000 才建）。
@@ -782,12 +783,18 @@
 | `last_seen_date` | DATE | NOT NULL | 最近命中日期 |
 | `hit_count` | INTEGER | NOT NULL DEFAULT 1 | 总命中数 |
 | `consecutive_hits` | INTEGER | NOT NULL DEFAULT 0 | 连续命中天数 |
+| `centroid` | vector | —（`default:NULL`，迁移 `20260727_0001`；运行时维度） | 近 `persistent_topic_centroid_window`（默认 30）条 section embedding 的均权平均，作为 lane 分桶与归属的**匹配锚点**（取代旧首义向量 `embedding`）；NULL 时运行时退化首义 |
+| `is_vacuum` | BOOLEAN | NOT NULL DEFAULT false（迁移 `20260727_0001`） | 吸尘器标记：`strong/(strong+mid) < persistent_topic_vacuum_ratio`（默认 0.20）则 true——质心过宽、沾边 tag 都被吸成最近邻，挂到它的 tag 从 L1 降级 L2 交 LLM 裁决 |
+| `vacuum_strong` | INTEGER | NOT NULL DEFAULT 0（迁移 `20260727_0001`） | 近 `persistent_topic_vacuum_window`（默认 7 天）归属该 topic 且 `topic_match_distance < 0.18` 的 section 计数（吸尘器统计快照） |
+| `vacuum_mid` | INTEGER | NOT NULL DEFAULT 0（迁移 `20260727_0001`） | 近窗口归属该 topic 且 distance ∈ [0.18, 0.30] 的 section 计数（吸尘器统计快照） |
 | `created_at` | TIMESTAMP | — | 创建时间 |
 | `updated_at` | TIMESTAMP | — | 更新时间 |
 
 > HNSW 索引 `idx_board_persistent_topics_embedding`：运行时由 `ensurePersistentTopicEmbeddingDimension` 创建（dim ≤ 2000 才建）。
+>
+> **质心维度**：`centroid` 同 `embedding` 用无维度 `vector` 声明，运行时由 `ensurePersistentTopicEmbeddingDimension` 同步维度。迁移 `20260727_0001` 离线用 pgvector `avg(vector)` 回填近 30 条 section 均权平均；回填失败（pgvector 版本不支持）则留 NULL，运行时 `ComputeTopicCentroid` 退化首义向量，不阻断。
 
-**归属与生命周期（算法语义）**：`daily_report_sections` 通过 `persistent_topic_id` / `topic_match_distance` / `topic_match_confidence` 记录归属。`topic_match_confidence` 四态：`anchor_hit`（双确认命中既有 topic）/ `auto_new`（双确认失败，新开 candidate）/ `unmatched`（section 无 embedding，无法归属）/ `manual`（用户手动建泳道覆盖归属，非算法三态）。`manual` 态由手动建泳道事务写入，前端独立样式区分。`topic_status_at_report` 与归属在同事务写入，不随后续状态回填，历史数据统一 NULL。
+**归属与生命周期（算法语义）**：`daily_report_sections` 通过 `persistent_topic_id` / `topic_match_distance` / `topic_match_confidence` / `lane_tier` 记录归属。归属由**泳道分桶**（lane-driven）决定，非旧双重确认 AND-gate：当天 tag 按到 topic **质心**的余弦距离分 L1/L2/L3 三桶（见 `flow/daily-report.md`）。`topic_match_confidence` 四态：`anchor_hit`（L1 直挂或 L2 LLM 留/换命中既有 topic）/ `auto_new`（L3 或 L2 换/新→新开 candidate）/ `unmatched`（section 无 embedding，无法分桶）/ `manual`（用户手动建泳道覆盖归属，非算法三态）。`lane_tier` 记录归属来源泳道（`l1_direct`/`l2_llm`/`l3_new`），历史 section（迁移前）为 NULL 视为旧流程数据、不回刷。`manual` 态由手动建泳道事务写入，前端独立样式区分。`topic_status_at_report` 与归属在同事务写入，不随后续状态回填，历史数据统一 NULL。
 
 **排序与窗口边界**：可锚定话题选择器（`ListAnchorableTopicsByBoard`）选出全部 active 及 `last_seen_date` 在 `persistent_topic_candidate_decay_window`（默认 7 天）内的 candidate，按 `last_seen_date DESC, hit_count DESC, id ASC` 排序，candidate 最多保留 `persistent_topic_candidate_prompt_limit`（默认 20）条。`candidate_decay_window` 仅用于 prompt 卫生过滤，不触发任何状态变更；所有 status → archived 仅由用户在话题管理界面手动操作。
 

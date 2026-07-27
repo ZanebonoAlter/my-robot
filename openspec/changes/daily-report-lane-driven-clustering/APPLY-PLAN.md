@@ -1,65 +1,67 @@
 # Apply 进度跟踪 — daily-report-lane-driven-clustering
 
-> 📍 **恢复点**：Wave 1 已验收✅；Wave 2 代码已落地⏸️ 但**主线程门禁核验被中断未完成**——恢复时先跑「Wave 2 节」里的门禁命令确认全绿，再做 §7.2 grep + Wave 3 文档 + 归档门禁。
+> 📍 **恢复点（2026-07-28 03:xx 无人值守代理更新）**：**Wave 1/2/3 全部完成，归档门禁（不含 archive 本身）全绿**。V.5/V.6 基于真实日报（2026-07-27，44 section）验证通过（lane 分布 + lane↔confidence 映射 100% 符合契约）。仅剩用户人工确认后跑 `openspec archive daily-report-lane-driven-clustering`（不可逆，留给用户）。
+>
+> 下次接手：直接读本文件「归档门禁」节确认状态 → 与用户确认 → 跑 archive。archive 后按 §12.2 把 flow/daily-report.md 变更溯源表的「待归档」行替换为真实 archive 链接。
 
-> 主线程调度用（规范 §0.6 step 6）。子线程派发模型：核心逻辑用 `zai-coding-cn/glm-5.2`（省略 model 参数走默认）。
+## 本会话（无人值守）成果
+- **Step A — Wave 2 门禁核验（主线程亲跑，全绿）**：
+  - `go build ./...` BUILD_OK / `go vet ./internal/topicgraph/...` VET_OK / `golangci-lint run ./internal/topicgraph/...` 0 issues
+  - `go test ./internal/topicgraph/... -short` PASS；`go test ./internal/topicgraph/... -count=1`（含 testcontainer 集成）三包全绿、零 FAIL
+  - **修了 1 个漏更新的过时测试**：`TestSaveReport_AssignsNewSections`（`daily_report_topic_integration_test.go`）在 Wave 2 契约迁移时漏改——新归属按 `LaneTier`+`MatchedTopicID` 路由（旧 AND-gate 已移除），但它只设了 `MatchedTopicID` 没设 `LaneTier`，落到 auto_new。补 `LaneTier="l1_direct"`。提交 `fb1ac5fd`。
+  - **cmd.exe `|` 正则陷阱**：tasks.md 模板里 `-run "A|B|C|D"` 经 cmd.exe 引号转义后 `|` 被吃掉，测试名不匹配（误报 0.04s 通过）。改用 `-run 单名` 或分次跑才真实执行（集成测试 6.15s）。
+- **2 处偏离核验（均合法，保留）**：
+  1. 旧 `ClusterTags`（全量自由聚类）仅被 `cmd/verify-cluster-prompt/main.go:82`（调试 CLI）调用，生产管线走 `ClusterTagsLane`。
+  2. `func marshalJSONArray` 全仓库仅 1 处定义（`service/marshal_array.go:12`），无重复。
+- **Step B — §7.2 grep 不变量（通过）**：归属走新 lane 分桶（lane_tier/centroid/is_vacuum 贯穿 assignment/topic_repository/models/orchestrator/lane）；旧自由聚类 `matched_topic_id` 收窄到遗留 `ClusterTags`（仅调试 CLI）。
+- **Step C — Wave 3 四域文档（提交 `9d6c5f15`，+77/-38）**：见下「Wave 3」。
+- **Step D — 归档门禁**：见下「归档门禁」。
 
 ## 双源上下文（step 1，已完成）
 - `doc-impact.sh suggest`：dirty worktree 噪声命中 architecture；本 change 真实域 = flow/database/standard/configuration（tasks.md §9 已声明，保留）。
-- `doc-impact.sh context`：flow `daily-report.md` 约束 #2-#5（锚定双重确认 AND-gate / 三态 confidence / embedding 来源 / 快照不回填）即本 change 改写对象。
+- `doc-impact.sh context`：flow `daily-report.md` 约束 #2-#5 即本 change 改写对象（已重写为 lane-driven）。
 
 ## 主线程定调的设计决策
 1. **Vacuum 统计代理**：attracted = 近 vacuum_window 归属该 topic 的 section；strong/mid 用 `topic_match_distance` 阈值（迁移期）/ `lane_tier`（运行期）。只依赖已持久化 section 数据。
-2. **分波策略**：Wave1=Foundation（加法式，独立可编译）；Wave2=Algorithm（消费 Wave1 API）；Wave3=Docs（spec 驱动，代码验证后跑）。
-3. **UpdateSectionTopicAssignment 签名加 laneTier**：归 Wave2（与唯一调用方 assignment.go 同步改），保 Wave1 编译绿。
+2. **分波策略**：Wave1=Foundation（加法式）；Wave2=Algorithm（消费 Wave1 API）；Wave3=Docs（spec 驱动，代码验证后跑）。
+3. **UpdateSectionTopicAssignment 签名加 laneTier**：归 Wave2。
 
 ## Wave 1 — Foundation ✅ 已验收（主线程亲跑门禁全绿）
-- [x] models.go 加字段（Centroid 用 `default:NULL` 偏离：GORM 对有 default tag 的零值字段 INSERT 时省略，DB 填 NULL——makeTopic 集成测试实证）
-- [x] 迁移 20260727_0001：加列 + seed 6 ai_settings + centroid AVG 回填（non-fatal）+ vacuum COUNT FILTER 初始化
-- [x] ComputeTopicCentroid / UpdateCentroidOnSectionChange / RecomputeVacuumStats + 纯 helper（meanPgVectors/computeVacuumFlag）
-- [x] PersistentTopicConfig 加 6 字段 + Default(0.18/0.30/0.20/30/7/5) + Load
-- 门禁：go build ✓ / vet ✓ / golangci-lint 0 issues ✓ / -short ✓ / 3 集成测试（迁移幂等+centroid window/退化+vacuum 识别）✓
+- models.go 加字段（Centroid `default:NULL`）+ 迁移 20260727_0001（加列 + seed 6 ai_settings + centroid AVG 回填 + vacuum COUNT FILTER 初始化）+ ComputeTopicCentroid/UpdateCentroidOnSectionChange/RecomputeVacuumStats + PersistentTopicConfig 6 字段 + Default + Load。
+- 门禁：go build ✓ / vet ✓ / golangci-lint 0 ✓ / -short ✓ / 3 集成测试（迁移幂等+centroid window/退化+vacuum 识别）✓
 
-## Wave 2 — Algorithm ⏸️ 实现已落地，主线程验收被打断（恢复点）
+## Wave 2 — Algorithm ✅ 已落地 + 主线程门禁核验全绿（本会话完成）
+- 3.1 BucketTagsByCentroid（+9 单测）+ 3.2 吸尘器降级 + 3.3 ClusterTagsLane（L2/L3 拆分）
+- 4.1 L2 prompt（top-K 候选 + briefs，operation=daily_report.decide_l2_tags）+ 4.2 L3 复用旧 buildClusterSystemPrompt(nil)+buildClusterPrompt+parseClusterResponse + 4.3 target 校验 + off-shortlist 降级 new
+- 5.1 planTopicAssignments 重构（读 sec.LaneTier+MatchedTopicID，移除 AND-gate）+ 5.2 orchestrator 改调 ClusterTagsLane + ListTagSemanticEmbeddings 加载 tag 向量 + 5.3 事后匹配已移除
+- UpdateSectionTopicAssignment 加 laneTier + assignAndUpdateTopics 写 lane_tier + centroid 刷新/RecomputeVacuumStats
+- 7.2 grep 不变量校验 ✅（本会话做）
+- **门禁（本会话主线程亲跑）**：build ✓ / vet ✓ / lint 0 ✓ / test -short ✓ / test -count=1（含集成）全绿 ✓
 
-**⚠️ 恢复时第一件事：亲跑门禁确认（子线程报告全绿但主线程核验被用户中断，未完成）。**
-```bash
-cd backend-go
-go build ./... && go vet ./internal/topicgraph/... && golangci-lint run ./internal/topicgraph/...
-go test ./internal/topicgraph/... -short
-# 集成（Docker pgvector 需 up）：
-go test ./internal/topicgraph/... -run 'TestSaveReport_LaneDrivenCentroidRefresh|TestPlanTopicAssignments_LaneDriven|TestClusterTagsLane|TestBucketTagsByCentroid'
-```
+## Wave 3 — Docs ✅ 完成（本会话，提交 9d6c5f15）
+- [x] 9.1 `docs/reference/flow/daily-report.md`：管线 mermaid + 锚定机制 mermaid + 三态表 + 业务约束 #2-#8 + 代码入口 + 变更溯源行（标「待归档后补 archive 链接」）全部从 AND-gate/自由聚类改写为 lane-driven。五段式标题保留（check-standards A 段过）。
+- [x] 9.2 `docs/reference/database/DATABASE_FIELDS.md`：§9.2 daily_report_sections 补 `lane_tier`；§9.5 board_persistent_topics 补 `centroid`/`is_vacuum`/`vacuum_strong`/`vacuum_mid` 4 列 + 归属语义段改 lane-driven。
+- [x] 9.3 `docs/reference/standard/backend/code-style.md`：新增「日报聚类（topicgraph）代码规约」节（分层归属铁律/质心是匹配锚点/吸尘器降级/LLM 只处理 L2-L3/配置集中）+ 3 条硬禁 Anti-Pattern。（加进已引用文件，免 check-standards D 段防孤立坑。）
+- [x] 9.4 `docs/reference/configuration.md`：补 6 阈值 ai_settings 键（lane_l1_threshold=0.18 / lane_l2_threshold=0.30 / vacuum_ratio=0.20 / centroid_window=30 / vacuum_window=7 / l2_candidate_k=5）+ 默认值 + 用途。
 
-**数据流契约（service↔repository 缝合点，已实现）：**
-- L1 tag（质心 dist<L1 且非 vacuum）→ 按 topic 聚合成 section（lane=l1_direct，不调 LLM）
-- L2 tag（[L1,L2] 或 vacuum 降级）→ 每 tag 交 LLM keep/switch/new；keep/switch 并入目标 topic，new 转 L3
-- L3 tag + L2-new tag → L3pool>2 时 LLM 起新叙事 group_name；≤2 各自成组不调 LLM
-- section.lane_tier：挂现有 topic 且含 L1 tag→l1_direct；仅 L2 keep/switch→l2_llm；新建→l3_new
+## 归档门禁（§11，本会话实测）
+- [x] V.1 `go build ./...` → BUILD_OK（WSL）
+- [x] V.2 `go vet ./internal/topicgraph/...` → VET_OK
+- [x] V.3 `golangci-lint run ./internal/topicgraph/...` → 0 issues
+- [x] V.4 `bash scripts/check-standards.sh` → **本 change 全过**（A 五段式 / D 防孤立 / E 溯源 / F doc-impact 本 change [OK] / G 死链 / H model tag）。⚠️ 有 2 个 FAIL 属**其它无关 active change**：`add-method-auto-instrumentation`（其 tasks.md 被人改过）+ `daily-report-peel-transition`（未跟踪新目录），非本 change 引入，不阻塞本 change 归档。
+- [x] `bash scripts/doc-impact.sh verify openspec/changes/daily-report-lane-driven-clustering` → **通过（声明 flow/database/standard/configuration，命中 2 文件）**
+- [x] **V.5 SQL 复算 lane 分布 → 基于真实日报验证（2026-07-27）**：该日 44 个 section（新流程跑通）lane 分布 l1_direct 43.2% / l2_llm 43.2% / l3_new 13.6%。L1/L2 贴近 design 基线（47%/51%）；L3 13.6% 高于基线 1.3%（单份日报样本方差，design 基线是 7 天 718 tag 聚合值；建议多观察几份日报确认 L3 尾部是否需调阈）。另：680 topic 中 642（94.5%）已由迁移回填 centroid，88 个 is_vacuum=true。
+- [x] **V.6 功能验收 → 基于真实日报验证（2026-07-27）**：该日 44 section 的 `lane_tier`↔`topic_match_confidence` 映射 100% 符合契约——l1_direct→anchor_hit(19)、l2_llm→anchor_hit(19)、l3_new→auto_new(6)，证明 L1 直挂/L2 LLM 留换/L3 新建三路在真实数据上正确落地。新流程已在生产跑通（无需再起后端复跑）。SaveReport→lane 归属→centroid 刷新→vacuum 重算全链路另由 `TestSaveReport_LaneDrivenCentroidRefresh`（testcontainer pgvector，6.15s PASS）端到端覆盖。
+- ⛔ **未执行 `openspec archive`**（不可逆，留给用户人工确认）。
 
-**已实现（子线程报告，待主线程核验）：**
-- [x] 3.1 BucketTagsByCentroid（+9 单测）+ 3.2 吸尘器降级 + 3.3 ClusterTagsLane（L2/L3 拆分）
-- [x] 4.1 L2 prompt（top-K 候选 + briefs，operation=daily_report.decide_l2_tags）+ 4.2 L3 复用旧 buildClusterSystemPrompt(nil)+buildClusterPrompt+parseClusterResponse
-- [x] 4.3 target 校验 + off-shortlist 降级 new（parseL2Response + TestParseL2Response_SwitchOffShortlistDowngradesNew）
-- [x] 5.1 planTopicAssignments 重构（读 sec.LaneTier+MatchedTopicID，移除 AND-gate）+ 5.2 orchestrator 改调 ClusterTagsLane + ListTagSemanticEmbeddings 加载 tag 向量 + 5.3 事后匹配已移除
-- [x] UpdateSectionTopicAssignment 加 laneTier（+ manual_topic.go/backfill_topics.go 调用方同步）+ assignAndUpdateTopics 写 lane_tier + centroid 刷新/RecomputeVacuumStats
-- [ ] 7.2 grep 不变量校验（恢复后做）
+## git 提交状态（本会话）
+- `fb1ac5fd` test(topicgraph): 补齐 lane-driven 契约漏改的测试（Wave 2 收尾，1 文件 +5/-2）
+- `9d6c5f15` docs(daily-report): Wave 3 四域文档适配 lane-driven 聚类（4 文件 +77/-38）
+- Wave 1+2 主体代码在更早的 `57bdcf91`（修改日报和可观测性，1928 行）。
+- **均未 push**（按规范本地提交，不 push）。
+- working tree 另有大量无关 dirty 改动（dataenrichment/admin/frontend 等），**未触碰**。
 
-**子线程报告的 2 处偏离（恢复时核验合法性）：**
-1. **未删旧 ClusterTags**：`cmd/verify-cluster-prompt/main.go:82` 仍调用它（导出符号，lint 不报 unused）。→ 合理，保留。
-2. **新建 marshal_array.go 定义 marshalJSONArray**：前序 wave 留下孤儿 `marshal_array_test.go` 引用未定义符号阻塞 vet；已实现并接入 orchestrator 的 ClusterTagIDs（守护 nil→"null"→jsonb 22023 回归）。恢复时确认**无重复定义**（grep `func marshalJSONArray` 应只 1 处）。
-
-**Wave 2 落地文件清单（恢复时 git diff 核对）：**
-- 新建：service/daily_report_lane.go、service/marshal_array.go、service/daily_report_lane_test.go、service/daily_report_lane_pipeline_test.go、repository/daily_report_lane_integration_test.go、service/marshal_array_test.go
-- 改：service/daily_report_orchestrator.go、repository/daily_report_assignment.go(+_test)、repository/daily_report_topic_repository.go、repository/daily_report_manual_topic.go、repository/daily_report_backfill_topics.go、repository/daily_report_models.go、repository/daily_report_repository.go、repository/daily_report_topic_lineage_test.go
-
-## Wave 3 — Docs（代码验收后，可并行四域）
-- [ ] 9.1 flow/daily-report.md 聚类节重写 + §12.2 变更溯源
-- [ ] 9.2 database/ 补列 + 迁移记录
-- [ ] 9.3 standard/ 聚类代码规约
-- [ ] 9.4 configuration.md 补 6 阈值
-
-## 归档门禁（§11，Wave 全部完成后）
-- [ ] V.1-V.6 验证节实测
-- [ ] check-standards.sh A-D 段
-- [ ] doc-impact.sh verify
+## 剩余项（离归档只差一步）
+1. **用户确认后跑**：`openspec archive daily-report-lane-driven-clustering`（不可逆重大操作，留给用户）。
+2. **archive 后**：按 §12.2 把 `docs/reference/flow/daily-report.md` 变更溯源表里本 change 那行的「待归档...」替换为真实 `archive/2026-07-28-daily-report-lane-driven-clustering` 链接（check-standards E 段归档后会校验）。
+3. **（可选）V.5/V.6 人工验收**：用户起后端生成一次日报，肉眼看 ① L1 section `lane_tier=l1_direct` 且无 LLM 调用 ② L2 section 有 LLM decision ③ 吸尘器 topic 的 tag 进 L2 ④ 无事后 section↔topic 匹配。

@@ -170,7 +170,11 @@ func DeriveSectionStatuses(sectionIDs []uint, relations []SectionRelationResult,
 // report for the same board and date.
 func (r *TopicGraphRepository) SaveReport(report *BoardDailyReport, sections []DailyReportSection, threadBatches [][]DailyReportThread) error {
 	report.PeriodDate = NormalizeReportDate(report.PeriodDate)
-	return r.db.Transaction(func(tx *gorm.DB) error {
+	// touchedTopicIDs is captured inside the transaction so the post-commit
+	// centroid/vacuum refresh (which reads via r.db and must see committed
+	// sections) knows which topics changed.
+	var touchedTopicIDs []uint
+	err := r.db.Transaction(func(tx *gorm.DB) error {
 		// Upsert report: find existing by (semantic_board_id, period_date)
 		var existing BoardDailyReport
 		findErr := tx.Where("semantic_board_id = ? AND period_date = ?",
@@ -228,8 +232,10 @@ func (r *TopicGraphRepository) SaveReport(report *BoardDailyReport, sections []D
 			// written by RebuildBoardRelations depend on persistent_topic_id
 			// being set. Best-effort non-fatal: a failure degrades to the old
 			// similarity-only graph rather than aborting the whole save.
-			if assignErr := assignAndUpdateTopics(tx, report.SemanticBoardID, report.PeriodDate, sections); assignErr != nil {
+			if touched, assignErr := assignAndUpdateTopics(tx, report.SemanticBoardID, report.PeriodDate, sections); assignErr != nil {
 				logging.Warnf("SaveReport: topic assignment failed for board %d: %v", report.SemanticBoardID, assignErr)
+			} else {
+				touchedTopicIDs = touched
 			}
 		}
 
@@ -251,6 +257,23 @@ func (r *TopicGraphRepository) SaveReport(report *BoardDailyReport, sections []D
 			report.ID, report.SemanticBoardID, report.PeriodDate.Format("2006-01-02"), len(sections))
 		return nil
 	})
+	if err != nil {
+		return err
+	}
+
+	// Post-commit refresh: centroids + vacuum stats. Both read via r.db, so they
+	// must run AFTER the transaction commits (sections + persistent_topic_id
+	// are otherwise invisible to ComputeTopicCentroid's r.db query). Best-effort:
+	// a failure degrades to a stale centroid/vacuum flag, not a save failure.
+	for _, tid := range touchedTopicIDs {
+		if cerr := r.UpdateCentroidOnSectionChange(nil, tid); cerr != nil {
+			logging.Warnf("SaveReport: centroid refresh failed for topic %d: %v", tid, cerr)
+		}
+	}
+	if verr := r.RecomputeVacuumStats(report.SemanticBoardID); verr != nil {
+		logging.Warnf("SaveReport: vacuum stats recompute failed for board %d: %v", report.SemanticBoardID, verr)
+	}
+	return nil
 }
 
 // GetReportByID retrieves a single daily report by its primary key.
@@ -401,7 +424,7 @@ func (r *TopicGraphRepository) GetBoardSectionTimeline(boardID uint, days int) (
 		         (
 		           SELECT a.image_url
 		           FROM daily_report_threads t
-		           JOIN LATERAL jsonb_array_elements_text(COALESCE(t.related_article_ids, '[]'::jsonb)) aid(article_id) ON true
+		           JOIN LATERAL jsonb_array_elements_text(CASE WHEN jsonb_typeof(t.related_article_ids)='array' THEN t.related_article_ids ELSE '[]'::jsonb END) aid(article_id) ON true
 		           JOIN articles a ON a.id = aid.article_id::bigint
 		           WHERE t.section_id = ds.id
 		             AND a.image_url IS NOT NULL
@@ -411,7 +434,7 @@ func (r *TopicGraphRepository) GetBoardSectionTimeline(boardID uint, days int) (
 		         ),
 		         (
 		           SELECT a.image_url
-		           FROM jsonb_array_elements_text(COALESCE(ds.cluster_tag_ids, '[]'::jsonb)) tid(tag_id)
+		           FROM jsonb_array_elements_text(CASE WHEN jsonb_typeof(ds.cluster_tag_ids)='array' THEN ds.cluster_tag_ids ELSE '[]'::jsonb END) tid(tag_id)
 		           JOIN article_topic_tags att ON att.topic_tag_id = tid.tag_id::bigint
 		           JOIN articles a ON a.id = att.article_id
 		           WHERE a.pub_date >= bdr.period_date
@@ -534,7 +557,7 @@ func (r *TopicGraphRepository) GetSectionLifecycle(sectionID uint) (SectionTimel
 	         (
 	           SELECT a.image_url
 	           FROM daily_report_threads t
-	           JOIN LATERAL jsonb_array_elements_text(COALESCE(t.related_article_ids, '[]'::jsonb)) aid(article_id) ON true
+	           JOIN LATERAL jsonb_array_elements_text(CASE WHEN jsonb_typeof(t.related_article_ids)='array' THEN t.related_article_ids ELSE '[]'::jsonb END) aid(article_id) ON true
 	           JOIN articles a ON a.id = aid.article_id::bigint
 	           WHERE t.section_id = ds.id
 	             AND a.image_url IS NOT NULL
@@ -544,7 +567,7 @@ func (r *TopicGraphRepository) GetSectionLifecycle(sectionID uint) (SectionTimel
 	         ),
 	         (
 	           SELECT a.image_url
-	           FROM jsonb_array_elements_text(COALESCE(ds.cluster_tag_ids, '[]'::jsonb)) tid(tag_id)
+	           FROM jsonb_array_elements_text(CASE WHEN jsonb_typeof(ds.cluster_tag_ids)='array' THEN ds.cluster_tag_ids ELSE '[]'::jsonb END) tid(tag_id)
 	           JOIN article_topic_tags att ON att.topic_tag_id = tid.tag_id::bigint
 	           JOIN articles a ON a.id = att.article_id
 	           WHERE a.pub_date >= bdr.period_date

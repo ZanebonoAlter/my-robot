@@ -171,7 +171,8 @@ function extraBoardsForRow(row: UpgradeSuggestionRow): SemanticBoard[] {
 function handlePickRowTarget(row: UpgradeSuggestionRow, boardId: number) {
   openMergeRowId.value = null
   delete mergeSearchByRow.value[row.id]
-  emit('confirmRow', { ...row, target_board_id: boardId, auxiliary_label_ids: selectedAuxIds(row) })
+  // 选「合并到...」目标即按 merge_into_existing 执行：create_new 行也可借此合并到已有板块。
+  emit('confirmRow', { ...row, decision: 'merge_into_existing', target_board_id: boardId, auxiliary_label_ids: selectedAuxIds(row) })
 }
 
 // create_new 行确认：同样只带勾选的辅助标签子集。
@@ -319,8 +320,8 @@ function decisionStyle(d: string): { border: string; bg: string; color: string }
                 <span v-for="(s, si) in shortlist(row)" :key="'sl' + si" class="usp-evidence-chip">{{ s.board_label || ('板块 #' + s.board_id) }}</span>
               </div>
               <div class="usp-item-actions">
-                <template v-if="row.decision === 'merge_into_existing'">
-                  <!-- 所有 merge 行都先展开「合并到...」选目标：候选优先（shortlist 置顶高亮）+ 全量可搜，不盲用 LLM/high 的 top-1 -->
+                <template v-if="row.decision === 'merge_into_existing' || row.decision === 'create_new'">
+                  <!-- merge 行与 create_new 行都可「合并到...」已有板块：候选优先（shortlist 置顶高亮）+ 全量可搜；create_new 行另保留「创建新版块」按钮 -->
                   <div class="usp-merge-wrapper">
                     <button
                       type="button"
@@ -374,7 +375,7 @@ function decisionStyle(d: string): { border: string; bg: string; color: string }
                   </div>
                 </template>
                 <button
-                  v-else-if="row.decision === 'create_new'"
+                  v-if="row.decision === 'create_new'"
                   type="button"
                   class="usp-item-btn usp-item-btn--primary"
                   :disabled="selectedAuxCount(row) === 0"
@@ -382,7 +383,7 @@ function decisionStyle(d: string): { border: string; bg: string; color: string }
                   @click="handleConfirmCreateRow(row)"
                 >
                   <Icon icon="mdi:check" width="12" />
-                  确认执行
+                  创建新版块
                 </button>
                 <button
                   type="button"

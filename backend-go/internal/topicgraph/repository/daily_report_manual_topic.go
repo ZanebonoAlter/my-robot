@@ -199,11 +199,12 @@ func (r *TopicGraphRepository) CreateManualTopic(boardID uint, label string, sec
 	type secRow struct {
 		ID        uint
 		Embedding string
+		LaneTier  string
 		Day       time.Time
 	}
 	var rows []secRow
 	if err := r.db.Raw(`
-		SELECT s.id, s.embedding, r.period_date AS day
+		SELECT s.id, s.embedding, s.lane_tier, r.period_date AS day
 		FROM daily_report_sections s
 		JOIN board_daily_reports r ON r.id = s.report_id
 		WHERE s.id IN ?
@@ -214,9 +215,10 @@ func (r *TopicGraphRepository) CreateManualTopic(boardID uint, label string, sec
 
 	// Parse embeddings and collect date range.
 	type usable struct {
-		id  uint
-		vec []float64
-		day time.Time
+		id       uint
+		vec      []float64
+		laneTier string
+		day      time.Time
 	}
 	var usables []usable
 	for _, rw := range rows {
@@ -230,7 +232,7 @@ func (r *TopicGraphRepository) CreateManualTopic(boardID uint, label string, sec
 			skipped = append(skipped, rw.ID)
 			continue
 		}
-		usables = append(usables, usable{id: rw.ID, vec: v, day: rw.Day})
+		usables = append(usables, usable{id: rw.ID, vec: v, laneTier: rw.LaneTier, day: rw.Day})
 	}
 	if len(usables) == 0 {
 		return nil, skipped, fmt.Errorf("CreateManualTopic: no section with a usable vector")
@@ -280,7 +282,7 @@ func (r *TopicGraphRepository) CreateManualTopic(boardID uint, label string, sec
 		for _, u := range usables {
 			dist := cosineDistance(u.vec, mean)
 			tid := created.ID
-			if err := r.UpdateSectionTopicAssignment(tx, u.id, &tid, dist, TopicConfManual, nil); err != nil {
+			if err := r.UpdateSectionTopicAssignment(tx, u.id, &tid, dist, TopicConfManual, u.laneTier, nil); err != nil {
 				return fmt.Errorf("CreateManualTopic: assign section %d: %w", u.id, err)
 			}
 		}

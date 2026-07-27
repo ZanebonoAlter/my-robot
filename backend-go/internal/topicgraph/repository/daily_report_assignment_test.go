@@ -47,24 +47,21 @@ func TestSelectAnchorableTopics_OrdersAndLimitsCandidates(t *testing.T) {
 }
 
 // TestSelectAnchorableTopics_AgreementWithAssignment verifies the collection
-// contract: only topics that survive selectAnchorableTopics can be accepted by
-// planTopicAssignments (when MatchedTopicID points to them and embedding is
-// within threshold). A candidate filtered by window or truncated by limit is
-// absent from the anchorable set, so planTopicAssignments cannot accept it —
-// even if its MatchedTopicID points to it. This guarantees ClusterTags
-// injection and dual-confirmation assignment share the same topic set.
+// contract under the lane-driven model: only topics that survive
+// selectAnchorableTopics can be the MatchedTopicID target that
+// planTopicAssignments accepts as anchor_hit. A candidate filtered by window
+// or truncated by limit is absent from the anchorable set, so a section whose
+// MatchedTopicID points at it cannot anchor — planTopicAssignments opens a new
+// candidate instead. This guarantees bucketing injection and assignment share
+// the same topic set.
 func TestSelectAnchorableTopics_AgreementWithAssignment(t *testing.T) {
 	reportDate := time.Date(2026, 6, 26, 0, 0, 0, 0, time.UTC)
 	cfg := PersistentTopicConfig{MatchThreshold: 0.30, CandidateDecayWindow: 7, CandidatePromptLimit: 2}
 
-	// active (id=1), in-window candidate (id=2, gap=5), in-window candidate
-	// (id=3, gap=1), stale candidate (id=4, gap=9 > window).
-	// With limit=2, only candidates id=3 (newer) and id=2 stay; id=4 is filtered
-	// by window.
 	topics := []BoardPersistentTopic{
-		{ID: 1, Status: TopicStatusActive, Embedding: vecStr(1, 0, 0), LastSeenDate: reportDate.AddDate(0, 0, -90)},
-		{ID: 2, Status: TopicStatusCandidate, Embedding: vecStr(0.9, 0.43, 0), LastSeenDate: reportDate.AddDate(0, 0, -5)},
-		{ID: 3, Status: TopicStatusCandidate, Embedding: vecStr(0.8, 0.5, 0), LastSeenDate: reportDate.AddDate(0, 0, -1)},
+		{ID: 1, Status: TopicStatusActive, Centroid: vecStr(1, 0, 0), LastSeenDate: reportDate.AddDate(0, 0, -90)},
+		{ID: 2, Status: TopicStatusCandidate, Centroid: vecStr(0.9, 0.43, 0), LastSeenDate: reportDate.AddDate(0, 0, -5)},
+		{ID: 3, Status: TopicStatusCandidate, Centroid: vecStr(0.8, 0.5, 0), LastSeenDate: reportDate.AddDate(0, 0, -1)},
 	}
 
 	selected, stats := selectAnchorableTopics(topics, reportDate, cfg)
@@ -72,19 +69,17 @@ func TestSelectAnchorableTopics_AgreementWithAssignment(t *testing.T) {
 	require.Equal(t, 0, stats.FilteredByWindow)
 	require.Equal(t, 0, stats.TruncatedByLimit)
 
-	// Build the anchorable ID set for fast lookup.
 	anchorableIDs := make(map[uint]bool, len(selected))
 	for _, t := range selected {
 		anchorableIDs[t.ID] = true
 	}
 
-	// Create sections whose MatchedTopicID points at each candidate.
-	// Assignments should only succeed for topics in the anchorable set.
+	// L2 sections anchor to their MatchedTopicID when that topic is anchorable.
 	id2 := uint(2)
 	id3 := uint(3)
 	sections := []DailyReportSection{
-		{ClusterLabel: "hits in-window-2", Embedding: vecStr(0.89, 0.42, 0), MatchedTopicID: &id2},
-		{ClusterLabel: "hits in-window-3", Embedding: vecStr(0.79, 0.49, 0), MatchedTopicID: &id3},
+		{ClusterLabel: "hits in-window-2", Embedding: vecStr(0.89, 0.42, 0), MatchedTopicID: &id2, LaneTier: "l2_llm"},
+		{ClusterLabel: "hits in-window-3", Embedding: vecStr(0.79, 0.49, 0), MatchedTopicID: &id3, LaneTier: "l2_llm"},
 	}
 
 	decisions := planTopicAssignments(sections, selected, cfg, reportDate)
@@ -92,32 +87,33 @@ func TestSelectAnchorableTopics_AgreementWithAssignment(t *testing.T) {
 
 	for _, d := range decisions {
 		assert.True(t, anchorableIDs[d.topicID], "topic %d not in anchorable set", d.topicID)
-		assert.Equal(t, TopicConfAnchorHit, d.confidence, "section should anchor to anchorable topic")
+		assert.Equal(t, TopicConfAnchorHit, d.confidence, "L2 section should anchor to anchorable topic")
+		assert.Equal(t, "l2_llm", d.laneTier)
 		assert.NotNil(t, d.topicStatusAtReport)
 	}
 
-	// Now verify the negative: a section whose MatchedTopicID points at a
-	// filtered candidate (id=4, gap > window) cannot anchor because id=4 is
-	// not in the anchorable set. planTopicAssignments receives the restricted
-	// set, so it opens a new candidate instead.
+	// Negative: a section whose MatchedTopicID points at a filtered candidate
+	// (id=4, gap > window) cannot anchor because id=4 is not in the anchorable
+	// set. planTopicAssignments opens a new candidate (lane degrades to l3_new).
 	staleTopics := []BoardPersistentTopic{
-		{ID: 1, Status: TopicStatusActive, Embedding: vecStr(1, 0, 0), LastSeenDate: reportDate.AddDate(0, 0, -5)},
+		{ID: 1, Status: TopicStatusActive, Centroid: vecStr(1, 0, 0), LastSeenDate: reportDate.AddDate(0, 0, -5)},
 	}
 	filteredSelected, filteredStats := selectAnchorableTopics(append(staleTopics, BoardPersistentTopic{
-		ID: 4, Status: TopicStatusCandidate, Embedding: vecStr(0.9, 0.4, 0), LastSeenDate: reportDate.AddDate(0, 0, -9),
+		ID: 4, Status: TopicStatusCandidate, Centroid: vecStr(0.9, 0.4, 0), LastSeenDate: reportDate.AddDate(0, 0, -9),
 	}), reportDate, cfg)
 	assert.Equal(t, 1, filteredStats.FilteredByWindow, "candidate with gap=9 should be filtered")
-	// The filtered set contains only the active topic.
 	require.Len(t, filteredSelected, 1)
 
 	id4 := uint(4)
 	sectionForStale := []DailyReportSection{{
-		ClusterLabel: "misses stale", Embedding: vecStr(0.89, 0.39, 0), MatchedTopicID: &id4,
+		ClusterLabel: "misses stale", Embedding: vecStr(0.89, 0.39, 0), MatchedTopicID: &id4, LaneTier: "l2_llm",
 	}}
 	decisionsForStale := planTopicAssignments(sectionForStale, filteredSelected, cfg, reportDate)
 	require.Len(t, decisionsForStale, 1)
 	assert.Equal(t, TopicConfAutoNew, decisionsForStale[0].confidence,
 		"pointing at a filtered candidate must trigger auto_new, not anchor hit")
+	assert.Equal(t, "l3_new", decisionsForStale[0].laneTier,
+		"lane degrades to l3_new when the anchor target is absent")
 }
 
 func TestCosineDistance_OrthogonalIsOne(t *testing.T) {
@@ -135,117 +131,114 @@ func TestCosineDistance_MismatchedLengthIsInf(t *testing.T) {
 	assert.True(t, math.IsInf(cosineDistance([]float64{1, 0}, []float64{1, 0, 0}), 1) || math.IsInf(cosineDistance([]float64{1, 0}, []float64{1, 0, 0}), 0) || cosineDistance([]float64{1, 0}, []float64{1, 0, 0}) == math.MaxFloat64)
 }
 
-func TestPlanTopicAssignments_AnchorHit(t *testing.T) {
-	// Existing topic at [1,0,0]; section at [0.99,0.01,0] is near (dist ~0.0),
-	// and the LLM agrees by setting MatchedTopicID to that topic.
+// ── Lane-driven planTopicAssignments tests (daily-report-lane-driven-clustering) ──
+//
+// Attribution is decided upstream by bucketing (section.LaneTier +
+// section.MatchedTopicID); planTopicAssignments only maps the lane outcome onto
+// confidence + distance. The old dual-confirmation AND-gate is gone.
+
+func TestPlanTopicAssignments_LaneDriven_AnchorHit_L1(t *testing.T) {
+	// L1 section anchors to its MatchedTopicID at the centroid distance.
 	mit := uint(12)
-	cfg := PersistentTopicConfig{MatchThreshold: 0.30, UpgradeThreshold: 3}
-	topics := []BoardPersistentTopic{{ID: 12, Embedding: vecStr(1, 0, 0), Status: TopicStatusActive}}
+	cfg := DefaultPersistentTopicConfig()
+	topics := []BoardPersistentTopic{{ID: 12, Centroid: vecStr(1, 0, 0), Status: TopicStatusActive}}
 	sections := []DailyReportSection{{
 		ClusterLabel: "AI 编程竞争", Embedding: vecStr(0.99, 0.01, 0),
-		MatchedTopicID: &mit,
+		MatchedTopicID: &mit, LaneTier: "l1_direct",
 	}}
 	dec := planTopicAssignments(sections, topics, cfg, time.Now())
 	require.Len(t, dec, 1)
 	assert.Equal(t, TopicConfAnchorHit, dec[0].confidence)
 	assert.Equal(t, uint(12), dec[0].topicID)
+	assert.Equal(t, "l1_direct", dec[0].laneTier)
 	assert.Nil(t, dec[0].newCandidate)
 	require.NotNil(t, dec[0].topicStatusAtReport)
 	assert.Equal(t, TopicStatusActive, *dec[0].topicStatusAtReport)
+	assert.InDelta(t, 0.0, dec[0].distance, 0.01, "distance = section embedding to centroid anchor")
 }
 
-// TestPlanTopicAssignments_AnchorHit_MatchedWithinThresholdNotNearest is the
-// regression guard for the 06-25 "all emerging" incident. The section is
-// nearest to topic 12, but LLM clustering drift made the LLM pick topic 13
-// (2nd-nearest, still within the 0.30 embedding threshold). Pre-fix the dual
-// confirmation demanded matched_id == nearest → it failed (13 != 12) and
-// opened a new candidate, severing the topic lineage. Post-fix the LLM gate
-// accepts any topic within the embedding threshold, so it anchors to 13 at
-// its actual distance. Both gates still apply (embedding AND LLM pointing at
-// the same topic) — this is NOT pure-embedding matching.
-func TestPlanTopicAssignments_AnchorHit_MatchedWithinThresholdNotNearest(t *testing.T) {
+func TestPlanTopicAssignments_LaneDriven_AnchorHit_L2(t *testing.T) {
+	// L2 section anchors to its MatchedTopicID (not the nearest topic) at the
+	// real centroid distance — the lane-driven equivalent of the old drift case.
 	mit := uint(13)
-	cfg := PersistentTopicConfig{MatchThreshold: 0.30, UpgradeThreshold: 3}
+	cfg := DefaultPersistentTopicConfig()
 	topics := []BoardPersistentTopic{
-		{ID: 12, Embedding: vecStr(1, 0, 0), Status: TopicStatusActive},      // nearest (~0.0001)
-		{ID: 13, Embedding: vecStr(0.9, 0.43, 0), Status: TopicStatusActive}, // 2nd-nearest (~0.093, within threshold)
+		{ID: 12, Centroid: vecStr(1, 0, 0), Status: TopicStatusActive},      // nearest (~0.0001)
+		{ID: 13, Centroid: vecStr(0.9, 0.43, 0), Status: TopicStatusActive}, // chosen (~0.093)
 	}
 	sections := []DailyReportSection{{
 		ClusterLabel:   "AI 编程竞争",
 		Embedding:      vecStr(1, 0.01, 0),
-		MatchedTopicID: &mit, // LLM drifted to 2nd-nearest
+		MatchedTopicID: &mit,
+		LaneTier:       "l2_llm",
 	}}
 	dec := planTopicAssignments(sections, topics, cfg, time.Now())
 	require.Len(t, dec, 1)
 	assert.Equal(t, TopicConfAnchorHit, dec[0].confidence, "must anchor, not open new candidate")
-	assert.Equal(t, uint(13), dec[0].topicID, "anchor to the LLM-chosen topic, not the nearest")
-	assert.InDelta(t, 0.093, dec[0].distance, 0.01, "distance is the anchored topic's actual distance")
+	assert.Equal(t, uint(13), dec[0].topicID, "anchor to the lane-chosen topic, not the nearest")
+	assert.Equal(t, "l2_llm", dec[0].laneTier)
+	assert.InDelta(t, 0.093, dec[0].distance, 0.01, "distance is the anchored topic's centroid distance")
 }
 
-// TestPlanTopicAssignments_AutoNew_MatchedBeyondThreshold verifies the
-// embedding gate still rejects a topic the LLM named when that topic is far
-// (> threshold). The relaxation only accepts topics within the threshold; it
-// is NOT pure-LLM matching.
-func TestPlanTopicAssignments_AutoNew_MatchedBeyondThreshold(t *testing.T) {
-	mit := uint(99)
-	cfg := PersistentTopicConfig{MatchThreshold: 0.30, UpgradeThreshold: 3}
-	topics := []BoardPersistentTopic{
-		{ID: 12, Embedding: vecStr(1, 0, 0), Status: TopicStatusActive},      // near but LLM didn't pick it
-		{ID: 99, Embedding: vecStr(0.2, 0.98, 0), Status: TopicStatusActive}, // LLM picked, but far (~0.79)
-	}
-	sections := []DailyReportSection{{
-		ClusterLabel:   "量子计算商用",
-		Embedding:      vecStr(1, 0.01, 0),
-		MatchedTopicID: &mit,
-	}}
-	dec := planTopicAssignments(sections, topics, cfg, time.Now())
-	require.Len(t, dec, 1)
-	assert.Equal(t, TopicConfAutoNew, dec[0].confidence)
-	assert.NotNil(t, dec[0].newCandidate)
-	require.NotNil(t, dec[0].topicStatusAtReport)
-	assert.Equal(t, TopicStatusCandidate, *dec[0].topicStatusAtReport)
-}
-
-func TestPlanTopicAssignments_AutoNew_DualConfirmationFail(t *testing.T) {
-	// Section is embedding-close to topic 12 (dist < threshold), but the LLM
-	// did NOT mark it (MatchedTopicID points elsewhere). Dual confirmation fails
-	// → a new candidate must be opened, NOT an anchor hit.
-	other := uint(99)
-	cfg := PersistentTopicConfig{MatchThreshold: 0.30, UpgradeThreshold: 3}
-	topics := []BoardPersistentTopic{{ID: 12, Embedding: vecStr(1, 0, 0), Status: TopicStatusActive}}
-	sections := []DailyReportSection{{
-		ClusterLabel: "开发者生态重构", Embedding: vecStr(0.99, 0.01, 0),
-		MatchedTopicID: &other, // LLM disagrees
-	}}
-	dec := planTopicAssignments(sections, topics, cfg, time.Now())
-	require.Len(t, dec, 1)
-	assert.Equal(t, TopicConfAutoNew, dec[0].confidence)
-	assert.NotNil(t, dec[0].newCandidate)
-	assert.Equal(t, "开发者生态重构", dec[0].newCandidate.label)
-}
-
-func TestPlanTopicAssignments_AutoNew_DistanceExceedsThreshold(t *testing.T) {
-	// Section is far from every topic (orthogonal, dist=1 > 0.30) → auto_new
-	// even though there is no MatchedTopicID to disagree with.
-	cfg := PersistentTopicConfig{MatchThreshold: 0.30, UpgradeThreshold: 3}
-	topics := []BoardPersistentTopic{{ID: 12, Embedding: vecStr(1, 0, 0), Status: TopicStatusActive}}
-	sections := []DailyReportSection{{
-		ClusterLabel: "量子计算商用", Embedding: vecStr(0, 1, 0),
-	}}
-	dec := planTopicAssignments(sections, topics, cfg, time.Now())
-	require.Len(t, dec, 1)
-	assert.Equal(t, TopicConfAutoNew, dec[0].confidence)
-	assert.NotNil(t, dec[0].newCandidate)
-}
-
-func TestPlanTopicAssignments_Unmatched_EmptyEmbedding(t *testing.T) {
+func TestPlanTopicAssignments_LaneDriven_AnchorUsesEmbeddingFallback(t *testing.T) {
+	// Topic has no centroid → anchor degrades to the 首义 embedding.
+	mit := uint(12)
 	cfg := DefaultPersistentTopicConfig()
-	sections := []DailyReportSection{{ClusterLabel: "no embedding", Embedding: ""}}
+	topics := []BoardPersistentTopic{{ID: 12, Embedding: vecStr(1, 0, 0), Status: TopicStatusActive}}
+	sections := []DailyReportSection{{
+		ClusterLabel: "AI", Embedding: vecStr(0.99, 0.01, 0),
+		MatchedTopicID: &mit, LaneTier: "l1_direct",
+	}}
+	dec := planTopicAssignments(sections, topics, cfg, time.Now())
+	require.Len(t, dec, 1)
+	assert.Equal(t, TopicConfAnchorHit, dec[0].confidence)
+	assert.Equal(t, uint(12), dec[0].topicID)
+}
+
+func TestPlanTopicAssignments_LaneDriven_AnchorTopicAbsentBecomesNew(t *testing.T) {
+	// Lane says anchor but MatchedTopicID points at a topic not in the
+	// anchorable set (e.g. filtered) → degrade to auto_new, lane l3_new, so the
+	// persisted row keeps confidence + lane consistent.
+	cfg := DefaultPersistentTopicConfig()
+	topics := []BoardPersistentTopic{{ID: 12, Centroid: vecStr(1, 0, 0), Status: TopicStatusActive}}
+	missing := uint(99)
+	sections := []DailyReportSection{{
+		ClusterLabel: "ghost", Embedding: vecStr(0.99, 0.01, 0),
+		MatchedTopicID: &missing, LaneTier: "l2_llm",
+	}}
+	dec := planTopicAssignments(sections, topics, cfg, time.Now())
+	require.Len(t, dec, 1)
+	assert.Equal(t, TopicConfAutoNew, dec[0].confidence)
+	assert.Equal(t, "l3_new", dec[0].laneTier)
+	assert.NotNil(t, dec[0].newCandidate)
+}
+
+func TestPlanTopicAssignments_LaneDriven_L3New(t *testing.T) {
+	// L3 section → auto_new, lane l3_new, distance = nearest anchor (diag).
+	cfg := DefaultPersistentTopicConfig()
+	topics := []BoardPersistentTopic{{ID: 12, Centroid: vecStr(1, 0, 0), Status: TopicStatusActive}}
+	sections := []DailyReportSection{{
+		ClusterLabel: "量子计算商用", Embedding: vecStr(0, 1, 0), LaneTier: "l3_new",
+	}}
+	dec := planTopicAssignments(sections, topics, cfg, time.Now())
+	require.Len(t, dec, 1)
+	assert.Equal(t, TopicConfAutoNew, dec[0].confidence)
+	assert.Equal(t, "l3_new", dec[0].laneTier)
+	assert.NotNil(t, dec[0].newCandidate)
+	assert.Equal(t, "量子计算商用", dec[0].newCandidate.label)
+	assert.InDelta(t, 1.0, dec[0].distance, 1e-9, "nearest anchor distance (orthogonal)")
+}
+
+func TestPlanTopicAssignments_LaneDriven_Unmatched_EmptyEmbedding(t *testing.T) {
+	cfg := DefaultPersistentTopicConfig()
+	sections := []DailyReportSection{{ClusterLabel: "no embedding", Embedding: "", LaneTier: "l1_direct"}}
 	dec := planTopicAssignments(sections, nil, cfg, time.Now())
 	require.Len(t, dec, 1)
 	assert.Equal(t, TopicConfUnmatched, dec[0].confidence)
+	assert.Equal(t, "l1_direct", dec[0].laneTier)
 	assert.Nil(t, dec[0].newCandidate)
 	assert.Nil(t, dec[0].topicStatusAtReport)
+	assert.Equal(t, 0.0, dec[0].distance)
 }
 
 func TestPlanLifecycle_EligibleCandidateStillRequiresManualConfirmation(t *testing.T) {

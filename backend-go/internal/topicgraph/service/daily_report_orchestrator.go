@@ -83,9 +83,28 @@ func GenerateDailyReport(ctx context.Context, boardID uint, date time.Time) (*re
 				boardID, activeWithBriefs)
 		}
 	}
-	clusters, err := ClusterTags(ctx, tags, existingTopics, topicBriefs)
+	// Lane-driven clustering (daily-report-lane-driven-clustering): bucket tags
+	// by centroid distance (L1/L2/L3) instead of a single LLM pass. Load the
+	// day's tag semantic embeddings so BucketTagsByCentroid can route each tag;
+	// tags without an embedding degrade to the L3 new-narrative lane.
+	tagIDs := make([]uint, len(tags))
+	for i, t := range tags {
+		tagIDs[i] = t.ID
+	}
+	tagEmbStr, embErr := repository.Repo.ListTagSemanticEmbeddings(tagIDs)
+	tagEmb := make(map[uint][]float64, len(tagEmbStr))
+	if embErr != nil {
+		logging.Warnf("daily-report: load tag embeddings for board %d failed (tags without embeddings route to L3): %v", boardID, embErr)
+	} else {
+		for id, s := range tagEmbStr {
+			if v, perr := parsePgVector(s); perr == nil && len(v) > 0 {
+				tagEmb[id] = v
+			}
+		}
+	}
+	clusters, err := ClusterTagsLane(ctx, tags, existingTopics, tagEmb, topicBriefs, topicCfg)
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("cluster tags: %w", err)
+		return nil, nil, nil, fmt.Errorf("cluster tags (lane): %w", err)
 	}
 
 	// Step 4: Query yesterday's report for continuity
@@ -177,6 +196,13 @@ func GenerateDailyReport(ctx context.Context, boardID uint, date time.Time) (*re
 		report.PrevReportID = &prevReport.ID
 	}
 
+	// Lane-driven sections carry LaneTier + a ClusterLabel resolved from the
+	// owning topic's label (L1/L2) or the new-narrative group name (L3).
+	topicLabelByID := make(map[uint]string, len(existingTopics))
+	for _, t := range existingTopics {
+		topicLabelByID[t.ID] = t.Label
+	}
+
 	// Build sections
 	var sections []repository.DailyReportSection
 	for i, cluster := range clusters {
@@ -189,7 +215,7 @@ func GenerateDailyReport(ctx context.Context, boardID uint, date time.Time) (*re
 			clusterArticleCount += t.ArticleCount
 		}
 
-		tagIDsJSON, _ := json.Marshal(cluster.TagIDs)
+		tagIDsJSON := marshalJSONArray(cluster.TagIDs)
 
 		// Calculate best_tier and avg_score
 		tagIDSet := make(map[uint]bool)
@@ -216,15 +242,22 @@ func GenerateDailyReport(ctx context.Context, boardID uint, date time.Time) (*re
 
 		breakdownJSON := buildQualityBreakdownJSON(tags, cluster.TagIDs)
 
+		clusterLabel := cluster.GroupName
+		if cluster.MatchedTopicID != nil {
+			if label, ok := topicLabelByID[*cluster.MatchedTopicID]; ok && label != "" {
+				clusterLabel = label
+			}
+		}
 		sections = append(sections, repository.DailyReportSection{
 			ClusterIndex:     i,
-			ClusterLabel:     cluster.GroupName,
+			ClusterLabel:     clusterLabel,
 			ClusterTagIDs:    tagIDsJSON,
 			ArticleCount:     clusterArticleCount,
 			BestTier:         bestTier,
 			AvgScore:         avgScore,
 			QualityBreakdown: breakdownJSON,
 			MatchedTopicID:   cluster.MatchedTopicID,
+			LaneTier:         clusterLaneToTier(cluster.Lane),
 		})
 	}
 

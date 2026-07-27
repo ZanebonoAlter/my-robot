@@ -62,6 +62,8 @@
 
 ## 4. 文档（doc-impact: standard 必更，database/architecture 可选）
 
+> **无 flow 影响**：本 change 为纯 `platform/database` 迁移执行器框架基建，无 API/schema/配置变化（见 proposal「Impact」节），不触及任何业务 flow，免 §12.2 变更溯源。
+
 - [x] 4.1 **[必更]** `docs/reference/standard/backend/code-style.md`：「GORM model tag 与迁移」节（约 :49）后补「迁移编写规范」子节，含 3 条约定：
   - **何时用 `RunOutsideTx: true`**：仅用于单条事务不兼容 DDL（`CREATE INDEX CONCURRENTLY`），多步操作必须留在事务内。
   - **`Down` 字段的声明性用法**：nil = 不可逆；破坏性迁移 Description 必须标注「⚠️ 不可逆」。

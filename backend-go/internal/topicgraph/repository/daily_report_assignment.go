@@ -3,7 +3,6 @@ package repository
 import (
 	"fmt"
 	"math"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -53,88 +52,73 @@ func cosineDistance(a, b []float64) float64 {
 	return 1 - dot/(math.Sqrt(na)*math.Sqrt(nb))
 }
 
-// parsedTopic pairs a topic id with its pre-parsed embedding.
-type parsedTopic struct {
-	ID        uint
-	Embedding []float64
-	Status    string
+// topicAnchor pairs a topic id with its parsed matching anchor vector: the
+// Centroid (mean of recent sections) when present, degrading to the Embedding
+// first-section 首义向量 otherwise. This is the lane-driven matching anchor
+// (supersedes the old first-section-only embedding). Topics with neither a
+// parseable centroid nor embedding are dropped.
+type topicAnchor struct {
+	ID     uint
+	Anchor []float64
+	Status string
 }
 
-// parseTopicEmbeddings parses each topic's embedding once, dropping unparseable
-// rows (they cannot participate in nearest-neighbour assignment).
-func parseTopicEmbeddings(topics []BoardPersistentTopic) []parsedTopic {
-	out := make([]parsedTopic, 0, len(topics))
+// parseTopicAnchors parses each topic's matching anchor (Centroid, else
+// Embedding). Unparseable topics are dropped — they cannot participate in
+// distance computation.
+func parseTopicAnchors(topics []BoardPersistentTopic) []topicAnchor {
+	out := make([]topicAnchor, 0, len(topics))
 	for _, t := range topics {
-		vec, err := repoParsePgVector(t.Embedding)
-		if err != nil || len(vec) == 0 {
+		vec := topicAnchorVec(t)
+		if len(vec) == 0 {
 			continue
 		}
-		out = append(out, parsedTopic{ID: t.ID, Embedding: vec, Status: t.Status})
+		out = append(out, topicAnchor{ID: t.ID, Anchor: vec, Status: t.Status})
 	}
 	return out
 }
 
-// findNearestTopic returns the topic id with the smallest cosine distance to
-// the given embedding and that distance. ok=false when no comparable topic.
-func findNearestTopic(vec []float64, topics []parsedTopic) (id uint, dist float64, ok bool) {
+// topicAnchorVec returns the topic's centroid vector when present, else its
+// first-section embedding. Empty when neither parses.
+func topicAnchorVec(t BoardPersistentTopic) []float64 {
+	if v, err := repoParsePgVector(t.Centroid); err == nil && len(v) > 0 {
+		return v
+	}
+	if v, err := repoParsePgVector(t.Embedding); err == nil && len(v) > 0 {
+		return v
+	}
+	return nil
+}
+
+// findNearestAnchor returns the anchor with the smallest cosine distance to
+// vec and that distance. ok=false when no comparable anchor.
+func findNearestAnchor(vec []float64, anchors []topicAnchor) (id uint, dist float64, ok bool) {
 	best := math.MaxFloat64
 	var bestID uint
 	found := false
-	for _, t := range topics {
-		if len(t.Embedding) == 0 {
+	for _, a := range anchors {
+		if len(a.Anchor) == 0 {
 			continue
 		}
-		d := cosineDistance(vec, t.Embedding)
+		d := cosineDistance(vec, a.Anchor)
 		if d < best {
 			best = d
-			bestID = t.ID
+			bestID = a.ID
 			found = true
 		}
 	}
 	return bestID, best, found
 }
 
-// nearbyTopic pairs a parsed topic with its distance to a query vector.
-type nearbyTopic struct {
-	parsedTopic
-	dist float64
-}
-
-// findTopicsWithinThreshold returns every topic whose cosine embedding
-// distance to vec is <= threshold, sorted nearest-first. Empty when none
-// qualify (the section is embedding-far from every active topic).
-func findTopicsWithinThreshold(vec []float64, topics []parsedTopic, threshold float64) []nearbyTopic {
-	var out []nearbyTopic
-	for _, t := range topics {
-		if len(t.Embedding) == 0 {
-			continue
-		}
-		d := cosineDistance(vec, t.Embedding)
-		if d <= threshold {
-			out = append(out, nearbyTopic{parsedTopic: t, dist: d})
-		}
-	}
-	sort.Slice(out, func(i, j int) bool { return out[i].dist < out[j].dist })
-	return out
-}
-
-// findTopicInList returns the topic with the given id from a nearby list.
-func findTopicInList(list []nearbyTopic, id uint) (nearbyTopic, bool) {
-	for _, t := range list {
-		if t.ID == id {
-			return t, true
-		}
-	}
-	return nearbyTopic{}, false
-}
-
-// topicAssignmentDecision is the per-section outcome of the dual-confirmation
+// topicAssignmentDecision is the per-section outcome of the lane-driven
 // assignment. topicID is set for anchor_hit; newCandidate is set for auto_new.
+// laneTier records the bucketing source carried onto the section row.
 type topicAssignmentDecision struct {
 	sectionIdx          int
 	topicID             uint
 	distance            float64
 	confidence          string
+	laneTier            string
 	newCandidate        *candidateTopicSpec
 	topicStatusAtReport *string
 }
@@ -147,13 +131,24 @@ type candidateTopicSpec struct {
 }
 
 // planTopicAssignments computes the per-section assignment plan with NO DB
-// access — pure and unit-testable. For each section it either anchors to an
-// existing topic (dual confirmation: nearest embedding within threshold AND
-// the LLM's matched_topic_id agrees) or opens a new candidate (auto_new), or
-// is marked unmatched when it has no embedding. Candidate specs are collected
-// in the returned slice; each auto_new decision points at its spec.
+// access — pure and unit-testable. Attribution was already decided upstream by
+// the lane bucketing (section.LaneTier + section.MatchedTopicID); this step
+// only maps the lane outcome onto a confidence + distance:
+//
+//	l1_direct / l2_llm with a MatchedTopicID → anchor_hit (distance = section
+//	  embedding to that topic's centroid anchor)
+//	l3_new or no MatchedTopicID → auto_new (distance = nearest anchor, for
+//	  diagnostics)
+//	empty section embedding → unmatched (distance 0)
+//
+// cfg is retained in the signature for caller symmetry; the lane-driven path
+// no longer applies an embedding threshold (the AND-gate is gone).
 func planTopicAssignments(sections []DailyReportSection, existingTopics []BoardPersistentTopic, cfg PersistentTopicConfig, today time.Time) []topicAssignmentDecision {
-	parsed := parseTopicEmbeddings(existingTopics)
+	anchors := parseTopicAnchors(existingTopics)
+	anchorByID := make(map[uint]topicAnchor, len(anchors))
+	for _, a := range anchors {
+		anchorByID[a.ID] = a
+	}
 	decisions := make([]topicAssignmentDecision, 0, len(sections))
 	var candidates []candidateTopicSpec
 	for i := range sections {
@@ -161,29 +156,25 @@ func planTopicAssignments(sections []DailyReportSection, existingTopics []BoardP
 		vec, err := repoParsePgVector(sec.Embedding)
 		if err != nil || len(vec) == 0 {
 			decisions = append(decisions, topicAssignmentDecision{
-				sectionIdx: i, confidence: TopicConfUnmatched,
+				sectionIdx: i, confidence: TopicConfUnmatched, laneTier: sec.LaneTier,
 			})
 			continue
 		}
-		// Dual confirmation: the LLM's matched_topic_id must point at a topic
-		// whose embedding is within the match threshold. Pre-relaxation this
-		// required matched_id == single nearest; that was too brittle — any
-		// drift in LLM clustering (e.g. the quality-scoring truncation change)
-		// made the LLM pick the 2nd-nearest and severed anchoring en masse.
-		// Accepting any within-threshold topic keeps BOTH gates (embedding AND
-		// the LLM naming the same topic) while tolerating minor drift.
-		within := findTopicsWithinThreshold(vec, parsed, cfg.MatchThreshold)
-		if sec.MatchedTopicID != nil {
-			if pt, ok := findTopicInList(within, *sec.MatchedTopicID); ok {
-				status := pt.Status
+		if (sec.LaneTier == "l1_direct" || sec.LaneTier == "l2_llm") && sec.MatchedTopicID != nil {
+			if a, ok := anchorByID[*sec.MatchedTopicID]; ok {
+				status := a.Status
 				decisions = append(decisions, topicAssignmentDecision{
-					sectionIdx: i, topicID: pt.ID, distance: pt.dist,
-					confidence: TopicConfAnchorHit, topicStatusAtReport: &status,
+					sectionIdx: i, topicID: a.ID, distance: cosineDistance(vec, a.Anchor),
+					confidence: TopicConfAnchorHit, laneTier: sec.LaneTier,
+					topicStatusAtReport: &status,
 				})
 				continue
 			}
 		}
-		_, nearestDist, _ := findNearestTopic(vec, parsed)
+		// l3_new, or lane said anchor but the topic is absent from the anchorable
+		// set → open a new candidate. lane_tier becomes l3_new so the persisted
+		// row keeps confidence + lane consistent.
+		_, nearestDist, _ := findNearestAnchor(vec, anchors)
 		candidates = append(candidates, candidateTopicSpec{
 			label:     sec.ClusterLabel,
 			embedding: sec.Embedding,
@@ -191,7 +182,8 @@ func planTopicAssignments(sections []DailyReportSection, existingTopics []BoardP
 		})
 		decisions = append(decisions, topicAssignmentDecision{
 			sectionIdx: i, distance: nearestDist,
-			confidence: TopicConfAutoNew, newCandidate: &candidates[len(candidates)-1],
+			confidence: TopicConfAutoNew, laneTier: "l3_new",
+			newCandidate:        &candidates[len(candidates)-1],
 			topicStatusAtReport: topicStatusPtr(TopicStatusCandidate),
 		})
 	}
@@ -253,22 +245,24 @@ func planLifecycle(topics []BoardPersistentTopic, today time.Time, hitTopicIDs m
 // assignAndUpdateTopics runs the full assignment + lifecycle pipeline for one
 // report save, inside the caller's transaction:
 //  1. load existing anchorable topics + config
-//  2. plan per-section assignment (pure, dual confirmation)
+//  2. plan per-section assignment (pure, lane-driven)
 //  3. create candidate topics
-//  4. write assignment columns onto sections
+//  4. write assignment columns (incl. lane_tier) onto sections
 //  5. advance the topic lifecycle (candidate→active→archived)
 //
-// Identity edges written later by RebuildBoardRelations depend on the
-// persistent_topic_id set here, so this must run before relation rebuild and
-// inside the same transaction.
-func assignAndUpdateTopics(tx *gorm.DB, boardID uint, periodDate time.Time, sections []DailyReportSection) error {
+// It returns the set of topic ids touched by this report (anchor_hit topics +
+// newly created candidates) so the caller can refresh their centroids after
+// the transaction commits. Identity edges written later by
+// RebuildBoardRelations depend on the persistent_topic_id set here, so this
+// must run before relation rebuild and inside the same transaction.
+func assignAndUpdateTopics(tx *gorm.DB, boardID uint, periodDate time.Time, sections []DailyReportSection) ([]uint, error) {
 	cfg := LoadPersistentTopicConfig(tx)
 	// periodDate must equal the orchestrator's startOfDay (=report.PeriodDate).
 	// Both sides call ListAnchorableTopicsByBoard with the same (boardID, date, cfg)
 	// so the injection set and the acceptance set are guaranteed identical.
 	existingTopics, anchorStats, err := Repo.ListAnchorableTopicsByBoard(boardID, periodDate, cfg)
 	if err != nil {
-		return fmt.Errorf("load existing topics: %w", err)
+		return nil, fmt.Errorf("load existing topics: %w", err)
 	}
 	today := NormalizeReportDate(periodDate)
 	decisions := planTopicAssignments(sections, existingTopics, cfg, today)
@@ -293,15 +287,17 @@ func assignAndUpdateTopics(tx *gorm.DB, boardID uint, periodDate time.Time, sect
 			ConsecutiveHits: 1,
 		}
 		if err := Repo.CreateTopic(tx, &topic); err != nil {
-			return fmt.Errorf("create candidate topic: %w", err)
+			return nil, fmt.Errorf("create candidate topic: %w", err)
 		}
 		candIDs[spec] = topic.ID
 	}
 
-	// Write assignment columns and collect the set of hit topic ids.
+	// Write assignment columns and collect the set of hit topic ids + every
+	// touched topic (anchor targets + new candidates) for centroid refresh.
 	// Newly created candidates are already at consecutive_hits=1, so they are
 	// excluded from the lifecycle hit set to avoid double-counting.
 	hitTopicIDs := make(map[uint]bool, len(decisions))
+	touched := make(map[uint]bool, len(decisions))
 	for _, d := range decisions {
 		var topicID *uint
 		switch d.confidence {
@@ -309,25 +305,27 @@ func assignAndUpdateTopics(tx *gorm.DB, boardID uint, periodDate time.Time, sect
 			id := d.topicID
 			topicID = &id
 			hitTopicIDs[id] = true
+			touched[id] = true
 		case TopicConfAutoNew:
 			if d.newCandidate != nil {
 				id := candIDs[d.newCandidate]
 				topicID = &id
+				touched[id] = true
 			}
 		}
 		if d.sectionIdx >= len(sections) {
 			continue
 		}
 		secID := sections[d.sectionIdx].ID
-		if err := Repo.UpdateSectionTopicAssignment(tx, secID, topicID, d.distance, d.confidence, d.topicStatusAtReport); err != nil {
-			return fmt.Errorf("update section %d assignment: %w", secID, err)
+		if err := Repo.UpdateSectionTopicAssignment(tx, secID, topicID, d.distance, d.confidence, d.laneTier, d.topicStatusAtReport); err != nil {
+			return nil, fmt.Errorf("update section %d assignment: %w", secID, err)
 		}
 	}
 
 	// Advance the lifecycle for pre-existing topics only.
 	allTopics, err := Repo.ListAllTopicsByBoard(boardID)
 	if err != nil {
-		return fmt.Errorf("load topics for lifecycle: %w", err)
+		return nil, fmt.Errorf("load topics for lifecycle: %w", err)
 	}
 	changes := planLifecycle(allTopics, today, hitTopicIDs)
 	if len(changes) > 0 {
@@ -345,7 +343,7 @@ func assignAndUpdateTopics(tx *gorm.DB, boardID uint, periodDate time.Time, sect
 			}
 		}
 		if err := Repo.SaveTopics(tx, toSave); err != nil {
-			return fmt.Errorf("save topic lifecycle changes: %w", err)
+			return nil, fmt.Errorf("save topic lifecycle changes: %w", err)
 		}
 	}
 
@@ -363,5 +361,10 @@ func assignAndUpdateTopics(tx *gorm.DB, boardID uint, periodDate time.Time, sect
 	logging.Infof("persistent-topic: board %d anchors active=%d candidates=%d filtered_window=%d truncated_limit=%d; assigned %d sections (anchor_hit=%d, auto_new=%d, unmatched=%d)",
 		boardID, anchorStats.ActiveCount, anchorStats.CandidateCount, anchorStats.FilteredByWindow, anchorStats.TruncatedByLimit,
 		len(decisions), matched, autoNew, unmatched)
-	return nil
+
+	touchedIDs := make([]uint, 0, len(touched))
+	for id := range touched {
+		touchedIDs = append(touchedIDs, id)
+	}
+	return touchedIDs, nil
 }

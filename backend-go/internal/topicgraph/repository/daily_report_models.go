@@ -64,8 +64,8 @@ const (
 
 // PersistentTopicConfidence values recorded on each DailyReportSection.
 const (
-	TopicConfAnchorHit = "anchor_hit" // matched an existing topic via dual confirmation
-	TopicConfAutoNew   = "auto_new"   // dual confirmation failed → opened a new candidate
+	TopicConfAnchorHit = "anchor_hit" // L1/L2 lane anchored to an existing topic
+	TopicConfAutoNew   = "auto_new"   // L3 new-narrative → opened a new candidate
 	TopicConfUnmatched = "unmatched"  // section has no embedding, cannot assign
 	TopicConfManual    = "manual"     // user manually assigned (manual topic lane)
 )
@@ -92,8 +92,18 @@ type BoardPersistentTopic struct {
 	LastSeenDate    time.Time `gorm:"type:date;not null" json:"last_seen_date"`
 	HitCount        int       `gorm:"not null;default:1" json:"hit_count"`
 	ConsecutiveHits int       `gorm:"not null;default:0" json:"consecutive_hits"`
-	CreatedAt       time.Time `json:"created_at"`
-	UpdatedAt       time.Time `json:"updated_at"`
+	// Lane-driven clustering fields (daily-report-lane-driven-clustering).
+	// Centroid is the mean of recent section embeddings (centroid_window);
+	// it supersedes Embedding (the first-section 首义向量) as the matching
+	// anchor. IsVacuum flags over-broad topics that attract tags without
+	// strong matches; VacuumStrong/VacuumMid snapshot the attraction stats
+	// over vacuum_window for the vacuum_ratio test.
+	Centroid     string    `gorm:"type:vector;default:NULL" json:"-"`
+	IsVacuum     bool      `gorm:"not null;default:false" json:"is_vacuum"`
+	VacuumStrong int       `gorm:"not null;default:0" json:"vacuum_strong"`
+	VacuumMid    int       `gorm:"not null;default:0" json:"vacuum_mid"`
+	CreatedAt    time.Time `json:"created_at"`
+	UpdatedAt    time.Time `json:"updated_at"`
 }
 
 func (BoardPersistentTopic) TableName() string {
@@ -121,13 +131,19 @@ type DailyReportSection struct {
 	TopicMatchDistance   float64 `json:"topic_match_distance,omitempty"`
 	TopicMatchConfidence string  `gorm:"size:20" json:"topic_match_confidence,omitempty"`
 	TopicStatusAtReport  *string `gorm:"size:20" json:"topic_status_at_report"`
+	// LaneTier records which lane produced this section's topic assignment:
+	// l1_direct (centroid strong match), l2_llm (LLM keep/switch), l3_new
+	// (new candidate). NULL on historical sections (pre-migration).
+	LaneTier string `gorm:"size:16" json:"lane_tier,omitempty"`
 	// PersistentTopic carries the nested topic brief for the daily-report
 	// detail API, so the UI can classify sections by topic status (active vs
 	// candidate). Transient — loaded via AttachTopicBriefsToReport, never
 	// persisted. Mirrors SectionTimelineNode.PersistentTopic.
 	PersistentTopic *PersistentTopicBrief `gorm:"-" json:"persistent_topic,omitempty"`
-	// MatchedTopicID is the topic the LLM picked during ClusterTags; carried
-	// transiently (not persisted) for the dual-confirmation assignment step.
+	// MatchedTopicID is the topic the lane bucketing/LLM picked for this
+	// section; carried transiently (not persisted) for the lane-driven
+	// assignment step (L1 direct / L2 keep-switch carry the owning topic id;
+	// L3 sections leave it nil).
 	MatchedTopicID *uint     `gorm:"-" json:"-"`
 	CreatedAt      time.Time `json:"created_at"`
 }
@@ -247,6 +263,11 @@ type ClusterGroup struct {
 	GroupName      string `json:"group_name"`
 	TagIDs         []uint `json:"tag_ids"`
 	MatchedTopicID *uint  `json:"matched_topic_id,omitempty"`
+	// Lane-driven clustering outcome (Wave2 fills these; Wave1 carries the
+	// fields so the struct/JSON shape is stable before the algorithm lands).
+	Decision      string `json:"decision,omitempty"`        // keep / switch / new (L2)
+	TargetTopicID *uint  `json:"target_topic_id,omitempty"` // L2 keep/switch target
+	Lane          string `json:"lane,omitempty"`            // l1 / l2 / l3
 }
 
 // Highlight represents a key highlight in the daily report.

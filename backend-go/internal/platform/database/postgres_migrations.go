@@ -1442,6 +1442,118 @@ func postgresMigrations() []Migration {
 				return nil
 			},
 		},
+
+		// ── daily-report-lane-driven-clustering: 质心 + 吸尘器 + lane 列 ──
+		// 纯加法迁移：board_persistent_topics 增 centroid/is_vacuum/vacuum_strong/
+		// vacuum_mid；daily_report_sections 增 lane_tier；seed 6 个 persistent_topic_*
+		// 阈值；离线回填 centroid（近 30 条 section 均权 AVG）与 vacuum 统计（近 7 天
+		// strong/mid 计数）。全部 IF NOT EXISTS / check-existing / SET=计算，重跑幂等。
+		// 阈值常量（0.18/0.30/0.20/30/7）与 DefaultPersistentTopicConfig 对齐，运行时可被
+		// ai_settings 覆盖；离线回填用默认值即可（迁移是一次性 snapshot）。
+		{
+			Version:     "20260727_0001",
+			Description: "Add centroid/is_vacuum/vacuum_strong/vacuum_mid to board_persistent_topics, lane_tier to daily_report_sections; seed lane/vacuum/centroid config; offline-backfill centroid + vacuum stats (daily-report-lane-driven-clustering).",
+			Up: func(db *gorm.DB) error {
+				if !tableExists(db, "board_persistent_topics") || !tableExists(db, "daily_report_sections") {
+					return nil // daily-report tables not registered on this deployment
+				}
+
+				// 1. ADD COLUMN IF NOT EXISTS (idempotent). centroid 用无维度 vector，
+				//    运行时由 ensurePersistentTopicEmbeddingDimension 同步维度。
+				addCols := []string{
+					`ALTER TABLE board_persistent_topics ADD COLUMN IF NOT EXISTS centroid vector`,
+					`ALTER TABLE board_persistent_topics ADD COLUMN IF NOT EXISTS is_vacuum boolean NOT NULL DEFAULT false`,
+					`ALTER TABLE board_persistent_topics ADD COLUMN IF NOT EXISTS vacuum_strong integer NOT NULL DEFAULT 0`,
+					`ALTER TABLE board_persistent_topics ADD COLUMN IF NOT EXISTS vacuum_mid integer NOT NULL DEFAULT 0`,
+					`ALTER TABLE daily_report_sections ADD COLUMN IF NOT EXISTS lane_tier varchar(16)`,
+				}
+				for _, stmt := range addCols {
+					if err := db.Exec(stmt).Error; err != nil {
+						return fmt.Errorf("add lane/centroid column: %w", err)
+					}
+				}
+
+				// 2. Seed ai_settings (check-existing-then-create，沿用 20260619_0002 模式)。
+				laneDefaults := []struct {
+					Key, Value, Description string
+				}{
+					{"persistent_topic_lane_l1_threshold", "0.18", "Lane L1 直挂阈值：tag 到 topic 质心余弦距离 < 此值直接归属（不调 LLM）"},
+					{"persistent_topic_lane_l2_threshold", "0.30", "Lane L2 弱区上限：距离在 [l1,l2] 交 LLM 留/换/新"},
+					{"persistent_topic_vacuum_ratio", "0.20", "吸尘器判定：strong/(strong+mid) < 此值则 is_vacuum=true"},
+					{"persistent_topic_centroid_window", "30", "质心计算取最近 N 条 section embedding 加权平均"},
+					{"persistent_topic_vacuum_window", "7", "吸尘器吸引统计窗口（天）"},
+					{"persistent_topic_l2_candidate_k", "5", "L2 LLM 注入的 top-K 候选 topic 数"},
+				}
+				for _, d := range laneDefaults {
+					var existing models.AISettings
+					if err := db.Where("key = ?", d.Key).First(&existing).Error; err == nil {
+						continue
+					}
+					if err := db.Create(&models.AISettings{
+						Key: d.Key, Value: d.Value, Description: d.Description,
+					}).Error; err != nil {
+						return fmt.Errorf("seed ai_settings key %s: %w", d.Key, err)
+					}
+				}
+
+				// 3. 离线回填 centroid：取每个 topic 近 30 条 section embedding 的均权
+				//    AVG（pgvector >= 0.5 的 avg(vector)）。section<2 或无 section 的 topic
+				//    子查询返回 NULL，保留 NULL（运行时 ComputeTopicCentroid 退化首义）。
+				if err := db.Exec(`
+					UPDATE board_persistent_topics t
+					SET centroid = sub.c
+					FROM (
+						SELECT t2.id,
+						       (
+						           SELECT AVG(recent.embedding)
+						           FROM (
+						               SELECT s.embedding
+						               FROM daily_report_sections s
+						               JOIN board_daily_reports rpt ON rpt.id = s.report_id
+						               WHERE s.persistent_topic_id = t2.id
+						                 AND s.embedding IS NOT NULL
+						               ORDER BY rpt.period_date DESC, s.id DESC
+						               LIMIT 30
+						           ) recent
+						       ) AS c
+						FROM board_persistent_topics t2
+					) sub
+					WHERE t.id = sub.id AND sub.c IS NOT NULL
+				`).Error; err != nil {
+					logging.Warnf("migration 20260727_0001: centroid AVG backfill failed (pgvector avg unavailable?), leaving centroid NULL for runtime fallback: %v", err)
+					// non-fatal: ComputeTopicCentroid degrades to first-section vector
+				}
+
+				// 4. 初始化 vacuum 统计（近 7 天 strong/mid 计数 + is_vacuum）。
+				//    strong=distance<0.18, mid=distance∈[0.18,0.30]；
+				//    is_vacuum = strong/(strong+mid) < 0.20（CASE 防除零）。
+				if err := db.Exec(`
+					UPDATE board_persistent_topics t
+					SET vacuum_strong = sub.strong,
+					    vacuum_mid = sub.mid,
+					    is_vacuum = CASE
+					        WHEN sub.strong + sub.mid > 0
+					        THEN sub.strong::float / (sub.strong + sub.mid)::float < 0.20
+					        ELSE false
+					    END
+					FROM (
+					    SELECT t2.id,
+					           COUNT(*) FILTER (WHERE s.topic_match_distance < 0.18) AS strong,
+					           COUNT(*) FILTER (WHERE s.topic_match_distance >= 0.18 AND s.topic_match_distance <= 0.30) AS mid
+					    FROM board_persistent_topics t2
+					    JOIN daily_report_sections s ON s.persistent_topic_id = t2.id
+					    JOIN board_daily_reports rpt ON rpt.id = s.report_id
+					    WHERE t2.status IN ('candidate', 'active')
+					      AND rpt.period_date >= (CURRENT_DATE - 7)
+					    GROUP BY t2.id
+					) sub
+					WHERE t.id = sub.id
+				`).Error; err != nil {
+					return fmt.Errorf("init vacuum stats: %w", err)
+				}
+				return nil
+			},
+		},
 	}
 }
 

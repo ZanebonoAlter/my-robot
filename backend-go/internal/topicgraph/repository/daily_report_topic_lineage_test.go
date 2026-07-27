@@ -12,19 +12,16 @@ import (
 )
 
 // TestTopicLineageSurvivesClusterDrift is the cross-feature regression guard
-// for the coupling documented in architecture/coupling-map.md: a change to
-// the quality-ranking truncation input (filterTagsByQuality) propagates
-// through LLM clustering into a drifted MatchedTopicID, which the
-// dual-confirmation in assignAndUpdateTopics must still anchor rather than
-// severing the topic lineage.
+// for the coupling documented in architecture/coupling-map.md. Under the
+// lane-driven model (daily-report-lane-driven-clustering) the attribution is
+// decided upstream by bucketing: a section flagged lane_tier=l2_llm anchors to
+// its MatchedTopicID (the LLM keep/switch target), NOT to the embedding-nearest
+// topic. This integration test proves the full DB write path
+// (assignAndUpdateTopics) persists that anchor onto the LLM-chosen topic and
+// opens NO spurious candidate.
 //
 // This is an INTEGRATION test (testcontainer pgvector) because the unit test
-// TestPlanTopicAssignments_AnchorHit_MatchedWithinThresholdNotNearest covers
-// only the pure planner; this one proves the full DB write path
-// (assignAndUpdateTopics) persists the anchor onto the correct active topic
-// and opens NO spurious candidate when the LLM id drifts to a within-threshold
-// 2nd-nearest topic. Pre-relaxation this created a new candidate and broke
-// the lineage → frontend "all emerging topics".
+// TestPlanTopicAssignments_LaneDriven_AnchorHit covers only the pure planner.
 func TestTopicLineageSurvivesClusterDrift(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 	Repo = NewTopicGraphRepository(db)
@@ -66,9 +63,12 @@ func TestTopicLineageSurvivesClusterDrift(t *testing.T) {
 	require.NoError(t, db.Create(&sec).Error) // gives it an ID
 	mit := t2.ID
 	sec.MatchedTopicID = &mit
+	// Lane-driven attribution: an L2 section anchors to its MatchedTopicID
+	// (the LLM keep/switch target) regardless of which topic is embedding-nearest.
+	sec.LaneTier = "l2_llm"
 
 	// Run the link under test against the real DB.
-	err := assignAndUpdateTopics(db, boardID, now, []DailyReportSection{sec})
+	_, err := assignAndUpdateTopics(db, boardID, now, []DailyReportSection{sec})
 	require.NoError(t, err)
 
 	// Lineage must survive: the section anchors to the LLM-chosen topic T2 (NOT
@@ -77,7 +77,7 @@ func TestTopicLineageSurvivesClusterDrift(t *testing.T) {
 	require.NoError(t, db.First(&got, sec.ID).Error)
 	require.NotNil(t, got.PersistentTopicID)
 	assert.Equal(t, t2.ID, *got.PersistentTopicID,
-		"section must anchor to the LLM-chosen within-threshold topic, preserving lineage")
+		"L2 section must anchor to its MatchedTopicID, not the embedding-nearest topic")
 	assert.Equal(t, TopicConfAnchorHit, got.TopicMatchConfidence)
 
 	// No spurious candidate must be created — that was the regression symptom

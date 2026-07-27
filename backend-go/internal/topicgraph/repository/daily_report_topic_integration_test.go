@@ -210,10 +210,13 @@ func TestSaveReport_AssignsNewSections(t *testing.T) {
 		PeriodDate:      NormalizeReportDate(time.Now()),
 		Title:           "today", Status: "completed",
 	}
-	// Section anchors: near the topic embedding AND the LLM agrees.
+	// Section is an L1 direct anchor: the bucketing stage (upstream of
+	// SaveReport) set LaneTier=l1_direct + MatchedTopicID because the tag's
+	// embedding is near the topic centroid. The lane-driven assignment path
+	// keys off these two fields (the old embedding AND-gate is gone).
 	sections := []DailyReportSection{{
 		ClusterLabel: "AI 编程竞争", Embedding: vecStr(0.99, 0.01, 0.0),
-		MatchedTopicID: &mit,
+		LaneTier: "l1_direct", MatchedTopicID: &mit,
 	}}
 
 	err := repo.SaveReport(report, sections, nil)

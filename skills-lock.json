@@ -79,11 +79,53 @@
       "skillPath": "skills/open-code-review/SKILL.md",
       "computedHash": "5ebd7726ff89b3f5906b6dc4f3a16dfa9684e30181f619d95a3fb7bc00ad3f3a"
     },
+    "opencli-adapter-author": {
+      "source": "jackwener/opencli",
+      "sourceType": "github",
+      "skillPath": "skills/opencli-adapter-author/SKILL.md",
+      "computedHash": "04cd5d6f4fe7e2b0821ca61701aea89bd4b03e5b149cb6be85269521129a5a9d"
+    },
+    "opencli-autofix": {
+      "source": "jackwener/opencli",
+      "sourceType": "github",
+      "skillPath": "skills/opencli-autofix/SKILL.md",
+      "computedHash": "b3e3fa585ed63fbb26610e36e5c3ec32497c1c35333614aa1f937c2d70b72965"
+    },
+    "opencli-browser": {
+      "source": "jackwener/opencli",
+      "sourceType": "github",
+      "skillPath": "skills/opencli-browser/SKILL.md",
+      "computedHash": "2840dbfb277bb1c3da2163b989028b88db8ff92070537c5c4865fdf0ca099fc1"
+    },
+    "opencli-browser-sitemap": {
+      "source": "jackwener/opencli",
+      "sourceType": "github",
+      "skillPath": "skills/opencli-browser-sitemap/SKILL.md",
+      "computedHash": "4d00d91ab47b33b7cd450b9459da08889325d399e3e97a1fb2061b7fa0a628cb"
+    },
+    "opencli-sitemap-author": {
+      "source": "jackwener/opencli",
+      "sourceType": "github",
+      "skillPath": "skills/opencli-sitemap-author/SKILL.md",
+      "computedHash": "dcc8cb42ae47dd4c6f0ee576acc0a910309b0df5b35d0baaab59091a51b2c1d9"
+    },
+    "opencli-usage": {
+      "source": "jackwener/opencli",
+      "sourceType": "github",
+      "skillPath": "skills/opencli-usage/SKILL.md",
+      "computedHash": "2fdfef4a5eef7f3dad489f952199485179e6c2a50b0b7c1e0c5091d48b23601b"
+    },
     "redesign-existing-projects": {
       "source": "Leonxlnx/taste-skill",
       "sourceType": "github",
       "skillPath": "skills/redesign-skill/SKILL.md",
       "computedHash": "47eced3e960a2c961d3cbee11fa1216264f589344b586a5cbd03967cd6b9c54b"
+    },
+    "smart-search": {
+      "source": "jackwener/opencli",
+      "sourceType": "github",
+      "skillPath": "skills/smart-search/SKILL.md",
+      "computedHash": "40cdcaf3cb6d3cd92f96704d8c95cf71a6e17d85f432710fc1e95a9324f1fbd0"
     }
   }
 }

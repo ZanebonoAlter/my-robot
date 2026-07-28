@@ -7,10 +7,12 @@ import (
 	"sort"
 	"time"
 
+	"go.opentelemetry.io/otel"
 	"gorm.io/gorm"
 
 	"syntopica-backend/internal/models"
 	"syntopica-backend/internal/platform/logging"
+	"syntopica-backend/internal/platform/tracing"
 )
 
 // ── preference-profile service（design D1/D7，preference-profile spec）──
@@ -50,6 +52,8 @@ type RecomputeSummary struct {
 // 幂等：先删除现有 source=behavior 行再重算；MUST NOT 触及 source=seed 行。
 // 重算只读 topic_tag_embeddings 现有向量，不调用 LLM/embedding 接口。
 func (s *PreferenceProfileService) RecomputeAll(ctx context.Context) (*RecomputeSummary, error) {
+	ctx, span := otel.Tracer(tracing.ServiceName).Start(ctx, "PreferenceProfileService.RecomputeAll")
+	defer span.End()
 	minTags := MinTagsPerBoardDefault
 
 	// 1. 近 30 天行为 → 每文章权重（behavior_level × time_decay）。
@@ -421,6 +425,8 @@ type PreferenceProfileItem struct {
 
 // GetProfile 返回兴趣画像（按版块分组 + 全局桶），无数据返回空列表。
 func (s *PreferenceProfileService) GetProfile(ctx context.Context) ([]PreferenceProfileItem, error) {
+	ctx, span := otel.Tracer(tracing.ServiceName).Start(ctx, "PreferenceProfileService.GetProfile")
+	defer span.End()
 	var vecs []models.PreferenceVector
 	err := s.db.WithContext(ctx).
 		Preload("Board").
@@ -459,6 +465,8 @@ func (s *PreferenceProfileService) WriteSeed(
 	ctx context.Context, incomingVec []float64, dim int, model string,
 	boardVecs map[uint][]float64,
 ) error {
+	ctx, span := otel.Tracer(tracing.ServiceName).Start(ctx, "PreferenceProfileService.WriteSeed")
+	defer span.End()
 	if len(incomingVec) == 0 {
 		return nil
 	}

@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"sync"
 
+	"go.opentelemetry.io/otel"
 	"syntopica-backend/internal/dataenrichment/repository"
+	"syntopica-backend/internal/platform/tracing"
 )
 
 // DebateService orchestrates the FinGenius stock debate flow:
@@ -33,6 +35,8 @@ func NewDebateService(client FinGeniusClient, distiller *DebateDistiller, repo *
 // Returns the persisted results (one per symbol). Returns error only if the
 // initial Submit itself fails (service unavailable).
 func (s *DebateService) RunDebate(ctx context.Context, resultID, topicID uint, sessionID string, symbols []DebateSymbol) ([]*repository.StockDebateResult, error) {
+	ctx, span := otel.Tracer(tracing.ServiceName).Start(ctx, "DebateService.RunDebate")
+	defer span.End()
 	if len(symbols) == 0 {
 		return nil, fmt.Errorf("run debate: no symbols provided")
 	}

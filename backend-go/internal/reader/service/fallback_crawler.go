@@ -3,6 +3,8 @@ package service
 import (
 	"context"
 	"fmt"
+	"go.opentelemetry.io/otel"
+	"syntopica-backend/internal/platform/tracing"
 )
 
 // FallbackCrawler 实现双源降级链：先尝试 primary（readability，进程内），
@@ -25,6 +27,8 @@ func NewFallbackCrawler(primary, fallback Crawler) *FallbackCrawler {
 // primary 报错不中断，而是降级 fallback（SSR 站偶发网络错误也能救回来）。
 // fallback 报错则原样返回（文章进入重试队列，符合现有 firecrawl_status 机制）。
 func (f *FallbackCrawler) ScrapePage(ctx context.Context, url string) (*ScrapeResult, error) {
+	ctx, span := otel.Tracer(tracing.ServiceName).Start(ctx, "FallbackCrawler.ScrapePage")
+	defer span.End()
 	primaryRes, err := f.primary.ScrapePage(ctx, url)
 	if err == nil && isUsableArticle(primaryRes.Markdown) {
 		return primaryRes, nil

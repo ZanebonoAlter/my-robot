@@ -4,7 +4,9 @@ import (
 	"context"
 	"fmt"
 
+	"go.opentelemetry.io/otel"
 	"syntopica-backend/internal/platform/airouter"
+	"syntopica-backend/internal/platform/tracing"
 )
 
 // Lens is a concrete problem-style analysis viewpoint (e.g. "美国为何在对华
@@ -56,6 +58,8 @@ func NewAgentLensSource(airouter AirRouter, capability airouter.Capability) *Age
 // topic's classified form. Uses the same Operation as interpret (viewpoint
 // proposal belongs to the interpreter phase).
 func (s *AgentLensSource) Propose(ctx context.Context, ictx interpretContext, form string) ([]Lens, error) {
+	ctx, span := otel.Tracer(tracing.ServiceName).Start(ctx, "AgentLensSource.Propose")
+	defer span.End()
 	prompt := fmt.Sprintf(lensProposePrompt, form) + "\n\n---\n"
 	if ictx.ContextText != "" {
 		prompt += "分层新闻上下文:\n" + ictx.ContextText + "\n\n"

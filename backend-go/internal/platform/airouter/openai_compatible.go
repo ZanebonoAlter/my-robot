@@ -11,8 +11,10 @@ import (
 	"strings"
 	"time"
 
+	"go.opentelemetry.io/otel"
 	"syntopica-backend/internal/models"
 	"syntopica-backend/internal/platform/httpclient"
+	"syntopica-backend/internal/platform/tracing"
 	// "syntopica-backend/internal/platform/logging"
 )
 
@@ -99,6 +101,8 @@ func NewOpenAICompatibleClient() ProviderClient {
 }
 
 func (c *openAICompatibleClient) Chat(ctx context.Context, provider models.AIProvider, req ChatRequest) (*ChatResponse, error) {
+	ctx, span := otel.Tracer(tracing.ServiceName).Start(ctx, "openAICompatibleClient.Chat")
+	defer span.End()
 	payload := buildPayload(provider, req)
 	body, err := json.Marshal(payload)
 	if err != nil {
@@ -240,6 +244,8 @@ func stripThinkTags(content string) string {
 }
 
 func (c *openAICompatibleClient) Embed(ctx context.Context, provider models.AIProvider, req EmbeddingRequest) (*EmbeddingResult, error) {
+	ctx, span := otel.Tracer(tracing.ServiceName).Start(ctx, "openAICompatibleClient.Embed")
+	defer span.End()
 	if len(req.Input) == 0 {
 		return nil, fmt.Errorf("no texts to embed")
 	}

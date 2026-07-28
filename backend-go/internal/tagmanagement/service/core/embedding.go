@@ -12,7 +12,9 @@ import (
 	"syntopica-backend/internal/models"
 	"syntopica-backend/internal/platform/airouter"
 	"syntopica-backend/internal/platform/logging"
+	"syntopica-backend/internal/platform/tracing"
 
+	"go.opentelemetry.io/otel"
 	"gorm.io/gorm"
 	"syntopica-backend/internal/tagmanagement/repository"
 )
@@ -62,6 +64,8 @@ func NewEmbeddingService() *EmbeddingService {
 
 // GenerateEmbedding generates an embedding for a tag's text representation
 func (s *EmbeddingService) GenerateEmbedding(ctx context.Context, tag *models.TopicTag, embeddingType string, opts ...EmbeddingTextOptions) (*models.TopicTagEmbedding, []float64, error) {
+	ctx, span := otel.Tracer(tracing.ServiceName).Start(ctx, "EmbeddingService.GenerateEmbedding")
+	defer span.End()
 	text := buildTagEmbeddingText(tag, embeddingType, opts...)
 	textHash := hashText(embeddingType + "\n" + text)
 
@@ -99,6 +103,8 @@ func (s *EmbeddingService) GenerateEmbedding(ctx context.Context, tag *models.To
 }
 
 func (s *EmbeddingService) GenerateEmbeddingForText(ctx context.Context, tagID uint, embeddingType string, text string) (*models.TopicTagEmbedding, []float64, error) {
+	ctx, span := otel.Tracer(tracing.ServiceName).Start(ctx, "EmbeddingService.GenerateEmbeddingForText")
+	defer span.End()
 	textHash := hashText(embeddingType + "\n" + text)
 
 	req := airouter.EmbeddingRequest{
@@ -153,6 +159,8 @@ func getEventKeywords(tag *models.TopicTag) []string {
 }
 
 func (s *EmbeddingService) FindSimilarTags(ctx context.Context, tag *models.TopicTag, category string, limit int, embeddingType string) ([]TagCandidate, error) {
+	ctx, span := otel.Tracer(tracing.ServiceName).Start(ctx, "EmbeddingService.FindSimilarTags")
+	defer span.End()
 	_, rawFloats, err := s.GenerateEmbedding(ctx, tag, embeddingType)
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate embedding: %w", err)
@@ -218,6 +226,8 @@ func (s *EmbeddingService) FindSimilarTags(ctx context.Context, tag *models.Topi
 
 // TagMatch decides how to handle a candidate tag
 func (s *EmbeddingService) TagMatch(ctx context.Context, label, category string, aliases string) (*TagMatchResult, error) {
+	ctx, span := otel.Tracer(tracing.ServiceName).Start(ctx, "EmbeddingService.TagMatch")
+	defer span.End()
 	slug := Slugify(label)
 	logging.Infof("TagMatch: start label=%q slug=%q category=%s threshold=%.2f", label, slug, category, MatchThreshold)
 	var existingTag models.TopicTag
@@ -313,6 +323,8 @@ func (s *EmbeddingService) TagMatch(ctx context.Context, label, category string,
 // FindSimilarTagsAmongSet finds pairs of tags within a set whose embedding
 // cosine similarity meets the given threshold. Uses pgvector pairwise distance.
 func (s *EmbeddingService) FindSimilarTagsAmongSet(ctx context.Context, tagIDs []uint, threshold float64) ([]SimilarityEdge, error) {
+	_, span := otel.Tracer(tracing.ServiceName).Start(ctx, "EmbeddingService.FindSimilarTagsAmongSet")
+	defer span.End()
 	if len(tagIDs) < 2 {
 		return nil, nil
 	}

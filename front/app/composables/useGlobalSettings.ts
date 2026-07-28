@@ -51,8 +51,8 @@ export function useGlobalSettings() {
   // ---- Feed operations ----
   async function updateFeedSetting(
     feedId: string,
-    setting: 'refresh_interval' | 'max_articles' | 'ai_summary_enabled' | 'tagging_enabled' | 'firecrawl_enabled' | 'completion_on_refresh',
-    value: number | boolean
+    setting: 'refresh_interval' | 'max_articles' | 'ai_summary_enabled' | 'tagging_enabled' | 'firecrawl_enabled' | 'completion_on_refresh' | 'category_id',
+    value: number | boolean | null
   ) {
     loading.value = true
     error.value = null
@@ -88,6 +88,41 @@ export function useGlobalSettings() {
     setTimeout(() => { success.value = null }, 2000)
   }
 
+  async function createCategoryAndAssign(feedId: string, name: string) {
+    const trimmed = name.trim()
+    if (!trimmed) return
+    loading.value = true
+    error.value = null
+    success.value = null
+    const response = await apiStore.createCategory({ name: trimmed })
+    if (response.success && response.data) {
+      await updateFeedSetting(feedId, 'category_id', Number(response.data.id))
+      success.value = '分类已创建并应用'
+      setTimeout(() => { success.value = null }, 2000)
+    } else {
+      error.value = response.error || '创建分类失败'
+    }
+    loading.value = false
+  }
+
+  async function deleteFeed(feedId: string, title: string, articleCount: number): Promise<boolean> {
+    const ok = window.confirm(`确定删除「${title}」？将同时删除其下 ${articleCount} 篇文章，此操作不可撤销。`)
+    if (!ok) return false
+    loading.value = true
+    error.value = null
+    success.value = null
+    const response = await apiStore.deleteFeed(feedId)
+    loading.value = false
+    if (response.success) {
+      await apiStore.fetchFeeds({ per_page: 10000 })
+      success.value = '订阅源已删除'
+      setTimeout(() => { success.value = null }, 2000)
+      return true
+    }
+    error.value = response.error || '删除失败'
+    return false
+  }
+
   // ---- AI summary / podcast settings (legacy — persisted but unused by panels) ----
   const aiSummaryEnabled = ref(false)
   const aiBaseURL = ref('')
@@ -115,13 +150,13 @@ export function useGlobalSettings() {
     activeTab, collapsedCategories, loading, error, success,
 
     // Computed
-    feedsByCategory,
+    feedsByCategory, categories: feedsStore.categories,
 
     // Constants
     refreshOptions, maxArticlesOptions,
 
     // Feed operations
-    updateFeedSetting, refreshFeed,
+    updateFeedSetting, refreshFeed, createCategoryAndAssign, deleteFeed,
 
     // Legacy AI settings (unused by panels, kept for back-compat)
     aiSummaryEnabled, aiBaseURL, aiAPIKey, aiModel, showApiKey, autoSummaryEnabled,

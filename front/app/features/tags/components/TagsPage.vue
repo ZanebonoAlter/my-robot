@@ -148,7 +148,9 @@ onMounted(() => {
             v-if="contentTab === 'daily-reports'"
             :board-id="selectedBoardId"
             :board-title="selectedBoardLabel"
+            :boards="boards"
             @open-article="openArticlePreview"
+            @select-board="handleSelectBoard"
           />
 
           <BoardTimelinePanel

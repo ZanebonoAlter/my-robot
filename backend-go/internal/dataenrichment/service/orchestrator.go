@@ -10,11 +10,13 @@ import (
 	mrand "math/rand"
 	"strings"
 
+	"go.opentelemetry.io/otel"
 	"gorm.io/gorm"
 
 	"syntopica-backend/internal/dataenrichment/repository"
 	"syntopica-backend/internal/platform/airouter"
 	"syntopica-backend/internal/platform/logging"
+	"syntopica-backend/internal/platform/tracing"
 )
 
 // ── Types ───────────────────────────────────────────────────────────────────
@@ -91,6 +93,8 @@ func NewOrchestratorService(
 // EnrichTopic runs the full cycle-B flow for a persistent topic.
 // Returns the immutable result snapshot and optionally a review.
 func (o *OrchestratorService) EnrichTopic(ctx context.Context, topicID uint) (*EnrichmentOutput, error) {
+	ctx, span := otel.Tracer(tracing.ServiceName).Start(ctx, "OrchestratorService.EnrichTopic")
+	defer span.End()
 	// 1. Generate session ID.
 	sessionID := generateSessionID(topicID)
 

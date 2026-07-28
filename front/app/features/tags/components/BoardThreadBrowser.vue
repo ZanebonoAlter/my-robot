@@ -5,7 +5,10 @@ import { useDailyReportsApi, type SectionTimelineNode, type SectionRelation, typ
 import { useArticlesApi } from '~/api/articles'
 import { fullComponentHighlight } from '~/utils/graphHighlight'
 import { filterFocusNodes, isDragMove, buildFocusMeta } from './topicFocus'
-import ComposePanel from './ComposePanel.vue'
+import ComposeInlineToolbar from './ComposeInlineToolbar.vue'
+import ComposeSidebar from './ComposeSidebar.vue'
+import { TIER_LABEL } from './composeReport'
+import { useInlineCompose, type MoveOutItem, type NodeTierInfo, type SidebarCandidateItem } from '../composables/useInlineCompose'
 
 const props = defineProps<{ boardId: number }>()
 
@@ -29,8 +32,8 @@ const selectedNode = ref<SectionTimelineNode | null>(null)
 const hoveredId = ref<number | null>(null)
 // 视图模式：timeline=匈牙利相似度 DAG（默认）；lanes=按话题分泳道（identity 驱动）；
 // focus=从某条泳道进入单话题专注视图（复用 lanes 数据，仅重投影单话题节点）；
-// compose=手动建泳道编排态（预览 + 候选池 + 体检，切片③）。
-const viewMode = ref<'timeline' | 'lanes' | 'focus' | 'compose'>('timeline')
+// 编排态为 lanes 上的 composeMode 布尔叠加态（不再单独占一个 viewMode，见下方编排态块）。
+const viewMode = ref<'timeline' | 'lanes' | 'focus'>('timeline')
 // focus 视图锁定的话题 id（由点泳道进入）；lanes/timeline 下保持 null。
 const focusedTopicId = ref<number | null>(null)
 
@@ -435,29 +438,91 @@ const emit = defineEmits<{
   openDetectiveWall: []
 }>()
 
-// --- 编排态（切片③）：手动建泳道 ---
-// 进入 compose 时记住原视图，保存/取消回到原 viewMode（spec Scenario「保存后返回总览」）。
-const prevViewMode = ref<'timeline' | 'lanes'>('lanes')
+// --- 编排态（切片③）：手动建泳道，就地叠加在 lanes 上（composeMode 布尔态）---
+// composable 负责候选池/勾选/聚合/离群/聚类质量/语义搜索/保存（含移出二次确认）的全部
+// 纯逻辑与网络协调；host 只负责接线：节点 checkbox + distance/tier/离群标徽、顶部浮工具条、
+// 右侧候选侧边栏、移出确认 AppDialog（requestMoveOutConfirm 经 Promise 桥接）。
+const showMoveOutDialog = ref(false)
+const pendingMoveOut = ref<MoveOutItem[]>([])
+let resolveMoveOut: ((ok: boolean) => void) | null = null
+// sidebar 搜索进行中（composable 未暴露 searching 态；host 监听 queryVec/searchError 近似收尾）。
+const composeSearching = ref(false)
+
+// boardId 适配 composable 的 Ref<number|string> 入参。
+const boardIdRef = computed<number | string>(() => props.boardId)
+// host 的 topics 是聚合的 TopicRow（驼峰），composable 需 BoardTopicListItem（蛇形）→ 就地映射。
+const candidateTopics = computed<BoardTopicListItem[]>(() =>
+  topics.value
+    .filter(t => t.status === 'candidate')
+    .map(t => ({
+      id: t.id,
+      semantic_board_id: props.boardId,
+      label: t.label,
+      description: '',
+      status: t.status,
+      first_seen_date: t.firstDate,
+      last_seen_date: t.lastDate,
+      hit_count: t.hitCount,
+      consecutive_hits: t.consecutiveHits,
+      section_count: t.sectionCount,
+      color: t.color,
+      can_activate: t.canActivate,
+    })),
+)
+
+const compose = useInlineCompose({
+  boardId: boardIdRef,
+  candidateTopics,
+  onSaved: async () => { await loadData() },
+  requestMoveOutConfirm: async (items: MoveOutItem[]) => {
+    pendingMoveOut.value = items
+    showMoveOutDialog.value = true
+    return await new Promise<boolean>(r => { resolveMoveOut = r })
+  },
+})
+// composeMode 与 composable.active 同步：active=true 即进入编排态（viewMode 保持 lanes 不变）。
+const composeMode = ref(false)
+watch(() => compose.active.value, (v) => { composeMode.value = v })
+
+// 进入编排态：切到 lanes（就地叠加），composable 置 active 并加载候选池。
 function enterCompose() {
-  prevViewMode.value = viewMode.value === 'timeline' ? 'timeline' : 'lanes'
-  viewMode.value = 'compose'
-}
-function exitCompose() {
-  viewMode.value = prevViewMode.value
-}
-async function onComposeSaved() {
-  exitCompose()
-  await loadData()
+  viewMode.value = 'lanes'
+  void compose.enter()
 }
 
-// 编排态「确认启用」候选话题：candidate→active（后端校验累计 hit_count≥阈值），刷新总览。
-async function onActivateCandidate(topicId: number) {
-  const res = await updateTopic(topicId, { status: 'active' })
-  if (res.success) {
-    await loadData()
-  } else {
-    opsError.value = res.error || '启用候选失败'
-  }
+// 可保存：泳道名非空且有勾选。
+const canSave = computed(() => compose.laneName.value.trim() !== '' && compose.selectedIds.value.size > 0)
+
+// 节点编排态信息取值 helper：pool 用 string id，节点 id 是 number → String 对齐。
+function nodeInfoFor(secId: number | string): NodeTierInfo | undefined {
+  return compose.nodeInfo.value[String(secId)]
+}
+
+// 侧边栏「确认启用」：按 topicId 找到 SidebarCandidateItem 走 composable.activate（updateTopic + onSaved）。
+function onSidebarActivate(topicId: number) {
+  const item: SidebarCandidateItem | undefined = compose.sidebarItems.value.find(i => i.topic.id === topicId)
+  if (item) void compose.activate(item)
+}
+
+// 语义搜索桥接：侧边栏文本 → composable.runSearch（debounce + embedQuery 冷启动）。
+function onComposeQuery(text: string) {
+  composeSearching.value = true
+  compose.runSearch(text)
+}
+watch([() => compose.queryVec.value, () => compose.searchError.value], () => {
+  composeSearching.value = false
+})
+
+// 移出确认对话框按钮（resolve 挂起的 Promise，composable.save 据此继续或中止）。
+function confirmMoveOut() {
+  showMoveOutDialog.value = false
+  resolveMoveOut?.(true)
+  resolveMoveOut = null
+}
+function cancelMoveOut() {
+  showMoveOutDialog.value = false
+  resolveMoveOut?.(false)
+  resolveMoveOut = null
 }
 
 // --- Persistent topic management (list drives the lanes view) ---
@@ -582,6 +647,7 @@ function exitFocus() {
 }
 // 只有具名话题泳道（active topic）可进入专注视图；unassigned 不进。
 function onLaneClick(lane: LaneRow) {
+  if (suppressNextSvgClick) { suppressNextSvgClick = false; return }
   if (lane.topicId == null) return
   enterFocus(lane.topicId)
 }
@@ -611,6 +677,39 @@ function endDrag() {
 }
 function onPointerUp() { endDrag() }
 function onPointerCancel() { endDrag() }
+
+// timeline/lanes 画布拖拽平移：pointer 改 scrollLeft/scrollTop，超阈值吞掉
+// 节点/泳道 click，避免误触选中或误进 focus（与 focus 的 dragState 互斥，两视图不同时显示）。
+const svgDragState = ref({ down: false, startX: 0, startY: 0, startScrollX: 0, startScrollY: 0, moved: false })
+let suppressNextSvgClick = false
+function onSvgPointerDown(e: PointerEvent) {
+  const el = svgScrollRef.value
+  if (!el) return
+  // 点在节点 / 泳道 hover 操作菜单上时不启动拖拽，让其 click 优先。
+  if ((e.target as Element)?.closest?.('.btb-dag-node, .btb-lane-op')) return
+  svgDragState.value = { down: true, startX: e.clientX, startY: e.clientY, startScrollX: el.scrollLeft, startScrollY: el.scrollTop, moved: false }
+  el.setPointerCapture?.(e.pointerId)
+}
+function onSvgPointerMove(e: PointerEvent) {
+  if (!svgDragState.value.down) return
+  const dx = e.clientX - svgDragState.value.startX
+  const dy = e.clientY - svgDragState.value.startY
+  if (isDragMove(dx, FOCUS_DRAG_THRESHOLD) || isDragMove(dy, FOCUS_DRAG_THRESHOLD)) svgDragState.value.moved = true
+  const el = svgScrollRef.value
+  if (el) {
+    el.scrollLeft = svgDragState.value.startScrollX - dx
+    el.scrollTop = svgDragState.value.startScrollY - dy
+  }
+}
+function endSvgDrag() {
+  if (svgDragState.value.down && svgDragState.value.moved) suppressNextSvgClick = true
+  svgDragState.value.down = false
+  svgDragState.value.moved = false
+}
+async function onSvgNodeClick(node: SectionTimelineNode) {
+  if (suppressNextSvgClick) { suppressNextSvgClick = false; return }
+  await selectNode(node)
+}
 async function onFocusNodeClick(node: SectionTimelineNode) {
   // 拖拽刚结束 → 吞掉这次 click，避免误触就地展开。
   if (suppressNextFocusClick) { suppressNextFocusClick = false; return }
@@ -770,7 +869,7 @@ watch(viewMode, () => {
 <template>
   <div class="btb-container">
     <!-- Controls -->
-    <div v-if="viewMode !== 'compose'" class="btb-controls">
+    <div v-if="!composeMode" class="btb-controls">
       <div class="btb-controls-left">
         <Icon icon="mdi:source-branch" width="15" class="text-white/50" />
         <span class="btb-controls-title">话题总览</span>
@@ -852,19 +951,8 @@ watch(viewMode, () => {
       <button class="btb-ops-error-close" @click="opsError = null">✕</button>
     </div>
 
-    <!-- 编排态：手动建泳道（预览 + 候选池 + 体检），自带工具条；总览工具条隐藏 -->
-    <ComposePanel
-      v-if="viewMode === 'compose'"
-      :board-id="boardId"
-      :days="days"
-      :candidate-topics="topics.filter(t => t.status === 'candidate')"
-      @saved="onComposeSaved"
-      @cancel="exitCompose"
-      @activate-candidate="onActivateCandidate"
-    />
-
     <!-- Loading -->
-    <div v-else-if="loading" class="btb-loading">
+    <div v-if="loading" class="btb-loading">
       <div v-for="i in 3" :key="i" class="btb-skeleton" />
     </div>
 
@@ -983,8 +1071,45 @@ watch(viewMode, () => {
 
     <!-- Timeline -->
     <div v-else class="btb-chart">
+      <!-- 编排态浮层：顶部工具条 + 右侧候选侧边栏，position:absolute 浮于 lanes SVG 之上 -->
+      <template v-if="composeMode">
+        <div class="btb-compose-toolbar-anchor">
+          <ComposeInlineToolbar
+            :lane-name="compose.laneName.value"
+            :member-count="compose.quality.value.memberCount"
+            :mean-distance="compose.quality.value.meanDistance"
+            :outlier-count="compose.quality.value.outlierCount"
+            :unassigned-count="compose.counts.value.unassigned"
+            :move-out-count="compose.counts.value.moveOut"
+            :saving="compose.saving.value"
+            :can-save="canSave"
+            @update:lane-name="compose.laneName.value = $event"
+            @save="compose.save()"
+            @cancel="compose.cancel()"
+          />
+        </div>
+        <div class="btb-compose-sidebar-anchor">
+          <ComposeSidebar
+            :items="compose.sidebarItems.value"
+            :query-text="compose.queryText.value"
+            :search-error="compose.searchError.value"
+            :searching="composeSearching"
+            @update:query-text="onComposeQuery"
+            @activate="onSidebarActivate"
+            @adopt="compose.adopt"
+          />
+        </div>
+      </template>
       <!-- SVG canvas: outer spacer owns scaled dimensions; SVG alone is transformed. -->
-      <div ref="svgScrollRef" class="btb-svg-scroll">
+      <div
+        ref="svgScrollRef"
+        class="btb-svg-scroll"
+        :class="{ 'btb-svg-scroll--dragging': svgDragState.down && svgDragState.moved }"
+        @pointerdown="onSvgPointerDown"
+        @pointermove="onSvgPointerMove"
+        @pointerup="endSvgDrag"
+        @pointercancel="endSvgDrag"
+      >
         <div
           class="btb-svg-zoom"
           :style="{
@@ -1026,7 +1151,7 @@ watch(viewMode, () => {
               v-for="(lane, li) in laneRows"
               :key="'lane-' + lane.key"
               class="btb-lane-row"
-              :class="{ 'btb-lane-row--enterable': lane.topicId != null }"
+              :class="{ 'btb-lane-row--enterable': lane.topicId != null, 'btb-lane-row--dimmed': composeMode && lane.topicId != null }"
               :data-topic="lane.topicId ?? ''"
               @click="onLaneClick(lane)"
             >
@@ -1075,6 +1200,20 @@ watch(viewMode, () => {
                   <path class="btb-lane-op-ico" d="M5 6.5h10l-.8 8H5.8L5 6.5z M8 4.5h4 M4 6.5h12" />
                 </g>
               </g>
+              <!-- unassigned 泳道头部「新建泳道」入口（编排态主战场入口，非编排态显示） -->
+              <g
+                v-if="!composeMode && lane.key === 'unassigned'"
+                class="btb-lane-op btb-lane-compose-entry"
+                role="button"
+                aria-label="新建泳道"
+                :transform="`translate(${LANE_LABEL_W - 92}, ${laneOpsY(li) - 9})`"
+                @click.stop="enterCompose"
+              >
+                <title>新建泳道（进入就地编排）</title>
+                <rect class="btb-lane-op-hit btb-lane-compose-entry__hit" width="86" height="18" rx="3" />
+                <path class="btb-lane-op-ico" d="M8 9h10M13 4v10" />
+                <text x="22" y="12" class="btb-lane-compose-entry__text">新建泳道</text>
+              </g>
             </g>
           </template>
 
@@ -1103,8 +1242,10 @@ watch(viewMode, () => {
               'btb-dag-node--selected': selectedNode?.id === pn.data.id,
               'btb-dag-node--lineage': isNodeHighlighted(pn.data.id),
               'btb-dag-node--dimmed': hoveredId !== null && !isNodeHighlighted(pn.data.id),
+              'btb-dag-node--compose-on': composeMode && compose.isSelected(String(pn.data.id)),
+              'btb-dag-node--compose-outlier': composeMode && nodeInfoFor(pn.data.id)?.isOutlier === true,
             }"
-            @click="selectNode(pn.data)"
+            @click="onSvgNodeClick(pn.data)"
             @mouseenter="hoveredId = pn.data.id"
             @mouseleave="hoveredId = null"
           >
@@ -1143,6 +1284,49 @@ watch(viewMode, () => {
             >
               {{ truncateLabel(pn.data.cluster_label) }}
             </text>
+            <!-- 编排态：就地 checkbox（左上角），勾选进入新泳道 -->
+            <g
+              v-if="composeMode"
+              class="btb-compose-check"
+              :class="{ 'btb-compose-check--on': compose.isSelected(String(pn.data.id)) }"
+              @click.stop="compose.toggle(String(pn.data.id))"
+            >
+              <title>{{ compose.isSelected(String(pn.data.id)) ? '取消勾选' : '勾选进入新泳道' }}</title>
+              <rect
+                :x="pn.cx - 13"
+                :y="pn.cy - 13"
+                width="12"
+                height="12"
+                rx="2"
+                class="btb-compose-check__box"
+              />
+              <path
+                v-if="compose.isSelected(String(pn.data.id))"
+                :d="`M${pn.cx - 10},${pn.cy - 7} l2.4,2.6 l4.6,-5`"
+                class="btb-compose-check__tick"
+              />
+            </g>
+            <!-- 编排态：distance/tier 标徽（节点右侧，tier 着色） -->
+            <g
+              v-if="composeMode && nodeInfoFor(pn.data.id)"
+              class="btb-compose-badge"
+              :class="'btb-compose-badge--' + nodeInfoFor(pn.data.id)!.tier"
+            >
+              <text :x="pn.cx + NODE_R + 4" :y="pn.cy - 1" class="btb-compose-badge__tier">
+                {{ TIER_LABEL[nodeInfoFor(pn.data.id)!.tier] }}
+              </text>
+              <text :x="pn.cx + NODE_R + 4" :y="pn.cy + 9" class="btb-compose-badge__dist">
+                {{ nodeInfoFor(pn.data.id)!.distance.toFixed(2) }}
+              </text>
+            </g>
+            <!-- 编排态：勾走 active section → 移出提示（节点下方，警示色） -->
+            <text
+              v-if="composeMode && nodeInfoFor(pn.data.id)?.moveOut && nodeInfoFor(pn.data.id)?.selected"
+              :x="pn.cx"
+              :y="pn.cy + NODE_R + 24"
+              text-anchor="middle"
+              class="btb-compose-moveout"
+            >将从【{{ nodeInfoFor(pn.data.id)?.originLabel }}】移出</text>
           </g>
         </svg>
         </div>
@@ -1158,6 +1342,25 @@ watch(viewMode, () => {
         </button>
       </div>
     </div>
+
+    <!-- 编排态：保存前移出二次确认（composable.requestMoveOutConfirm → Promise 桥接） -->
+    <AppDialog
+      :model-value="showMoveOutDialog"
+      title="确认移出"
+      :close-on-overlay="false"
+      @update:model-value="(v) => { if (!v) cancelMoveOut() }"
+    >
+      <p class="btb-moveout-body">
+        以下 {{ pendingMoveOut.length }} 条 section 将从原泳道移出、归入新泳道「<b>{{ compose.laneName.value || '未命名' }}</b>」（单值覆盖，原话题内容保留）：
+      </p>
+      <ul class="btb-moveout-list">
+        <li v-for="(it, i) in pendingMoveOut" :key="i">{{ it.label }}（来自：{{ it.origin }}）</li>
+      </ul>
+      <template #footer>
+        <AppButton variant="secondary" @click="cancelMoveOut">取消</AppButton>
+        <AppButton variant="primary" :loading="compose.saving.value" @click="confirmMoveOut">确认移出并保存</AppButton>
+      </template>
+    </AppDialog>
   </div>
 
   <!-- Node detail popup -->
@@ -1651,11 +1854,13 @@ watch(viewMode, () => {
 .btb-svg-scroll {
   overflow: auto;
   position: relative;
+  cursor: grab;
   /* 占满工作台主体高度：接近 content 高度；泳道多时纵向滚动 */
   height: calc(100vh - 200px);
   min-height: 320px;
   max-height: none;
 }
+.btb-svg-scroll--dragging { cursor: grabbing; }
 
 .btb-svg-zoom {
   position: relative;
@@ -2454,5 +2659,114 @@ watch(viewMode, () => {
   text-align: center;
   font-size: 0.74rem;
   color: var(--color-text-muted);
+}
+
+/* ===== 编排态浮层（顶部工具条 + 右侧候选侧边栏，position:absolute 浮于 lanes SVG 之上）===== */
+.btb-compose-toolbar-anchor {
+  position: absolute;
+  top: 10px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 30;
+  max-width: calc(100% - 340px);
+}
+.btb-compose-sidebar-anchor {
+  position: absolute;
+  top: 78px;
+  right: 12px;
+  width: 300px;
+  max-height: calc(100% - 96px);
+  overflow: auto;
+  z-index: 30;
+}
+
+/* 编排态：active 泳道淑显保留为背景参照（unassigned 不淑显，主战场） */
+.btb-lane-row--dimmed {
+  opacity: 0.3;
+  transition: opacity 0.2s ease;
+}
+
+/* 编排态节点：勾选/离群状态 */
+.btb-dag-node--compose-outlier circle:not(.btb-manual-ring):not(.btb-manual-core) {
+  stroke: var(--color-warning);
+}
+
+/* 编排态：就地 checkbox（节点左上角） */
+.btb-compose-check { cursor: pointer; }
+.btb-compose-check__box {
+  fill: var(--color-bg-elevated);
+  stroke: var(--color-accent);
+  stroke-width: 1.4;
+}
+.btb-compose-check--on .btb-compose-check__box {
+  fill: var(--color-accent);
+}
+.btb-compose-check__tick {
+  fill: none;
+  stroke: var(--color-text-inverted);
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+/* 编排态：distance/tier 标徽（节点右侧） */
+.btb-compose-badge { pointer-events: none; }
+.btb-compose-badge__tier {
+  font-size: 8px;
+  font-weight: 600;
+  dominant-baseline: middle;
+}
+.btb-compose-badge__dist {
+  font-size: 7.5px;
+  font-family: ui-monospace, monospace;
+  fill: var(--color-text-muted);
+  dominant-baseline: middle;
+}
+.btb-compose-badge--good .btb-compose-badge__tier { fill: var(--color-success); }
+.btb-compose-badge--boundary .btb-compose-badge__tier { fill: var(--color-accent); }
+.btb-compose-badge--outlier .btb-compose-badge__tier,
+.btb-compose-badge--far .btb-compose-badge__tier { fill: var(--color-warning); }
+
+/* 编排态：勾走 active section 的移出提示（节点下方） */
+.btb-compose-moveout {
+  font-size: 8px;
+  fill: var(--color-warning);
+  pointer-events: none;
+}
+
+/* unassigned 泳道头部「新建泳道」入口 */
+.btb-lane-compose-entry { cursor: pointer; }
+.btb-lane-compose-entry__hit {
+  fill: var(--color-accent-subtle);
+  stroke: var(--color-accent);
+  stroke-width: 0.8;
+}
+.btb-lane-compose-entry:hover .btb-lane-compose-entry__hit {
+  fill: var(--color-accent);
+}
+.btb-lane-compose-entry__text {
+  font-size: 9px;
+  font-weight: 600;
+  fill: var(--color-accent);
+  pointer-events: none;
+}
+.btb-lane-compose-entry:hover .btb-lane-compose-entry__text {
+  fill: var(--color-text-inverted);
+}
+
+/* 移出二次确认对话框内容 */
+.btb-moveout-body {
+  margin: 0 0 0.6rem;
+  font-size: 0.84rem;
+  color: var(--color-text-primary);
+  line-height: 1.5;
+}
+.btb-moveout-body b { color: var(--color-accent); }
+.btb-moveout-list {
+  margin: 0;
+  padding-left: 1.2rem;
+  font-size: 0.78rem;
+  color: var(--color-text-secondary);
+  line-height: 1.7;
 }
 </style>

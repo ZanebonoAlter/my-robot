@@ -55,4 +55,4 @@
 ## 关联
 
 - 可观测性三系列的业务设计 → [daily-report.md](../../flow/daily-report.md) §可观测性
-- 验证这些交互（Playwright / Flash 按需验证）→ `.agents/skills/playwright-e2e/`、[ui-navigation.md](../../architecture/ui-navigation.md)
+- 验证这些交互（opencli 按需验证 / kimi 视图验证）→ `.agents/skills/ui-verify/`、[ui-navigation.md](../../architecture/ui-navigation.md)

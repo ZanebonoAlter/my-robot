@@ -8,8 +8,10 @@ import (
 
 	"github.com/JohannesKaufmann/html-to-markdown"
 	"github.com/go-shiori/go-readability"
+	"go.opentelemetry.io/otel"
 
 	"syntopica-backend/internal/platform/httpclient"
+	"syntopica-backend/internal/platform/tracing"
 )
 
 // minUsableContentRunes 是判定 readability 结果"合格可用"的最小正文字数（按 rune 计）。
@@ -69,6 +71,8 @@ func NewReadabilityCrawler() *ReadabilityCrawler {
 // ScrapePage 抓取 URL，用 readability 提正文后转 Markdown，返回中立 ScrapeResult。
 // 注意：返回结果是否"合格"需调用方用 isUsableArticle 判定；本方法不自行过滤。
 func (c *ReadabilityCrawler) ScrapePage(ctx context.Context, url string) (*ScrapeResult, error) {
+	_, span := otel.Tracer(tracing.ServiceName).Start(ctx, "ReadabilityCrawler.ScrapePage")
+	defer span.End()
 	article, err := readability.FromURL(url, 30*time.Second, readability.RequestWith(func(r *http.Request) {
 		r.Header.Set("User-Agent", desktopUserAgent)
 	}))

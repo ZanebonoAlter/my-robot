@@ -15,6 +15,7 @@ backend-go/*.exe
 backend-go/syntopica
 backend-go/syntopica.exe
 backend-go/server.exe
+backend-go/instrumenter
 backend-go/bin/fresh.exe
 backend-go/bin/server.exe
 backend-go/bin/server.exe~

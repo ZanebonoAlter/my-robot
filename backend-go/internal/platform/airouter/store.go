@@ -7,11 +7,13 @@ import (
 	"fmt"
 	"strings"
 
+	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/trace"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 	"syntopica-backend/internal/models"
 	"syntopica-backend/internal/platform/database"
+	"syntopica-backend/internal/platform/tracing"
 )
 
 type Capability string
@@ -173,6 +175,8 @@ func (s *Store) ResolvePrimaryProvider(capability Capability) (*models.AIProvide
 }
 
 func (s *Store) LogCall(ctx context.Context, logEntry *models.AICallLog) {
+	ctx, span := otel.Tracer(tracing.ServiceName).Start(ctx, "Store.LogCall")
+	defer span.End()
 	if logEntry == nil || s.db == nil {
 		return
 	}

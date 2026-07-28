@@ -1,20 +1,54 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { Icon } from '@iconify/vue'
 import FeedIcon from '~/components/feed/FeedIcon.vue'
-import type { RssFeed } from '~/types'
+import type { RssFeed, Category } from '~/types'
 
 const props = defineProps<{
   feed: RssFeed
+  categories: Category[]
   refreshOptions: { label: string; value: number }[]
   maxArticlesOptions: { label: string; value: number }[]
   loading: boolean
 }>()
 
 const emit = defineEmits<{
-  'update-feed': [feedId: string, setting: 'refresh_interval' | 'max_articles' | 'ai_summary_enabled' | 'tagging_enabled' | 'firecrawl_enabled' | 'completion_on_refresh', value: number | boolean]
+  'update-feed': [feedId: string, setting: 'refresh_interval' | 'max_articles' | 'ai_summary_enabled' | 'tagging_enabled' | 'firecrawl_enabled' | 'completion_on_refresh' | 'category_id', value: number | boolean | null]
   'refresh-feed': [feedId: string]
+  'create-category': [name: string]
+  'delete-feed': [feedId: string]
 }>()
+
+// ---- Category management ----
+const NEW_CATEGORY_VALUE = '__new__'
+const selectedCategory = ref(props.feed.category)
+const showCreateCategory = ref(false)
+const newCategoryName = ref('')
+
+watch(() => props.feed.category, (v) => { selectedCategory.value = v })
+
+function onCategoryChange() {
+  if (selectedCategory.value === NEW_CATEGORY_VALUE) {
+    showCreateCategory.value = true
+    return
+  }
+  const categoryId = selectedCategory.value === '' ? null : Number(selectedCategory.value)
+  emit('update-feed', props.feed.id, 'category_id', categoryId)
+}
+
+function submitNewCategory() {
+  const name = newCategoryName.value.trim()
+  if (!name) return
+  emit('create-category', name)
+  showCreateCategory.value = false
+  newCategoryName.value = ''
+}
+
+function cancelCreateCategory() {
+  showCreateCategory.value = false
+  newCategoryName.value = ''
+  selectedCategory.value = props.feed.category
+}
 
 function formatInterval(minutes: number): string {
   const opt = props.refreshOptions.find(o => o.value === minutes)
@@ -59,20 +93,30 @@ function formatStatus(feed: RssFeed): string {
         <h3 class="feed-detail__title">{{ feed.title }}</h3>
         <p class="feed-detail__url">{{ feed.url }}</p>
       </div>
-      <button
-        class="feed-detail__refresh-btn"
-        title="立即刷新"
-        :disabled="loading"
-        @click="emit('refresh-feed', feed.id)"
-      >
-        <Icon
-          :icon="loading ? 'mdi:loading' : 'mdi:refresh'"
-          :class="{ 'animate-spin': loading }"
-          width="16"
-          height="16"
-        />
-        刷新
-      </button>
+      <div class="feed-detail__header-actions">
+        <button
+          class="feed-detail__refresh-btn"
+          title="立即刷新"
+          :disabled="loading"
+          @click="emit('refresh-feed', feed.id)"
+        >
+          <Icon
+            :icon="loading ? 'mdi:loading' : 'mdi:refresh'"
+            :class="{ 'animate-spin': loading }"
+            width="16"
+            height="16"
+          />
+          刷新
+        </button>
+        <button
+          class="feed-detail__delete-btn"
+          title="删除订阅源"
+          :disabled="loading"
+          @click="emit('delete-feed', feed.id)"
+        >
+          <Icon icon="mdi:trash-can-outline" width="18" height="18" />
+        </button>
+      </div>
     </div>
 
     <!-- Status bar -->
@@ -97,6 +141,30 @@ function formatStatus(feed: RssFeed): string {
 
     <!-- Settings form -->
     <div class="feed-detail__form">
+      <!-- Category selector -->
+      <div class="feed-detail__field feed-detail__field--category">
+        <label class="feed-detail__label">分类</label>
+        <select
+          v-model="selectedCategory"
+          class="feed-detail__select"
+          @change="onCategoryChange"
+        >
+          <option value="">无分类</option>
+          <option v-for="c in categories" :key="c.id" :value="c.id">{{ c.name }}</option>
+          <option :value="NEW_CATEGORY_VALUE">＋ 新建分类…</option>
+        </select>
+        <div v-if="showCreateCategory" class="feed-detail__new-category">
+          <input
+            v-model="newCategoryName"
+            class="feed-detail__input"
+            placeholder="输入分类名称"
+            @keyup.enter="submitNewCategory"
+          />
+          <button class="feed-detail__mini-btn feed-detail__mini-btn--primary" @click="submitNewCategory">确认</button>
+          <button class="feed-detail__mini-btn" @click="cancelCreateCategory">取消</button>
+        </div>
+      </div>
+
       <div class="feed-detail__row">
         <div class="feed-detail__field">
           <label class="feed-detail__label">自动刷新</label>
@@ -241,6 +309,93 @@ function formatStatus(feed: RssFeed): string {
 .feed-detail__refresh-btn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+.feed-detail__header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.feed-detail__delete-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border: 1px solid var(--color-border-medium);
+  border-radius: 8px;
+  background: var(--color-bg-elevated);
+  color: var(--color-error);
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.feed-detail__delete-btn:hover:not(:disabled) {
+  background: rgba(248, 113, 113, 0.1);
+  border-color: var(--color-error);
+}
+
+.feed-detail__delete-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.feed-detail__field--category {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.feed-detail__new-category {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.feed-detail__input {
+  flex: 1;
+  min-width: 0;
+  padding: 7px 10px;
+  font-size: 13px;
+  border: 1px solid var(--color-input-border);
+  border-radius: 8px;
+  background: var(--color-input-bg);
+  color: var(--color-text-primary);
+  outline: none;
+  transition: border-color 0.15s;
+}
+
+.feed-detail__input:focus {
+  border-color: var(--color-input-focus);
+}
+
+.feed-detail__mini-btn {
+  padding: 6px 12px;
+  font-size: 12px;
+  border: 1px solid var(--color-border-medium);
+  border-radius: 8px;
+  background: var(--color-bg-elevated);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  transition: background 0.15s;
+  flex-shrink: 0;
+}
+
+.feed-detail__mini-btn:hover {
+  background: var(--color-bg-hover);
+}
+
+.feed-detail__mini-btn--primary {
+  background: var(--color-link);
+  border-color: var(--color-link);
+  color: #fff;
+}
+
+.feed-detail__mini-btn--primary:hover {
+  opacity: 0.9;
+  background: var(--color-link);
 }
 
 /* Status bar */

@@ -329,9 +329,9 @@ func UpdateFeed(c *gin.Context) {
 	if req.URL != "" {
 		updates["url"] = req.URL
 	}
-	// Only update category_id if explicitly provided (not zero/nil)
-	if req.CategoryID != nil {
-		updates["category_id"] = *req.CategoryID
+	// presence check: distinguish "field not provided" from "explicitly clear (null)"
+	if _, exists := bodyMap["category_id"]; exists {
+		updates["category_id"] = req.CategoryID // *uint; nil = clear category
 	}
 	if req.Icon != "" {
 		updates["icon"] = req.Icon
@@ -343,7 +343,7 @@ func UpdateFeed(c *gin.Context) {
 	if _, exists := bodyMap["max_articles"]; exists {
 		updates["max_articles"] = req.MaxArticles
 	}
-	if req.RefreshInterval >= 0 {
+	if _, exists := bodyMap["refresh_interval"]; exists {
 		updates["refresh_interval"] = req.RefreshInterval
 	}
 	if _, exists := bodyMap["article_summary_enabled"]; exists && req.ArticleSummaryEnabled != nil {

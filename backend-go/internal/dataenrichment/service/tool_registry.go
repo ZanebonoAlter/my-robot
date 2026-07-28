@@ -9,7 +9,9 @@ import (
 	"sync"
 	"time"
 
+	"go.opentelemetry.io/otel"
 	"syntopica-backend/internal/platform/httpclient"
+	"syntopica-backend/internal/platform/tracing"
 )
 
 // HTTPFetcher abstracts HTTP GET requests for testability.
@@ -31,6 +33,8 @@ func NewDefaultHTTPFetcher() *DefaultHTTPFetcher {
 
 // Fetch performs an HTTP GET with custom headers.
 func (f *DefaultHTTPFetcher) Fetch(ctx context.Context, url string, headers map[string]string) ([]byte, error) {
+	ctx, span := otel.Tracer(tracing.ServiceName).Start(ctx, "DefaultHTTPFetcher.Fetch")
+	defer span.End()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, fmt.Errorf("create request: %w", err)
@@ -134,6 +138,8 @@ func (r *Registry) Tools() map[string]*Tool {
 // Execute runs a tool by name with the given arguments.
 // Returns JSON string on success or error JSON on failure.
 func (r *Registry) Execute(ctx context.Context, name string, args map[string]any) (string, error) {
+	ctx, span := otel.Tracer(tracing.ServiceName).Start(ctx, "Registry.Execute")
+	defer span.End()
 	tool := r.tools[name]
 	if tool == nil {
 		names := make([]string, 0, len(r.tools))

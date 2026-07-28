@@ -141,7 +141,7 @@ export const useApiStore = defineStore('api', () => {
         articleCount: feed.article_count || 0,
         unreadCount: feed.unread_count || 0,
         maxArticles: feed.max_articles ?? 100,
-        refreshInterval: feed.refresh_interval || 60,
+        refreshInterval: feed.refresh_interval,
         refreshStatus: feed.refresh_status as RssFeed['refreshStatus'] || 'idle',
         refreshError: feed.refresh_error,
         lastRefreshAt: feed.last_refresh_at,
@@ -201,7 +201,7 @@ export const useApiStore = defineStore('api', () => {
       url?: string
       title?: string
       description?: string
-      category_id?: number
+      category_id?: number | null
       icon?: string
       color?: string
       max_articles?: number

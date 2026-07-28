@@ -340,3 +340,80 @@ func (s *S) Discard(_ context.Context, id int) error {
 		t.Fatalf("method with discarded ctx param should be untouched;\n--- got ---\n%s", out)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Test 12: when the body reads ctx, the injected span binds the new context
+// back to ctx so it propagates to downstream calls.
+// ---------------------------------------------------------------------------
+
+func TestInstrument_BindsCtxWhenBodyUsesIt(t *testing.T) {
+	src := []byte(`package svc
+
+import "context"
+
+type S struct{}
+
+func (s *S) Propagate(ctx context.Context) error {
+	downstream(ctx)
+	return nil
+}
+`)
+	out, err := instrumentSource("svc.go", src)
+	if err != nil {
+		t.Fatalf("instrumentSource: %v", err)
+	}
+	mustParse(t, "svc.go", out)
+	contains(t, out, `ctx, span := otel.Tracer(tracing.ServiceName).Start(ctx, "S.Propagate")`)
+}
+
+// ---------------------------------------------------------------------------
+// Test 13: when the body never reads ctx, the injected span binds the context
+// return to `_` to avoid an ineffectual-assignment lint failure.
+// ---------------------------------------------------------------------------
+
+func TestInstrument_DropsCtxWhenBodyIgnoresIt(t *testing.T) {
+	src := []byte(`package svc
+
+import "context"
+
+type S struct{}
+
+func (s *S) NoPropagation(ctx context.Context, id int) error {
+	return nil
+}
+`)
+	out, err := instrumentSource("svc.go", src)
+	if err != nil {
+		t.Fatalf("instrumentSource: %v", err)
+	}
+	mustParse(t, "svc.go", out)
+	contains(t, out, `_, span := otel.Tracer(tracing.ServiceName).Start(ctx, "S.NoPropagation")`)
+}
+
+// ---------------------------------------------------------------------------
+// Test 14: no /*line*/ directive is emitted. An earlier version inserted one
+// to anchor debug positions, but a /*line*/ directive resets the compiler's
+// line counter for the rest of the file, which broke golangci-lint's per-line
+// //nolint matching (an existing //nolint:unused on a nearby dead-code helper
+// stopped applying and fired a false positive). The marginal debug-position
+// benefit is not worth that, so we emit nothing and let gofmt renumber.
+// ---------------------------------------------------------------------------
+
+func TestInstrument_NoLineDirective(t *testing.T) {
+	src := []byte(`package svc
+
+import "context"
+
+type S struct{}
+
+func (s *S) DoThing(ctx context.Context) error {
+	return nil
+}
+`)
+	out, err := instrumentSource("backend-go/internal/svc/service/svc.go", src)
+	if err != nil {
+		t.Fatalf("instrumentSource: %v", err)
+	}
+	mustParse(t, "svc.go", out)
+	notContains(t, out, `/*line `)
+}

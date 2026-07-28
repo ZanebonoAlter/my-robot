@@ -49,12 +49,17 @@ vi.mock('~/api/persistentTopics', () => ({
   }),
 }))
 
-// 统一组件库 stub（AppDialog/AppButton/AppInput）+ 编排态面板 stub——保持离线、可控交互。
+// 统一组件库 stub（AppDialog/AppButton/AppInput）+ 编排态浮层 stub——保持离线、可控交互。
 const stubs = {
-  ComposePanel: {
-    name: 'ComposePanel',
-    props: ['boardId', 'days'],
-    template: '<div class="compose-panel-stub" data-testid="compose-panel">编排态 stub</div>',
+  ComposeInlineToolbar: {
+    name: 'ComposeInlineToolbar',
+    props: ['laneName', 'canSave'],
+    template: '<div class="compose-inline-toolbar-stub" data-testid="compose-toolbar">编排工具条 stub</div>',
+  },
+  ComposeSidebar: {
+    name: 'ComposeSidebar',
+    props: ['items', 'queryText'],
+    template: '<div class="compose-sidebar-stub" data-testid="compose-sidebar">候选侧边栏 stub</div>',
   },
   AppDialog: {
     name: 'AppDialog',
@@ -219,17 +224,19 @@ describe('BoardThreadBrowser — 话题总览工作台化（切片②）', () =>
     expect(wrapper.find('.topic-mgmt-stub').exists()).toBe(false)
   })
 
-  // ---- 3.1: 新建泳道按钮进入编排态（viewMode='compose'）----
-  it('enters compose mode (renders ComposePanel) when 新建泳道 is clicked', async () => {
+  // ---- 3.1: 新建泳道按钮进入编排态（composeMode 叠加，viewMode 保持 lanes）----
+  it('enters compose mode (renders inline overlay, keeps lanes) when 新建泳道 is clicked', async () => {
     const wrapper = await mountBrowser()
-    // 初始无编排态面板
-    expect(wrapper.find('.compose-panel-stub').exists()).toBe(false)
+    // 初始无编排态浮层
+    expect(wrapper.find('.compose-inline-toolbar-stub').exists()).toBe(false)
     const btn = wrapper.findAll('button').find(b => b.text().includes('新建泳道'))!
     await btn.trigger('click')
     await nextTick()
-    // 进入编排态：ComposePanel 渲染、总览工具条隐藏
-    expect(wrapper.find('.compose-panel-stub').exists()).toBe(true)
+    // 进入编排态：浮工具条渲染、总览工具条隐藏、lanes 视图保留（叠加而非全屏替换）
+    expect(wrapper.find('.compose-inline-toolbar-stub').exists()).toBe(true)
+    expect(wrapper.find('.compose-sidebar-stub').exists()).toBe(true)
     expect(wrapper.find('.btb-controls').exists()).toBe(false)
+    expect(wrapper.find('.btb-chart').exists()).toBe(true)
   })
 
   // ---- 3.9: manual confidence 节点双环样式 ----

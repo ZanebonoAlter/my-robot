@@ -69,25 +69,27 @@ Gin 全局中间件已经覆盖 HTTP 请求入口，根 span 由 `otelgin` 自�
 
 > 与下方 §2（go-instrument 方法级自动）互补：本节覆盖 go-instrument 管不到的 DB/出站 HTTP 层。两者共享同一 `TracerProvider`。
 
-### 2. `go-instrument` 自动注入的方法
+### 2. 方法级 span 自动织入（AST 织入器）
 
-当前仓库中已经能看到注入后的代码，表现为方法体开头直接出现：
+service 层方法不再靠人手写 span。`backend-go/cmd/instrumenter`（自写 `go/ast` 织入器）在构建前扫描 `internal/*/service/**/*.go` + `internal/platform/airouter/*.go`，给每个「首参为 `ctx context.Context` 的 exported 方法」自动注入 span（命名 `TypeName.MethodName`），named `err` 自动记录错误。**完整规则、使用方式、排错见专题文档 [method-instrumenter.md](method-instrumenter.md)。**
+
+注入后的代码表现为方法体开头直接出现：
 
 ```go
 ctx, span := otel.Tracer(tracing.ServiceName).Start(ctx, "FeedService.RefreshFeed")
 defer span.End()
 ```
 
-目前已落地的自动注入方法：
+跑法：`cd backend-go && make instrument`（幂等）；CI 用 `make instrument-check` 校验源码已织入。
 
-| 文件 | 方法 | 当前效果 |
+**历史 go-instrument 的 6 个方法已纳入新流程统一管理**（排除规则检测到已有 `otel.Tracer(` 即跳过，不重复注入）：
+
+| 文件 | 方法 | 备注 |
 | ------ | ------ | ---------- |
-| `backend-go/internal/reader/service/feed_service.go` | `FeedService.RefreshFeed` | 自动创建 span，自动记录 named error |
-| `backend-go/internal/reader/service/firecrawl_service.go` | `FirecrawlService.ScrapePage` | 自动创建 span，自动记录 named error |
-| `backend-go/internal/reader/service/content_completion_service.go` | `ContentCompletionService.CompleteArticle` | 自动创建 span，只有薄包装，无自动错误记录 |
-| `backend-go/internal/reader/service/content_completion_service.go` | `ContentCompletionService.CompleteArticleWithForce` | 自动创建 span，只有薄包装，无自动错误记录 |
-| `backend-go/internal/reader/service/content_completion_service.go` | `ContentCompletionService.CompleteArticleWithMetadata` | 自动创建 span，自动记录 named error |
-| `backend-go/internal/platform/airouter/router.go` | `Router.Chat` | 自动创建 span，自动记录 named error |
+| `reader/service/feed_service.go` | `FeedService.RefreshFeed` | 历史 go-instrument，排除规则保护 |
+| `reader/service/firecrawl_service.go` | `FirecrawlService.ScrapePage` | 同上 |
+| `reader/service/content_completion_service.go` | `ContentCompletionService.CompleteArticle` / `CompleteArticleWithForce` / `CompleteArticleWithMetadata` | 同上 |
+| `platform/airouter/router.go` | `Router.Chat` | 同上 |
 
 ### 3. 手动 root span：Scheduler
 
@@ -143,6 +145,8 @@ tracing.TraceSchedulerTick("auto_refresh", "cron", func(ctx context.Context) {
 优先级：低于编排 span（task 2 已补）与 session 聚合端点（task 1 已补），后续单独 change。
 
 ## `go-instrument` 第一版的真实约束
+
+> **演进（`add-method-auto-instrumentation`）**：go-instrument 已被自写 AST 织入器 `cmd/instrumenter` 取代（集中脚本化、规则自控、接 `make instrument`）。本节保留 go-instrument 的历史约束说明；**当前规则与用法见 [method-instrumenter.md](method-instrumenter.md)**。
 
 当前版本的注入效果，从仓库现状看有几个明确约束：
 
@@ -308,6 +312,8 @@ tracing.TraceSchedulerTick("auto_refresh", "cron", func(ctx context.Context) {
 
 出站 HTTP 自动埋点在独立包 `backend-go/internal/platform/httpclient/`（工厂 + otelhttp 包装）。
 
+方法级 span 自动织入器在 `backend-go/cmd/instrumenter/`（自写 AST 工具，构建前给 service 方法注入 span，见 [method-instrumenter.md](method-instrumenter.md)）。
+
 ## 当前问题与下一步建议
 
 从仓库现状看，这一版 tracing 已经能用于排查，但还属于“基础链路通了，业务语义待补”的阶段：
@@ -321,4 +327,4 @@ tracing.TraceSchedulerTick("auto_refresh", "cron", func(ctx context.Context) {
 如果继续往下推进，优先级建议是：
 
 1. 给 `FirecrawlService.ScrapePage`、`Router.Chat`、`FeedService.RefreshFeed` 补关键 attributes / events（注：`ai-call-logging-schema` 已把 `Router.Chat`/`Router.Embed` 的 `ai.operation`/`ai.session_id`/`ai.capability` 从 `ChatRequest`/`EmbeddingRequest` 一等字段注入；`otel-tracing-completion` 已补日报编排业务 span `workflow.daily_report.*` + session 聚合端点 `GET /api/ai/sessions/:session_id`；但编排 span 的 **attributes/events 仍待补**，其他外部调用 attributes 仍待补）
-2. **把 `go-instrument` 接入 `go generate` / 脚本化流程并扩大覆盖**（方法级全自动）—— 见 change `add-method-auto-instrumentation`（选型原型阶段）
+2. ~~把 `go-instrument` 接入 `go generate` / 脚本化流程并扩大覆盖~~ → **已落地**：自写 AST 织入器 `cmd/instrumenter` 取代 go-instrument，`make instrument` 构建前跑，覆盖全部 service 包 + airouter。详见 [method-instrumenter.md](method-instrumenter.md)

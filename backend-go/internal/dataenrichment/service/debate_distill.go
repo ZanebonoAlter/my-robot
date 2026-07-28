@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"go.opentelemetry.io/otel"
 	"syntopica-backend/internal/platform/airouter"
+	"syntopica-backend/internal/platform/tracing"
 )
 
 // ── Distilled types ─────────────────────────────────────────────────────────
@@ -50,6 +52,8 @@ func NewDebateDistiller(airouter AirRouter, capability airouter.Capability) *Deb
 // Distill runs LLM distillation over FinGenius per-agent research text + vote data.
 // Returns structured DistilledDebate.
 func (d *DebateDistiller) Distill(ctx context.Context, sessionID string, research map[string]any, battle map[string]any) (*DistilledDebate, error) {
+	ctx, span := otel.Tracer(tracing.ServiceName).Start(ctx, "DebateDistiller.Distill")
+	defer span.End()
 	researchJSON, _ := json.Marshal(research)
 	battleJSON, _ := json.Marshal(battle)
 

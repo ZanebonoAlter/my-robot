@@ -11,7 +11,9 @@ import (
 	"strconv"
 	"time"
 
+	"go.opentelemetry.io/otel"
 	"syntopica-backend/internal/platform/httpclient"
+	"syntopica-backend/internal/platform/tracing"
 )
 
 // ── Contract types (aligned with FinGenius service API) ─────────────────────
@@ -157,6 +159,8 @@ func NewFinGeniusHTTPClientWithConfig(cfg FingeniusConfig) *FinGeniusHTTPClient 
 }
 
 func (c *FinGeniusHTTPClient) Health(ctx context.Context) error {
+	ctx, span := otel.Tracer(tracing.ServiceName).Start(ctx, "FinGeniusHTTPClient.Health")
+	defer span.End()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.cfg.BaseURL+"/health", nil)
 	if err != nil {
 		return fmt.Errorf("fingenius health request: %w", err)
@@ -176,6 +180,8 @@ func (c *FinGeniusHTTPClient) Health(ctx context.Context) error {
 }
 
 func (c *FinGeniusHTTPClient) Submit(ctx context.Context, symbols []DebateSymbol) ([]DebateTask, error) {
+	ctx, span := otel.Tracer(tracing.ServiceName).Start(ctx, "FinGeniusHTTPClient.Submit")
+	defer span.End()
 	body := submitRequest{Symbols: symbols}
 	bodyBytes, err := json.Marshal(body)
 	if err != nil {
@@ -209,6 +215,8 @@ func (c *FinGeniusHTTPClient) Submit(ctx context.Context, symbols []DebateSymbol
 }
 
 func (c *FinGeniusHTTPClient) GetTask(ctx context.Context, taskID string) (*DebateTaskResult, error) {
+	ctx, span := otel.Tracer(tracing.ServiceName).Start(ctx, "FinGeniusHTTPClient.GetTask")
+	defer span.End()
 	url := fmt.Sprintf("%s/task/%s", c.cfg.BaseURL, taskID)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
@@ -236,6 +244,8 @@ func (c *FinGeniusHTTPClient) GetTask(ctx context.Context, taskID string) (*Deba
 }
 
 func (c *FinGeniusHTTPClient) PollTask(ctx context.Context, taskID string) (*DebateTaskResult, error) {
+	ctx, span := otel.Tracer(tracing.ServiceName).Start(ctx, "FinGeniusHTTPClient.PollTask")
+	defer span.End()
 	deadline := time.Now().Add(c.cfg.MaxWait)
 	ticker := time.NewTicker(c.cfg.PollInterval)
 	defer ticker.Stop()

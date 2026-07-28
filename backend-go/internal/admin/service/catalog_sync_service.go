@@ -11,11 +11,13 @@ import (
 	"strings"
 	"time"
 
+	"go.opentelemetry.io/otel"
 	"gorm.io/gorm"
 
 	"syntopica-backend/internal/models"
 	"syntopica-backend/internal/platform/httpclient"
 	"syntopica-backend/internal/platform/logging"
+	"syntopica-backend/internal/platform/tracing"
 )
 
 // ── RSSHub 路由目录同步（design D2/D3，rsshub-route-catalog spec）──
@@ -57,6 +59,8 @@ type CatalogSyncSummary struct {
 // SyncAll 拉取全量目录并 diff 入库（D2）。
 // 实例不可达时仅记日志并返回（不修改既有目录）。
 func (s *CatalogSyncService) SyncAll(ctx context.Context) (*CatalogSyncSummary, error) {
+	ctx, span := otel.Tracer(tracing.ServiceName).Start(ctx, "CatalogSyncService.SyncAll")
+	defer span.End()
 	raw, err := s.fetch(ctx)
 	if err != nil {
 		logging.Warnf("rsshub catalog sync: fetch failed, keep existing catalog: %v", err)
@@ -289,6 +293,8 @@ type CatalogStatus struct {
 
 // GetStatus 返回目录状态统计。
 func (s *CatalogSyncService) GetStatus(ctx context.Context) (*CatalogStatus, error) {
+	ctx, span := otel.Tracer(tracing.ServiceName).Start(ctx, "CatalogSyncService.GetStatus")
+	defer span.End()
 	var st CatalogStatus
 	if err := s.db.WithContext(ctx).Model(&models.RSSHubRoute{}).
 		Select("COUNT(*) AS total").

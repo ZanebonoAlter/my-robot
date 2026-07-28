@@ -5,8 +5,10 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"go.opentelemetry.io/otel"
 	"syntopica-backend/internal/dataenrichment/repository"
 	"syntopica-backend/internal/platform/airouter"
+	"syntopica-backend/internal/platform/tracing"
 )
 
 // QAAgent answers report follow-up questions. It reuses the SAME exploration
@@ -78,6 +80,8 @@ const qaSystemPrompt = `你是一位产业探索判断分析师的追问助手�
 // Ask runs one follow-up round for a report (result) and persists it as a new
 // topic_enrichment_qa row (source="qa"). The report itself is never modified.
 func (q *QAAgent) Ask(ctx context.Context, resultID uint, question string) (*QAAnswer, error) {
+	ctx, span := otel.Tracer(tracing.ServiceName).Start(ctx, "QAAgent.Ask")
+	defer span.End()
 	// 1. Read the immutable result snapshot for report context.
 	result, err := q.repo.GetTopicEnrichmentResultByID(ctx, resultID)
 	if err != nil {

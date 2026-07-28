@@ -8,7 +8,9 @@ import (
 	"strconv"
 	"strings"
 
+	"go.opentelemetry.io/otel"
 	"syntopica-backend/internal/platform/logging"
+	"syntopica-backend/internal/platform/tracing"
 	"syntopica-backend/internal/topicgraph/repository"
 )
 
@@ -76,6 +78,8 @@ func MergeSimilarSections(
 	threadBatches [][]repository.DailyReportThread,
 	tags []repository.TagInput,
 ) ([]repository.DailyReportSection, [][]repository.DailyReportThread, error) {
+	ctx, span := otel.Tracer(tracing.ServiceName).Start(ctx, "service.MergeSimilarSections")
+	defer span.End()
 	if len(sections) <= 1 {
 		return sections, threadBatches, nil
 	}

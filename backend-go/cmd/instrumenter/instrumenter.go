@@ -15,8 +15,6 @@ package main
 //   - when the result list has a named `err error`, inject an error-recording
 //     defer (span.SetStatus + span.RecordError)
 //   - add missing imports (otel, otel/codes, tracing); reuse existing aliases
-//   - a /*line*/ directive is emitted before the first original statement to
-//     keep debug positions anchored to the pre-rewrite source
 
 import (
 	"bytes"
@@ -105,19 +103,13 @@ func analyze(fset *token.FileSet, file *ast.File, filename string, a aliases) ([
 			anyNamedErr = true
 		}
 
+		usesCtx := usesCtxParam(fn.Body, paramName)
 		bodyOpenOff := fset.Position(fn.Body.Lbrace).Offset + 1 // byte after '{'
 		ops = append(ops, spliceOp{
 			offset: bodyOpenOff,
-			text:   injectionBlock(paramName, spanName, namedErr, a),
+			text:   injectionBlock(paramName, spanName, namedErr, usesCtx, a),
 		})
 
-		if len(fn.Body.List) > 0 {
-			first := fn.Body.List[0]
-			stmtOff := fset.Position(first.Pos()).Offset
-			pos := fset.Position(first.Pos())
-			directive := fmt.Sprintf("/*line %s:%d:%d*/ ", filename, pos.Line, pos.Column)
-			ops = append(ops, spliceOp{offset: stmtOff, text: directive})
-		}
 	}
 	return ops, anyNamedErr
 }
@@ -168,8 +160,14 @@ func finalize(src []byte, filename string, anyNamedErr bool, a aliases) ([]byte,
 }
 
 // injectionBlock builds the text inserted right after the body's opening brace.
-func injectionBlock(paramName, spanName string, namedErr bool, a aliases) string {
-	head := "\n\t" + paramName + ", span := " + a.otelName + ".Tracer(" + a.tracingName +
+// When the body never reads the ctx param, the context return is bound to `_`
+// to avoid an ineffectual-assignment lint failure (the span still wraps the call).
+func injectionBlock(paramName, spanName string, namedErr, usesCtx bool, a aliases) string {
+	recv := paramName
+	if !usesCtx {
+		recv = "_"
+	}
+	head := "\n\t" + recv + ", span := " + a.otelName + ".Tracer(" + a.tracingName +
 		".ServiceName).Start(" + paramName + ", \"" + spanName + "\")\n\tdefer span.End()"
 	if !namedErr {
 		return head
@@ -272,6 +270,32 @@ func hasNamedError(ft *ast.FuncType) bool {
 		}
 	}
 	return false
+}
+
+// usesCtxParam reports whether body references the ctx parameter by name. When
+// the body never reads ctx, binding it (ctx, span := ...) would be an
+// ineffectual assignment; callers use this to decide whether to keep the
+// context return or drop it into `_`.
+func usesCtxParam(body *ast.BlockStmt, paramName string) bool {
+	if paramName == "" {
+		return false
+	}
+	used := false
+	ast.Inspect(body, func(n ast.Node) bool {
+		if used {
+			return false
+		}
+		ident, ok := n.(*ast.Ident)
+		if !ok {
+			return true
+		}
+		if ident.Name == paramName {
+			used = true
+			return false
+		}
+		return true
+	})
+	return used
 }
 
 // baseTypeName strips pointer/generic wrappers to get the bare receiver type.

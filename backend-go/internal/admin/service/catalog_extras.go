@@ -10,10 +10,12 @@ import (
 	"strings"
 	"time"
 
+	"go.opentelemetry.io/otel"
 	"syntopica-backend/internal/models"
 	"syntopica-backend/internal/platform/airouter"
 	"syntopica-backend/internal/platform/httpclient"
 	"syntopica-backend/internal/platform/logging"
+	"syntopica-backend/internal/platform/tracing"
 )
 
 // ── 路由目录可用性校验（D4）+ 路由向量生成（spec 路由向量）──
@@ -34,6 +36,8 @@ type AvailabilitySummary struct {
 // CheckAvailability 对带 example 的路由以可配速率（默认 2 req/s）发起 GET 校验。
 // 超时/非 200/空响应 → broken，否则 ok；校验 broken 的路由在推荐粗筛中被硬排除（D4）。
 func (s *CatalogSyncService) CheckAvailability(ctx context.Context, ratePerSec int) (*AvailabilitySummary, error) {
+	ctx, span := otel.Tracer(tracing.ServiceName).Start(ctx, "CatalogSyncService.CheckAvailability")
+	defer span.End()
 	if ratePerSec <= 0 {
 		ratePerSec = 2
 	}
@@ -77,6 +81,8 @@ func (s *CatalogSyncService) CheckAvailability(ctx context.Context, ratePerSec i
 // 文本取 namespace + name + description 摘要；向量维度/模型来自 airouter 返回。
 // router 为 nil 时跳过（外网/embedding route 未配置时不阻塞）。
 func (s *CatalogSyncService) EmbedPendingRoutes(ctx context.Context, router *airouter.Router) (int, error) {
+	ctx, span := otel.Tracer(tracing.ServiceName).Start(ctx, "CatalogSyncService.EmbedPendingRoutes")
+	defer span.End()
 	if router == nil {
 		return 0, nil
 	}

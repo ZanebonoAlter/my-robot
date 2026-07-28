@@ -8,11 +8,13 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"go.opentelemetry.io/otel"
 	"gorm.io/gorm/clause"
 
 	"syntopica-backend/internal/platform/airouter"
 	"syntopica-backend/internal/platform/jsonutil"
 	"syntopica-backend/internal/platform/logging"
+	"syntopica-backend/internal/platform/tracing"
 	"syntopica-backend/internal/topicgraph/repository"
 )
 
@@ -21,12 +23,16 @@ type sessionCtxKey struct{}
 
 // WithSessionID injects a daily report SessionID into the context.
 func WithSessionID(ctx context.Context, sessionID string) context.Context {
+	ctx, span := otel.Tracer(tracing.ServiceName).Start(ctx, "service.WithSessionID")
+	defer span.End()
 	return context.WithValue(ctx, sessionCtxKey{}, sessionID)
 }
 
 // SessionIDFromContext extracts the daily report SessionID from context.
 // Returns empty string when no SessionID is present.
 func SessionIDFromContext(ctx context.Context) string {
+	ctx, span := otel.Tracer(tracing.ServiceName).Start(ctx, "service.SessionIDFromContext")
+	defer span.End()
 	if ctx == nil {
 		return ""
 	}
@@ -39,6 +45,8 @@ func SessionIDFromContext(ctx context.Context) string {
 // After saving the report (and its sections), it runs EvaluateWatchHits
 // OUTSIDE the SaveReport transaction as a read-only overlay.
 func GenerateAndSaveReport(ctx context.Context, boardID uint, date time.Time) (*repository.BoardDailyReport, error) {
+	ctx, span := otel.Tracer(tracing.ServiceName).Start(ctx, "service.GenerateAndSaveReport")
+	defer span.End()
 	// Generate a SessionID BEFORE the LLM calls so all calls within
 	// this orchestration share the same session_id. boardID + uuid8
 	// gives a unique key even before SaveReport fills report.ID.
@@ -78,6 +86,8 @@ type watchChatFunc func(ctx context.Context, req airouter.ChatRequest) (*airoute
 // persistent_topic_id or any topic's consecutive_hits. On failure it returns
 // an error that the caller SHOULD swallow (log.Warnf + continue).
 func EvaluateWatchHits(ctx context.Context, boardID uint, report *repository.BoardDailyReport, sections []repository.DailyReportSection) error {
+	ctx, span := otel.Tracer(tracing.ServiceName).Start(ctx, "service.EvaluateWatchHits")
+	defer span.End()
 	return evaluateWatchHitsWithChat(ctx, boardID, report, sections, airouter.NewRouter().Chat)
 }
 

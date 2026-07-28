@@ -8,11 +8,13 @@ import (
 	"strings"
 	"time"
 
+	"go.opentelemetry.io/otel"
 	"gorm.io/gorm"
 
 	"syntopica-backend/internal/models"
 	"syntopica-backend/internal/platform/airouter"
 	"syntopica-backend/internal/platform/logging"
+	"syntopica-backend/internal/platform/tracing"
 )
 
 // ── 订阅源推荐（design D5/D6，feed-discovery spec）──
@@ -52,6 +54,8 @@ type RefreshSummary struct {
 
 // RefreshRecommendations 手动刷新（粗筛 + 精排 + 幂等落库），source=manual_refresh。
 func (s *RecommendationService) RefreshRecommendations(ctx context.Context) (*RefreshSummary, error) {
+	ctx, span := otel.Tracer(tracing.ServiceName).Start(ctx, "RecommendationService.RefreshRecommendations")
+	defer span.End()
 	return s.generateAndPersist(ctx, RecommendationSourceManualRefresh, nil)
 }
 
@@ -336,6 +340,8 @@ type RecommendationCard struct {
 
 // GetRecommendations 返回推荐卡片列表（默认 pending）。
 func (s *RecommendationService) GetRecommendations(ctx context.Context, status string) ([]RecommendationCard, error) {
+	ctx, span := otel.Tracer(tracing.ServiceName).Start(ctx, "RecommendationService.GetRecommendations")
+	defer span.End()
 	if status == "" {
 		status = "pending"
 	}
@@ -372,6 +378,8 @@ func (s *RecommendationService) GetRecommendations(ctx context.Context, status s
 // AcceptRecommendation 接受推荐：usable_directly 直订；requires_parameters 填参拼 URL 订阅。
 // 订阅成功后标记 accepted 并记录 feed_id。
 func (s *RecommendationService) AcceptRecommendation(ctx context.Context, id uint, categoryID *uint, params map[string]string) (*models.Feed, error) {
+	ctx, span := otel.Tracer(tracing.ServiceName).Start(ctx, "RecommendationService.AcceptRecommendation")
+	defer span.End()
 	var rec models.FeedRecommendation
 	if err := s.db.WithContext(ctx).Preload("Route").First(&rec, id).Error; err != nil {
 		return nil, err
@@ -421,6 +429,8 @@ func (s *RecommendationService) markAccepted(ctx context.Context, rec *models.Fe
 
 // DismissRecommendation 拒绝推荐，进入冷却期。
 func (s *RecommendationService) DismissRecommendation(ctx context.Context, id uint) error {
+	ctx, span := otel.Tracer(tracing.ServiceName).Start(ctx, "RecommendationService.DismissRecommendation")
+	defer span.End()
 	now := time.Now()
 	return s.db.WithContext(ctx).Model(&models.FeedRecommendation{}).
 		Where("id = ? AND status = ?", id, "pending").
@@ -429,6 +439,8 @@ func (s *RecommendationService) DismissRecommendation(ctx context.Context, id ui
 
 // Ask 问答式即时推荐：embedding → 粗筛 → 精排 → 落库(source=qa) + 种子写入。
 func (s *RecommendationService) Ask(ctx context.Context, question string) ([]RecommendationCard, error) {
+	ctx, span := otel.Tracer(tracing.ServiceName).Start(ctx, "RecommendationService.Ask")
+	defer span.End()
 	if s.router == nil {
 		return nil, fmt.Errorf("ask requires airouter (embedding route not configured)")
 	}

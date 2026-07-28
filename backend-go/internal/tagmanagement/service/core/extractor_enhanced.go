@@ -5,9 +5,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"go.opentelemetry.io/otel"
 	"strings"
 	"syntopica-backend/internal/platform/airouter"
 	"syntopica-backend/internal/platform/jsonutil"
+	"syntopica-backend/internal/platform/tracing"
 )
 
 // TagExtractor handles extracting and resolving tags from AI summaries
@@ -40,6 +42,8 @@ const defaultTagExtractionScore = 0.7
 
 // ExtractTags extracts tags from a summary using independent event/person and keyword branches.
 func (te *TagExtractor) ExtractTags(ctx context.Context, input ExtractionInput) (*ExtractionResult, error) {
+	ctx, span := otel.Tracer(tracing.ServiceName).Start(ctx, "TagExtractor.ExtractTags")
+	defer span.End()
 	eventPersonCh := make(chan extractionBranchResult, 1)
 	keywordCh := make(chan extractionBranchResult, 1)
 

@@ -8,8 +8,10 @@ import (
 	"sort"
 	"time"
 
+	"go.opentelemetry.io/otel"
 	"syntopica-backend/internal/dataenrichment/repository"
 	"syntopica-backend/internal/platform/airouter"
+	"syntopica-backend/internal/platform/tracing"
 )
 
 // LifelineContextService manages topic lifeline context generation for cycle A.
@@ -47,6 +49,8 @@ func NewLifelineContextService(
 // For 'all': reads all sections since the old 'all' as_of_date and incrementally
 // merges them with the old content (single rolling row, period="all").
 func (s *LifelineContextService) RefreshPeriod(ctx context.Context, topicID uint, granularity, period string, now time.Time) error {
+	ctx, span := otel.Tracer(tracing.ServiceName).Start(ctx, "LifelineContextService.RefreshPeriod")
+	defer span.End()
 	switch granularity {
 	case string(repository.GranularityWeek), string(repository.GranularityMonth), string(repository.GranularityYear):
 		return s.refreshArchive(ctx, topicID, granularity, period)
@@ -59,30 +63,40 @@ func (s *LifelineContextService) RefreshPeriod(ctx context.Context, topicID uint
 
 // RefreshWeek generates context for the current ISO week.
 func (s *LifelineContextService) RefreshWeek(ctx context.Context, topicID uint, now time.Time) error {
+	ctx, span := otel.Tracer(tracing.ServiceName).Start(ctx, "LifelineContextService.RefreshWeek")
+	defer span.End()
 	period := FormatWeek(now)
 	return s.RefreshPeriod(ctx, topicID, string(repository.GranularityWeek), period, now)
 }
 
 // RefreshMonth generates context for the current month.
 func (s *LifelineContextService) RefreshMonth(ctx context.Context, topicID uint, now time.Time) error {
+	ctx, span := otel.Tracer(tracing.ServiceName).Start(ctx, "LifelineContextService.RefreshMonth")
+	defer span.End()
 	period := FormatMonth(now)
 	return s.RefreshPeriod(ctx, topicID, string(repository.GranularityMonth), period, now)
 }
 
 // RefreshYear generates context for the current year.
 func (s *LifelineContextService) RefreshYear(ctx context.Context, topicID uint, now time.Time) error {
+	ctx, span := otel.Tracer(tracing.ServiceName).Start(ctx, "LifelineContextService.RefreshYear")
+	defer span.End()
 	period := FormatYear(now)
 	return s.RefreshPeriod(ctx, topicID, string(repository.GranularityYear), period, now)
 }
 
 // RefreshAll incrementally merges new sections with the old 'all' context (rolling).
 func (s *LifelineContextService) RefreshAll(ctx context.Context, topicID uint, now time.Time) error {
+	ctx, span := otel.Tracer(tracing.ServiceName).Start(ctx, "LifelineContextService.RefreshAll")
+	defer span.End()
 	return s.RefreshPeriod(ctx, topicID, string(repository.GranularityAll), "all", now)
 }
 
 // RefreshGranularity dispatches to the appropriate refresh method. Delegates
 // to RefreshPeriod with the current period derived from now.
 func (s *LifelineContextService) RefreshGranularity(ctx context.Context, topicID uint, granularity string, now time.Time) error {
+	ctx, span := otel.Tracer(tracing.ServiceName).Start(ctx, "LifelineContextService.RefreshGranularity")
+	defer span.End()
 	switch granularity {
 	case string(repository.GranularityWeek):
 		return s.RefreshWeek(ctx, topicID, now)
@@ -101,6 +115,8 @@ func (s *LifelineContextService) RefreshGranularity(ctx context.Context, topicID
 // Bidirectional: finds every period that has section data but no lifeline_context
 // row yet, and generates it (up to current period, no future).
 func (s *LifelineContextService) HealMissing(ctx context.Context, granularity string, now time.Time, lister TopicLister) error {
+	ctx, span := otel.Tracer(tracing.ServiceName).Start(ctx, "LifelineContextService.HealMissing")
+	defer span.End()
 	topicIDs, err := lister.ListActiveTopicIDs(ctx)
 	if err != nil {
 		return fmt.Errorf("heal missing: list topics: %w", err)
@@ -158,6 +174,8 @@ func (s *LifelineContextService) HealMissing(ctx context.Context, granularity st
 //	month: keep last 12 months
 //	year/all: never prune
 func (s *LifelineContextService) ArchivePrune(ctx context.Context, granularity string, now time.Time) error {
+	ctx, span := otel.Tracer(tracing.ServiceName).Start(ctx, "LifelineContextService.ArchivePrune")
+	defer span.End()
 	switch granularity {
 	case string(repository.GranularityWeek):
 		cutoff := time.Now().AddDate(0, 0, -8*7)

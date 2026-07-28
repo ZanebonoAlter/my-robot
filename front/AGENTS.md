@@ -61,8 +61,8 @@ pnpm test:unit  &&  pnpm test:e2e
 ## 测试与 Lint
 
 - 单元：Vitest + happy-dom，`*.test.ts` 与源同目录
-- E2E：Playwright，`front/tests/e2e/*.spec.ts`，串行执行（只放稳定 smoke）
-- 交互验证：DeepSeek v4 Flash 按需验证（断言现写现跑，不堆回归脚本）→ `.agents/skills/playwright-e2e/` + `docs/reference/architecture/ui-navigation.md`
+- E2E smoke：`front/tests/e2e/*.spec.ts`（Playwright，仅页面骨架/响应式，串行执行）
+- 交互验证：opencli 按需验证（断言现写现跑，不堆回归脚本）；视图验证派 kimi-coding/k3 → `.agents/skills/ui-verify/` + `docs/reference/architecture/ui-navigation.md`
 - 交互约定：状态标记左对齐、状态说明不伪装动作 → `docs/reference/standard/frontend/interaction-conventions.md`
 - ESLint flat config：`front/eslint.config.js`
 

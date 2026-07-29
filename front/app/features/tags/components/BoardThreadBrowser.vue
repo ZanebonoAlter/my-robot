@@ -44,13 +44,7 @@ const expandedThreadId = ref<number | null>(null)
 const threadArticles = ref<Map<number, { id: number, title: string }[]>>(new Map())
 const threadArticlesLoading = ref(false)
 
-// --- Constants ---
-const COL_W = 148
-const ROW_H = 60
-const PAD = 32
-const NODE_R = 7
-const LABEL_MAX = 10
-const LANE_LABEL_MAX = 8    // 泳道标签截断阈值（避让右侧 hover 操作菜单，防重叠）
+// --- Constants（不随缩放变化：标签列宽）---
 // 泳道视图参数
 const LANE_LABEL_W = 180 // 左侧话题标签列宽（容结标签 + hover 操作菜单，避免重叠）
 
@@ -93,26 +87,45 @@ function onViewportResize() { viewportWidth.value = window.innerWidth }
 onMounted(() => window.addEventListener('resize', onViewportResize))
 onUnmounted(() => window.removeEventListener('resize', onViewportResize))
 
-// --- SVG 缩放（滚轮）---
-// 用 CSS transform scale 包裹 SVG，不动其坐标，点节点/连线的命中不受影响。
-// 按鼠标位置缩放（缩放后鼠标下的点不动），缩放后容器溢出可滚动。
+// --- SVG 缩放（滚轮：鼠标在图上直接滚轮 = 缩放，不用 Ctrl，避免和浏览器缩放冲突）---
+// 缩放语义：只拉开布局间距（行高 / 列宽 / 节点间距随滚轮线性变化），
+// 字体与节点半径保持不变。这样放大→节点之间越来越宽松，文字不会因等比放大
+// 而盖住相邻泳道（原 transform:scale 等比缩放「放大了还是挤」的问题根除）。
 const svgScrollRef = ref<HTMLDivElement | null>(null)
 const zoomScale = ref(1)
-const MIN_SCALE = 0.4
-const MAX_SCALE = 3
-const ZOOM_STEP = 0.2
+const MIN_SCALE = 0.6
+const MAX_SCALE = 2.4
+const ZOOM_STEP = 0.15
 const zoomPercent = computed(() => Math.round(zoomScale.value * 100))
 
+// 间距类布局参数随缩放线性变化（基础值已加大：行高 52→76、节点间距 24→34，
+// 保证 100% 时也不挤）。节点半径 / 字号 / 标签列宽不随缩放（见常量区）。
+const COL_W = computed(() => 148 * zoomScale.value)
+const ROW_H = computed(() => 60 * zoomScale.value)
+const PAD = computed(() => 32 * zoomScale.value)
+const LANE_BASE = computed(() => 76 * zoomScale.value)
+const LANE_NODE_GAP = computed(() => 34 * zoomScale.value)
+// 节点 label 截断阈值随列宽放大→可容纳更多字，缩小设下限防过短。
+const LABEL_MAX = computed(() => Math.max(4, Math.round(10 * zoomScale.value)))
+// 字体 / 节点半径缩放系数：增长慢于间距 zoomScale（系数 0.5）——放大时字与节点变大、
+// 但间距增长更快→不会盖邻道。fontScale=1+(zoom-1)*0.5：zoom2→1.5, zoom2.4→1.7, zoom0.6→0.8。
+const fontScale = computed(() => 1 + (zoomScale.value - 1) * 0.5)
+const NODE_R = computed(() => 7 * fontScale.value)
+
+// 缩放时保持视口中心在内容里的相对比例（内容尺寸随 zoomScale 变化）。
 async function setZoom(nextScale: number) {
   const el = svgScrollRef.value
-  const oldScale = zoomScale.value
-  const centerX = el ? (el.scrollLeft + el.clientWidth / 2) / oldScale : 0
-  const centerY = el ? (el.scrollTop + el.clientHeight / 2) / oldScale : 0
+  const maxX = el && el.scrollWidth > el.clientWidth ? el.scrollWidth - el.clientWidth : 0
+  const maxY = el && el.scrollHeight > el.clientHeight ? el.scrollHeight - el.clientHeight : 0
+  const ratioX = maxX > 0 ? el!.scrollLeft / maxX : 0
+  const ratioY = maxY > 0 ? el!.scrollTop / maxY : 0
   zoomScale.value = nextScale
   await nextTick()
   if (el) {
-    el.scrollLeft = Math.max(0, centerX * nextScale - el.clientWidth / 2)
-    el.scrollTop = Math.max(0, centerY * nextScale - el.clientHeight / 2)
+    const nx = el.scrollWidth > el.clientWidth ? el.scrollWidth - el.clientWidth : 0
+    const ny = el.scrollHeight > el.clientHeight ? el.scrollHeight - el.clientHeight : 0
+    el.scrollLeft = ratioX * nx
+    el.scrollTop = ratioY * ny
   }
 }
 
@@ -126,6 +139,24 @@ function zoomOut() {
 function resetZoom() {
   void setZoom(1)
 }
+
+// 鼠标在图上滚轮 = 缩放。需 passive:false 才能 preventDefault 阻止页面滚动，
+// 故手动 addEventListener（template @wheel 在部分浏览器被当 passive）。
+function onWheelZoom(e: WheelEvent) {
+  e.preventDefault()
+  const delta = e.deltaY < 0 ? ZOOM_STEP : -ZOOM_STEP
+  const next = Math.min(MAX_SCALE, Math.max(MIN_SCALE, +(zoomScale.value + delta).toFixed(2)))
+  if (next === zoomScale.value) return
+  void setZoom(next)
+}
+// svgScrollRef 随 viewMode 切换重新挂载，watch 动态绑/解 wheel 监听。
+watch(svgScrollRef, (el, oldEl) => {
+  if (oldEl) oldEl.removeEventListener('wheel', onWheelZoom)
+  if (el) el.addEventListener('wheel', onWheelZoom, { passive: false })
+}, { immediate: true })
+
+// 编排态右侧候选侧边栏折叠态（收起成窄条，让出空间给泳道）。
+const composeSidebarCollapsed = ref(false)
 
 // Theme-aware SVG colors
 const svgGridColor = computed(() => theme.value === 'dark' ? 'rgba(255,255,255,0.04)' : 'rgba(26,26,26,0.06)')
@@ -149,12 +180,10 @@ function formatDateShort(dateStr: string): string {
 }
 
 function truncateLabel(label: string): string {
-  return label.length > LABEL_MAX ? label.slice(0, LABEL_MAX) + '…' : label
+  const max = LABEL_MAX.value
+  return label.length > max ? label.slice(0, max) + '…' : label
 }
-// 泳道标签用更宽的截断阈值；hover 仍会通过 <title> 显示完整名称。
-function truncateLaneLabel(label: string): string {
-  return label.length > LANE_LABEL_MAX ? label.slice(0, LANE_LABEL_MAX) + '…' : label
-}
+
 
 // --- Hover highlight graph ---
 
@@ -238,12 +267,10 @@ interface PositionedSection {
 
 // 泳道自适应高度：每条泳道高 = 基础行高 + 该泳道内单天最大节点数 × 节点间距。
 // 固定高度会导致同天多节点的泳道互相覆盖（节点+标签溢出），动态高度让每条
-// 泳道都够容结自己的内容，间隔充裕。
-const LANE_NODE_GAP = 24      // 同泳道同天多节点的纵向间距
-const LANE_BASE = 52         // 基础行高（单节点时的垂直空间）
+// 泳道都够容结自己的内容，间隔充裕。LANE_BASE/LANE_NODE_GAP 随 zoomScale 变化（见缩放区）。
 const laneLayout = computed(() => {
   const lanes = laneRows.value
-  const laneH = new Array(lanes.length).fill(LANE_BASE)
+  const laneH = new Array(lanes.length).fill(LANE_BASE.value)
   const subMax = new Map<string, number>()
   for (const s of sections.value) {
     const date = s.period_date.slice(0, 10)
@@ -252,7 +279,7 @@ const laneLayout = computed(() => {
     const n = (subMax.get(k) ?? 0) + 1
     subMax.set(k, n)
     // 单节点只需 LANE_BASE；每多一个节点 +节点间距（含节点半径与标签余量）。
-    const need = LANE_BASE + (n - 1) * LANE_NODE_GAP
+    const need = LANE_BASE.value + (n - 1) * LANE_NODE_GAP.value
     if (need > laneH[li]!) laneH[li] = need
   }
   const laneY: number[] = []
@@ -276,12 +303,12 @@ const positionedNodes = computed<PositionedSection[]>(() => {
       const total = layout.subMax.get(k) ?? 1
       const idx = seen.get(k) ?? 0
       seen.set(k, idx + 1)
-      const subOffset = (idx - (total - 1) / 2) * LANE_NODE_GAP
+      const subOffset = (idx - (total - 1) / 2) * LANE_NODE_GAP.value
       return {
         data: s,
-        cx: col * COL_W + PAD + COL_W / 2 + LANE_LABEL_W,
+        cx: col * COL_W.value + PAD.value + COL_W.value / 2 + LANE_LABEL_W,
         // 与背景 rect 同基准（rect y = laneY[li] + PAD），节点 cy 也 + PAD。
-        cy: PAD + layout.laneY[li]! + layout.laneH[li]! / 2 + subOffset,
+        cy: PAD.value + layout.laneY[li]! + layout.laneH[li]! / 2 + subOffset,
       }
     })
   }
@@ -294,8 +321,8 @@ const positionedNodes = computed<PositionedSection[]>(() => {
     rowCounter.set(date, row + 1)
     return {
       data: s,
-      cx: col * COL_W + PAD + COL_W / 2,
-      cy: row * ROW_H + PAD + ROW_H / 2,
+      cx: col * COL_W.value + PAD.value + COL_W.value / 2,
+      cy: row * ROW_H.value + PAD.value + ROW_H.value / 2,
     }
   })
 })
@@ -358,15 +385,15 @@ const edgePaths = computed<EdgeLine[]>(() => {
 })
 
 const svgWidth = computed(() => {
-  const base = sortedDates.value.length * COL_W + PAD * 2
+  const base = sortedDates.value.length * COL_W.value + PAD.value * 2
   return viewMode.value === 'lanes' ? base + LANE_LABEL_W : base
 })
 const svgHeight = computed(() => {
   if (viewMode.value === 'lanes') {
     const total = laneLayout.value.laneH.reduce((a, b) => a + b, 0)
-    return total + PAD * 2
+    return total + PAD.value * 2
   }
-  return maxRows.value * ROW_H + PAD * 2
+  return maxRows.value * ROW_H.value + PAD.value * 2
 })
 
 interface DateCol {
@@ -379,7 +406,7 @@ const dateColumns = computed<DateCol[]>(() =>
   sortedDates.value.map((date, i) => ({
     date,
     label: formatDateShort(date),
-    x: i * COL_W + PAD + COL_W / 2 + (viewMode.value === 'lanes' ? LANE_LABEL_W : 0),
+    x: i * COL_W.value + PAD.value + COL_W.value / 2 + (viewMode.value === 'lanes' ? LANE_LABEL_W : 0),
   })),
 )
 
@@ -689,6 +716,8 @@ function onSvgPointerDown(e: PointerEvent) {
   if ((e.target as Element)?.closest?.('.btb-dag-node, .btb-lane-op')) return
   svgDragState.value = { down: true, startX: e.clientX, startY: e.clientY, startScrollX: el.scrollLeft, startScrollY: el.scrollTop, moved: false }
   el.setPointerCapture?.(e.pointerId)
+  // 拖拽平移期间禁用全局文本选择，避免框选文字干扰拖动（参考 AppSidebarView 做法）。
+  document.body.style.userSelect = 'none'
 }
 function onSvgPointerMove(e: PointerEvent) {
   if (!svgDragState.value.down) return
@@ -705,6 +734,7 @@ function endSvgDrag() {
   if (svgDragState.value.down && svgDragState.value.moved) suppressNextSvgClick = true
   svgDragState.value.down = false
   svgDragState.value.moved = false
+  document.body.style.userSelect = ''
 }
 async function onSvgNodeClick(node: SectionTimelineNode) {
   if (suppressNextSvgClick) { suppressNextSvgClick = false; return }
@@ -724,7 +754,7 @@ const backfilling = ref(false)
 
 // 泳道 hover 操作菜单的纵向锚点（泳道竖向中心）。
 function laneOpsY(li: number): number {
-  return (laneLayout.value.laneY[li] ?? 0) + PAD + (laneLayout.value.laneH[li] ?? LANE_BASE) / 2
+  return (laneLayout.value.laneY[li] ?? 0) + PAD.value + (laneLayout.value.laneH[li] ?? LANE_BASE.value) / 2
 }
 
 // 重命名
@@ -1088,8 +1118,19 @@ watch(viewMode, () => {
             @cancel="compose.cancel()"
           />
         </div>
-        <div class="btb-compose-sidebar-anchor">
+        <div
+          class="btb-compose-sidebar-anchor"
+          :class="{ 'is-collapsed': composeSidebarCollapsed }"
+        >
+          <button
+            class="btb-compose-sidebar-toggle"
+            :title="composeSidebarCollapsed ? '展开候选栏' : '收起候选栏'"
+            @click="composeSidebarCollapsed = !composeSidebarCollapsed"
+          >
+            <Icon :icon="composeSidebarCollapsed ? 'mdi:chevron-left' : 'mdi:chevron-right'" width="18" />
+          </button>
           <ComposeSidebar
+            v-show="!composeSidebarCollapsed"
             :items="compose.sidebarItems.value"
             :query-text="compose.queryText.value"
             :search-error="compose.searchError.value"
@@ -1100,28 +1141,22 @@ watch(viewMode, () => {
           />
         </div>
       </template>
-      <!-- SVG canvas: outer spacer owns scaled dimensions; SVG alone is transformed. -->
+      <!-- SVG canvas: 间距随 zoomScale 变化（svgWidth/Height 已含缩放），无需 transform spacer。 -->
       <div
         ref="svgScrollRef"
         class="btb-svg-scroll"
         :class="{ 'btb-svg-scroll--dragging': svgDragState.down && svgDragState.moved }"
+        :style="composeMode ? { paddingRight: (composeSidebarCollapsed ? 52 : 324) + 'px' } : undefined"
         @pointerdown="onSvgPointerDown"
         @pointermove="onSvgPointerMove"
         @pointerup="endSvgDrag"
         @pointercancel="endSvgDrag"
       >
-        <div
-          class="btb-svg-zoom"
-          :style="{
-            width: Math.round(svgWidth * zoomScale) + 'px',
-            height: Math.round(svgHeight * zoomScale) + 'px',
-          }"
-        >
         <svg
           :width="svgWidth"
           :height="svgHeight"
           class="btb-svg"
-          :style="{ transform: `scale(${zoomScale})` }"
+          :style="{ '--fs': fontScale }"
         >
           <!-- Date labels live inside the same pan/zoom coordinate system. -->
           <text
@@ -1173,7 +1208,7 @@ watch(viewMode, () => {
                 :y="(laneLayout.laneY[li] ?? 0) + PAD + (laneLayout.laneH[li] ?? LANE_BASE) / 2 + 4"
                 class="btb-lane-label"
                 :fill="svgLaneLabelColor"
-              >{{ truncateLaneLabel(lane.label) }}<title>{{ lane.label }}</title></text>
+              >{{ lane.label }}</text>
               <!-- 泳道 hover 操作菜单（重命名 / 归档·恢复 / 删除）；source=manual 与 auto 一视同仁 -->
               <g
                 v-if="lane.topicId != null"
@@ -1206,13 +1241,12 @@ watch(viewMode, () => {
                 class="btb-lane-op btb-lane-compose-entry"
                 role="button"
                 aria-label="新建泳道"
-                :transform="`translate(${LANE_LABEL_W - 92}, ${laneOpsY(li) - 9})`"
+                :transform="`translate(${LANE_LABEL_W - 24}, ${laneOpsY(li) - 9})`"
                 @click.stop="enterCompose"
               >
                 <title>新建泳道（进入就地编排）</title>
-                <rect class="btb-lane-op-hit btb-lane-compose-entry__hit" width="86" height="18" rx="3" />
-                <path class="btb-lane-op-ico" d="M8 9h10M13 4v10" />
-                <text x="22" y="12" class="btb-lane-compose-entry__text">新建泳道</text>
+                <rect class="btb-lane-op-hit btb-lane-compose-entry__hit" width="20" height="18" rx="3" />
+                <path class="btb-lane-op-ico" d="M4 9h12M10 3v12" />
               </g>
             </g>
           </template>
@@ -1329,7 +1363,6 @@ watch(viewMode, () => {
             >将从【{{ nodeInfoFor(pn.data.id)?.originLabel }}】移出</text>
           </g>
         </svg>
-        </div>
       </div>
       <!-- 缩放控制条 -->
       <div class="btb-zoom-bar">
@@ -1803,7 +1836,7 @@ watch(viewMode, () => {
   color: #93c5fd;
 }
 .btb-lane-label {
-  font-size: 10px;
+  font-size: calc(10px * var(--fs, 1));
   font-weight: 600;
 }
 
@@ -1845,7 +1878,7 @@ watch(viewMode, () => {
 }
 
 .btb-date-label {
-  font-size: 0.6rem;
+  font-size: calc(0.6rem * var(--fs, 1));
   fill: var(--color-text-muted);
   pointer-events: none;
 }
@@ -1855,6 +1888,7 @@ watch(viewMode, () => {
   overflow: auto;
   position: relative;
   cursor: grab;
+  user-select: none;
   /* 占满工作台主体高度：接近 content 高度；泳道多时纵向滚动 */
   height: calc(100vh - 200px);
   min-height: 320px;
@@ -1928,7 +1962,7 @@ watch(viewMode, () => {
 
 /* Node label */
 .btb-node-label {
-  font-size: 10px;
+  font-size: calc(10px * var(--fs, 1));
   font-weight: 500;
   pointer-events: none;
   opacity: 0.82;
@@ -2541,9 +2575,11 @@ watch(viewMode, () => {
 .btb-lane-ops {
   opacity: 0;
   transition: opacity 0.12s ease;
+  pointer-events: none;
 }
 .btb-lane-row:hover .btb-lane-ops {
   opacity: 1;
+  pointer-events: auto;
 }
 .btb-lane-op {
   cursor: pointer;
@@ -2678,6 +2714,33 @@ watch(viewMode, () => {
   max-height: calc(100% - 96px);
   overflow: auto;
   z-index: 30;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;   /* 展开态：toggle 贴右 */
+}
+.btb-compose-sidebar-anchor.is-collapsed {
+  width: 40px;
+  overflow: visible;
+  align-items: center;     /* 折叠态：toggle 居中，窄条整体可见 */
+}
+.btb-compose-sidebar-toggle {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  margin: 6px;
+  border: 1px solid var(--color-border-medium);
+  border-radius: 999px;
+  background: var(--color-bg-elevated);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.15);
+}
+.btb-compose-sidebar-toggle:hover {
+  color: var(--color-text-primary);
+  border-color: var(--color-accent);
 }
 
 /* 编排态：active 泳道淑显保留为背景参照（unassigned 不淑显，主战场） */

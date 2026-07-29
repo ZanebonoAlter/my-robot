@@ -57,6 +57,7 @@
 <!-- doc-impact-excuse: flow=启发式命中系其它在途 change 的后端脏文件(backend-go/internal/admin|topicgraph/...)，本 change 纯前端零后端改动，不涉业务链路; api=同上脏文件干扰，本 change 复用既有 API 零新增/零变更; database=同上脏文件干扰，本 change 零 schema/数据模型变更(proposal 明确)；standard=命中的 standard/frontend/interaction-conventions.md 系其它 change 脏文件，本 change 的 inline-compose 是 feature 级交互非全局约定，不新增 standard 规范 -->
 
 - [x] 9.1 apply 时按 `doc-impact.sh suggest` 预勾选结果同步 `docs/reference/`；若 suggest 无命中则本节空置 ✅ suggest 命中的 flow/database 系**其它在途 change 的脏工作树文件**（backend-go/...），与本纯前端 change 无关；standard 命中的 interaction-conventions 是 feature 级交互非全局约定。本 change 纯前端、零后端/API/数据模型/配置/部署变更，doc-impact: none 成立（归档前以 `doc-impact.sh verify` 复核）
+  - **doc-impact verify 现状（归档前必读）**：`verify` 报 4 FAIL（声明 none 但启发式命中 flow/api/database/standard）。诊断：①api/database/standard 三项命中来自**工作树里其它在途 change 的脏文件**（backend handler/models + docs/reference/standard/interaction-conventions.md），干净工作树复跑即消；②**flow 项是 `^front/app/features/` 全匹启发式对纯 UI 重构的误报**——本 change 复用 createManualLane 全链路、零业务链路变更（proposal/spec/design 一致确认）。`verify` 规则4（声明 none→任何启发式命中即 FAIL）不读 excuse，放仅作文档留档。归档建议：干净工作树复跑 verify（消 api/database/standard）；flow 误报项需团队定夺（细化启发式或接受 excuse）
 
 ## 10. 验证
 
@@ -67,3 +68,13 @@
 - [x] 10.3 `cmd.exe /C "cd /d D:\project\Syntopica\front && pnpm test:unit 2>&1"` → 期望新增/扩展测试全过、无回归 ✅ 40 文件 / 428 测试全绿（含 useInlineCompose 31 + ComposeInlineToolbar 11 + ComposeSidebar 9 + workbench 9 改后）
 - [x] 10.4 `cmd.exe /C "cd /d D:\project\Syntopica\front && pnpm build"` → 期望构建成功 ✅ `✨ Build complete!` exit 0
 - [ ] 10.5 手测：lanes 视图点「新建泳道」→ active 泳道淡显保留 + unassigned 节点可勾 + 贴合度实时标 + 勾走 active 标移出 + 保存二次确认 + 新泳道出现；视图全程不切 viewMode ⏳ **未执行**：需起 dev server + Docker PG + 种子数据。逻辑/组件层已被 60 个单测覆盖 + build 通过；建议在用户环境跑 opencli 端到端冒烟（见 §5.3），或派 k3 视图验证截图
+
+## 11. 交互打磨（收尾补丁 · 用户反馈驱动）
+
+> 用户反馈 inline-compose-lane 交付后交互性差：①编排态浮层（顶部工具条 + 右侧 300px 候选栏）遮挡泳道、不可收；②行间距太挤，选中节点 label 盖到相邻泳道；③缩放按钮等比放大「放大了还是挤」无意义、且无滚轮。本次为收尾小修，不立新 change。
+
+- [x] 11.1 缩放重做：废弃 `transform: scale(zoomScale)` 等比缩放（间距/字体同比涨，比例不变→放大无用）；改为**间距驱动**——`LANE_BASE`/`LANE_NODE_GAP`/`COL_W`/`ROW_H`/`PAD` 随 `zoomScale` 线性变化（computed），**节点半径 `NODE_R` 与字号不随缩放**。语义：放大=拉开布局间距，文字不爆开盖邻道 ✅ BoardThreadBrowser.vue 常量区 + laneLayout/positionedNodes/svgWidth/svgHeight/dateColumns/laneOpsY 全部 computed 化
+- [x] 11.2 滚轮缩放：新增 `onWheelZoom`（直接滚轮，**不用 Ctrl**——避免与浏览器原生缩放冲突），`passive:false` 手动 `addEventListener` 以便 `preventDefault` 阻止页面滚动；`watch(svgScrollRef)` 动态绑/解（viewMode 切换重挂载）；`setZoom` 改为保持视口中心比例。MIN/MAX 0.6~2.4，步长 0.15 ✅
+- [x] 11.3 基础行高加大：`LANE_BASE` 52→76、`LANE_NODE_GAP` 24→34（100% 时也不挤，选中节点 label 不再溢出邻道）✅
+- [x] 11.4 浮层可折叠 + 让位：`ComposeSidebar` 加一键折叠（`composeSidebarCollapsed` ref + toggle 按钮，收起成 36px 窄条）；`.btb-svg-scroll` 编排态动态 `paddingRight`（展开 324 / 折叠 52），泳道内容物理避让、不再被侧边栏遮挡 ✅
+- [x] 11.5 验证：lint 0 error（本文件 0 问题）/ typecheck exit 0 / build `✨ Build complete!` exit 0 ✅

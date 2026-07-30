@@ -7,6 +7,7 @@ import SettingsSectionQueues from '~/features/settings/components/SettingsSectio
 import SettingsSectionPreferences from '~/features/settings/components/SettingsSectionPreferences.vue'
 import SettingsSectionFirecrawl from '~/features/settings/components/SettingsSectionFirecrawl.vue'
 import SettingsSectionRsshub from '~/features/settings/components/SettingsSectionRsshub.vue'
+import SettingsSectionProxy from '~/features/settings/components/SettingsSectionProxy.vue'
 import SettingsSectionSchedulers from '~/features/settings/components/SettingsSectionSchedulers.vue'
 
 import type { SectionKey } from '~/features/settings/components/SettingsWorkspace.vue'
@@ -19,6 +20,7 @@ const sectionComponents: Record<SectionKey, any> = {
   'preferences': SettingsSectionPreferences,
   'firecrawl': SettingsSectionFirecrawl,
   'rsshub': SettingsSectionRsshub,
+  'proxy': SettingsSectionProxy,
   'schedulers': SettingsSectionSchedulers,
 }
 </script>

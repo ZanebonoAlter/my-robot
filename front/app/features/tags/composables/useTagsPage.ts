@@ -16,7 +16,7 @@ export function useTagsPage() {
   const articlesApi = useArticlesApi()
 
   // Tab / dialog state
-  const contentTab = ref<'composition' | 'daily-reports' | 'articles' | 'enrichment'>('composition')
+  const contentTab = ref<'composition' | 'daily-reports' | 'articles' | 'enrichment' | 'topic-overview'>('composition')
   const showUpgradeDialog = ref(false)
   const showMatchingConfigDialog = ref(false)
   const showGenerateDialog = ref(false)

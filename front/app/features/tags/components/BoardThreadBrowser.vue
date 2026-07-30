@@ -757,6 +757,26 @@ function laneOpsY(li: number): number {
   return (laneLayout.value.laneY[li] ?? 0) + PAD.value + (laneLayout.value.laneH[li] ?? LANE_BASE.value) / 2
 }
 
+// 泳道标题按可用宽度截断，避免长标题延伸到 hover 操作按钮区（重命名/归档/删除）造成重叠。
+// 估算 10px 字号下宽度：中文/全角≈10px，其余≈5.5px。
+function laneTextWidth(s: string): number {
+  let w = 0
+  for (const ch of s) {
+    w += /[\u4e00-\u9fff\u3000-\u303f\uff00-\uffef]/.test(ch) ? 10 : 5.5
+  }
+  return w
+}
+function laneLabel(label: string): string {
+  // 可用宽度 = 标签列宽 - 按钮组偏移(LANE_LABEL_W-68) - 标题起点(24) - 间距(6)
+  const maxW = LANE_LABEL_W - 68 - 24 - 6
+  if (laneTextWidth(label) <= maxW) return label
+  let s = label
+  while (s.length > 0 && laneTextWidth(s + '…') > maxW) {
+    s = s.slice(0, -1)
+  }
+  return s + '…'
+}
+
 // 重命名
 const renameTarget = ref<TopicRow | null>(null)
 const renameLabel = ref('')
@@ -1208,7 +1228,7 @@ watch(viewMode, () => {
                 :y="(laneLayout.laneY[li] ?? 0) + PAD + (laneLayout.laneH[li] ?? LANE_BASE) / 2 + 4"
                 class="btb-lane-label"
                 :fill="svgLaneLabelColor"
-              >{{ lane.label }}</text>
+              >{{ laneLabel(lane.label) }}<title>{{ lane.label }}</title></text>
               <!-- 泳道 hover 操作菜单（重命名 / 归档·恢复 / 删除）；source=manual 与 auto 一视同仁 -->
               <g
                 v-if="lane.topicId != null"

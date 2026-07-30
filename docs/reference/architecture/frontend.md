@@ -228,6 +228,8 @@ features/
 
 日报详情不走独立路由，而是在 `/tags` 页内由 `BoardDailyReportTimeline.vue` 渲染为全屏阅读层（独立视觉壳，不复用主阅读页三栏壳），详见 §日报全屏阅读层。
 
+`/tags` 页（`TagsPage.vue`）顶部 tab：板块内容 / 日报 / 文章 / 数据增强 / 话题总览（`BoardThreadBrowser`，与日报平级）。
+
 ## 大组件拆分阈值（D14）
 
 - 单文件超过 **500 行 / ~15KB** 时应考虑拆分
@@ -237,7 +239,7 @@ features/
 
 ## 3D 侦探墙（detective-wall）
 
-`features/tags/components/detective-wall/` 是项目内首个直接使用 Three.js 的特性，将话题总览（`BoardThreadBrowser` 2D SVG DAG）升级为沉浸式 3D 侦探照片墙。入口在 `BoardThreadBrowser` 的"侦探墙"按钮（仅 WebGL 可用且屏幕宽 ≥768px 显示），全屏视图 `TopicDetectiveWall.client.vue` 由 `BoardDailyReportTimeline` 渲染。
+`features/tags/components/detective-wall/` 是项目内首个直接使用 Three.js 的特性，将话题总览（`BoardThreadBrowser` 2D SVG DAG）升级为沉浸式 3D 侦探照片墙。入口在 `BoardThreadBrowser` 的“侦探墙”按钮（仅 WebGL 可用且屏幕宽 ≥768px 显示）；话题总览现为 `TagsPage` 平级 tab（`contentTab='topic-overview'`），全屏视图 `TopicDetectiveWall.client.vue` 由 `TagsPage` 顶层（话题总览 tab）与 `BoardDailyReportTimeline`（日报 tab 内 toggle）双入口渲染。
 
 ### 子模块结构
 

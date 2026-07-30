@@ -44,3 +44,4 @@ pgvector-pg18-arm64.tar
 syntopica-demo-arm64.tar
 tests
 research/readability-spike/readability-spike.exe
+backend-go/verify-cluster-prompt

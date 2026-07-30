@@ -16,6 +16,7 @@ import (
 const openNotebookConfigKey = "open_notebook_config"
 const firecrawlConfigKey = "firecrawl_config"
 const rsshubConfigKey = "rsshub_config"
+const proxyConfigKey = "http_proxy_config"
 const dailyReportTimeKey = "daily_report_time"
 const defaultDailyReportTime = "21:00"
 const boardUpgradeSuggestTimeKey = "semantic_board_upgrade_suggest_time"
@@ -99,6 +100,16 @@ func LoadRSSHubConfig() (map[string]interface{}, *models.AISettings, error) {
 // SaveRSSHubConfig 写入 rsshub_config。
 func SaveRSSHubConfig(config map[string]interface{}, description string) error {
 	return saveConfigByKey(rsshubConfigKey, config, description)
+}
+
+// LoadProxyConfig 读取 http_proxy_config（feed 抓取等所有外部请求的全局出站代理地址）。
+func LoadProxyConfig() (map[string]interface{}, *models.AISettings, error) {
+	return loadConfigByKey(proxyConfigKey)
+}
+
+// SaveProxyConfig 写入 http_proxy_config。
+func SaveProxyConfig(config map[string]interface{}, description string) error {
+	return saveConfigByKey(proxyConfigKey, config, description)
 }
 
 // LoadDailyReportTimeConfig loads the daily_report_time setting from ai_settings.

@@ -84,6 +84,8 @@ var (
 	Ask                    = handler.Ask
 	GetRSSHubSettings      = handler.GetRSSHubSettings
 	SaveRSSHubSettings     = handler.SaveRSSHubSettings
+	GetProxySettings       = handler.GetProxySettings
+	SaveProxySettings      = handler.SaveProxySettings
 )
 
 // ============================================================================

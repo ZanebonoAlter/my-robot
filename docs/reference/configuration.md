@@ -168,6 +168,7 @@ AI 相关配置不存储在文件或环境变量中 — 通过 Web UI 管理并�
 | `firecrawl_config` | Firecrawl 集成设置（启用、API URL、API key、模式、超时、最大内容长度） |
 | `open_notebook_config` | Open Notebook digest 导出设置（启用、base URL、API key、model、目标笔记本、prompt 模式、自动发送日报/周报） |
 | `rsshub_config` | RSSHub 实例配置（订阅源发现用，见下「订阅源发现」节；`rsshub_base_url` 缺省回落 `http://47.110.71.194:1200`） |
+| `http_proxy_config` | 全局出站代理配置（feed 抓取 / Firecrawl / LLM 等所有外部请求；见下「出站代理」节；`http_proxy_url` 空=直连） |
 | `daily_report_time` | 日报生成时刻（HH:MM 格式，默认 `21:00`） |
 | `persistent_topic_match_threshold` | 新 section 锚定已有话题的余弦距离阈值（默认 `0.30`） |
 | `persistent_topic_upgrade_threshold` | candidate 允许人工确认所需、同时为管理 UI 可见门槛的连续命中天数（默认 `3`；不会自动转 active） |
@@ -223,6 +224,18 @@ AI 相关配置不存储在文件或环境变量中 — 通过 Web UI 管理并�
 3. （可选）调整 `window_days`（默认 14）和 `context_layers`（默认 `["week","month","year","all"]`）
 
 管理员无需额外配置；以上操作均可通过 Web UI 完成。
+
+### 出站代理（`http_proxy_config`）
+
+通过设置工作台「出站代理」section（`GET/POST /api/settings/proxy`）配置，存 `ai_settings.http_proxy_config`：
+
+| 字段 | 默认值 | 说明 |
+|------|--------|------|
+| `http_proxy_url` | *(空)* | 全局出站代理地址；feed 抓取、Firecrawl、LLM 等所有外部请求经此转发。支持 `http`/`https`/`socks5`。空=直连 |
+
+- 保存即时生效（`httpclient.SetProxy` 运行时替换全局 transport），重启后由 `cmd/server/main.go` 从该配置注入，无需重设。
+- 与 `HTTP_PROXY`/`HTTPS_PROXY` 环境变量的关系：本配置优先；当 `http_proxy_url` 为空时，`httpclient` 回落 `http.DefaultTransport`，仍遵循标准库 `ProxyFromEnvironment`（即环境变量作兜底）。
+- 实现入口：`internal/platform/httpclient/httpclient.go`（`SetProxy` + 包级 `proxyTransport`）；复用 `aisettings` 通用配置存储，与 RSSHub/Firecrawl 配置同机制。
 
 ### 订阅源发现（Feed Discovery）
 

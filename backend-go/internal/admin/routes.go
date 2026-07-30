@@ -59,5 +59,7 @@ func RegisterRoutes(rg *gin.RouterGroup) {
 	{
 		settings.GET("/rsshub", GetRSSHubSettings)
 		settings.POST("/rsshub", SaveRSSHubSettings)
+		settings.GET("/proxy", GetProxySettings)
+		settings.POST("/proxy", SaveProxySettings)
 	}
 }

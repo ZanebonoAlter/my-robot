@@ -38,3 +38,9 @@ func TestDefaultDailyReportTime(t *testing.T) {
 		t.Errorf("defaultDailyReportTime = %q, want %q", defaultDailyReportTime, "21:00")
 	}
 }
+
+func TestProxyConfigKey(t *testing.T) {
+	if proxyConfigKey != "http_proxy_config" {
+		t.Errorf("proxyConfigKey = %q, want %q", proxyConfigKey, "http_proxy_config")
+	}
+}

@@ -4,12 +4,14 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"go.opentelemetry.io/contrib/instrumentation/github.com/gin-gonic/gin/otelgin"
 	"syntopica-backend/internal/admin"
 	appbootstrap "syntopica-backend/internal/app"
 	"syntopica-backend/internal/dataenrichment"
+	"syntopica-backend/internal/platform/aisettings"
 	"syntopica-backend/internal/platform/config"
 	"syntopica-backend/internal/platform/database"
 	"syntopica-backend/internal/platform/httpclient"
@@ -67,6 +69,16 @@ func main() {
 		traceCfg.InstrumentHTTP = config.AppConfig.Tracing.InstrumentHTTP
 	}
 	httpclient.SetInstrumentation(traceCfg.InstrumentHTTP)
+	// 启动时把已保存的全局出站代理注入 httpclient，使 feed 抓取 / Firecrawl / LLM 等外部请求走代理。
+	if cfg, _, err := aisettings.LoadProxyConfig(); err == nil {
+		if u, ok := cfg["http_proxy_url"].(string); ok {
+			if perr := httpclient.SetProxy(u); perr != nil {
+				logging.Warnf("Invalid saved http_proxy_url %q ignored: %v", u, perr)
+			} else if trimmed := strings.TrimSpace(u); trimmed != "" {
+				logging.Infof("Outbound proxy enabled: %s", trimmed)
+			}
+		}
+	}
 	tp, err := tracing.InitTracerProvider(database.DB, traceCfg)
 	if err != nil {
 		logging.Warnf("Failed to initialize tracing: %v", err)

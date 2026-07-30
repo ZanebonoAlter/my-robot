@@ -12,6 +12,7 @@ import (
 	"syntopica-backend/internal/admin/service"
 	"syntopica-backend/internal/platform/airouter"
 	"syntopica-backend/internal/platform/aisettings"
+	"syntopica-backend/internal/platform/httpclient"
 	"syntopica-backend/internal/platform/logging"
 )
 
@@ -178,6 +179,55 @@ func SaveRSSHubSettings(c *gin.Context) {
 		"rsshub_base_url": strings.TrimSpace(req.RSSHubBaseURL),
 	}
 	if err := aisettings.SaveRSSHubConfig(configJSON, "RSSHub instance configuration"); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true})
+}
+
+// ── proxy settings（全局出站代理）──
+
+// GetProxySettings GET /api/settings/proxy — 读全局出站代理地址（feed 抓取等所有外部请求）。
+func GetProxySettings(c *gin.Context) {
+	proxyURL := ""
+	configured := false
+	if cfg, _, err := aisettings.LoadProxyConfig(); err == nil {
+		if u, ok := cfg["http_proxy_url"].(string); ok {
+			proxyURL = strings.TrimSpace(u)
+			configured = proxyURL != ""
+		}
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data": gin.H{
+			"http_proxy_url": proxyURL,
+			"configured":     configured,
+		},
+	})
+}
+
+// saveProxySettingsRequest 保存全局出站代理地址请求体。
+type saveProxySettingsRequest struct {
+	HTTPProxyURL string `json:"http_proxy_url"`
+}
+
+// SaveProxySettings POST /api/settings/proxy — 写全局出站代理地址并即时生效。
+// 空串=清除代理（恢复直连）。URL 需为 http/https/socks5，非法值返回 400。
+func SaveProxySettings(c *gin.Context) {
+	var req saveProxySettingsRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "Invalid request body"})
+		return
+	}
+	proxyURL := strings.TrimSpace(req.HTTPProxyURL)
+	if err := httpclient.SetProxy(proxyURL); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": err.Error()})
+		return
+	}
+	configJSON := map[string]interface{}{
+		"http_proxy_url": proxyURL,
+	}
+	if err := aisettings.SaveProxyConfig(configJSON, "Global outbound proxy configuration"); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": err.Error()})
 		return
 	}

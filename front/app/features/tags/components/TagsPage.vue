@@ -10,6 +10,8 @@ import BackfillProgress from './BackfillProgress.vue'
 import MatchingConfigDialog from './MatchingConfigDialog.vue'
 import NarrativeGenerateDialog from './NarrativeGenerateDialog.vue'
 import BoardDailyReportTimeline from './BoardDailyReportTimeline.vue'
+import BoardThreadBrowser from './BoardThreadBrowser.vue'
+import TopicDetectiveWall from './TopicDetectiveWall.client.vue'
 import TagMergePreview from './TagMergePreview.vue'
 import BoardListSidebar from './BoardListSidebar.vue'
 import BoardTimelinePanel from './BoardTimelinePanel.vue'
@@ -67,6 +69,14 @@ const {
 
 const { isTagsFirstRun, startTagsTour } = useOnboarding()
 const selectedBoardLabel = computed(() => boards.value.find(board => board.id === selectedBoardId.value)?.label)
+
+// 话题总览 tab：侦探墙全屏入口（BoardThreadBrowser @open-detective-wall 触发）
+const showTopicOverviewWall = ref(false)
+const topicOverviewWallTopicId = ref<number | undefined>(undefined)
+function openTopicOverviewDetectiveWall(topicId?: number) {
+  topicOverviewWallTopicId.value = topicId
+  showTopicOverviewWall.value = true
+}
 
 onMounted(() => {
   if (isTagsFirstRun.value) {
@@ -128,6 +138,9 @@ onMounted(() => {
             <button type="button" class="tags-content-tab" :class="{ 'tags-content-tab--active': contentTab === 'enrichment' }" @click="contentTab = 'enrichment'">
               <Icon icon="mdi:database-plus-outline" width="14" /> 数据增强
             </button>
+            <button type="button" class="tags-content-tab" :class="{ 'tags-content-tab--active': contentTab === 'topic-overview' }" @click="contentTab = 'topic-overview'">
+              <Icon icon="mdi:chart-timeline-variant" width="14" /> 话题总览
+            </button>
           </div>
 
           <BoardCompositionPanel
@@ -151,6 +164,21 @@ onMounted(() => {
             :boards="boards"
             @open-article="openArticlePreview"
             @select-board="handleSelectBoard"
+          />
+
+          <BoardThreadBrowser
+            v-if="contentTab === 'topic-overview'"
+            :board-id="selectedBoardId"
+            @open-article="openArticlePreview"
+            @open-detective-wall="openTopicOverviewDetectiveWall()"
+          />
+
+          <TopicDetectiveWall
+            v-if="showTopicOverviewWall"
+            :board-id="selectedBoardId"
+            :initial-topic-id="topicOverviewWallTopicId"
+            @close="showTopicOverviewWall = false"
+            @open-article="openArticlePreview"
           />
 
           <BoardTimelinePanel

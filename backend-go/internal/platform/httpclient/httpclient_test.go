@@ -2,6 +2,7 @@ package httpclient
 
 import (
 	"net/http"
+	"net/url"
 	"testing"
 	"time"
 
@@ -73,5 +74,86 @@ func TestSetInstrumentation_TogglesGlobally(t *testing.T) {
 	c2 := New()
 	if _, ok := c2.Transport.(*otelhttp.Transport); !ok {
 		t.Fatal("enabled should wrap")
+	}
+}
+
+func mustParseURL(t *testing.T, raw string) *url.URL {
+	t.Helper()
+	u, err := url.Parse(raw)
+	if err != nil {
+		t.Fatalf("parse %q: %v", raw, err)
+	}
+	return u
+}
+
+// TestSetProxy_AppliesToNewClients 验证 SetProxy 后 New 构造的 client 走代理。
+func TestSetProxy_AppliesToNewClients(t *testing.T) {
+	SetInstrumentation(false) // 裸 transport，方便断言 base
+	t.Cleanup(func() {
+		SetProxy("")
+		SetInstrumentation(true)
+	})
+	if err := SetProxy("http://proxy.example.com:8080"); err != nil {
+		t.Fatalf("SetProxy: %v", err)
+	}
+	c := New()
+	tr, ok := c.Transport.(*http.Transport)
+	if !ok {
+		t.Fatalf("expected *http.Transport base, got %T", c.Transport)
+	}
+	got, err := tr.Proxy(&http.Request{URL: mustParseURL(t, "http://target.example.com/")})
+	if err != nil {
+		t.Fatalf("Proxy() error: %v", err)
+	}
+	if got == nil || got.Host != "proxy.example.com:8080" {
+		t.Fatalf("expected proxy host proxy.example.com:8080, got %v", got)
+	}
+}
+
+// TestSetProxy_EmptyClearsProxy 验证空串清除代理（恢复 DefaultTransport）。
+func TestSetProxy_EmptyClearsProxy(t *testing.T) {
+	SetInstrumentation(false)
+	t.Cleanup(func() {
+		SetProxy("")
+		SetInstrumentation(true)
+	})
+	if err := SetProxy("http://proxy.example.com:8080"); err != nil {
+		t.Fatalf("SetProxy: %v", err)
+	}
+	_ = New()
+	if err := SetProxy(""); err != nil {
+		t.Fatalf("SetProxy empty: %v", err)
+	}
+	c := New()
+	if c.Transport != http.DefaultTransport {
+		t.Fatalf("expected http.DefaultTransport after clearing proxy, got %T", c.Transport)
+	}
+}
+
+// TestSetProxy_RejectsUnsupportedScheme 验证非法 scheme 报错且不污染全局状态。
+func TestSetProxy_RejectsUnsupportedScheme(t *testing.T) {
+	t.Cleanup(func() { SetProxy("") })
+	if err := SetProxy("ftp://proxy.example.com:21"); err == nil {
+		t.Fatal("expected error for ftp scheme, got nil")
+	}
+	if currentProxyTransport() != nil {
+		t.Fatal("global proxy transport should remain nil after rejected scheme")
+	}
+}
+
+// TestNew_WithTransportOverridesProxy 验证显式 WithTransport 覆盖全局代理。
+func TestNew_WithTransportOverridesProxy(t *testing.T) {
+	SetInstrumentation(false)
+	t.Cleanup(func() {
+		SetProxy("")
+		SetInstrumentation(true)
+	})
+	if err := SetProxy("http://proxy.example.com:8080"); err != nil {
+		t.Fatalf("SetProxy: %v", err)
+	}
+	custom := &http.Transport{}
+	c := New(WithTransport(custom))
+	if c.Transport != custom {
+		t.Fatalf("expected custom transport to override proxy, got %T", c.Transport)
 	}
 }

@@ -27,6 +27,7 @@ func TestSemanticBoardBackfillAllModeRewritesActiveTags(t *testing.T) {
 	require.NoError(t, db.Create(&models.TopicTagSemanticLabel{TopicTagID: inactive.ID, SemanticLabelID: auxiliary.ID}).Error)
 	require.NoError(t, db.Create(&models.TopicTagBoardLabel{TopicTagID: tagA.ID, SemanticBoardID: replacedBoard.ID, Score: 0.2, MatchReason: "stale"}).Error)
 	require.NoError(t, db.Create(&models.TopicTagBoardLabel{TopicTagID: inactive.ID, SemanticBoardID: replacedBoard.ID, Score: 0.2, MatchReason: "stale"}).Error)
+	upsertMatchSetting(t, db, "semantic_board_match_direct_hit_min_overlap", "1")
 	service := NewSemanticBoardBackfillService(db)
 
 	job, err := service.Enqueue(context.Background(), SemanticBoardBackfillRequest{Mode: SemanticBoardBackfillModeAll})
@@ -52,6 +53,7 @@ func TestSemanticBoardBackfillUnassignedModeSkipsAssignedTags(t *testing.T) {
 	require.NoError(t, db.Create(&models.TopicTagSemanticLabel{TopicTagID: assigned.ID, SemanticLabelID: auxiliary.ID}).Error)
 	require.NoError(t, db.Create(&models.TopicTagSemanticLabel{TopicTagID: unassigned.ID, SemanticLabelID: auxiliary.ID}).Error)
 	require.NoError(t, db.Create(&models.TopicTagBoardLabel{TopicTagID: assigned.ID, SemanticBoardID: board.ID, Score: 0.4, MatchReason: "existing"}).Error)
+	upsertMatchSetting(t, db, "semantic_board_match_direct_hit_min_overlap", "1")
 	service := NewSemanticBoardBackfillService(db)
 
 	job, err := service.Enqueue(context.Background(), SemanticBoardBackfillRequest{Mode: SemanticBoardBackfillModeUnassigned})
@@ -87,6 +89,7 @@ func TestSemanticBoardBackfillBoardModeReprocessesAffectedTags(t *testing.T) {
 	require.NoError(t, db.Create(&models.TopicTagBoardLabel{TopicTagID: existing.ID, SemanticBoardID: targetBoard.ID, Score: 0.4, MatchReason: "stale"}).Error)
 	require.NoError(t, db.Create(&models.TopicTagBoardLabel{TopicTagID: disabledOnly.ID, SemanticBoardID: otherBoard.ID, Score: 0.4, MatchReason: "existing"}).Error)
 	require.NoError(t, db.Create(&models.TopicTagBoardLabel{TopicTagID: unaffected.ID, SemanticBoardID: otherBoard.ID, Score: 0.4, MatchReason: "existing"}).Error)
+	upsertMatchSetting(t, db, "semantic_board_match_direct_hit_min_overlap", "1")
 	service := NewSemanticBoardBackfillService(db)
 
 	job, err := service.Enqueue(context.Background(), SemanticBoardBackfillRequest{Mode: SemanticBoardBackfillModeBoard, BoardID: &targetBoard.ID})
@@ -109,6 +112,7 @@ func TestSemanticBoardBackfillIsIdempotent(t *testing.T) {
 	tag := createMatchTag(t, db, "idempotent")
 	require.NoError(t, db.Create(&models.BoardComposition{BoardID: board.ID, AuxiliaryLabelID: auxiliary.ID}).Error)
 	require.NoError(t, db.Create(&models.TopicTagSemanticLabel{TopicTagID: tag.ID, SemanticLabelID: auxiliary.ID}).Error)
+	upsertMatchSetting(t, db, "semantic_board_match_direct_hit_min_overlap", "1")
 	service := NewSemanticBoardBackfillService(db)
 
 	first, err := service.Enqueue(context.Background(), SemanticBoardBackfillRequest{Mode: SemanticBoardBackfillModeAll})
@@ -178,4 +182,14 @@ func requireTopicTagBoardIDs(t *testing.T, db *gorm.DB, topicTagID uint, expecte
 		actual = append(actual, row.SemanticBoardID)
 	}
 	require.Equal(t, expected, actual)
+}
+
+// upsertMatchSetting 幂等覆盖某条 semantic_board_match_* 配置：迁移已 seed 这些 key，
+// 且 ResetTestData 每个测试前会重建 seed 行，直接 db.Create 会撞 uni_ai_settings_key
+// 唯一约束。用 FirstOrCreate+Assign 做幂等 upsert（存在则改 value，不存在则建）。
+func upsertMatchSetting(t *testing.T, db *gorm.DB, key, value string) {
+	t.Helper()
+	require.NoError(t, db.Where("key = ?", key).
+		Assign(models.AISettings{Value: value}).
+		FirstOrCreate(&models.AISettings{Key: key}).Error)
 }

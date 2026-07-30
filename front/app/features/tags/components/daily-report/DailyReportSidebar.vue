@@ -3,17 +3,26 @@ import { Icon } from '@iconify/vue'
 import { formatMagazineDate, type QualityZone, type TopicGroup } from './dailyReportMagazine'
 import type { DailyReportListItem } from '~/api/dailyReports'
 
+/** 版块切换所需的最小版块信息（结构兼容 SemanticBoard）。 */
+interface BoardOption {
+  id: number
+  label: string
+}
+
 defineProps<{
   zones: QualityZone[]
   activeTopics: TopicGroup[]
   reports: DailyReportListItem[]
   currentIndex: number
+  boards?: BoardOption[]
+  boardId?: number
 }>()
 
 const emit = defineEmits<{
   scrollTo: [target: string]
   selectReport: [index: number]
   openTopicOverview: []
+  selectBoard: [boardId: number]
 }>()
 </script>
 
@@ -54,6 +63,19 @@ const emit = defineEmits<{
       >
         <span>{{ formatMagazineDate(report.period_date) }}</span>
         <Icon v-if="index === currentIndex" icon="mdi:circle-small" width="18" />
+      </button>
+    </section>
+
+    <section v-if="boards && boards.length > 1" class="drm-sidebar__section drm-sidebar__boards">
+      <h2>版块切换</h2>
+      <button
+        v-for="board in boards"
+        :key="board.id"
+        type="button"
+        :class="{ 'is-active': board.id === boardId }"
+        @click="emit('selectBoard', board.id)"
+      >
+        <span>{{ board.label }}</span>
       </button>
     </section>
   </aside>
@@ -151,6 +173,32 @@ const emit = defineEmits<{
 }
 
 .drm-sidebar__archive button.is-active {
+  border-left-color: var(--color-accent);
+  background: color-mix(in srgb, var(--color-accent) 10%, transparent);
+  color: var(--color-accent);
+  font-weight: 700;
+}
+
+.drm-sidebar__boards button {
+  margin-bottom: 0.2rem;
+  padding: 0.5rem 0.75rem;
+  border: 0;
+  border-left: 2px solid transparent;
+  background: var(--color-bg-active);
+  font-family: "Noto Serif SC", serif;
+  font-size: 0.8rem;
+  font-weight: 500;
+  transition: border-color 0.2s ease, background 0.2s ease, color 0.2s ease;
+}
+
+.drm-sidebar__boards button:hover,
+.drm-sidebar__boards button:focus-visible {
+  border-left-color: var(--color-border-strong);
+  background: var(--color-bg-active);
+  color: var(--color-text-primary);
+}
+
+.drm-sidebar__boards button.is-active {
   border-left-color: var(--color-accent);
   background: color-mix(in srgb, var(--color-accent) 10%, transparent);
   color: var(--color-accent);

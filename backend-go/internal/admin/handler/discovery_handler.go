@@ -143,7 +143,8 @@ func Ask(c *gin.Context) {
 
 // ── rsshub settings（design E）──
 
-// GetRSSHubSettings GET /api/settings/rsshub — 读 RSSHub 实例地址（缺省回落 DefaultRSSHubBaseURL）。
+// GetRSSHubSettings GET /api/settings/rsshub — 读 RSSHub 实例地址（缺省回落 DefaultRSSHubBaseURL）
+// 与官方文档基址 rsshub_doc_base（缺省回落 https://docs.rsshub.app，feed-param-options D4）。
 func GetRSSHubSettings(c *gin.Context) {
 	baseURL := service.DefaultRSSHubBaseURL
 	configured := false
@@ -153,22 +154,28 @@ func GetRSSHubSettings(c *gin.Context) {
 			configured = true
 		}
 	}
+	docBase, _ := aisettings.LoadRSSHubDocBaseConfig()
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"data": gin.H{
-			"rsshub_base_url": baseURL,
-			"configured":      configured,
-			"default":         service.DefaultRSSHubBaseURL,
+			"rsshub_base_url":         baseURL,
+			"configured":              configured,
+			"default":                 service.DefaultRSSHubBaseURL,
+			"rsshub_doc_base":         docBase,
+			"rsshub_doc_base_default": aisettings.DefaultRSSHubDocBase(),
 		},
 	})
 }
 
 // saveRSSHubSettingsRequest 保存 RSSHub 实例地址请求体。
+// RSSHubDocBase 为可选字段：非空时一并更新 rsshub_doc_base（feed-param-options D4）。
 type saveRSSHubSettingsRequest struct {
 	RSSHubBaseURL string `json:"rsshub_base_url"`
+	RSSHubDocBase string `json:"rsshub_doc_base"`
 }
 
 // SaveRSSHubSettings POST /api/settings/rsshub — 写 RSSHub 实例地址（空串=恢复默认）。
+// rsshub_doc_base 非空时一并写入（空串=不修改 doc_base）。
 func SaveRSSHubSettings(c *gin.Context) {
 	var req saveRSSHubSettingsRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -181,6 +188,12 @@ func SaveRSSHubSettings(c *gin.Context) {
 	if err := aisettings.SaveRSSHubConfig(configJSON, "RSSHub instance configuration"); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": err.Error()})
 		return
+	}
+	if docBase := strings.TrimSpace(req.RSSHubDocBase); docBase != "" {
+		if err := aisettings.SaveRSSHubDocBaseConfig(docBase); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": err.Error()})
+			return
+		}
 	}
 	c.JSON(http.StatusOK, gin.H{"success": true})
 }

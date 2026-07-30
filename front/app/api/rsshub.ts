@@ -5,6 +5,10 @@ export interface RSSHubStatus {
   rsshub_base_url: string
   configured: boolean
   default: string
+  /** 官方文档基址生效值（feed-param-options D4） */
+  rsshub_doc_base: string
+  /** 官方文档基址默认值 */
+  rsshub_doc_base_default: string
 }
 
 export interface RSSHubConfig {

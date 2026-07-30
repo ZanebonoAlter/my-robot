@@ -6,11 +6,32 @@
  * - 目录自带的 parameters 是原始 JSON（对象或数组），值为中文说明。
  */
 
+/** RSSHub 官方文档基址默认值（feed-param-options D4；服务端配置不可达时兜底）。 */
+export const DEFAULT_RSSHUB_DOC_BASE = 'https://docs.rsshub.app'
+
 export interface RouteParamSpec {
   name: string
   required: boolean
   /** 目录自带的中文参数说明；无说明为空串 */
   description: string
+  /** 可选值：优先字典（manual/scraped 人工维护），无字典时用目录自带 options（RSSHub 官方数据）；都无缺省渲染输入框。绝不 LLM 生成 */
+  options?: Array<{ value: string, label: string }>
+  /** 官方文档链接；未提供 docUrl 入参时缺省 */
+  docUrl?: string
+}
+
+/**
+ * 官方文档链接：{doc_base}/routes/{namespace}#{slug}（design D4）。
+ * slug 首版规则：path 去前导 /，去掉参数段（:param / 含 {} / 含 ? 的段），剩余段以 - 连接。
+ * TODO: RSSHub 文档锚点精确规则待实测校准（design Open Questions 1），后续可能需按实际锚点调整。
+ */
+export function buildRouteDocUrl(docBase: string, namespace: string, path: string): string {
+  const base = (docBase || DEFAULT_RSSHUB_DOC_BASE).replace(/\/+$/, '')
+  const slug = path
+    .split('/')
+    .filter(seg => seg && !seg.startsWith(':') && !seg.includes('{') && !seg.includes('?'))
+    .join('-')
+  return `${base}/routes/${namespace}#${slug}`
 }
 
 /** 解析 path 中的参数段：`:uid` → 必填；`:category{.+}?` → 可选。 */
@@ -74,10 +95,82 @@ export function parseParameterDescriptions(raw: string): Record<string, string> 
   return out
 }
 
-/** 合并 path 参数段与目录说明，产出填参表单的字段列表（必填在前）。 */
-export function buildRouteParamSpecs(path: string, rawParameters: string): RouteParamSpec[] {
+/**
+ * 解析目录自带 parameters 里的 options 数组（部分 RSSHub 路由目录已含枚举值，如 ifanr/jrj）。
+ * 形态：对象 `{ name: { options: [{value,label}], description } }` 或数组 `[{name, options}]`。
+ * 与字典互补：字典优先，目录 options 兜底（两者都是真实数据，绝不 LLM 生成）。
+ * 非法 / 无 options 字段 / 空数组 → 该参数不出现在结果。
+ */
+export function parseParameterOptions(raw: string): Record<string, Array<{ value: string, label: string }>> {
+  if (!raw) return {}
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(raw)
+  } catch {
+    return {}
+  }
+  const out: Record<string, Array<{ value: string, label: string }>> = {}
+  const collect = (name: string, val: unknown) => {
+    if (!val || typeof val !== 'object') return
+    const rec = val as Record<string, unknown>
+    const opts = rec.options
+    if (!Array.isArray(opts)) return
+    const list: Array<{ value: string, label: string }> = []
+    for (const o of opts) {
+      if (!o || typeof o !== 'object') continue
+      const r = o as Record<string, unknown>
+      const value = typeof r.value === 'string' ? r.value : ''
+      if (!value) continue
+      const label = typeof r.label === 'string' ? r.label : value
+      list.push({ value, label })
+    }
+    if (list.length > 0) out[name] = list
+  }
+  if (Array.isArray(parsed)) {
+    for (const item of parsed) {
+      if (item && typeof item === 'object') {
+        const rec = item as Record<string, unknown>
+        if (typeof rec.name === 'string' && rec.name) collect(rec.name, rec)
+      }
+    }
+    return out
+  }
+  if (parsed && typeof parsed === 'object') {
+    for (const [key, val] of Object.entries(parsed as Record<string, unknown>)) {
+      collect(key, val)
+    }
+  }
+  return out
+}
+
+/**
+ * 合并 path 参数段与目录说明，产出填参表单的字段列表（必填在前）。
+ * options 来源优先级：字典（manual/scraped）> 目录自带 options；都无则缺省。
+ * 向后兼容：无字典且目录无 options 时输出退化为 { name, required, description }。
+ */
+export function buildRouteParamSpecs(
+  path: string,
+  rawParameters: string,
+  paramOptions?: Record<string, Array<{ value: string, label: string, source?: string }>>,
+  docUrl?: string,
+): RouteParamSpec[] {
   const descriptions = parseParameterDescriptions(rawParameters)
+  const catalogOptions = parseParameterOptions(rawParameters)
   return parsePathParams(path)
-    .map(p => ({ ...p, description: descriptions[p.name] ?? '' }))
+    .map((p) => {
+      const spec: RouteParamSpec = { ...p, description: descriptions[p.name] ?? '' }
+      // 字典优先（manual/scraped 人工维护），无字典用目录自带 options（RSSHub 官方数据）；都无则缺省渲染输入框
+      const dictOpts = paramOptions?.[p.name]
+      let opts: Array<{ value: string, label: string }> | undefined
+      if (dictOpts && dictOpts.length > 0) {
+        opts = dictOpts.map(o => ({ value: o.value, label: o.label }))
+      } else {
+        const catOpts = catalogOptions[p.name]
+        if (catOpts && catOpts.length > 0) opts = catOpts
+      }
+      if (opts) spec.options = opts
+      if (docUrl) spec.docUrl = docUrl
+      return spec
+    })
     .sort((a, b) => Number(b.required) - Number(a.required))
 }

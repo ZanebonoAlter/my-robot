@@ -62,4 +62,13 @@ func RegisterRoutes(rg *gin.RouterGroup) {
 		settings.GET("/proxy", GetProxySettings)
 		settings.POST("/proxy", SaveProxySettings)
 	}
+
+	// 路由参数可选值字典 CRUD（feed-param-options）
+	routeParamOptions := rg.Group("/admin/route-param-options")
+	{
+		routeParamOptions.GET("", ListRouteParamOptions)
+		routeParamOptions.POST("", CreateRouteParamOption)
+		routeParamOptions.PUT("/:id", UpdateRouteParamOption)
+		routeParamOptions.DELETE("/:id", DeleteRouteParamOption)
+	}
 }

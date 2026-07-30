@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"regexp"
 	"strings"
 
@@ -21,6 +22,11 @@ const dailyReportTimeKey = "daily_report_time"
 const defaultDailyReportTime = "21:00"
 const boardUpgradeSuggestTimeKey = "semantic_board_upgrade_suggest_time"
 const defaultBoardUpgradeSuggestTime = "06:30"
+const rsshubDocBaseKey = "rsshub_doc_base"
+const defaultRSSHubDocBase = "https://docs.rsshub.app"
+
+// DefaultRSSHubDocBase 返回 rsshub_doc_base 的默认值（design D4），供 handler 透传给前端。
+func DefaultRSSHubDocBase() string { return defaultRSSHubDocBase }
 
 var hhmmPattern = regexp.MustCompile(`^([01][0-9]|2[0-3]):([0-5][0-9])$`)
 
@@ -200,5 +206,62 @@ func SaveBoardUpgradeSuggestTimeConfig(value string) error {
 		Key:         boardUpgradeSuggestTimeKey,
 		Value:       value,
 		Description: "版块升级建议生成时刻（HH:MM）",
+	}).Error
+}
+
+// isValidHTTPURL reports whether s is an http/https URL with a non-empty host.
+// Used to guard rsshub_doc_base against junk / non-reachable values.
+func isValidHTTPURL(s string) bool {
+	parsed, err := url.Parse(s)
+	if err != nil {
+		return false
+	}
+	return (parsed.Scheme == "http" || parsed.Scheme == "https") && parsed.Host != ""
+}
+
+// LoadRSSHubDocBaseConfig loads the rsshub_doc_base setting from ai_settings.
+// Returns the doc base URL. If the key is missing or invalid (not an http/https
+// URL), returns the default "https://docs.rsshub.app" (design D4).
+func LoadRSSHubDocBaseConfig() (string, error) {
+	var settings models.AISettings
+	err := database.DB.Where("key = ?", rsshubDocBaseKey).First(&settings).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return defaultRSSHubDocBase, nil
+		}
+		return "", err
+	}
+
+	value := strings.TrimSpace(settings.Value)
+	if !isValidHTTPURL(value) {
+		logging.Warnf("Invalid rsshub_doc_base value %q, falling back to default %s", value, defaultRSSHubDocBase)
+		return defaultRSSHubDocBase, nil
+	}
+	return value, nil
+}
+
+// SaveRSSHubDocBaseConfig saves the rsshub_doc_base setting. Validates that
+// value is an http/https URL with a non-empty host. Returns error for invalid
+// values.
+func SaveRSSHubDocBaseConfig(value string) error {
+	value = strings.TrimSpace(value)
+	if !isValidHTTPURL(value) {
+		return fmt.Errorf("invalid rsshub_doc_base value %q: expected http/https URL", value)
+	}
+
+	var settings models.AISettings
+	dbErr := database.DB.Where("key = ?", rsshubDocBaseKey).First(&settings).Error
+	if dbErr == nil {
+		settings.Value = value
+		return database.DB.Save(&settings).Error
+	}
+	if !errors.Is(dbErr, gorm.ErrRecordNotFound) {
+		return dbErr
+	}
+
+	return database.DB.Create(&models.AISettings{
+		Key:         rsshubDocBaseKey,
+		Value:       value,
+		Description: "RSSHub 官方文档基址（用于生成参数文档链接）",
 	}).Error
 }

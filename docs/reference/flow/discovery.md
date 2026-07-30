@@ -63,6 +63,20 @@ sequenceDiagram
 
 问答 `POST /discovery/ask`：问题 embedding → 粗筛 → 精排即时返回（同时 `source=qa` 落推荐表）+ 调种子写入（兴趣表达落 `source=seed`）。
 
+### 参数可选值字典与卡片填参分流
+
+需填参路由（`requires_parameters=true`）推荐时，卡片填参表单按「参数可选值字典」分流渲染（feed-param-options）：
+
+```text
+recommendation 响应 route.param_options（按 param_name 分组的可选值，一次拿全，不二次请求）
+  ↓ 前端 buildRouteParamSpecs(path, parameters, paramOptions, docUrl)
+  ↓ 每个参数 spec：有 options → 下拉点选；无 options → 裸输入框兜底任意值
+  ↓ 表单底部统一「官方文档」链接（docUrl = {doc_base}/routes/{namespace}#{slug}）
+accept：选定值/输入值走原 accept parameters 路径（直订/填参验证不变）
+```
+
+字典来源铁律：可选值**只来自人工录入（`manual`）或文档抓取（`scraped`）**，LLM 绝不生成参数值（LLM 边界 = 仅推荐路由）。首版人工维护高频路由；冷门/缺数据路由退化为裸输入框 + 官方文档链接，不阻塞订阅。
+
 ## 业务约束与不变量
 
 > 本节同时是 `scripts/doc-impact.sh context` 的数据源——改 `internal/admin/`（偏好画像 / 发现 / 目录同步）代码前会被自动 dump，必读。
@@ -79,15 +93,19 @@ sequenceDiagram
 10. **问答推荐恒落全局桶（board_id=NULL）**：`Ask` 问答推荐的候选落库时 `board_id=NULL`（与 manual_refresh 的版块桶推荐仅在全局桶层面共享幂等池）。已知限制非 bug——避免问答与版块桶 hash 维度错位。问答的**种子写入**仍按阈值匹配版块（见约束 2），两者独立。
 11. **RSSHub 目录 content_hash diff + gone 标记**：同步按 `content_hash`（namespace+path+name+description+parameters 的 hash）diff——新增/变更入库，消失的标 `status=gone`（不物理删除，保留供历史推荐回看）。`rsshub_base_url` 从 `ai_settings.rsshub_config` 读（缺省回落 `DefaultRSSHubBaseURL=http://47.110.71.194:1200`），实例不可达仅记日志保留旧目录（松耦合，失败不阻塞兄弟 job）。
 12. **推荐精排独立 capability route（feed_discovery）**：精排 LLM 走 `airouter` 独立 `CapabilityFeedDiscovery`（并发 2，手动刷新/问答低频突发），**不与 `CapabilitySummary` 共用**，便于分清用量与单独配模型；问答与路由 embedding 的 embedding 调用仍用通用 `CapabilityEmbedding`。所有 LLM/embedding 调用经 airouter + 写 `AICallLog`（operation：`discovery.recommendation_rerank` / `discovery.ask` / `discovery.route_embedding`），见 [`standard/backend/ai-logging.md`](../standard/backend/ai-logging.md)。
+13. **参数可选值只来自真实数据（LLM 禁区）**：`route_param_options` 表 `source` ∈ {`manual`, `scraped`}，**MUST NOT 为 `llm`**（service 层 Create/Update 硬拒）。LLM 在发现链路职责仅限推荐路由（向量粗筛 + 精排），参数可选值由人工/抓取提供真实枚举。**RSSHub 目录 `parameters` 自带的 `options` 数组也是真实数据源**（部分路由如 ifanr/jrj 已含枚举值），前端可直接消费，不违背 LLM 禁令。改 `source` 取值范围属业务语义变更。
+14. **无任何 options 源才退化为输入框（不阻塞订阅）**：推荐卡片参数区按 options 分流——有可选值 → 下拉点选；无 → 裸文本输入框兜底任意值。**options 来源优先级：字典（`param_options`，manual/scraped）> 目录自带 options**（RSSHub 目录 `parameters` 枚举值）；两者都无时缺省。`buildRouteParamSpecs` 未传 `paramOptions` 且目录无该参数 options 时退化为 `{name,required,description}`（向后兼容）。**无 options 不能卡死订阅**，冷门路由靠输入框 + 官方文档链接兜底。`recommendation` 响应 `param_options` 必为非 nil map（无字典数据时为 `{}`，JSON 序列化空对象，向后兼容；目录 options 不进 `param_options`，由前端单独解析目录）。
+15. **官方文档链接 doc_base 可配（应对站点访问受限）**：`docUrl = {doc_base}/routes/{namespace}#{slug}`，`doc_base` 存 `ai_settings.rsshub_doc_base`（经 `/api/settings/rsshub` 暴露，缺省 `https://docs.rsshub.app`）。官方文档站国内可能 `ERR_CONNECTION_RESET`，`doc_base` 可配换镜像。slug 基于 path 推导（首版去参数段，锚点精确规则待实测校准）。前端 `DiscoveryPanel` 初始化拉一次 `doc_base` 注入卡片，拉取失败兜底默认常量保证链接始终出现。
 
 ## 代码入口
 
 - **后端偏好画像（admin 域）**：`backend-go/internal/admin/service/preference_profile_service.go`（`RecomputeAll` D1 权重/衰减/分桶/幂等 + `WriteSeed` D7/A 加权合并 + `GetProfile`）、`backend-go/internal/admin/handler/preference_profile_handler.go`、`backend-go/internal/admin/scheduler/job_preference_profile_update.go`、路由 `/api/preference-profile` + `/recompute`。
 - **后端 RSSHub 目录（admin 域）**：`backend-go/internal/admin/service/catalog_sync_service.go`（`SyncAll` /api/namespace + content_hash diff + 参数标记 + gone + `GetStatus`）、`catalog_extras.go`（`CheckAvailability` D4 异步限流 + `EmbedPendingRoutes` 路由向量）、`rsshub_config.go`（`resolveRSSHubBaseURL` 读 `rsshub_config`）、`backend-go/internal/admin/scheduler/job_rsshub_catalog_sync.go`、路由 `/api/discovery/catalog/{sync,status}`。
 - **后端订阅源发现（admin 域）**：`backend-go/internal/admin/service/recommendation_service.go`（粗筛 pgvector `<=>` + route_id 状态机去重 + feeds.url/冷却 + 精排 LLM + accept/dismiss 状态机 + `Ask` 问答 + 种子写入）、`discovery_helpers.go`（`articleBehaviorLevel`/`timeDecay`/`normalizeVector`/`mergeSeedVectors`/`ComputeRecommendationHash`/`ParseRouteParameters` + 默认常量）、`backend-go/internal/admin/handler/discovery_handler.go`、路由 `/api/discovery/recommendations{,/:id/accept,/:id/dismiss,/refresh}` + `/api/discovery/ask`。
-- **后端 RSSHub 设置**：`backend-go/internal/platform/aisettings/config_store.go`（`LoadRSSHubConfig`/`SaveRSSHubConfig`，key=`rsshub_config`）、路由 `/api/settings/rsshub`（GET/POST）。
-- **数据模型**：`backend-go/internal/models/discovery.go`（`PreferenceVector` / `RSSHubRoute` / `RouteEmbedding` / `FeedRecommendation`，pgvector 列沿用 `topic_tag_embeddings` 写法）。
-- **前端**：`front/app/features/discovery/`（`useDiscovery` + `DiscoveryPanel` + `DiscoveryCard`）、`front/app/pages/discovery.vue`、`front/app/api/{discovery,preferenceProfile,rsshub}.ts`、`front/app/stores/discovery.ts`、`front/app/utils/routeParams.ts`、`front/app/composables/useRsshubConfig.ts`、`front/app/features/settings/components/{SettingsSectionPreferences,SettingsSectionRsshub}.vue`（兴趣画像 + RSSHub 实例配置）、`front/app/features/settings/composables/usePreferenceProfile.ts`、feeds 侧边栏「发现订阅源」入口（`AppSidebarView.vue`）。
+- **后端 RSSHub 设置**：`backend-go/internal/platform/aisettings/config_store.go`（`LoadRSSHubConfig`/`SaveRSSHubConfig`，key=`rsshub_config`；`LoadRSSHubDocBaseConfig`/`SaveRSSHubDocBaseConfig`，key=`rsshub_doc_base`，缺省 `https://docs.rsshub.app`）、路由 `/api/settings/rsshub`（GET/POST，响应附 `rsshub_doc_base` + `rsshub_doc_base_default`）。
+- **后端参数可选值字典（admin 域）**：`backend-go/internal/admin/service/route_param_option_service.go`（`ListByRouteIDs` 批量 IN 查询 + `GroupByRouteAndParam` 按 param_name 分组 + CRUD + source 校验拒 `llm`）、`recommendation_service.go` 的 `attachParamOptions`（一次 IN 注入 `param_options`，禁 N+1，空 map 兜底 `{}`）、`backend-go/internal/admin/handler/route_param_option_handler.go`（字典 CRUD）、路由 `/api/admin/route-param-options`（GET/POST/PUT/DELETE）。
+- **数据模型**：`backend-go/internal/models/discovery.go`（`PreferenceVector` / `RSSHubRoute` / `RouteEmbedding` / `FeedRecommendation` / `RouteParamOption`（参数可选值字典，UNIQUE(route_id,param_name,value)），pgvector 列沿用 `topic_tag_embeddings` 写法）。
+- **前端**：`front/app/features/discovery/`（`useDiscovery` + `DiscoveryPanel` + `DiscoveryCard`）、`front/app/pages/discovery.vue`、`front/app/api/{discovery,preferenceProfile,rsshub}.ts`、`front/app/stores/discovery.ts`、`front/app/utils/routeParams.ts`（`buildRouteParamSpecs` 扩展 `options?`/`docUrl?` + `buildRouteDocUrl` + `DEFAULT_RSSHUB_DOC_BASE`）、`DiscoveryCard.vue`（`spec.options` 非空 → `<select>` 点选，否则 `AppInput` 兜底；表单底部「官方文档」链接）、`DiscoveryPanel.vue`（`onMounted` 拉 `/api/settings/rsshub` 取 `rsshub_doc_base` 注入卡片）、`front/app/composables/useRsshubConfig.ts`、`front/app/features/settings/components/{SettingsSectionPreferences,SettingsSectionRsshub}.vue`（兴趣画像 + RSSHub 实例配置）、`front/app/features/settings/composables/usePreferenceProfile.ts`、feeds 侧边栏「发现订阅源」入口（`AppSidebarView.vue`）。
 - 应用装配：`backend-go/internal/app/router.go`、`backend-go/internal/app/runtime.go`（注册两新 scheduler）。
 
 ## 变更溯源

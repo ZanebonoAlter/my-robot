@@ -11,6 +11,13 @@ export type RecommendationStatus = 'pending' | 'accepted' | 'dismissed'
 /** 推荐来源：手动刷新 | 问答；二者共享幂等池与 dismiss 冷却池 */
 export type RecommendationSource = 'manual_refresh' | 'qa'
 
+/** 参数可选值字典条目（feed-param-options）。source 仅为 manual/scraped，绝不由 LLM 生成。 */
+export interface RouteParamOption {
+  value: string
+  label: string
+  source: string
+}
+
 /** 推荐卡片（GET /api/discovery/recommendations、POST /api/discovery/ask 的单条） */
 export interface DiscoveryRecommendation {
   id: string
@@ -32,6 +39,8 @@ export interface DiscoveryRecommendation {
   requiresParameters: boolean
   /** 目录自带的参数说明（原始 JSON 字符串，对象或数组），由 utils/routeParams 解析 */
   parameters: string
+  /** 参数可选值字典（按 param_name 分组，只来自 manual/scraped 真实数据）；无字典数据为空对象 */
+  paramOptions: Record<string, RouteParamOption[]>
   createdAt: string
 }
 

@@ -31,9 +31,10 @@ const (
 
 // RecommendationService 实现推荐生成、状态机与问答。
 type RecommendationService struct {
-	db      *gorm.DB
-	router  *airouter.Router // 精排 LLM + 问答 embedding；nil 时精排直出粗筛、问答不可用
-	prefSvc *PreferenceProfileService
+	db        *gorm.DB
+	router    *airouter.Router // 精排 LLM + 问答 embedding；nil 时精排直出粗筛、问答不可用
+	prefSvc   *PreferenceProfileService
+	paramOpts *RouteParamOptionService // 路由参数可选值字典（注入 recommendation 响应）
 }
 
 // NewRecommendationService 构造。prefSvc 为 nil 时内部按需创建（用于问答种子写入）。
@@ -41,7 +42,7 @@ func NewRecommendationService(db *gorm.DB, router *airouter.Router, prefSvc *Pre
 	if prefSvc == nil {
 		prefSvc = NewPreferenceProfileService(db)
 	}
-	return &RecommendationService{db: db, router: router, prefSvc: prefSvc}
+	return &RecommendationService{db: db, router: router, prefSvc: prefSvc, paramOpts: NewRouteParamOptionService(db)}
 }
 
 // RefreshSummary 描述一轮推荐刷新的产出。
@@ -336,6 +337,9 @@ type RecommendationCard struct {
 	Parameters         string `json:"parameters"`
 	RouteStatus        string `json:"route_status"`
 	BoardLabel         string `json:"board_label"`
+	// ParamOptions 按参数名分组的可选值字典（feed-param-options D7）。必为非 nil map：
+	// 无字典数据时序列化为 {}（向后兼容），永不为 null。
+	ParamOptions map[string][]ParamOption `json:"param_options"`
 }
 
 // GetRecommendations 返回推荐卡片列表（默认 pending）。
@@ -372,7 +376,36 @@ func (s *RecommendationService) GetRecommendations(ctx context.Context, status s
 		}
 		cards = append(cards, card)
 	}
+	s.attachParamOptions(ctx, cards)
 	return cards, nil
+}
+
+// attachParamOptions 批量注入 param_options 到卡片（一次 IN 查询，禁 N+1，design T3）。
+// 每张卡 ParamOptions 必为非 nil map：无字典数据时为空 map（JSON 序列化为 {}，向后兼容）。
+func (s *RecommendationService) attachParamOptions(ctx context.Context, cards []RecommendationCard) {
+	for i := range cards {
+		cards[i].ParamOptions = map[string][]ParamOption{} // 兜底空 map
+	}
+	if len(cards) == 0 {
+		return
+	}
+	ids := make([]uint, 0, len(cards))
+	for _, c := range cards {
+		if c.RouteID != 0 {
+			ids = append(ids, c.RouteID)
+		}
+	}
+	opts, err := s.paramOpts.ListByRouteIDs(ctx, ids)
+	if err != nil {
+		logging.Warnf("attachParamOptions: load route param options failed: %v", err)
+		return // 查询失败时保留兜底空 map，不破坏响应
+	}
+	grouped := GroupByRouteAndParam(opts)
+	for i := range cards {
+		if inner, ok := grouped[cards[i].RouteID]; ok {
+			cards[i].ParamOptions = inner
+		}
+	}
 }
 
 // AcceptRecommendation 接受推荐：usable_directly 直订；requires_parameters 填参拼 URL 订阅。
@@ -539,6 +572,7 @@ func (s *RecommendationService) cardsFromRanked(ctx context.Context, ranked []ra
 			},
 		})
 	}
+	s.attachParamOptions(ctx, cards)
 	return cards, nil
 }
 

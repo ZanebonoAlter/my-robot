@@ -89,6 +89,7 @@ func RunAutoMigrate(db *gorm.DB) error {
 		// preference-vector-feed-discovery: 偏好向量 / RSSHub 路由目录 / 订阅源推荐
 		&models.PreferenceVector{},
 		&models.RSSHubRoute{},
+		&models.RouteParamOption{},
 		&models.RouteEmbedding{},
 		&models.FeedRecommendation{},
 		&models.FirecrawlJob{},

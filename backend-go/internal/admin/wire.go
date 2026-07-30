@@ -88,6 +88,14 @@ var (
 	SaveProxySettings      = handler.SaveProxySettings
 )
 
+// Route param option dictionary handlers (feed-param-options)
+var (
+	ListRouteParamOptions  = handler.ListRouteParamOptions
+	CreateRouteParamOption = handler.CreateRouteParamOption
+	UpdateRouteParamOption = handler.UpdateRouteParamOption
+	DeleteRouteParamOption = handler.DeleteRouteParamOption
+)
+
 // ============================================================================
 // Scheduler re-exports (types and constructors used in internal/app/runtime.go)
 // ============================================================================

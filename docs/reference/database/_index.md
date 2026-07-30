@@ -12,7 +12,7 @@ Syntopica 数据库全景概览与索引/约束权威清单。
 
 | 指标 | 值 | 说明 |
 | ------ | ----- | ------ |
-| 真实业务表数 | **46** | 33 Core + 5 DataEnrichment + 7 TopicGraph 日报域 + 1 Tracing（见下方清单，不含 `schema_migrations`） |
+| 真实业务表数 | **47** | 34 Core + 5 DataEnrichment + 7 TopicGraph 日报域 + 1 Tracing（见下方清单，不含 `schema_migrations`） |
 | DB 级 FK 约束 | **1** | 仅 `topic_tags_merged_into_id_fkey`（ON DELETE CASCADE，迁移 `20260601_0001` 重建）。GORM 关闭了外键迁移（`DisableForeignKeyConstraintWhenMigrating: true`），且该迁移主动 drop 了历史上的全部 `fk_*`。其余表间关系均为 **GORM 逻辑关联，DB 层不强制**。 |
 | CHECK 约束 | **3** | `chk_board_persistent_topics_status` / `chk_board_persistent_topics_source` / `chk_board_topic_watches_status`（见下） |
 | 业务域 | **7** | Core 文章流、Topic Tags 图谱、Semantic Labels/Board、AI Infrastructure、Narrative 叙事、Daily Report 日报域、DataEnrichment 数据增强 |
@@ -26,7 +26,7 @@ Syntopica 数据库全景概览与索引/约束权威清单。
 ## 真实表清单（43 张，按代码权威对齐）
 
 **Core（`migrator.go` allModels，33 张）**：
-`categories` `feeds` `articles` `topic_tags` `semantic_labels` `topic_tag_semantic_labels` `topic_tag_board_labels` `board_composition` `board_upgrade_suggestions` `topic_tag_embeddings` `topic_tag_analyses` `topic_analysis_cursors` `article_topic_tags` `tag_merge_suggestions` `topic_tag_relations` `scheduler_tasks` `ai_settings` `embedding_config` `embedding_queues` `merge_reembedding_queues` `ai_providers` `ai_routes` `ai_route_providers` `ai_call_logs` `reading_behaviors` `firecrawl_jobs` `tag_jobs` `narrative_summaries` `narrative_boards` `preference_vectors` `rsshub_routes` `route_embeddings` `feed_recommendations`
+`categories` `feeds` `articles` `topic_tags` `semantic_labels` `topic_tag_semantic_labels` `topic_tag_board_labels` `board_composition` `board_upgrade_suggestions` `topic_tag_embeddings` `topic_tag_analyses` `topic_analysis_cursors` `article_topic_tags` `tag_merge_suggestions` `topic_tag_relations` `scheduler_tasks` `ai_settings` `embedding_config` `embedding_queues` `merge_reembedding_queues` `ai_providers` `ai_routes` `ai_route_providers` `ai_call_logs` `reading_behaviors` `firecrawl_jobs` `tag_jobs` `narrative_summaries` `narrative_boards` `preference_vectors` `rsshub_routes` `route_embeddings` `feed_recommendations` `route_param_options`
 
 > 旧 `user_preferences` 表已删除（preference-vector-feed-discovery，偏好转向向量画像，迁移 `20260725_0001` DROP）。
 
@@ -124,6 +124,7 @@ Syntopica 数据库全景概览与索引/约束权威清单。
 | `rsshub_routes` | `idx_rsshub_routes_ns_path(namespace, path)` **UNIQUE** [gorm]；单列 [gorm]：`content_hash`、`status` |
 | `route_embeddings` | `idx_route_embeddings_route(route_id)` **UNIQUE** [gorm]；单列 [gorm]：`text_hash`；逻辑关联 `rsshub_routes`(route_id, OnDelete CASCADE)；向量列 `embedding vector` |
 | `feed_recommendations` | `idx_feed_recommendations_hash(recommendation_hash)` **UNIQUE** [gorm]；复合 `idx_feed_rec_status(status, score)` [gorm]；单列 [gorm]：`route_id`、`board_id`、`accepted_feed_id`；逻辑关联 `rsshub_routes`(route_id) / `semantic_labels`(board_id) / `feeds`(accepted_feed_id) |
+| `route_param_options` | `idx_route_param_option_uniq(route_id, param_name, value)` **UNIQUE** [gorm]；单列 [gorm]：`route_id`；逻辑关联 `rsshub_routes`(route_id, OnDelete CASCADE) |
 
 > `recommendation_hash = hash(route_id + board_id)`，**不含 source**，qa 与 manual_refresh 共享幂等池与 dismiss 冷却池（见 `flow/discovery.md`）。
 
@@ -199,6 +200,11 @@ Syntopica 数据库全景概览与索引/约束权威清单。
 ---
 
 ## 更新日志
+
+### 2026-07-30
+
+- 新增 `route_param_options` 表（feed-param-options）：RSSHub 路由参数可选值字典，UNIQUE(route_id,param_name,value)，`source` ∈ {`manual`,`scraped`}（拒 `llm`，LLM 不生成参数值铁律）（Core 33→34，总数 46→**47**）
+- 偏好/发现域索引节补 `route_param_options` 复合唯一索引 + 逻辑关联 `rsshub_routes`(OnDelete CASCADE)
 
 ### 2026-07-25
 

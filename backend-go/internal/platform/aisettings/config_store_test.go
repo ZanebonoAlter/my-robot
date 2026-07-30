@@ -44,3 +44,35 @@ func TestProxyConfigKey(t *testing.T) {
 		t.Errorf("proxyConfigKey = %q, want %q", proxyConfigKey, "http_proxy_config")
 	}
 }
+
+func TestDefaultRSSHubDocBase(t *testing.T) {
+	if defaultRSSHubDocBase != "https://docs.rsshub.app" {
+		t.Errorf("defaultRSSHubDocBase = %q, want %q", defaultRSSHubDocBase, "https://docs.rsshub.app")
+	}
+	if rsshubDocBaseKey != "rsshub_doc_base" {
+		t.Errorf("rsshubDocBaseKey = %q, want %q", rsshubDocBaseKey, "rsshub_doc_base")
+	}
+}
+
+func TestIsValidHTTPURL(t *testing.T) {
+	tests := []struct {
+		input string
+		valid bool
+	}{
+		{"https://docs.rsshub.app", true},
+		{"http://example.com", true},
+		{"https://docs.rsshub.app/routes", true},
+		{"ftp://example.com", false},
+		{"example.com", false},
+		{"", false},
+		{"not a url", false},
+		{"javascript:alert(1)", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			if got := isValidHTTPURL(tt.input); got != tt.valid {
+				t.Errorf("isValidHTTPURL(%q) = %v, want %v", tt.input, got, tt.valid)
+			}
+		})
+	}
+}

@@ -8,7 +8,7 @@ Agent guide for coding assistants working in `Syntopica` (`D:\project\my-robot`)
 - Frontend API: `http://localhost:5000/api`; WebSocket: `ws://localhost:5000/ws`.
 - PostgreSQL + pgvector for persistence; Redis optional for job queues.
 - 和用户沟通使用中文，开发环境 Windows, 返回的回答尽量用大白话，接地气，能让用户理解。
-- 使用 openspec 编写任务时， 必须遵循 `docs/reference/开发执行规范.md`
+- **所有改动默认走 openspec**（代码/功能/接口/数据模型必须先开 change）；豁免清单与编排见 `docs/reference/开发执行规范.md` §0.6「准入总则」
 
 ## 开发环境 (Development Environment)
 

@@ -264,20 +264,6 @@ onUnmounted(() => {
             </button>
           </nav>
 
-          <nav v-if="boards.length > 1" class="drm-board-switcher" aria-label="版块切换">
-            <button
-              v-for="board in boards"
-              :key="board.id"
-              type="button"
-              class="drm-board-chip"
-              :class="{ 'drm-board-chip--active': board.id === boardId }"
-              :disabled="animating"
-              @click="handleSwitchBoard(board.id)"
-            >
-              {{ board.label }}
-            </button>
-          </nav>
-
           <div v-if="reader.detailLoading.value !== null" class="drm-reader__loading" aria-live="polite">
             <span v-for="index in 3" :key="index" />
           </div>
@@ -300,8 +286,11 @@ onUnmounted(() => {
                   :active-topics="activeTopics"
                   :reports="reader.reports.value"
                   :current-index="reader.currentDayIndex.value"
+                  :boards="boards"
+                  :board-id="boardId"
                   @scroll-to="scrollTo"
                   @select-report="selectReportPeel"
+                  @select-board="handleSwitchBoard"
                   @open-topic-overview="showThreadBrowser = true; closeReader()"
                 />
                 <main class="drm-content">
@@ -559,52 +548,6 @@ onUnmounted(() => {
   width: 2.5rem;
   margin-left: 0.5rem;
   border-left: 1px solid var(--color-border-medium) !important;
-}
-
-.drm-board-switcher {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 0.4rem;
-  padding: 0.5rem clamp(1rem, 4vw, 4rem);
-  border-bottom: 1px solid var(--color-border-subtle);
-  background: var(--color-bg-elevated);
-}
-
-.drm-board-chip {
-  max-width: 12rem;
-  padding: 0.3rem 0.7rem;
-  border: 1px solid var(--color-border-medium);
-  border-radius: 999px;
-  background: transparent;
-  color: var(--color-text-secondary);
-  font-size: 0.7rem;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  cursor: pointer;
-  transition: all 0.12s ease;
-}
-
-.drm-board-chip:hover:not(:disabled) {
-  border-color: var(--color-border-strong);
-  color: var(--color-text-primary);
-}
-
-.drm-board-chip:focus-visible {
-  outline: 2px solid var(--color-input-focus);
-  outline-offset: 2px;
-}
-
-.drm-board-chip--active {
-  border-color: transparent;
-  background: var(--color-accent);
-  color: var(--color-bg-base);
-}
-
-.drm-board-chip:disabled {
-  opacity: 0.5;
-  cursor: default;
 }
 
 .drm-peel-host {

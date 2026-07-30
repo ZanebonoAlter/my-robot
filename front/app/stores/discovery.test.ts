@@ -53,6 +53,7 @@ function createCard(overrides: Partial<DiscoveryRecommendation> = {}): Discovery
     usableDirectly: false,
     requiresParameters: true,
     parameters: '{"uid":"用户 id"}',
+    paramOptions: {},
     createdAt: '2026-07-25T00:00:00Z',
     ...overrides,
   }

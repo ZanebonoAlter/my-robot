@@ -7,6 +7,7 @@ import type {
   DiscoveryRecommendation,
   RecommendationStatus,
   RefreshSummary,
+  RouteParamOption,
 } from '~/types/discovery'
 
 /** 后端推荐卡片 payload（snake_case；route/board 预加载字段此处不展开）。 */
@@ -26,6 +27,8 @@ interface RecommendationPayload {
   usable_directly: boolean
   requires_parameters: boolean
   parameters: string
+  /** 参数可选值字典（按 param_name 分组）；无字典数据为空对象 */
+  param_options?: Record<string, RouteParamOption[]>
   board_label: string
 }
 
@@ -52,6 +55,7 @@ function normalizeCard(p: RecommendationPayload): DiscoveryRecommendation {
     usableDirectly: Boolean(p.usable_directly),
     requiresParameters: Boolean(p.requires_parameters),
     parameters: p.parameters || '{}',
+    paramOptions: p.param_options ?? {},
     createdAt: p.created_at || '',
   }
 }

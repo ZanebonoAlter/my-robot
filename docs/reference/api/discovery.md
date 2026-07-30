@@ -39,7 +39,7 @@
 
 ### GET /api/discovery/recommendations
 
-返回推荐卡片（含路由元数据 + 相似度 score + 匹配版块 + 参数说明）。
+返回推荐卡片（含路由元数据 + 相似度 score + 匹配版块 + 参数说明 + `param_options` 参数可选值字典）。`param_options` 按参数名分组，无字典数据时为 `{}`（向后兼容）；每项 `source` ∈ {`manual`, `scraped`}，永不出现 `llm`（见 [../flow/discovery.md](../flow/discovery.md) §参数可选值字典）。
 
 ```json
 {
@@ -55,6 +55,7 @@
       "usable_directly": true,
       "requires_parameters": false,
       "parameters": "",
+      "param_options": {},
       "route_status": "ok",
       "board_id": "12",
       "board_label": "AI 芯片",
@@ -127,13 +128,30 @@
 ### GET /api/settings/rsshub
 
 ```json
-{ "success": true, "data": { "rsshub_base_url": "http://47.110.71.194:1200" } }
+{ "success": true, "data": { "rsshub_base_url": "http://47.110.71.194:1200", "rsshub_doc_base": "https://docs.rsshub.app", "rsshub_doc_base_default": "https://docs.rsshub.app" } }
 ```
 
 ### POST /api/settings/rsshub
 
 ```json
-{ "rsshub_base_url": "http://47.110.71.194:1200" }
+{ "rsshub_base_url": "http://47.110.71.194:1200", "rsshub_doc_base": "https://docs.rsshub.app" }
 ```
 
+`rsshub_doc_base` 可选，缺省回落默认 `https://docs.rsshub.app`；提供非空值则写入 `ai_settings.rsshub_doc_base`（仅改 `rsshub_base_url` 时不影响 doc_base）。
+
 > 实例地址存 `ai_settings.rsshub_config`，缺省回落 `DefaultRSSHubBaseURL=http://47.110.71.194:1200`。改一处全链路（目录同步 + 推荐订阅落地）生效。
+>
+> `rsshub_doc_base` 存 `ai_settings.rsshub_doc_base`（官方文档基址，用于推荐卡片「官方文档」链接生成）。缺省 `https://docs.rsshub.app`；官方文档站国内可能访问受限，可配换镜像。
+
+## 路由参数字典（admin）
+
+需填参路由的参数可选值字典，注入 recommendation 响应 `param_options`。链路与铁律见 [../flow/discovery.md](../flow/discovery.md) §参数可选值字典。
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/api/admin/route-param-options` | 字典列表（可选 `?route_id=N` 过滤） |
+| POST | `/api/admin/route-param-options` | 新建字典条目 |
+| PUT | `/api/admin/route-param-options/:id` | 更新（value/label/source） |
+| DELETE | `/api/admin/route-param-options/:id` | 删除 |
+
+字典条目字段：`route_id` + `param_name` + `value` + `label` + `source`（`manual`/`scraped`，**拒 `llm`**），UNIQUE(route_id, param_name, value)。

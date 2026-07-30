@@ -88,6 +88,9 @@ features/
 ├─ preferences/        # 阅读行为埋点与偏好
 │  ├─ composables/     # useReadingTracker
 │  └─ public.ts        # 跨 feature 共享 facade
+├─ discovery/          # 订阅源发现（推荐卡片 + 填参分流）
+│  ├─ components/      # DiscoveryPanel、DiscoveryCard（param_options 字典驱动 select/input 分流 + 官方文档链接）
+│  └─ composables/     # useDiscovery
 ├─ tags/               # 标签/板块/日报/数据富化的前端主体
 │  ├─ components/      # TagsPage、BoardCRUD、Timeline、Merge、BoardEnrichmentPanel 等
 │  ├─ components/daily-report/   # 日报全屏阅读层（见 §日报全屏阅读层）

@@ -249,6 +249,8 @@ AI 相关配置不存储在文件或环境变量中 — 通过 Web UI 管理并�
 |------|--------|------|
 | `rsshub_base_url` | `http://47.110.71.194:1200`（`DefaultRSSHubBaseURL`） | 自建 RSSHub 实例地址；缺省/空回落默认值。目录同步与推荐订阅落地共用，改一处全链路生效 |
 
+**官方文档基址（`rsshub_doc_base`）**：同经 `GET/POST /api/settings/rsshub` 配置（响应附 `rsshub_doc_base` + `rsshub_doc_base_default`），存 `ai_settings.rsshub_doc_base`。默认 `https://docs.rsshub.app`，用于推荐卡片「官方文档」链接生成（`{doc_base}/routes/{namespace}#{slug}`）。官方文档站国内可能访问受限，可配换镜像。链路见 [flow/discovery.md](flow/discovery.md) §参数可选值字典。
+
 #### 2. `ai_routes` 表 seed 一条 Capability
 
 | capability | 路由建议名 | 说明 |

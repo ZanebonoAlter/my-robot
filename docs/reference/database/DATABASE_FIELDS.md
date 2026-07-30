@@ -68,6 +68,7 @@
 | `rsshub_routes` | RSSHub 路由目录 | `models.RSSHubRoute` | 偏好/发现 |
 | `route_embeddings` | RSSHub 路由向量 | `models.RouteEmbedding` | 偏好/发现 |
 | `feed_recommendations` | 订阅源推荐卡片 | `models.FeedRecommendation` | 偏好/发现 |
+| `route_param_options` | 路由参数可选值字典 | `models.RouteParamOption` | 偏好/发现 |
 | `otel_spans` | OpenTelemetry 链路追踪 | `tracing.OtelSpan` | 追踪 |
 
 > 旧 `user_preferences` 表已删除（preference-vector-feed-discovery，迁移 `20260725_0001` DROP；偏好转向 `preference_vectors` 向量画像）。
@@ -1039,6 +1040,23 @@ FinGenius 多角色辩论输出，按 `(result_id, sector, code)` 维度 append-
 | `created_at` | TIMESTAMP | — | 创建时间 |
 | `updated_at` | TIMESTAMP | — | 更新时间 |
 
+### 11.6 route_param_options（路由参数可选值字典）
+
+RSSHub 路由参数可选值字典（feed-param-options）。`source` ∈ {`manual`, `scraped`}，**拒 `llm`**（service 层 Create/Update 硬拒，LLM 不生成参数值铁律 D5）。注入 recommendation 响应 `param_options`（按 param_name 分组），驱动前端卡片参数 select/input 分流。
+
+| 字段名 | 类型 | 约束/默认/索引 | 用途 |
+ | -------- | ------ | ------ | ------ |
+| `id` | SERIAL | PK | 主键 |
+| `route_id` | INTEGER | index; `uniqueIndex:idx_route_param_option_uniq` | 关联 `rsshub_routes`（OnDelete CASCADE） |
+| `param_name` | VARCHAR(100) | `uniqueIndex:idx_route_param_option_uniq` | 参数名 |
+| `value` | VARCHAR(255) | `uniqueIndex:idx_route_param_option_uniq` | 可选值 |
+| `label` | VARCHAR(255) | — | 展示标签 |
+| `source` | VARCHAR(20) | default `'manual'` | `manual` \| `scraped`（拒 `llm`） |
+| `created_at` | TIMESTAMP | — | 创建时间 |
+| `updated_at` | TIMESTAMP | — | 更新时间 |
+
+UNIQUE(route_id, param_name, value) 复合唯一索引防同参数重复录入同一值。链路与铁律见 `flow/discovery.md` §参数可选值字典。
+
 ---
 
 ## §12 链路追踪域
@@ -1252,6 +1270,11 @@ FinGenius 多角色辩论输出，按 `(result_id, sector, code)` 维度 append-
 ---
 
 ## 更新日志
+
+### 2026-07-30（feed-param-options）
+
+- 新增 `route_param_options` 表：RSSHub 路由参数可选值字典（UNIQUE(route_id,param_name,value)，`source` manual/scraped 拒 llm）。
+- §11.6 补 `route_param_options` 完整字段表。
 
 ### 2026-07-25（preference-vector-feed-discovery）
 

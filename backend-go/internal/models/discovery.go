@@ -47,9 +47,31 @@ type RSSHubRoute struct {
 	LastCheckedAt      *time.Time `json:"last_checked_at,omitempty"`
 	CreatedAt          time.Time  `json:"created_at"`
 	UpdatedAt          time.Time  `json:"updated_at"`
+
+	// ParamOptions 反向关联（route_param_options 字典）。不在此序列化：推荐卡片由
+	// RecommendationCard.ParamOptions（按 param_name 分组的 map）单独承载契约字段。
+	ParamOptions []RouteParamOption `gorm:"foreignKey:RouteID" json:"-"`
 }
 
 func (RSSHubRoute) TableName() string { return "rsshub_routes" }
+
+// RouteParamOption 是某 RSSHub 路由某参数的可选值字典条目（feed-param-options）。
+// source 限定 manual（人工录入）/ scraped（文档抓取）——LLM 绝不生成参数值（spec 铁律 D5）。
+// UNIQUE(route_id, param_name, value) 防同参数重复录入同一值。
+type RouteParamOption struct {
+	ID        uint      `gorm:"primaryKey" json:"id"`
+	RouteID   uint      `gorm:"index;uniqueIndex:idx_route_param_option_uniq" json:"route_id"`
+	ParamName string    `gorm:"size:100;uniqueIndex:idx_route_param_option_uniq" json:"param_name"`
+	Value     string    `gorm:"size:255;uniqueIndex:idx_route_param_option_uniq" json:"value"`
+	Label     string    `gorm:"size:255" json:"label"`
+	Source    string    `gorm:"size:20;default:'manual'" json:"source"` // manual | scraped（never llm）
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+
+	Route *RSSHubRoute `gorm:"foreignKey:RouteID;constraint:OnDelete:CASCADE" json:"route,omitempty"`
+}
+
+func (RouteParamOption) TableName() string { return "route_param_options" }
 
 // RouteEmbedding 存路由的语义向量（文本取 namespace+name+description 摘要）。
 // UNIQUE(route_id)：单路由单向量；text_hash 变更入队重算。

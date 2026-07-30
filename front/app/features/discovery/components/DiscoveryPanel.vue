@@ -1,11 +1,20 @@
 <script setup lang="ts">
 import { Icon } from '@iconify/vue'
 import { useDiscovery } from '../composables/useDiscovery'
+import { useRsshubApi } from '~/api/rsshub'
 import DiscoveryCard from './DiscoveryCard.vue'
 
 const { store, groups, catalogEmpty } = useDiscovery()
 
 const question = ref('')
+
+// RSSHub 官方文档基址（design D4）：面板初始化拉一次生效值，注入各卡片；失败则兜底默认常量
+const docBase = ref('')
+const rsshubApi = useRsshubApi()
+onMounted(async () => {
+  const res = await rsshubApi.getStatus()
+  if (res.success && res.data?.rsshub_doc_base) docBase.value = res.data.rsshub_doc_base
+})
 
 function submitQuestion() {
   const q = question.value.trim()
@@ -86,7 +95,7 @@ function submitQuestion() {
           <span class="discovery-group__count">{{ group.cards.length }}</span>
         </h3>
         <div class="discovery-group__cards">
-          <DiscoveryCard v-for="card in group.cards" :key="card.id" :card="card" />
+          <DiscoveryCard v-for="card in group.cards" :key="card.id" :card="card" :doc-base="docBase" />
         </div>
       </section>
     </div>

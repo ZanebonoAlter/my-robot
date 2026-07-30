@@ -2,11 +2,13 @@
 import { Icon } from '@iconify/vue'
 import { useDiscoveryStore } from '~/stores/discovery'
 import { useApiStore } from '~/stores/api'
-import { buildRouteParamSpecs } from '~/utils/routeParams'
+import { buildRouteDocUrl, buildRouteParamSpecs, DEFAULT_RSSHUB_DOC_BASE } from '~/utils/routeParams'
 import type { DiscoveryRecommendation } from '~/types/discovery'
 
 const props = defineProps<{
   card: DiscoveryRecommendation
+  /** RSSHub 官方文档基址（DiscoveryPanel 注入）；缺省兜底默认常量 */
+  docBase?: string
 }>()
 
 const store = useDiscoveryStore()
@@ -17,8 +19,13 @@ const formOpen = ref(false)
 const paramValues = ref<Record<string, string>>({})
 const categoryId = ref('')
 
+/** 官方文档链接（design D4）；docBase 缺省时兜底默认常量，保证链接始终可达 */
+const docUrl = computed(() =>
+  buildRouteDocUrl(props.docBase || DEFAULT_RSSHUB_DOC_BASE, props.card.routeNamespace, props.card.routePath),
+)
+
 const paramSpecs = computed(() =>
-  buildRouteParamSpecs(props.card.routePath, props.card.parameters),
+  buildRouteParamSpecs(props.card.routePath, props.card.parameters, props.card.paramOptions, docUrl.value),
 )
 
 const missingRequired = computed(() =>
@@ -146,7 +153,17 @@ function dismiss() {
           <span v-else class="discovery-card__optional">（可选）</span>
         </label>
         <p v-if="spec.description" class="discovery-card__desc">{{ spec.description }}</p>
-        <AppInput v-model="paramValues[spec.name]" :placeholder="spec.required ? '必填' : '不填则用默认'" />
+        <select
+          v-if="spec.options && spec.options.length > 0"
+          v-model="paramValues[spec.name]"
+          class="discovery-card__select"
+        >
+          <option value="" disabled>{{ spec.required ? '请选择（必填）' : '不填则用默认' }}</option>
+          <option v-for="opt in spec.options" :key="opt.value" :value="opt.value">
+            {{ opt.label }}（{{ opt.value }}）
+          </option>
+        </select>
+        <AppInput v-else v-model="paramValues[spec.name]" :placeholder="spec.required ? '必填' : '不填则用默认'" />
       </div>
 
       <div class="discovery-card__field">
@@ -166,6 +183,15 @@ function dismiss() {
         <AppButton size="sm" variant="ghost" :disabled="acting" @click="formOpen = false">
           取消
         </AppButton>
+        <a
+          class="discovery-card__doc-link"
+          :href="docUrl"
+          target="_blank"
+          rel="noopener noreferrer"
+        >
+          <Icon icon="mdi:book-open-outline" width="14" height="14" />
+          官方文档
+        </a>
       </div>
     </div>
   </div>
@@ -351,7 +377,22 @@ function dismiss() {
 
 .discovery-card__form-actions {
   display: flex;
+  align-items: center;
   gap: 8px;
   margin-top: 2px;
+}
+
+.discovery-card__doc-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+  font-size: 13px;
+  color: var(--color-link);
+  text-decoration: none;
+}
+
+.discovery-card__doc-link:hover {
+  text-decoration: underline;
 }
 </style>

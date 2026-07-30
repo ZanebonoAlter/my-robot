@@ -129,6 +129,9 @@ onMounted(() => {
             <button type="button" class="tags-content-tab" :class="{ 'tags-content-tab--active': contentTab === 'composition' }" @click="contentTab = 'composition'">
               <Icon icon="mdi:view-dashboard-outline" width="14" /> 板块内容
             </button>
+            <button type="button" class="tags-content-tab" :class="{ 'tags-content-tab--active': contentTab === 'topic-overview' }" @click="contentTab = 'topic-overview'">
+              <Icon icon="mdi:chart-timeline-variant" width="14" /> 话题总览
+            </button>
             <button type="button" class="tags-content-tab" :class="{ 'tags-content-tab--active': contentTab === 'daily-reports' }" @click="contentTab = 'daily-reports'">
               <Icon icon="mdi:file-document-outline" width="14" /> 日报
             </button>
@@ -137,9 +140,6 @@ onMounted(() => {
             </button>
             <button type="button" class="tags-content-tab" :class="{ 'tags-content-tab--active': contentTab === 'enrichment' }" @click="contentTab = 'enrichment'">
               <Icon icon="mdi:database-plus-outline" width="14" /> 数据增强
-            </button>
-            <button type="button" class="tags-content-tab" :class="{ 'tags-content-tab--active': contentTab === 'topic-overview' }" @click="contentTab = 'topic-overview'">
-              <Icon icon="mdi:chart-timeline-variant" width="14" /> 话题总览
             </button>
           </div>
 
@@ -302,7 +302,7 @@ onMounted(() => {
 <style scoped>
 .tags-page { display: flex; flex-direction: column; height: 100vh; background: var(--color-bg-base); color: var(--color-text-primary); }
 .tags-topbar { position: sticky; top: 0; z-index: 30; border-bottom: 1px solid var(--color-border-subtle); background: var(--color-bg-elevated); backdrop-filter: blur(16px); }
-.tags-topbar-inner { display: flex; align-items: center; justify-content: space-between; max-width: min(1800px, 95vw); margin: 0 auto; padding: 0.75rem 1.5rem; }
+.tags-topbar-inner { display: flex; align-items: center; justify-content: space-between; padding: 0.75rem 1.5rem; }
 .tags-back-btn { display: flex; align-items: center; justify-content: center; width: 28px; height: 28px; border: 1px solid var(--color-border-medium); border-radius: 8px; color: var(--color-text-muted); text-decoration: none; transition: all 0.12s ease; }
 .tags-back-btn:hover { border-color: var(--color-border-strong); color: var(--color-text-secondary); background: var(--color-bg-hover); }
 .tags-page-title { font-family: serif; font-size: 1.1rem; font-weight: 600; color: var(--color-text-primary); letter-spacing: 0.02em; }

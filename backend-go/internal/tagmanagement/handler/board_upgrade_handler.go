@@ -180,8 +180,9 @@ type boardUpgradeSuggestionRowDTO struct {
 }
 
 type idLabelDTO struct {
-	ID    uint   `json:"id"`
-	Label string `json:"label"`
+	ID     uint   `json:"id"`
+	Label  string `json:"label"`
+	Status string `json:"status"`
 }
 
 // upgradeSuggestionsToRowDTO maps persisted rows to the panel DTO, batch-resolving
@@ -198,15 +199,17 @@ func (h *semanticBoardHandler) upgradeSuggestionsToRowDTO(ctx context.Context, r
 		}
 	}
 	labelNames := make(map[uint]string)
+	labelStatuses := make(map[uint]string)
 	if len(labelIDSet) > 0 {
 		ids := make([]uint, 0, len(labelIDSet))
 		for id := range labelIDSet {
 			ids = append(ids, id)
 		}
 		var labels []models.SemanticLabel
-		if err := h.db.WithContext(ctx).Where("id IN ?", ids).Select("id, label").Find(&labels).Error; err == nil {
+		if err := h.db.WithContext(ctx).Where("id IN ?", ids).Select("id, label, status").Find(&labels).Error; err == nil {
 			for _, l := range labels {
 				labelNames[l.ID] = l.Label
+				labelStatuses[l.ID] = l.Status
 			}
 		}
 	}
@@ -233,7 +236,7 @@ func (h *semanticBoardHandler) upgradeSuggestionsToRowDTO(ctx context.Context, r
 			DismissReason: r.DismissReason, CreatedAt: r.CreatedAt, ResolvedAt: r.ResolvedAt,
 		}
 		for _, id := range r.AuxiliaryLabelIDs {
-			dto.AuxiliaryLabels = append(dto.AuxiliaryLabels, idLabelDTO{ID: id, Label: labelNames[id]})
+			dto.AuxiliaryLabels = append(dto.AuxiliaryLabels, idLabelDTO{ID: id, Label: labelNames[id], Status: labelStatuses[id]})
 		}
 		if r.TargetBoardID != nil {
 			dto.TargetBoardLabel = boardNames[*r.TargetBoardID]

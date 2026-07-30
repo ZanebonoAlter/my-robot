@@ -1028,6 +1028,57 @@ func TestSemanticBoardUpgradeConfirmWithoutSuggestionIDLeavesItPending(t *testin
 	require.Nil(t, reloaded.ResolvedAt)
 }
 
+// TestSemanticBoardUpgradeConfirmSkipsInactiveAuxiliaryLabels verifies that a
+// confirm carrying a mix of active and inactive auxiliary labels silently skips
+// the inactive ones (建议生成后标签可能被禁用/合并), writing composition only
+// for the still-active labels instead of failing the whole request.
+func TestSemanticBoardUpgradeConfirmSkipsInactiveAuxiliaryLabels(t *testing.T) {
+	db := setupSemanticBoardUpgradeTestDB(t)
+	activeA := createUpgradeLabel(t, db, "OpenAI", "openai", "auxiliary", "active", 5, []float64{1, 0, 0})
+	inactiveB := createUpgradeLabel(t, db, "Disabled Label", "disabled-label", "auxiliary", "disabled", 5, []float64{0, 1, 0})
+	board := createUpgradeLabel(t, db, "AI Board", "ai-board", "board", "active", 0, nil)
+
+	svc := NewSemanticBoardUpgradeService(db, nil, nil)
+	result, err := svc.ConfirmSuggestion(context.Background(), ConfirmSemanticBoardUpgradeRequest{
+		Decision:          SemanticBoardUpgradeDecisionMergeIntoExisting,
+		TargetBoardID:     &board.ID,
+		AuxiliaryLabelIDs: []uint{activeA.ID, inactiveB.ID},
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, board.ID, result.SemanticBoardID)
+	require.Equal(t, []uint{activeA.ID}, result.AuxiliaryLabelIDs, "inactive label must be skipped")
+
+	var rows []models.BoardComposition
+	require.NoError(t, db.Where("board_id = ?", board.ID).Find(&rows).Error)
+	require.Len(t, rows, 1)
+	require.Equal(t, activeA.ID, rows[0].AuxiliaryLabelID, "only the active label is linked to the board")
+}
+
+// TestSemanticBoardUpgradeConfirmAllInactiveAuxiliaryLabelsErrors verifies that
+// when every requested auxiliary label is inactive, the confirm fails with an
+// actionable error instead of writing an empty composition.
+func TestSemanticBoardUpgradeConfirmAllInactiveAuxiliaryLabelsErrors(t *testing.T) {
+	db := setupSemanticBoardUpgradeTestDB(t)
+	inactiveA := createUpgradeLabel(t, db, "Disabled A", "disabled-a", "auxiliary", "disabled", 5, []float64{1, 0, 0})
+	inactiveB := createUpgradeLabel(t, db, "Disabled B", "disabled-b", "auxiliary", "disabled", 5, []float64{0, 1, 0})
+	board := createUpgradeLabel(t, db, "AI Board", "ai-board", "board", "active", 0, nil)
+
+	svc := NewSemanticBoardUpgradeService(db, nil, nil)
+	_, err := svc.ConfirmSuggestion(context.Background(), ConfirmSemanticBoardUpgradeRequest{
+		Decision:          SemanticBoardUpgradeDecisionMergeIntoExisting,
+		TargetBoardID:     &board.ID,
+		AuxiliaryLabelIDs: []uint{inactiveA.ID, inactiveB.ID},
+	})
+
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "失效", "error must explain all labels are inactive")
+
+	var rows []models.BoardComposition
+	require.NoError(t, db.Where("board_id = ?", board.ID).Find(&rows).Error)
+	require.Empty(t, rows, "no composition written when all labels are inactive")
+}
+
 // TestSemanticBoardUpgradeGenerateAndPersistInsertsNonSkip verifies the
 // GenerateAndPersist entry point persists non-skip suggestions as pending and
 // drops skip decisions (spec: 升级建议持久化存储).

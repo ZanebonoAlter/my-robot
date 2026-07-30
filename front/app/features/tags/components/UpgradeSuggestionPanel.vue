@@ -78,7 +78,7 @@ function shortlist(row: UpgradeSuggestionRow): ShortlistItem[] {
   const v = row.evidence?.shortlist
   return Array.isArray(v) ? v.filter((x): x is ShortlistItem => x != null && typeof x === 'object') : []
 }
-function rowAuxLabels(row: UpgradeSuggestionRow): { id: number; label: string }[] {
+function rowAuxLabels(row: UpgradeSuggestionRow): { id: number; label: string; status?: string }[] {
   return row.auxiliary_labels && row.auxiliary_labels.length > 0
     ? row.auxiliary_labels
     : row.auxiliary_label_ids.map((id) => ({ id, label: `标签 #${id}` }))
@@ -90,25 +90,18 @@ function rowAuxLabels(row: UpgradeSuggestionRow): { id: number; label: string }[
 watch(() => props.persistedSuggestions, (rows) => {
   const next: Record<number, Set<number>> = {}
   for (const row of rows) {
-    const allIds = new Set(rowAuxLabels(row).map((al) => al.id))
-    const prev = selectedAuxByRow.value[row.id]
-    if (prev) {
-      // 沿用 prev：只保留仍存在的标签；prev 里没有的新标签默认选中。
-      const merged = new Set<number>(prev)
-      for (const id of merged) {
-        if (!allIds.has(id)) merged.delete(id)
-      }
-      for (const id of allIds) {
-        // 新出现的标签默认选中（prev 没记录过它）
-        if (!prev.has(id)) merged.add(id)
-      }
-      next[row.id] = merged
-    } else {
-      next[row.id] = allIds
-    }
+    // 默认勾选所有可选辅助标签；失效标签（status≠active，建议生成后被禁用）
+    // 默认不勾、置灰展示。用户手动 toggle 的选择在 persistedSuggestions 不变时保留
+    // （此 watch 仅在列表重载时触发重置默认值）。
+    next[row.id] = new Set(rowAuxLabels(row).filter((al) => !isAuxDisabled(al)).map((al) => al.id))
   }
   selectedAuxByRow.value = next
 }, { immediate: true, deep: false })
+
+// 失效标签（status 有值且非 active）：建议生成后可能被禁用，置灰且默认不勾。
+function isAuxDisabled(al: { status?: string }): boolean {
+  return !!al.status && al.status !== 'active'
+}
 
 function isAuxSelected(rowId: number, auxId: number): boolean {
   return selectedAuxByRow.value[rowId]?.has(auxId) ?? true
@@ -296,8 +289,9 @@ function decisionStyle(d: string): { border: string; bg: string; color: string }
                   :key="al.id"
                   type="button"
                   class="usp-item-tag usp-aux-chip"
-                  :class="{ 'usp-aux-chip--off': !isAuxSelected(row.id, al.id) }"
-                  :title="al.label || ('标签 #' + al.id)"
+                  :class="{ 'usp-aux-chip--off': !isAuxSelected(row.id, al.id), 'usp-aux-chip--disabled': isAuxDisabled(al) }"
+                  :disabled="isAuxDisabled(al)"
+                  :title="isAuxDisabled(al) ? ((al.label || ('标签 #' + al.id)) + '（已失效）') : (al.label || ('标签 #' + al.id))"
                   @click="toggleAux(row.id, al.id)"
                 >
                   <Icon
@@ -305,6 +299,7 @@ function decisionStyle(d: string): { border: string; bg: string; color: string }
                     width="12"
                   />
                   {{ al.label || ('标签 #' + al.id) }}
+                  <span v-if="isAuxDisabled(al)" class="usp-aux-chip-status">已失效</span>
                 </button>
               </div>
               <div v-if="laneBriefs(row).length > 0" class="usp-evidence">
@@ -851,6 +846,26 @@ function decisionStyle(d: string): { border: string; bg: string; color: string }
   border-color: var(--color-border-subtle);
   text-decoration: line-through;
   opacity: 0.65;
+}
+
+/* 失效标签（建议生成后被禁用）：在 --off 基础上锁死不可交互 */
+.usp-aux-chip--disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.usp-aux-chip--disabled:hover {
+  background: transparent;
+}
+
+.usp-aux-chip-status {
+  margin-left: 0.2rem;
+  padding: 0.02rem 0.2rem;
+  border-radius: 3px;
+  background: var(--color-warning-bg, rgba(180, 140, 40, 0.18));
+  color: var(--color-warning, #b48c28);
+  font-size: 0.58rem;
+  font-weight: 600;
 }
 
 .usp-item-actions {

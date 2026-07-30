@@ -102,7 +102,7 @@ export interface UpgradeSuggestionRow {
   target_board_id?: number
   target_board_label?: string
   auxiliary_label_ids: number[]
-  auxiliary_labels: { id: number; label: string }[]
+  auxiliary_labels: { id: number; label: string; status?: string }[]
   confidence: string
   /** 证据快照 {shortlist, margins, cotag_events, lane_briefs, ...}，按 key 安全读取，缺 key 降级。 */
   evidence?: Record<string, unknown>

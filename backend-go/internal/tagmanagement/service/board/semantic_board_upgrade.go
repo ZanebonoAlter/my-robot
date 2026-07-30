@@ -244,9 +244,16 @@ func (s *SemanticBoardUpgradeService) ConfirmSuggestion(ctx context.Context, req
 
 	var result ConfirmSemanticBoardUpgradeResult
 	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		if err := ValidateActiveAuxiliaryLabels(tx, auxiliaryIDs); err != nil {
+		// 跳过已失效（status≠active）的辅助标签：建议生成后标签可能被禁用/合并，
+		// 硬性全量校验会让陈旧建议整体 400。这里软过滤，只保留仍 active 的标签。
+		activeIDs, err := FilterActiveAuxiliaryLabels(tx, auxiliaryIDs)
+		if err != nil {
 			return err
 		}
+		if len(activeIDs) == 0 {
+			return fmt.Errorf("所有传入的辅助标签均已失效（status≠active），请重新选择有效的辅助标签后重试")
+		}
+		auxiliaryIDs = activeIDs
 
 		var boardID uint
 		switch req.Decision {
@@ -1160,6 +1167,33 @@ func ValidateActiveAuxiliaryLabels(tx *gorm.DB, ids []uint) error {
 		return fmt.Errorf("all auxiliary labels must be active auxiliary labels")
 	}
 	return nil
+}
+
+// FilterActiveAuxiliaryLabels 返回 ids 中仍为 active 辅助标签的子集（保持入参顺序）。
+// 与 ValidateActiveAuxiliaryLabels 的取舍：后者要求全部 active 否则报错，适合「手动
+// 新增单个 composition」这类必须严格 active 的场景；前者软过滤，适合升级建议确认——
+// 建议生成后标签可能被禁用/合并，跳过失效项让有效项继续落库，避免陈旧建议整体 400。
+func FilterActiveAuxiliaryLabels(tx *gorm.DB, ids []uint) ([]uint, error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	var found []uint
+	if err := tx.Model(&models.SemanticLabel{}).
+		Where("id IN ? AND label_type = ? AND status = ?", ids, "auxiliary", "active").
+		Pluck("id", &found).Error; err != nil {
+		return nil, err
+	}
+	active := make(map[uint]struct{}, len(found))
+	for _, id := range found {
+		active[id] = struct{}{}
+	}
+	keep := make([]uint, 0, len(ids))
+	for _, id := range ids {
+		if _, ok := active[id]; ok {
+			keep = append(keep, id)
+		}
+	}
+	return keep, nil
 }
 
 func UniqueUintSlice(ids []uint) []uint {

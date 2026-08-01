@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -12,6 +13,7 @@ import (
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 
+	"syntopica-backend/internal/models"
 	"syntopica-backend/internal/platform/database"
 )
 
@@ -40,7 +42,31 @@ var (
 	cachedDB  *gorm.DB
 	startErr  error
 	cachedDSN string // container connection string; used to reopen the pool after a schema rebuild
+
+	// Golden-schema state. migrateOnce builds the schema once per process;
+	// every later SetupTestDB call resets via ResetTestData (fast path).
+	migrateOnce        sync.Once // runs runTestMigrations + takeSeedSnapshot once
+	goldenSchemaErr    error     // captures first-build error, surfaced on every call
+	migrationsRunCount int64     // test-only observable: how often runTestMigrations ran
+	setupCallCount     int64     // distinguishes first SetupTestDB call from later ones
+	seedSnapshotMu     sync.Mutex
+	aiSettingsSeed     []models.AISettings
+	embeddingCfgSeed   []models.EmbeddingConfig
+
+	// goldenVectorColumns snapshots vector-typed columns at golden-build so
+	// ResetTestData can re-ALTER them back if a test mutated the dimension
+	// (some tests do: ALTER COLUMN embedding TYPE vector(N)). typeDecl is the
+	// format_type() string captured at golden build (e.g. "vector").
+	goldenVectorColumns []vectorColumnInfo
 )
+
+// vectorColumnInfo records a vector-typed column's golden-build type so
+// ResetTestData can undo dimension mutations tests make via ALTER COLUMN.
+type vectorColumnInfo struct {
+	table    string
+	column   string
+	typeDecl string // pg_catalog.format_type output, e.g. "vector"
+}
 
 // OpenTestDB returns a *gorm.DB connected to a throwaway pgvector Postgres
 // running in an isolated Docker container (started via testcontainers-go).
@@ -127,9 +153,12 @@ func openGorm(dsn string) (*gorm.DB, error) {
 // SetupTestDB is the single entry point for integration tests.
 // It:
 //  1. Skips when running with -short flag.
-//  2. Starts (or reuses) the isolated pgvector container and connection.
-//  3. Rebuilds the test schema and imports production migrations and seed data.
-//  4. Sets database.DB for production code compatibility.
+//  2. Starts (or reuses) the isolated pgvector container.
+//  3. On the FIRST call of the process, builds the golden schema once
+//     (runTestMigrations) and snapshots migration seed rows.
+//  4. On every LATER call, resets via the fast path (ResetTestData) instead of
+//     rebuilding the schema — this is the ~6x speedup.
+//  5. Sets database.DB for production code compatibility.
 //
 // Every integration test should start with: db := testutil.SetupTestDB(t)
 func SetupTestDB(t *testing.T) *gorm.DB {
@@ -140,7 +169,35 @@ func SetupTestDB(t *testing.T) *gorm.DB {
 	}
 
 	db := OpenTestDB(t)
-	return ReimportTestDB(t, db)
+
+	// Build the golden schema (migrations + seed snapshot) exactly once per
+	// process. Later SetupTestDB calls skip this and reset via ResetTestData.
+	migrateOnce.Do(func() {
+		if err := runTestMigrations(t, db); err != nil {
+			goldenSchemaErr = fmt.Errorf("build golden schema: %w", err)
+			return
+		}
+		if err := takeSeedSnapshot(db); err != nil {
+			goldenSchemaErr = fmt.Errorf("snapshot seed: %w", err)
+			return
+		}
+		if err := snapshotVectorColumns(db); err != nil {
+			goldenSchemaErr = fmt.Errorf("snapshot vector columns: %w", err)
+			return
+		}
+	})
+	if goldenSchemaErr != nil {
+		t.Fatalf("%v", goldenSchemaErr)
+	}
+
+	// First call: the schema was just built and is already in the fresh
+	// post-migration state — return it without a redundant truncate. Every
+	// later call resets via the fast path.
+	if atomic.AddInt64(&setupCallCount, 1) == 1 {
+		database.DB = db
+		return db
+	}
+	return ResetTestData(t, db)
 }
 
 // ReimportTestDB rebuilds the isolated test schema and reruns the production
@@ -158,7 +215,7 @@ func ReimportTestDB(t *testing.T, db *gorm.DB) *gorm.DB {
 	if err := db.Exec("CREATE SCHEMA public").Error; err != nil {
 		t.Fatalf("create test schema: %v", err)
 	}
-	if err := runTestMigrations(db); err != nil {
+	if err := runTestMigrations(t, db); err != nil {
 		t.Fatalf("import production database state: %v", err)
 	}
 
@@ -204,6 +261,144 @@ func TruncateAllTables(t *testing.T, db *gorm.DB) {
 	}
 }
 
+// snapshotVectorColumns records the golden-build type declaration of every
+// vector-typed column in the public schema. ResetTestData re-ALTERs columns
+// back to these declarations to undo any dimension mutation a test made
+// (e.g. ALTER COLUMN embedding TYPE vector(2560)).
+func snapshotVectorColumns(db *gorm.DB) error {
+	goldenVectorColumns = nil
+	type row struct {
+		Table    string
+		Column   string
+		TypeDecl string
+	}
+	var rows []row
+	if err := db.Raw(`
+		SELECT c.table_name AS "table", c.column_name AS "column",
+		       pg_catalog.format_type(a.atttypid, a.atttypmod) AS "type_decl"
+		FROM information_schema.columns c
+		JOIN pg_catalog.pg_class cls ON cls.relname = c.table_name
+		JOIN pg_catalog.pg_namespace ns ON ns.oid = cls.relnamespace AND ns.nspname = 'public'
+		JOIN pg_catalog.pg_attribute a ON a.attrelid = cls.oid AND a.attname = c.column_name
+		WHERE c.table_schema = 'public' AND c.udt_name = 'vector'
+	`).Scan(&rows).Error; err != nil {
+		return fmt.Errorf("snapshot vector columns: %w", err)
+	}
+	for _, r := range rows {
+		goldenVectorColumns = append(goldenVectorColumns, vectorColumnInfo{
+			table: r.Table, column: r.Column, typeDecl: r.TypeDecl,
+		})
+	}
+	return nil
+}
+
+// takeSeedSnapshot reads the current seed rows of ai_settings/embedding_config
+// from the golden schema into package-level slices. MUST be called immediately
+// after runTestMigrations, before any test mutates those tables. Content comes
+// from the DB at runtime — there is no hardcoded seed copy in testutil.
+func takeSeedSnapshot(db *gorm.DB) error {
+	seedSnapshotMu.Lock()
+	defer seedSnapshotMu.Unlock()
+
+	aiSettingsSeed = nil
+	embeddingCfgSeed = nil
+	if err := db.Find(&aiSettingsSeed).Error; err != nil {
+		return fmt.Errorf("snapshot ai_settings: %w", err)
+	}
+	if err := db.Find(&embeddingCfgSeed).Error; err != nil {
+		return fmt.Errorf("snapshot embedding_config: %w", err)
+	}
+	return nil
+}
+
+// ResetTestData resets the golden schema to the "fresh production startup"
+// state for the next test. It:
+//  1. TRUNCATEs all business tables (RESTART IDENTITY CASCADE, skipping
+//     schema_migrations) — clears data and resets serial sequences.
+//  2. Re-ALTERs every vector-typed column back to its golden-build type
+//     declaration — undoes dimension mutations tests made via ALTER COLUMN.
+//  3. Restores migration seed rows (ai_settings, embedding_config) from the
+//     golden-schema snapshot, then advances their sequences past the restored
+//     explicit-id rows.
+//  4. Reopens the connection pool — fresh prepared statements against the
+//     stable catalog (the golden schema never drops the vector extension, so
+//     the vector type OID is stable; reopening only clears plans invalidated
+//     by step 2's ALTERs, exactly mirroring what a production restart does).
+//
+// Returns the fresh *gorm.DB (the caller MUST use the returned handle; the
+// passed db's pool is closed). TruncateAllTables (no restore, no reopen) is
+// retained for callers that deliberately want a truly empty DB.
+func ResetTestData(t *testing.T, db *gorm.DB) *gorm.DB {
+	t.Helper()
+
+	seedSnapshotMu.Lock()
+	defer seedSnapshotMu.Unlock()
+
+	if aiSettingsSeed == nil || embeddingCfgSeed == nil {
+		t.Fatal("ResetTestData: seed snapshot not taken; golden schema must be built first")
+	}
+
+	// 1. Truncate all base tables except schema_migrations.
+	var tables []string
+	if err := db.Raw(`SELECT table_name FROM information_schema.tables
+		WHERE table_schema = 'public' AND table_type = 'BASE TABLE'
+		AND table_name <> 'schema_migrations'`).Scan(&tables).Error; err != nil {
+		t.Fatalf("list tables: %v", err)
+	}
+	if len(tables) > 0 {
+		if err := db.Exec(fmt.Sprintf("TRUNCATE TABLE %s RESTART IDENTITY CASCADE",
+			strings.Join(tables, ", "))).Error; err != nil {
+			t.Fatalf("truncate tables: %v", err)
+		}
+	}
+
+	// 2. Restore vector column dimensions to the golden-build declarations
+	//    (undoes test mutations like ALTER COLUMN embedding TYPE vector(N)).
+	//    Tables are empty after the truncate, so the USING cast is trivial.
+	for _, vc := range goldenVectorColumns {
+		if err := db.Exec(fmt.Sprintf(
+			"ALTER TABLE %s ALTER COLUMN %s TYPE %s USING %s::%s",
+			vc.table, vc.column, vc.typeDecl, vc.column, vc.typeDecl)).Error; err != nil {
+			t.Fatalf("restore vector column %s.%s to %s: %v", vc.table, vc.column, vc.typeDecl, err)
+		}
+	}
+
+	// 3. Restore migration seed rows from the golden-schema snapshot.
+	if len(aiSettingsSeed) > 0 {
+		if err := db.Create(&aiSettingsSeed).Error; err != nil {
+			t.Fatalf("restore ai_settings seed: %v", err)
+		}
+	}
+	if len(embeddingCfgSeed) > 0 {
+		if err := db.Create(&embeddingCfgSeed).Error; err != nil {
+			t.Fatalf("restore embedding_config seed: %v", err)
+		}
+	}
+	// Advance serial sequences past the restored explicit-id seed rows.
+	for _, tbl := range []string{"ai_settings", "embedding_config"} {
+		if err := db.Exec(fmt.Sprintf(
+			"SELECT setval(pg_get_serial_sequence('%s', 'id'), COALESCE((SELECT MAX(id) FROM %s), 0))",
+			tbl, tbl)).Error; err != nil {
+			t.Fatalf("advance %s id sequence: %v", tbl, err)
+		}
+	}
+
+	// 4. Reopen the connection pool. Steps above (especially the ALTERs) can
+	//    invalidate server-side prepared statements cached on the current pool
+	//    (cached plan must not change result type). A fresh pool gives clean
+	//    statements against the stable catalog. Mirrors ReimportTestDB's reopen.
+	freshDB, err := openGorm(cachedDSN)
+	if err != nil {
+		t.Fatalf("reopen test database after reset: %v", err)
+	}
+	if sqlDB, err := db.DB(); err == nil {
+		_ = sqlDB.Close()
+	}
+	cachedDB = freshDB
+	database.DB = freshDB
+	return freshDB
+}
+
 // TestEmbeddingDim is the vector dimension enforced by the production schema
 // (semantic_labels.embedding/merge_embedding and topic_tag_embeddings.embedding
 // are vector(4096)).
@@ -235,7 +430,13 @@ func PadVector(vec []float64, dim int) []float64 {
 // parts of this by hand (manual embedding column DDL, manual ai_settings /
 // embedding_config seeds) — those duplicated production and drifted, so they
 // were removed in favor of running the real migration path.
-func runTestMigrations(db *gorm.DB) error {
+//
+// t enables destructive migrations (MIGRATIONS_ALLOW_DESTRUCTIVE=1) so the test
+// golden schema matches production + historical data cleanup. Production never
+// sets this env (destructive migrations self-skip); see db-migration-safety.
+func runTestMigrations(t *testing.T, db *gorm.DB) error {
+	t.Setenv("MIGRATIONS_ALLOW_DESTRUCTIVE", "1")
+	atomic.AddInt64(&migrationsRunCount, 1)
 	// Enable pgvector extension (mirrors the first production migration).
 	if err := db.Exec("CREATE EXTENSION IF NOT EXISTS vector").Error; err != nil {
 		return fmt.Errorf("enable pgvector: %w", err)

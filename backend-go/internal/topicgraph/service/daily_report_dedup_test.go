@@ -1,14 +1,16 @@
 package service
 
 import (
-	"syntopica-backend/internal/topicgraph/repository"
+	"context"
 	"testing"
+
+	"syntopica-backend/internal/topicgraph/repository"
 
 	"github.com/stretchr/testify/assert"
 )
 
 func TestDeduplicateTags_Empty(t *testing.T) {
-	result := DeduplicateTags(nil, nil)
+	result := DeduplicateTags(context.Background(), nil, nil)
 	assert.Nil(t, result)
 }
 
@@ -24,7 +26,7 @@ func TestDeduplicateTags_IdenticalArticleSets(t *testing.T) {
 		{40, 50},
 	}
 
-	result := DeduplicateTags(tags, articleSets)
+	result := DeduplicateTags(context.Background(), tags, articleSets)
 	assert.Len(t, result, 2)
 	// Tag B has same set as Tag A but same article count and higher ID → Tag A survives.
 	// Tag A (ID:1) vs Tag B (ID:2): same article set, same count → keep lower ID (Tag A)
@@ -44,7 +46,7 @@ func TestDeduplicateTags_SingleArticleOverlap(t *testing.T) {
 		{200},
 	}
 
-	result := DeduplicateTags(tags, articleSets)
+	result := DeduplicateTags(context.Background(), tags, articleSets)
 	assert.Len(t, result, 2)
 	// Tag X and Tag Y share article 100 → keep lower ID (10)
 	// Tag Z has different article (200) → survives
@@ -63,7 +65,7 @@ func TestDeduplicateTags_HigherArticleCountWins(t *testing.T) {
 		{10, 20},
 	}
 
-	result := DeduplicateTags(tags, articleSets)
+	result := DeduplicateTags(context.Background(), tags, articleSets)
 	assert.Len(t, result, 1)
 	assert.Equal(t, uint(5), result[0].ID) // Higher article_count wins
 }
@@ -72,7 +74,7 @@ func TestDeduplicateTags_MismatchedLength(t *testing.T) {
 	tags := []repository.TagInput{{ID: 1, Label: "A"}}
 	articleSets := [][]uint{} // mismatch
 
-	result := DeduplicateTags(tags, articleSets)
+	result := DeduplicateTags(context.Background(), tags, articleSets)
 	assert.Len(t, result, 1) // Returns original
 }
 
@@ -88,7 +90,7 @@ func TestDeduplicateTags_NoDuplicates(t *testing.T) {
 		{60},
 	}
 
-	result := DeduplicateTags(tags, articleSets)
+	result := DeduplicateTags(context.Background(), tags, articleSets)
 	assert.Len(t, result, 3)
 }
 
@@ -102,7 +104,7 @@ func TestDeduplicateTags_EmptyArticleSet(t *testing.T) {
 		{10, 20},
 	}
 
-	result := DeduplicateTags(tags, articleSets)
+	result := DeduplicateTags(context.Background(), tags, articleSets)
 	assert.Len(t, result, 1)
 	assert.Equal(t, uint(2), result[0].ID)
 }

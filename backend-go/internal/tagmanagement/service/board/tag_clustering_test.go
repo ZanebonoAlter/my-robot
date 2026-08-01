@@ -14,6 +14,7 @@ import (
 func setupClusteringTestDB(t *testing.T) *gorm.DB {
 	db := testutil.SetupTestDB(t)
 	repository.InitRepository(db)
+	InvalidateBoardCache() // 避免包级缓存跨测试残留
 	return db
 }
 

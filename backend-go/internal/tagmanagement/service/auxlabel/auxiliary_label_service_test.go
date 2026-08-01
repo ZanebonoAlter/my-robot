@@ -16,6 +16,7 @@ import (
 func setupAuxiliaryLabelTestDB(t *testing.T) *gorm.DB {
 	db := testutil.SetupTestDB(t)
 	repository.InitRepository(db)
+	InvalidateAuxLabelCache() // 避免包级缓存跨测试残留（ResetTestData 清 db 但不清内存缓存）
 	return db
 }
 
@@ -48,6 +49,38 @@ func TestAuxiliaryLabelServiceL1SlugAndAliasExactMatch(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, existing.ID, label.ID)
 	require.Empty(t, embedder.calls)
+}
+
+func TestAuxiliaryLabelServiceL1NormalizeKeyMatchesTextVariant(t *testing.T) {
+	db := setupAuxiliaryLabelTestDB(t)
+	existing := models.SemanticLabel{Label: "SK海力士", Slug: "sk海力士", LabelType: "auxiliary", Status: "active"}
+	require.NoError(t, db.Create(&existing).Error)
+	embedder := &recordingAuxiliaryEmbedder{}
+	service := NewAuxiliaryLabelService(db, embedder.embed)
+
+	// "SK 海力士" slug differs from "SK海力士" (Slugify keeps a single space),
+	// and there is no alias — only the whitespace-stripped normalize key matches.
+	label, err := service.ResolveAuxiliaryLabel(context.Background(), "SK 海力士", "")
+
+	require.NoError(t, err)
+	require.Equal(t, existing.ID, label.ID, "L1 normalize-key match should reuse existing text-variant label, not create new")
+	require.Empty(t, embedder.calls, "L1 match must short-circuit before any embedding call")
+}
+
+func TestAuxiliaryLabelServiceL1NormalizeKeyNoMatchCreatesNew(t *testing.T) {
+	db := setupAuxiliaryLabelTestDB(t)
+	existing := models.SemanticLabel{Label: "SK海力士", Slug: "sk海力士", LabelType: "auxiliary", Status: "active"}
+	require.NoError(t, db.Create(&existing).Error)
+	embedder := &recordingAuxiliaryEmbedder{}
+	service := NewAuxiliaryLabelService(db, embedder.embed)
+
+	// "量子计算" normalize key differs from "SK海力士" → no L1 hit → create new.
+	label, err := service.ResolveAuxiliaryLabel(context.Background(), "量子计算", "")
+
+	require.NoError(t, err)
+	require.NotEqual(t, existing.ID, label.ID, "distinct normalize key should create a new label")
+	require.NotZero(t, label.ID)
+	require.Equal(t, "量子计算", label.Label)
 }
 
 func TestAuxiliaryLabelServiceExcludesDisabledLabels(t *testing.T) {
@@ -182,6 +215,27 @@ func TestAuxiliaryLabelServiceL2MergeKeepsHigherRefCountAndAppendsAlias(t *testi
 	var reloaded models.SemanticLabel
 	require.NoError(t, db.First(&reloaded, highRef.ID).Error)
 	require.Contains(t, reloaded.Aliases, "GPT 5")
+}
+
+func TestAuxiliaryLabelServiceL2ThresholdConfigurable(t *testing.T) {
+	db := setupAuxiliaryLabelTestDB(t)
+	// Override the seeded default (0.95, set by migration 20260717_0001) to 0.80.
+	setv := models.AISettings{Key: "auxiliary_label_dedupe_sim", Value: "0.80"}
+	require.NoError(t, db.Where("key = ?", "auxiliary_label_dedupe_sim").Assign(setv).FirstOrCreate(&setv).Error)
+
+	existingVec := core.FloatsToPgVector(testutil.PadVector([]float64{1, 0, 0}, testutil.TestEmbeddingDim))
+	existing := models.SemanticLabel{Label: "Prompt工程", Slug: "prompt工程", LabelType: "auxiliary", Status: "active", MergeEmbedding: &existingVec}
+	require.NoError(t, db.Create(&existing).Error)
+	// Candidate whose merge embedding has cosine ~0.85 to existing.
+	// At the default 0.95 threshold this would NOT merge; at the configured 0.80 it should.
+	embedder := &recordingAuxiliaryEmbedder{vectors: map[string][]float64{"提示词工程": {0.85, 0.53, 0}}}
+	service := NewAuxiliaryLabelService(db, embedder.embed)
+
+	label, err := service.ResolveAuxiliaryLabel(context.Background(), "提示词工程", "")
+
+	require.NoError(t, err)
+	require.Equal(t, existing.ID, label.ID, "with configured threshold 0.80, cosine ~0.85 should merge into existing as alias")
+	require.Contains(t, label.Aliases, "提示词工程")
 }
 
 func TestAuxiliaryLabelServiceL3CreatesAuxiliaryLabelWithEmbedding(t *testing.T) {

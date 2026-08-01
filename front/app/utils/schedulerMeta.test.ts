@@ -68,7 +68,8 @@ describe('schedulerMeta', () => {
   })
 
   it('maps newly added scheduler names to Chinese display names', () => {
-    expect(getSchedulerDisplayName('preference_update')).toBe('阅读偏好更新')
+    expect(getSchedulerDisplayName('preference_profile_update')).toBe('兴趣画像重算')
+    expect(getSchedulerDisplayName('rsshub_catalog_sync')).toBe('订阅源目录同步')
     expect(getSchedulerDisplayName('tag_quality_score')).toBe('标签质量评分')
     expect(getSchedulerDisplayName('log_cleanup')).toBe('日志清理')
     expect(getSchedulerDisplayName('daily_report')).toBe('每日报告')

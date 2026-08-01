@@ -9,6 +9,7 @@ import (
 	"syntopica-backend/internal/platform/airouter"
 	"syntopica-backend/internal/platform/jsonutil"
 	"syntopica-backend/internal/platform/logging"
+	"syntopica-backend/internal/platform/tracing"
 	"syntopica-backend/internal/topicgraph/repository"
 )
 
@@ -32,6 +33,9 @@ const highlightsSystemPrompt = `你是一名专业的新闻分析师。你收到
 
 // GenerateHighlights produces 2-3 highlights for the report.
 func GenerateHighlights(ctx context.Context, tags []repository.TagInput, clusters []repository.ClusterGroup) ([]repository.Highlight, error) {
+	ctx, span := tracing.Tracer(tracing.ServiceName).Start(ctx, "workflow.daily_report.highlights")
+	defer span.End()
+
 	if len(tags) == 0 {
 		return nil, nil
 	}
@@ -41,6 +45,8 @@ func GenerateHighlights(ctx context.Context, tags []repository.TagInput, cluster
 	temperature := 0.3
 	maxTokens := 2000
 	result, err := airouter.NewRouter().Chat(ctx, airouter.ChatRequest{
+		Operation:  "daily_report.highlights",
+		SessionID:  SessionIDFromContext(ctx),
 		Capability: airouter.CapabilityDigestPolish,
 		Messages: []airouter.Message{
 			{Role: "system", Content: highlightsSystemPrompt},
@@ -85,6 +91,9 @@ func buildHighlightsPrompt(tags []repository.TagInput, clusters []repository.Clu
 	sb.WriteString("## 事件标签\n\n")
 	for _, t := range tags {
 		fmt.Fprintf(&sb, "- [ID:%d] %s (文章数:%d)\n", t.ID, t.Label, t.ArticleCount)
+		if t.ArticleContext != "" {
+			fmt.Fprintf(&sb, "  代表文章: %s\n", t.ArticleContext)
+		}
 	}
 	if len(clusters) > 0 {
 		sb.WriteString("\n## 聚类分组\n\n")
@@ -143,6 +152,9 @@ const threadsSystemPrompt = `你是一名专业的新闻叙事分析师。你收
 
 // GenerateClusterThreads produces threads for a single cluster.
 func GenerateClusterThreads(ctx context.Context, cluster repository.ClusterGroup, tags []repository.TagInput) ([]repository.Thread, error) {
+	ctx, span := tracing.Tracer(tracing.ServiceName).Start(ctx, "workflow.daily_report.cluster_threads")
+	defer span.End()
+
 	clusterTags := filterTagsByIDs(tags, cluster.TagIDs)
 	if len(clusterTags) == 0 {
 		return nil, nil
@@ -153,6 +165,8 @@ func GenerateClusterThreads(ctx context.Context, cluster repository.ClusterGroup
 	temperature := 0.3
 	maxTokens := 2000
 	result, err := airouter.NewRouter().Chat(ctx, airouter.ChatRequest{
+		Operation:  "daily_report.threads",
+		SessionID:  SessionIDFromContext(ctx),
 		Capability: airouter.CapabilityDigestPolish,
 		Messages: []airouter.Message{
 			{Role: "system", Content: threadsSystemPrompt},
@@ -201,6 +215,9 @@ func buildThreadsPrompt(cluster repository.ClusterGroup, tags []repository.TagIn
 		if t.Description != "" {
 			fmt.Fprintf(&sb, ", 描述:%s", t.Description)
 		}
+		if t.ArticleContext != "" {
+			fmt.Fprintf(&sb, ", 代表文章: %s", t.ArticleContext)
+		}
 		sb.WriteString(")\n")
 	}
 	sb.WriteString("\n请识别该聚类中的叙事线索。\n")
@@ -245,6 +262,9 @@ type llmMergePair struct {
 
 // llmArbitrateMerges uses LLM to decide whether gray-zone section pairs should be merged.
 func llmArbitrateMerges(ctx context.Context, sections []repository.DailyReportSection, pairs []llmMergePair, tagLabelMap map[uint]string) ([]llmMergePair, error) {
+	ctx, span := tracing.Tracer(tracing.ServiceName).Start(ctx, "workflow.daily_report.merge_arbitration")
+	defer span.End()
+
 	var sb strings.Builder
 	sb.WriteString("以下是一些同日生成的叙事分组（section）配对，它们语义相似但不确定是否属于同一叙事框架。\n")
 	sb.WriteString("请判断每对是否应该合并为一个 section。合并标准：它们描述的是同一个更大的叙事/故事。\n\n")
@@ -279,6 +299,8 @@ func llmArbitrateMerges(ctx context.Context, sections []repository.DailyReportSe
 	temperature := 0.1
 	maxTokens := 2048
 	result, err := airouter.NewRouter().Chat(ctx, airouter.ChatRequest{
+		Operation:  "daily_report.merge_arbitration",
+		SessionID:  SessionIDFromContext(ctx),
 		Capability: airouter.CapabilityDigestPolish,
 		Messages: []airouter.Message{
 			{Role: "system", Content: "你是一名专业的新闻叙事分析师。你的任务是判断两个叙事分组是否描述的是同一个更大的故事/叙事框架。只返回应该合并的配对索引。"},

@@ -24,7 +24,7 @@ import (
 )
 
 var semanticBoardLabelEmbedder service.AuxiliaryLabelEmbedder = service.DefaultAuxiliaryLabelEmbedder
-var semanticBoardUpgradeLLMFactory = newSemanticBoardUpgradeLLM
+var semanticBoardUpgradeLLMFactory = service.NewDefaultSemanticBoardUpgradeLLM
 
 type semanticBoardHandler struct {
 	db        *gorm.DB
@@ -33,12 +33,15 @@ type semanticBoardHandler struct {
 }
 
 type semanticBoardRequest struct {
-	Label           string `json:"label"`
-	Description     string `json:"description"`
-	DisplayOrder    *int   `json:"display_order"`
-	Protected       *bool  `json:"protected"`
-	Status          string `json:"status"`
-	AuxiliaryLabels []uint `json:"auxiliary_labels"`
+	Label             string   `json:"label"`
+	Description       string   `json:"description"`
+	DisplayOrder      *int     `json:"display_order"`
+	Protected         *bool    `json:"protected"`
+	Status            string   `json:"status"`
+	AuxiliaryLabels   []uint   `json:"auxiliary_labels"`
+	EnrichmentEnabled *bool    `json:"enrichment_enabled"`
+	WindowDays        *int     `json:"window_days"`
+	ContextLayers     []string `json:"context_layers"`
 }
 
 type suggestedAuxiliaryDTO struct {
@@ -107,6 +110,12 @@ func RegisterSemanticBoardRoutes(rg *gin.RouterGroup) {
 		boards.GET("/upgrade-candidates", handler.getUpgradeCandidates)
 		boards.POST("/upgrade-suggest", handler.suggestUpgrades)
 		boards.POST("/upgrade-execute", handler.executeUpgrade)
+
+		// §5: persisted upgrade-suggestions resource (query / dismiss / generate).
+		// Legacy upgrade-suggest is retained for a compatibility window.
+		boards.GET("/upgrade-suggestions", handler.listUpgradeSuggestions)
+		boards.POST("/upgrade-suggestions/:id/dismiss", handler.dismissUpgradeSuggestion)
+		boards.POST("/upgrade-suggestions/generate", handler.generateUpgradeSuggestions)
 		boards.POST("/backfill", handler.enqueueBackfill)
 		boards.GET("/backfill/:id", handler.getBackfillJob)
 		boards.POST("/backfill-embeddings", handler.backfillBoardEmbeddings)
@@ -268,6 +277,15 @@ func (h *semanticBoardHandler) updateSemanticBoard(c *gin.Context) {
 	}
 	if req.Status == "active" || req.Status == "disabled" {
 		board.Status = req.Status
+	}
+	if req.EnrichmentEnabled != nil {
+		board.EnrichmentEnabled = *req.EnrichmentEnabled
+	}
+	if req.WindowDays != nil && *req.WindowDays >= 1 {
+		board.WindowDays = *req.WindowDays
+	}
+	if req.ContextLayers != nil {
+		board.ContextLayers = req.ContextLayers
 	}
 	if err := h.db.WithContext(c.Request.Context()).Save(&board).Error; err != nil {
 		respondError(c, http.StatusBadRequest, err)

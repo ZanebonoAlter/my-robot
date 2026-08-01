@@ -1,16 +1,23 @@
 import type { ApiResponse } from '~/types'
-import type { SchedulerStatus, SchedulerTriggerResult } from '~/types/scheduler'
+import type { AnalysisPauseState, SchedulerStatus, SchedulerTriggerResult } from '~/types/scheduler'
 import { apiClient } from './client'
+import { buildQueryString } from '~/utils/api-helpers'
+
+// /schedulers/status 顶层除 data 外还带 analysis_paused / analysis_paused_at
+export type SchedulersStatusResponse = ApiResponse<SchedulerStatus[]> & {
+  analysis_paused?: boolean
+  analysis_paused_at?: string
+}
 
 async function triggerSchedulerRequest(name: string, params?: Record<string, string>): Promise<ApiResponse<SchedulerTriggerResult>> {
-  const query = params ? '?' + new URLSearchParams(params).toString() : ''
+  const query = params ? buildQueryString(params) : ''
   return apiClient.post<SchedulerTriggerResult>(`/schedulers/${name}/trigger${query}`, {})
 }
 
 export function useSchedulerApi() {
   return {
-    async getSchedulersStatus() {
-      return apiClient.get<SchedulerStatus[]>('/schedulers/status')
+    async getSchedulersStatus(): Promise<SchedulersStatusResponse> {
+      return apiClient.get<SchedulerStatus[]>('/schedulers/status') as Promise<SchedulersStatusResponse>
     },
 
     async getSchedulerStatus(name: string) {
@@ -19,6 +26,18 @@ export function useSchedulerApi() {
 
     async triggerScheduler(name: string, params?: Record<string, string>) {
       return triggerSchedulerRequest(name, params)
+    },
+
+    async updateScheduleTime(name: string, time: string) {
+      return apiClient.put<{ name: string; time: string }>(`/schedulers/${name}/schedule-time`, { time })
+    },
+
+    async getAnalysisPause() {
+      return apiClient.get<AnalysisPauseState>('/analysis/pause')
+    },
+
+    async setAnalysisPause(paused: boolean) {
+      return apiClient.post<AnalysisPauseState>('/analysis/pause', { paused })
     },
 
   }

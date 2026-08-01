@@ -60,11 +60,18 @@ class ApiClient {
         }
       }
 
+      // 透传响应顶层额外字段（如 /schedulers/status 的 analysis_paused）
+      const extras = Object.fromEntries(
+        Object.entries(data as Record<string, unknown>).filter(
+          ([key]) => !['success', 'data', 'pagination', 'message', 'error'].includes(key),
+        ),
+      )
       return {
         success: true,
         data: data.data,
         pagination: data.pagination,
         message: data.message,
+        ...extras,
       }
     } catch (error) {
       return {

@@ -10,9 +10,12 @@ import BackfillProgress from './BackfillProgress.vue'
 import MatchingConfigDialog from './MatchingConfigDialog.vue'
 import NarrativeGenerateDialog from './NarrativeGenerateDialog.vue'
 import BoardDailyReportTimeline from './BoardDailyReportTimeline.vue'
+import BoardThreadBrowser from './BoardThreadBrowser.vue'
+import TopicDetectiveWall from './TopicDetectiveWall.client.vue'
 import TagMergePreview from './TagMergePreview.vue'
 import BoardListSidebar from './BoardListSidebar.vue'
 import BoardTimelinePanel from './BoardTimelinePanel.vue'
+import BoardEnrichmentPanel from './BoardEnrichmentPanel.vue'
 import BoardEditDialog from './BoardEditDialog.vue'
 import ArticlePreviewModal from './ArticlePreviewModal.vue'
 import { useTagsPage } from '~/features/tags/composables/useTagsPage'
@@ -21,7 +24,9 @@ const {
   // Board CRUD
   boards, selectedBoardId, boardsLoading, boardsError,
   compositionLabels, compositionLoading,
-  editingBoard, editLabel, editDescription, editSaving, editError,
+  editingBoard, editLabel, editDescription,
+  editEnrichmentEnabled, editWindowDays, editContextLayers,
+  editSaving, editError,
   showAddDialog,
   // Timeline
   timelineArticles, timelineLoading, timelineHasMore,
@@ -38,6 +43,7 @@ const {
   backfillTask,
   upgradeCandidates, upgradeClusters, upgradeSuggestions,
   upgradeLoading, upgradeSuggesting, upgradeBackfillNotice,
+  upgradePersistedSuggestions, upgradePersistedLoading, upgradePersistedGenerating,
   matchingConfig, matchingConfigLoading,
   // Methods - board
   loadBoards: _lb, loadComposition, handleSelectBoard,
@@ -52,6 +58,8 @@ const {
   handleDisableAuxLabel, handleMergeAuxLabel,
   // Methods - other
   handleUpgradeSuggest, handleSuggestUpgrade, handleExecuteUpgrade,
+  loadPersistedSuggestions, handleGenerateUpgradeSuggestions,
+  handleDismissUpgradeRow, handleConfirmUpgradeRow,
   handleTriggerBackfill,
   handleOpenMatchingConfig, handleSaveMatchingConfig,
   handleMergeComplete,
@@ -61,6 +69,25 @@ const {
 
 const { isTagsFirstRun, startTagsTour } = useOnboarding()
 const selectedBoardLabel = computed(() => boards.value.find(board => board.id === selectedBoardId.value)?.label)
+
+// 话题总览 tab：侦探墙全屏入口（BoardThreadBrowser @open-detective-wall 触发）
+const showTopicOverviewWall = ref(false)
+const topicOverviewWallTopicId = ref<number | undefined>(undefined)
+function openTopicOverviewDetectiveWall(topicId?: number) {
+  topicOverviewWallTopicId.value = topicId
+  showTopicOverviewWall.value = true
+}
+
+// 话题态势版图卡片/气泡 click → 切「话题总览」tab 并聚焦该 topic（BoardThreadBrowser focus 视图，不弹侦探墙）
+const focusTopicIdInBrowser = ref<number | null>(null)
+function handleLandscapeSelectTopic(topicId: number) {
+  contentTab.value = 'topic-overview'
+  // 先清再设，保证同一话题重复点击也触发 BoardThreadBrowser 的 watch
+  focusTopicIdInBrowser.value = null
+  nextTick(() => {
+    focusTopicIdInBrowser.value = topicId
+  })
+}
 
 onMounted(() => {
   if (isTagsFirstRun.value) {
@@ -113,11 +140,17 @@ onMounted(() => {
             <button type="button" class="tags-content-tab" :class="{ 'tags-content-tab--active': contentTab === 'composition' }" @click="contentTab = 'composition'">
               <Icon icon="mdi:view-dashboard-outline" width="14" /> 板块内容
             </button>
+            <button type="button" class="tags-content-tab" :class="{ 'tags-content-tab--active': contentTab === 'topic-overview' }" @click="contentTab = 'topic-overview'">
+              <Icon icon="mdi:chart-timeline-variant" width="14" /> 话题总览
+            </button>
             <button type="button" class="tags-content-tab" :class="{ 'tags-content-tab--active': contentTab === 'daily-reports' }" @click="contentTab = 'daily-reports'">
               <Icon icon="mdi:file-document-outline" width="14" /> 日报
             </button>
             <button type="button" class="tags-content-tab" :class="{ 'tags-content-tab--active': contentTab === 'articles' }" @click="contentTab = 'articles'">
               <Icon icon="mdi:newspaper-variant-outline" width="14" /> 文章
+            </button>
+            <button type="button" class="tags-content-tab" :class="{ 'tags-content-tab--active': contentTab === 'enrichment' }" @click="contentTab = 'enrichment'">
+              <Icon icon="mdi:database-plus-outline" width="14" /> 数据增强
             </button>
           </div>
 
@@ -128,12 +161,36 @@ onMounted(() => {
             :loading="compositionLoading"
             @remove="handleRemoveComposition"
             @refresh="() => loadComposition(selectedBoardId!)"
+            @select-topic="handleLandscapeSelectTopic"
+          />
+
+          <BoardEnrichmentPanel
+            v-if="contentTab === 'enrichment'"
+            :board-id="selectedBoardId"
           />
 
           <BoardDailyReportTimeline
             v-if="contentTab === 'daily-reports'"
             :board-id="selectedBoardId"
             :board-title="selectedBoardLabel"
+            :boards="boards"
+            @open-article="openArticlePreview"
+            @select-board="handleSelectBoard"
+          />
+
+          <BoardThreadBrowser
+            v-if="contentTab === 'topic-overview'"
+            :board-id="selectedBoardId"
+            :focus-topic-id="focusTopicIdInBrowser"
+            @open-article="openArticlePreview"
+            @open-detective-wall="openTopicOverviewDetectiveWall()"
+          />
+
+          <TopicDetectiveWall
+            v-if="showTopicOverviewWall"
+            :board-id="selectedBoardId"
+            :initial-topic-id="topicOverviewWallTopicId"
+            @close="showTopicOverviewWall = false"
             @open-article="openArticlePreview"
           />
 
@@ -148,6 +205,7 @@ onMounted(() => {
             :timeline-display-articles="timelineDisplayArticles"
             :feed-options="feedOptions"
             :selected-tag-for-detail="selectedTagForDetail"
+            @update:selected-tag-for-detail="selectedTagForDetail = $event"
             :filter-feed-id="filterFeedId"
             :start-date="startDate"
             :end-date="endDate"
@@ -199,10 +257,16 @@ onMounted(() => {
       :editing-board="!!editingBoard"
       :edit-label="editLabel"
       :edit-description="editDescription"
+      :edit-enrichment-enabled="editEnrichmentEnabled"
+      :edit-window-days="editWindowDays"
+      :edit-context-layers="editContextLayers"
       :edit-saving="editSaving"
       :edit-error="editError"
       @update:edit-label="(v: string) => editLabel = v"
       @update:edit-description="(v: string) => editDescription = v"
+      @update:edit-enrichment-enabled="(v: boolean) => editEnrichmentEnabled = v"
+      @update:edit-window-days="(v: number) => editWindowDays = v"
+      @update:edit-context-layers="(v: string[]) => editContextLayers = v"
       @save="handleSaveBoardEdit"
       @close="closeEditBoard"
     />
@@ -214,8 +278,16 @@ onMounted(() => {
       :loading="upgradeLoading"
       :suggesting="upgradeSuggesting"
       :backfill-notice="upgradeBackfillNotice"
+      :persisted-suggestions="upgradePersistedSuggestions"
+      :persisted-loading="upgradePersistedLoading"
+      :persisted-generating="upgradePersistedGenerating"
+      :boards="boards"
       @suggest="handleSuggestUpgrade"
       @execute="handleExecuteUpgrade"
+      @load-persisted="loadPersistedSuggestions"
+      @generate="handleGenerateUpgradeSuggestions"
+      @dismiss-row="handleDismissUpgradeRow"
+      @confirm-row="handleConfirmUpgradeRow"
       @cancel="showUpgradeDialog = false"
     />
     <MatchingConfigDialog
@@ -243,13 +315,13 @@ onMounted(() => {
 <style scoped>
 .tags-page { display: flex; flex-direction: column; height: 100vh; background: var(--color-bg-base); color: var(--color-text-primary); }
 .tags-topbar { position: sticky; top: 0; z-index: 30; border-bottom: 1px solid var(--color-border-subtle); background: var(--color-bg-elevated); backdrop-filter: blur(16px); }
-.tags-topbar-inner { display: flex; align-items: center; justify-content: space-between; max-width: min(1800px, 95vw); margin: 0 auto; padding: 0.75rem 1.5rem; }
+.tags-topbar-inner { display: flex; align-items: center; justify-content: space-between; padding: 0.75rem 1.5rem; }
 .tags-back-btn { display: flex; align-items: center; justify-content: center; width: 28px; height: 28px; border: 1px solid var(--color-border-medium); border-radius: 8px; color: var(--color-text-muted); text-decoration: none; transition: all 0.12s ease; }
 .tags-back-btn:hover { border-color: var(--color-border-strong); color: var(--color-text-secondary); background: var(--color-bg-hover); }
 .tags-page-title { font-family: serif; font-size: 1.1rem; font-weight: 600; color: var(--color-text-primary); letter-spacing: 0.02em; }
 .tags-guide-btn { display: flex; align-items: center; justify-content: center; width: 28px; height: 28px; border: 1px solid var(--color-border-medium); border-radius: 8px; background: none; color: var(--color-text-muted); cursor: pointer; transition: all 0.12s ease; }
 .tags-guide-btn:hover { border-color: var(--color-border-strong); color: var(--color-text-secondary); background: var(--color-bg-hover); }
-.tags-main { display: flex; flex: 1; min-height: 0; max-width: min(1800px, 95vw); width: 100%; margin: 0 auto; }
+.tags-main { display: flex; flex: 1; min-height: 0; width: 100%; }
 .tags-content { flex: 1; min-width: 0; padding: 1.25rem 1.5rem 3.5rem; overflow-y: auto; }
 .tags-content-tabs { display: flex; gap: 0.25rem; padding: 0 0 0.75rem; margin-bottom: 1rem; border-bottom: 1px solid var(--color-border-subtle); }
 .tags-content-tab { display: flex; align-items: center; gap: 0.35rem; padding: 0.4rem 0.75rem; border: none; border-radius: 8px 8px 0 0; background: none; color: var(--color-text-muted); font-size: 0.75rem; cursor: pointer; transition: all 0.12s ease; position: relative; }

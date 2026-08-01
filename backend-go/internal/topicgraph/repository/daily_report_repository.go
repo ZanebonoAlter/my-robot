@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"time"
 
@@ -45,14 +46,15 @@ func NormalizeReportDate(date time.Time) time.Time {
 
 // SectionTimelineNode represents a section in a timeline view.
 type SectionTimelineNode struct {
-	ID           uint      `json:"id"`
-	ReportID     uint      `json:"report_id"`
-	PeriodDate   time.Time `json:"period_date"`
-	ClusterLabel string    `json:"cluster_label"`
-	Status       string    `json:"status"`
-	ArticleCount int       `json:"article_count"`
-	ThreadCount  int       `json:"thread_count"`
-	ImageURL     string    `json:"image_url"`
+	ID               uint            `json:"id"`
+	ReportID         uint            `json:"report_id"`
+	PeriodDate       time.Time       `json:"period_date"`
+	ClusterLabel     string          `json:"cluster_label"`
+	Status           string          `json:"status"`
+	ArticleCount     int             `json:"article_count"`
+	ThreadCount      int             `json:"thread_count"`
+	ImageURL         string          `json:"image_url"`
+	QualityBreakdown json.RawMessage `json:"quality_breakdown"`
 	// Persistent topic assignment. All optional so historical / unmatched
 	// sections (persistent_topic_id IS NULL) still serialize cleanly.
 	PersistentTopicID    *uint                 `json:"persistent_topic_id,omitempty"`
@@ -69,6 +71,7 @@ type PersistentTopicBrief struct {
 	Label           string `json:"label"`
 	Status          string `json:"status"`
 	Color           string `json:"color"`
+	HitCount        int    `json:"hit_count"`
 	ConsecutiveHits int    `json:"consecutive_hits"`
 	CanActivate     bool   `json:"can_activate"`
 }
@@ -167,7 +170,11 @@ func DeriveSectionStatuses(sectionIDs []uint, relations []SectionRelationResult,
 // report for the same board and date.
 func (r *TopicGraphRepository) SaveReport(report *BoardDailyReport, sections []DailyReportSection, threadBatches [][]DailyReportThread) error {
 	report.PeriodDate = NormalizeReportDate(report.PeriodDate)
-	return r.db.Transaction(func(tx *gorm.DB) error {
+	// touchedTopicIDs is captured inside the transaction so the post-commit
+	// centroid/vacuum refresh (which reads via r.db and must see committed
+	// sections) knows which topics changed.
+	var touchedTopicIDs []uint
+	err := r.db.Transaction(func(tx *gorm.DB) error {
 		// Upsert report: find existing by (semantic_board_id, period_date)
 		var existing BoardDailyReport
 		findErr := tx.Where("semantic_board_id = ? AND period_date = ?",
@@ -225,8 +232,10 @@ func (r *TopicGraphRepository) SaveReport(report *BoardDailyReport, sections []D
 			// written by RebuildBoardRelations depend on persistent_topic_id
 			// being set. Best-effort non-fatal: a failure degrades to the old
 			// similarity-only graph rather than aborting the whole save.
-			if assignErr := assignAndUpdateTopics(tx, report.SemanticBoardID, report.PeriodDate, sections); assignErr != nil {
+			if touched, assignErr := assignAndUpdateTopics(tx, report.SemanticBoardID, report.PeriodDate, sections); assignErr != nil {
 				logging.Warnf("SaveReport: topic assignment failed for board %d: %v", report.SemanticBoardID, assignErr)
+			} else {
+				touchedTopicIDs = touched
 			}
 		}
 
@@ -248,6 +257,23 @@ func (r *TopicGraphRepository) SaveReport(report *BoardDailyReport, sections []D
 			report.ID, report.SemanticBoardID, report.PeriodDate.Format("2006-01-02"), len(sections))
 		return nil
 	})
+	if err != nil {
+		return err
+	}
+
+	// Post-commit refresh: centroids + vacuum stats. Both read via r.db, so they
+	// must run AFTER the transaction commits (sections + persistent_topic_id
+	// are otherwise invisible to ComputeTopicCentroid's r.db query). Best-effort:
+	// a failure degrades to a stale centroid/vacuum flag, not a save failure.
+	for _, tid := range touchedTopicIDs {
+		if cerr := r.UpdateCentroidOnSectionChange(nil, tid); cerr != nil {
+			logging.Warnf("SaveReport: centroid refresh failed for topic %d: %v", tid, cerr)
+		}
+	}
+	if verr := r.RecomputeVacuumStats(report.SemanticBoardID); verr != nil {
+		logging.Warnf("SaveReport: vacuum stats recompute failed for board %d: %v", report.SemanticBoardID, verr)
+	}
+	return nil
 }
 
 // GetReportByID retrieves a single daily report by its primary key.
@@ -378,15 +404,17 @@ func (r *TopicGraphRepository) SaveThreads(tx *gorm.DB, reportID, sectionID uint
 
 // GetBoardSectionTimeline fetches all sections and their relations for a board within a date range.
 func (r *TopicGraphRepository) GetBoardSectionTimeline(boardID uint, days int) (SectionTimelineResponse, error) {
+	// days <= 0 表示"全部历史"：跳过 90 天窗口上限，用一个远超真实数据跨度的
+	// 窗口等效"不按天过滤"（保留单条大 SELECT，避免重写易错的 SQL 字面量）。
 	if days <= 0 {
-		days = 30
-	}
-	if days > 90 {
+		days = 100000
+	} else if days > 90 {
 		days = 90
 	}
 	var nodes []SectionTimelineNode
 	err := r.db.Raw(`
 		SELECT ds.id, ds.report_id, bdr.period_date, ds.cluster_label,
+		       ds.quality_breakdown,
 		       ds.article_count,
 		       ds.persistent_topic_id,
 		       ds.topic_match_distance,
@@ -396,7 +424,7 @@ func (r *TopicGraphRepository) GetBoardSectionTimeline(boardID uint, days int) (
 		         (
 		           SELECT a.image_url
 		           FROM daily_report_threads t
-		           JOIN LATERAL jsonb_array_elements_text(COALESCE(t.related_article_ids, '[]'::jsonb)) aid(article_id) ON true
+		           JOIN LATERAL jsonb_array_elements_text(CASE WHEN jsonb_typeof(t.related_article_ids)='array' THEN t.related_article_ids ELSE '[]'::jsonb END) aid(article_id) ON true
 		           JOIN articles a ON a.id = aid.article_id::bigint
 		           WHERE t.section_id = ds.id
 		             AND a.image_url IS NOT NULL
@@ -406,7 +434,7 @@ func (r *TopicGraphRepository) GetBoardSectionTimeline(boardID uint, days int) (
 		         ),
 		         (
 		           SELECT a.image_url
-		           FROM jsonb_array_elements_text(COALESCE(ds.cluster_tag_ids, '[]'::jsonb)) tid(tag_id)
+		           FROM jsonb_array_elements_text(CASE WHEN jsonb_typeof(ds.cluster_tag_ids)='array' THEN ds.cluster_tag_ids ELSE '[]'::jsonb END) tid(tag_id)
 		           JOIN article_topic_tags att ON att.topic_tag_id = tid.tag_id::bigint
 		           JOIN articles a ON a.id = att.article_id
 		           WHERE a.pub_date >= bdr.period_date
@@ -519,6 +547,7 @@ func (r *TopicGraphRepository) GetSectionLifecycle(sectionID uint) (SectionTimel
 	var nodes []SectionTimelineNode
 	if err := r.db.Raw(`
 		SELECT ds.id, ds.report_id, bdr.period_date, ds.cluster_label,
+		       ds.quality_breakdown,
 		       ds.article_count,
 		       ds.persistent_topic_id,
 		       ds.topic_match_distance,
@@ -528,7 +557,7 @@ func (r *TopicGraphRepository) GetSectionLifecycle(sectionID uint) (SectionTimel
 	         (
 	           SELECT a.image_url
 	           FROM daily_report_threads t
-	           JOIN LATERAL jsonb_array_elements_text(COALESCE(t.related_article_ids, '[]'::jsonb)) aid(article_id) ON true
+	           JOIN LATERAL jsonb_array_elements_text(CASE WHEN jsonb_typeof(t.related_article_ids)='array' THEN t.related_article_ids ELSE '[]'::jsonb END) aid(article_id) ON true
 	           JOIN articles a ON a.id = aid.article_id::bigint
 	           WHERE t.section_id = ds.id
 	             AND a.image_url IS NOT NULL
@@ -538,7 +567,7 @@ func (r *TopicGraphRepository) GetSectionLifecycle(sectionID uint) (SectionTimel
 	         ),
 	         (
 	           SELECT a.image_url
-	           FROM jsonb_array_elements_text(COALESCE(ds.cluster_tag_ids, '[]'::jsonb)) tid(tag_id)
+	           FROM jsonb_array_elements_text(CASE WHEN jsonb_typeof(ds.cluster_tag_ids)='array' THEN ds.cluster_tag_ids ELSE '[]'::jsonb END) tid(tag_id)
 	           JOIN article_topic_tags att ON att.topic_tag_id = tid.tag_id::bigint
 	           JOIN articles a ON a.id = att.article_id
 	           WHERE a.pub_date >= bdr.period_date
@@ -612,8 +641,8 @@ func loadTopicBriefMap(db *gorm.DB, ids []uint) map[uint]PersistentTopicBrief {
 	for _, t := range topics {
 		briefByID[t.ID] = PersistentTopicBrief{
 			ID: t.ID, Label: t.Label, Status: t.Status,
-			Color: PersistentTopicColor(t.ID), ConsecutiveHits: t.ConsecutiveHits,
-			CanActivate: t.Status == TopicStatusCandidate && t.ConsecutiveHits >= cfg.UpgradeThreshold,
+			Color: PersistentTopicColor(t.ID), HitCount: t.HitCount, ConsecutiveHits: t.ConsecutiveHits,
+			CanActivate: t.Status == TopicStatusCandidate && t.HitCount >= cfg.UpgradeThreshold,
 		}
 	}
 	return briefByID
@@ -690,6 +719,7 @@ func (r *TopicGraphRepository) GetTopicLifeline(topicID uint) (SectionTimelineRe
 	var nodes []SectionTimelineNode
 	err := r.db.Raw(`
 		SELECT ds.id, ds.report_id, bdr.period_date, ds.cluster_label,
+		       ds.quality_breakdown,
 		       ds.article_count,
 		       ds.persistent_topic_id,
 		       ds.topic_match_distance,
@@ -766,7 +796,8 @@ func (r *TopicGraphRepository) BackfillSectionEmbeddings(ctx context.Context) (e
 		}
 
 		result, embedErr := airouter.NewRouter().Embed(ctx, airouter.EmbeddingRequest{
-			Input: texts,
+			Input:     texts,
+			Operation: "section.embedding_backfill",
 			Metadata: map[string]any{
 				"operation": "daily_report_section_backfill",
 			},
@@ -869,6 +900,140 @@ func (r *TopicGraphRepository) BackfillAllRelations() (map[uint]int, error) {
 		logging.Infof("BackfillAllRelations: board %d rebuilt %d relations", b.BoardID, rebuilt)
 	}
 	return results, nil
+}
+
+// =============================================================================
+// ListTopicRecentBriefs — 泳道上下文注入（切片 D）
+// =============================================================================
+
+// ListTopicRecentBriefs fetches, for every active persistent topic on the board,
+// sections from the last `sinceDays` days with up to 2 representative thread
+// titles per section. Sections are sorted by period_date DESC and trimmed to
+// `perTopicLimit` per topic. Returns map[topicID][]TopicRecentBrief.
+//
+// Degradation contract: when the query fails (DB down etc.), the caller SHALL
+// fall back to label-only injection — the briefs are purely an information
+// enrichment layer and SHALL NOT block ClusterTags.
+func (r *TopicGraphRepository) ListTopicRecentBriefs(boardID uint, sinceDays int, perTopicLimit int) (map[uint][]TopicRecentBrief, error) {
+	cutoff := time.Now().AddDate(0, 0, -sinceDays).Truncate(24 * time.Hour)
+
+	// 1) Collect active topic IDs on this board.
+	type topicRow struct {
+		ID     uint
+		Status string
+	}
+	var topics []topicRow
+	err := r.db.Model(&BoardPersistentTopic{}).
+		Select("id, status").
+		Where("semantic_board_id = ? AND status = ?", boardID, TopicStatusActive).
+		Find(&topics).Error
+	if err != nil {
+		return nil, fmt.Errorf("listTopicRecentBriefs: load active topics: %w", err)
+	}
+	if len(topics) == 0 {
+		return nil, nil
+	}
+
+	activeIDs := make([]uint, len(topics))
+	for i, t := range topics {
+		activeIDs[i] = t.ID
+	}
+
+	// 2) Raw query: sections + threads joined, ordered for downstream grouping.
+	type row struct {
+		TopicID      uint      `gorm:"column:persistent_topic_id"`
+		SectionID    uint      `gorm:"column:section_id"`
+		SectionLabel string    `gorm:"column:section_label"`
+		PeriodDate   time.Time `gorm:"column:period_date"`
+		ThreadTitle  *string   `gorm:"column:thread_title"`
+		FitDistance  *float64  `gorm:"column:fit_distance"`
+	}
+
+	var rows []row
+	err = r.db.Raw(`
+		SELECT
+			ds.persistent_topic_id,
+			ds.id AS section_id,
+			ds.cluster_label AS section_label,
+			bdr.period_date,
+			t.title AS thread_title,
+			t.fit_distance
+		FROM daily_report_sections ds
+		JOIN board_daily_reports bdr ON bdr.id = ds.report_id
+		LEFT JOIN LATERAL (
+			SELECT d.title, d.fit_distance
+			FROM daily_report_threads d
+			WHERE d.section_id = ds.id
+			ORDER BY COALESCE(d.fit_distance, 999999) ASC, d.id ASC
+			LIMIT 2
+		) t ON true
+		WHERE ds.persistent_topic_id IN ?
+		  AND bdr.period_date >= ?
+		ORDER BY ds.persistent_topic_id, bdr.period_date DESC, ds.id ASC
+	`, activeIDs, cutoff).Scan(&rows).Error
+	if err != nil {
+		return nil, fmt.Errorf("listTopicRecentBriefs: query sections+threads: %w", err)
+	}
+
+	// 3) Group rows by topic → section → threads.
+	// Because the query is ordered by (topic_id, period_date DESC, section_id),
+	// a streaming assembly is straightforward.
+	result := make(map[uint][]TopicRecentBrief)
+	type sectionKey struct {
+		TopicID   uint
+		SectionID uint
+	}
+	seenSec := make(map[sectionKey]*TopicRecentBrief)
+
+	for _, row := range rows {
+		sk := sectionKey{row.TopicID, row.SectionID}
+		_, exists := seenSec[sk]
+		if !exists {
+			// Enforce per-topic section cap.
+			if len(result[row.TopicID]) >= perTopicLimit {
+				continue
+			}
+			brief := &TopicRecentBrief{
+				TopicID:      row.TopicID,
+				SectionID:    row.SectionID,
+				SectionLabel: row.SectionLabel,
+				PeriodDate:   row.PeriodDate,
+			}
+			seenSec[sk] = brief
+			result[row.TopicID] = append(result[row.TopicID], *brief)
+		}
+		// Append thread title (up to 2 per section per query LIMIT).
+		if row.ThreadTitle != nil && *row.ThreadTitle != "" {
+			// Since we modify the slice element in-place, update the result map entry.
+			idx := len(result[row.TopicID]) - 1
+			result[row.TopicID][idx].ThreadTitles = append(
+				result[row.TopicID][idx].ThreadTitles, *row.ThreadTitle)
+		}
+	}
+
+	return result, nil
+}
+
+// CountSectionsByTopic aggregates the section count per persistent_topic_id across
+// all daily_report_sections (null topics excluded). Returns a map[topicID]count.
+func (r *TopicGraphRepository) CountSectionsByTopic() (map[uint]int, error) {
+	type countRow struct {
+		PersistentTopicID uint
+		N                 int
+	}
+	var counts []countRow
+	if err := r.db.Table("daily_report_sections").
+		Select("persistent_topic_id, count(*) AS n").
+		Where("persistent_topic_id IS NOT NULL").
+		Group("persistent_topic_id").
+		Scan(&counts).Error; err != nil {
+		return nil, err
+	}
+	result := make(map[uint]int, len(counts))
+	for _, cr := range counts {
+		result[cr.PersistentTopicID] = cr.N
+	}
+	return result, nil
 }
 
 // =============================================================================

@@ -7,11 +7,13 @@ import (
 	"fmt"
 	"strings"
 
+	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/trace"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 	"syntopica-backend/internal/models"
 	"syntopica-backend/internal/platform/database"
+	"syntopica-backend/internal/platform/tracing"
 )
 
 type Capability string
@@ -22,6 +24,7 @@ const (
 	CapabilityDigestPolish       Capability = "digest_polish"
 	CapabilityOpenNotebook       Capability = "open_notebook"
 	CapabilityEmbedding          Capability = "embedding"
+	CapabilityFeedDiscovery      Capability = "feed_discovery"
 	DefaultRouteName             string     = "default"
 	DefaultProviderName          string     = "default-primary"
 	ProviderTypeOpenAICompatible string     = "openai_compatible"
@@ -172,11 +175,18 @@ func (s *Store) ResolvePrimaryProvider(capability Capability) (*models.AIProvide
 }
 
 func (s *Store) LogCall(ctx context.Context, logEntry *models.AICallLog) {
+	ctx, span := otel.Tracer(tracing.ServiceName).Start(ctx, "Store.LogCall")
+	defer span.End()
 	if logEntry == nil || s.db == nil {
 		return
 	}
 	if spanCtx := trace.SpanContextFromContext(ctx); spanCtx.HasTraceID() {
 		logEntry.TraceID = spanCtx.TraceID().String()
+	}
+	// token_usage 列是 JSONB，空串不是合法 JSON；空值时省略该列让 DB 置 NULL。
+	if logEntry.TokenUsage == "" {
+		_ = s.db.Omit("token_usage").Create(logEntry).Error
+		return
 	}
 	_ = s.db.Create(logEntry).Error
 }

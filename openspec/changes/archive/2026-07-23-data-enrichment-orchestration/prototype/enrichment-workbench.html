@@ -1,0 +1,876 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="editorial">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>数据增强工作台 · 原型 v2</title>
+<style>
+/* ============================================================
+   v2 改造（吃进三条反馈）：
+   A. 周期筛选器（翻历史）替四档缩放尺
+   B. 新增「板块走势预测」区（direction/confidence/horizon/triggers）
+   C. 复盘区改成「预测兑现度」而非描述对比
+   D. 术语全换人话，结构按用户任务流重组
+   样式严格复用 front/app/assets/css/main.css 的双主题 token
+   ============================================================ */
+:root {
+  --raw-stone-50:#faf7f2; --raw-stone-100:#f5f0e6; --raw-stone-200:#e8dfd1;
+  --raw-red-500:#d94a4a;  --raw-red-600:#c12f2f;
+  --raw-success:#3d8a4a; --raw-warning:#c4883c; --raw-error:#c42f3c; --raw-info:#3d7a8a;
+}
+[data-theme="editorial"] {
+  --color-bg-base:var(--raw-stone-50); --color-bg-elevated:var(--raw-stone-100);
+  --color-bg-sunken:var(--raw-stone-200); --color-bg-hover:rgba(255,255,255,.85);
+  --color-bg-active:rgba(255,255,255,.6);
+  --color-text-primary:#1a1a1a; --color-text-secondary:#5a5a5a; --color-text-muted:#8a8a8a;
+  --color-text-inverted:#faf7f2;
+  --color-border-subtle:rgba(26,26,26,.08); --color-border-medium:rgba(26,26,26,.15);
+  --color-border-strong:rgba(26,26,26,.25);
+  --color-accent:var(--raw-red-500); --color-accent-hover:var(--raw-red-600);
+  --color-accent-subtle:rgba(217,74,74,.08);
+  --shadow-subtle:0 1px 3px rgba(26,26,26,.06);
+  --shadow-print:0 1px 0 rgba(26,26,26,.1),0 2px 4px rgba(26,26,26,.06);
+  --color-success:var(--raw-success); --color-warning:var(--raw-warning);
+  --color-error:var(--raw-error); --color-info:var(--raw-info);
+  --color-success-subtle:rgba(61,138,74,.12); --color-warning-subtle:rgba(196,136,60,.14);
+  --color-error-subtle:rgba(196,47,60,.10);
+  --color-input-bg:rgba(255,255,255,.6); --color-input-border:rgba(26,26,26,.12);
+  --color-input-focus:var(--raw-red-500);
+  --color-dialog-divider:rgba(26,26,26,.06); --color-overlay:rgba(26,26,26,.4);
+}
+[data-theme="dark"] {
+  --color-bg-base:#080c12; --color-bg-elevated:rgba(17,27,38,.98);
+  --color-bg-sunken:#0e161d; --color-bg-hover:rgba(255,255,255,.06);
+  --color-bg-active:rgba(255,255,255,.08);
+  --color-text-primary:rgba(255,255,255,.9); --color-text-secondary:rgba(255,255,255,.6);
+  --color-text-muted:rgba(255,255,255,.35); --color-text-inverted:#1a1a1a;
+  --color-border-subtle:rgba(255,255,255,.06); --color-border-medium:rgba(255,255,255,.10);
+  --color-border-strong:rgba(255,255,255,.18);
+  --color-accent:rgba(240,138,75,.85); --color-accent-hover:rgba(240,138,75,1);
+  --color-accent-subtle:rgba(240,138,75,.08);
+  --shadow-subtle:0 1px 3px rgba(0,0,0,.3);
+  --shadow-print:0 1px 0 rgba(0,0,0,.2),0 2px 4px rgba(0,0,0,.3);
+  --color-success:#4e9a8f; --color-warning:var(--raw-warning); --color-error:var(--raw-error); --color-info:#4a8a9a;
+  --color-success-subtle:rgba(78,166,143,.14); --color-warning-subtle:rgba(240,162,75,.14);
+  --color-error-subtle:rgba(196,47,60,.16);
+  --color-input-bg:rgba(255,255,255,.04); --color-input-border:rgba(255,255,255,.10);
+  --color-input-focus:rgba(240,138,75,.85);
+  --color-dialog-divider:rgba(255,255,255,.06); --color-overlay:rgba(8,12,18,.75);
+}
+* { box-sizing:border-box; }
+html,body { margin:0; padding:0; }
+body {
+  background:var(--color-bg-base); color:var(--color-text-primary);
+  font-family:-apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
+  font-size:14px; line-height:1.6; transition:background .3s,color .3s; min-height:100vh;
+}
+.serif { font-family:Georgia,"Songti SC","SimSun","Source Serif 4",serif; }
+.mono  { font-family:ui-monospace,"Cascadia Code",Menlo,monospace; }
+.muted { color:var(--color-text-muted); }
+.sec   { color:var(--color-text-secondary); }
+
+.proto-bar {
+  position:sticky; top:0; z-index:50; display:flex; align-items:center; gap:.75rem;
+  padding:.5rem 1.25rem; background:var(--color-overlay); backdrop-filter:blur(8px);
+  border-bottom:1px solid var(--color-border-subtle); font-size:12px;
+}
+[data-theme="editorial"] .proto-bar { color:var(--color-text-secondary); }
+[data-theme="dark"] .proto-bar { color:var(--color-text-inverted); }
+.proto-bar .spacer { flex:1; }
+.proto-bar code { background:var(--color-bg-sunken); padding:1px 6px; border-radius:4px; font-size:11px; }
+.theme-toggle {
+  display:inline-flex; align-items:center; gap:6px; cursor:pointer;
+  padding:4px 10px; border-radius:999px; border:1px solid var(--color-border-medium);
+  background:var(--color-bg-elevated); color:var(--color-text-primary); font-size:12px; font-family:inherit;
+}
+.theme-toggle:hover { border-color:var(--color-accent); color:var(--color-accent); }
+
+.workbench { max-width:960px; margin:0 auto; padding:2rem 1.5rem 5rem; }
+
+/* Masthead */
+.masthead { border-bottom:2px solid var(--color-text-primary); padding-bottom:1rem; margin-bottom:1.5rem; }
+.masthead .eyebrow { font-size:11px; letter-spacing:.18em; text-transform:uppercase; color:var(--color-accent); font-weight:600; margin-bottom:.4rem; }
+.masthead h1 { font-size:2rem; line-height:1.15; margin:0 0 .6rem; font-weight:700; letter-spacing:-.01em; }
+.masthead .lede { display:flex; align-items:center; gap:.6rem; flex-wrap:wrap; font-size:13px; color:var(--color-text-secondary); }
+.status-pill { display:inline-flex; align-items:center; gap:5px; padding:2px 9px; border-radius:999px; font-size:11px; font-weight:600; }
+.status-pill.evolving { background:var(--color-warning-subtle); color:var(--color-warning); }
+.status-pill .dot { width:6px; height:6px; border-radius:50%; background:currentColor; animation:pulse 1.6s infinite; }
+@keyframes pulse { 0%,100%{opacity:1;} 50%{opacity:.35;} }
+.masthead .trigger-wrap { margin-left:auto; }
+
+.btn { display:inline-flex; align-items:center; gap:6px; font-family:inherit; cursor:pointer; border:none; border-radius:8px; font-weight:600; font-size:13px; padding:7px 14px; transition:background .15s,opacity .15s,transform .1s; }
+.btn:active { transform:translateY(1px); }
+.btn-primary { background:var(--color-accent); color:#fff; }
+.btn-primary:hover { background:var(--color-accent-hover); }
+.btn-ghost { background:transparent; color:var(--color-text-secondary); border:1px solid var(--color-border-medium); }
+.btn-ghost:hover { background:var(--color-bg-hover); color:var(--color-text-primary); }
+.btn-sm { padding:4px 10px; font-size:12px; }
+.btn:disabled { opacity:.4; cursor:not-allowed; }
+
+/* 区块 */
+.block { margin-bottom:2.25rem; }
+.block-head { display:flex; align-items:baseline; gap:.6rem; margin-bottom:.9rem; padding-bottom:.4rem; border-bottom:1px solid var(--color-border-subtle); }
+.block-head .step-no { font-size:11px; font-weight:700; color:var(--color-accent); border:1px solid var(--color-accent); border-radius:50%; width:20px; height:20px; display:inline-flex; align-items:center; justify-content:center; flex-shrink:0; }
+.block-head h2 { font-size:1.1rem; margin:0; font-weight:700; }
+.block-head .helper { margin-left:auto; font-size:12px; color:var(--color-text-muted); }
+
+/* ① 周期筛选器（替四档缩放尺） */
+.period-picker {
+  display:flex; align-items:center; gap:.75rem; flex-wrap:wrap;
+  background:var(--color-bg-elevated); border:1px solid var(--color-border-subtle);
+  border-radius:12px; padding:.6rem .9rem; margin-bottom:1.1rem; box-shadow:var(--shadow-subtle);
+}
+.gran-select { display:inline-flex; border:1px solid var(--color-border-medium); border-radius:8px; overflow:hidden; }
+.gran-select button { border:none; background:var(--color-bg-base); color:var(--color-text-secondary); font-size:12.5px; padding:5px 14px; cursor:pointer; font-family:inherit; font-weight:600; }
+.gran-select button.on { background:var(--color-accent); color:#fff; }
+.period-nav { display:inline-flex; align-items:center; gap:.5rem; }
+.period-nav .cur { font-size:14px; font-weight:600; min-width:120px; text-align:center; }
+.period-nav button { width:26px; height:26px; border:1px solid var(--color-border-medium); background:var(--color-bg-base); color:var(--color-text-secondary); border-radius:6px; cursor:pointer; font-family:inherit; }
+.period-nav button:hover:not(:disabled) { border-color:var(--color-accent); color:var(--color-accent); }
+.period-nav button:disabled { opacity:.3; cursor:not-allowed; }
+.fresh-tag { font-size:11px; padding:2px 8px; border-radius:999px; }
+.fresh-latest { background:var(--color-success-subtle); color:var(--color-success); }
+.fresh-stale  { background:var(--color-warning-subtle); color:var(--color-warning); }
+
+/* 叙事区 */
+.narrative { background:var(--color-bg-elevated); border:1px solid var(--color-border-subtle); border-left:3px solid var(--color-accent); border-radius:0 8px 8px 0; padding:1.1rem 1.3rem; box-shadow:var(--shadow-print); }
+.seg { position:relative; padding:.35rem .5rem .35rem 0; margin:0 -.5rem; border-radius:6px; transition:background .12s; }
+.seg + .seg { margin-top:.5rem; padding-top:.55rem; border-top:1px dashed var(--color-border-subtle); }
+.seg:hover { background:var(--color-bg-hover); }
+.seg .seg-h { font-weight:600; font-size:13.5px; margin-bottom:.2rem; }
+.seg .seg-b { font-size:13px; color:var(--color-text-secondary); line-height:1.65; }
+.seg .seg-edit { position:absolute; right:6px; top:6px; opacity:0; transition:opacity .12s; cursor:pointer; padding:3px; border-radius:5px; color:var(--color-text-muted); }
+.seg:hover .seg-edit { opacity:1; }
+.seg .seg-edit:hover { background:var(--color-accent-subtle); color:var(--color-accent); }
+.seg textarea { width:100%; min-height:90px; resize:vertical; font-family:inherit; font-size:13px; line-height:1.6; background:var(--color-input-bg); border:1px solid var(--color-input-border); border-radius:6px; color:var(--color-text-primary); padding:.5rem .6rem; outline:none; }
+.seg textarea:focus { border-color:var(--color-input-focus); }
+.seg-actions { display:flex; gap:.4rem; margin-top:.4rem; }
+.narrative-foot { display:flex; align-items:center; gap:.6rem; margin-top:.9rem; padding-top:.7rem; border-top:1px solid var(--color-dialog-divider); font-size:11.5px; color:var(--color-text-muted); }
+
+/* ② 板块走势预测（新增） */
+.outlook { background:var(--color-bg-elevated); border:1px solid var(--color-border-medium); border-radius:12px; padding:1.1rem 1.3rem; box-shadow:var(--shadow-print); position:relative; overflow:hidden; }
+.outlook::before { content:""; position:absolute; top:0; left:0; right:0; height:3px; background:var(--color-accent); }
+.outlook-title { display:flex; align-items:baseline; gap:.5rem; margin-bottom:.8rem; }
+.outlook-title h3 { margin:0; font-size:14px; font-weight:700; }
+.outlook-title .since { font-size:11px; color:var(--color-text-muted); margin-left:auto; }
+.outlook-grid { display:flex; flex-direction:column; gap:.4rem; margin-bottom:1rem; }
+.outlook-row { display:grid; grid-template-columns:90px 1fr 90px 110px; align-items:center; gap:.6rem; padding:.5rem .7rem; background:var(--color-bg-base); border:1px solid var(--color-border-subtle); border-radius:8px; }
+.outlook-row .o-name { font-weight:700; font-size:13.5px; }
+.outlook-row .o-dir { display:inline-flex; align-items:center; gap:5px; font-size:12.5px; font-weight:600; }
+.o-dir.up { color:var(--color-success); }
+.o-dir.down { color:var(--color-error); }
+.o-dir.flat { color:var(--color-text-muted); }
+.o-dir.unknown { color:var(--color-text-muted); }
+.o-dir .arrow { font-size:15px; }
+.conf-dots { display:inline-flex; gap:3px; }
+.conf-dots span { width:8px; height:8px; border-radius:50%; background:var(--color-border-medium); }
+.conf-dots span.on { background:var(--color-accent); }
+.conf-label { font-size:11px; color:var(--color-text-muted); margin-left:6px; }
+.o-horizon { font-size:11.5px; color:var(--color-text-secondary); text-align:right; }
+.triggers { border-top:1px solid var(--color-dialog-divider); padding-top:.7rem; display:grid; grid-template-columns:1fr 1fr; gap:1rem; }
+.trig-block .trig-h { font-size:11px; font-weight:700; margin-bottom:.35rem; display:flex; align-items:center; gap:4px; }
+.trig-block.up .trig-h { color:var(--color-success); }
+.trig-block.down .trig-h { color:var(--color-error); }
+.trig-block ul { margin:0; padding-left:1.1rem; font-size:12px; color:var(--color-text-secondary); line-height:1.7; }
+.disclaimer { margin-top:.9rem; padding:.5rem .8rem; background:var(--color-warning-subtle); border-radius:6px; font-size:11.5px; color:var(--color-warning); display:flex; align-items:center; gap:6px; }
+
+/* 板块可展开卡片（每个板块自带凭什么/数据/触发） */
+.boards { display:flex; flex-direction:column; gap:.5rem; margin-bottom:.4rem; }
+.o-board { border:1px solid var(--color-border-subtle); border-radius:10px; background:var(--color-bg-base); overflow:hidden; transition:border-color .15s; }
+.o-board.open { border-color:var(--color-border-medium); box-shadow:var(--shadow-subtle); }
+.o-head { width:100%; display:flex; align-items:center; gap:.6rem; padding:.65rem .85rem; cursor:pointer; border:none; background:transparent; font-family:inherit; text-align:left; transition:background .12s; }
+.o-head:hover { background:var(--color-bg-hover); }
+.o-chev { color:var(--color-text-muted); font-size:12px; width:12px; flex-shrink:0; }
+.o-name { font-weight:700; font-size:13.5px; color:var(--color-text-primary); min-width:48px; }
+.o-dir { display:inline-flex; align-items:center; gap:4px; font-size:12.5px; font-weight:600; }
+.o-dir.up { color:var(--color-success); } .o-dir.down { color:var(--color-error); } .o-dir.flat { color:var(--color-text-muted); }
+.o-dir .arrow { font-size:15px; }
+.o-spacer { margin-left:auto; }
+.o-head .conf { display:inline-flex; align-items:center; gap:5px; }
+.o-head .conf-dots { display:inline-flex; gap:3px; }
+.o-head .conf-dots span { width:7px; height:7px; border-radius:50%; background:var(--color-border-medium); }
+.o-head .conf-dots span.on { background:var(--color-accent); }
+.o-head .conf-label { font-size:11px; color:var(--color-text-muted); }
+.o-horizon { font-size:11.5px; color:var(--color-text-secondary); white-space:nowrap; }
+.o-body { display:none; padding:.3rem .95rem .85rem; border-top:1px solid var(--color-border-subtle); background:var(--color-bg-elevated); }
+.o-board.open .o-body { display:block; }
+.o-section { padding:.55rem 0 .25rem; }
+.o-section-h { font-size:10.5px; font-weight:700; color:var(--color-text-muted); letter-spacing:.06em; margin-bottom:.5rem; text-transform:uppercase; }
+.o-why { display:flex; flex-direction:column; gap:.3rem; }
+.o-why-item { display:flex; align-items:center; gap:.45rem; font-size:12.5px; padding:.2rem 0; flex-wrap:wrap; }
+.o-sig { background:var(--color-accent-subtle); color:var(--color-accent); padding:2px 8px; border-radius:5px; font-weight:600; font-size:11.5px; white-space:nowrap; }
+.o-arrow { color:var(--color-text-muted); flex-shrink:0; }
+.o-mech { color:var(--color-text-secondary); line-height:1.5; }
+.o-data { display:flex; align-items:baseline; gap:.5rem; padding:.5rem .7rem; background:var(--color-bg-sunken); border-radius:6px; margin:.55rem 0; font-size:12px; }
+.o-data-label { font-size:10px; font-weight:700; color:var(--color-text-muted); text-transform:uppercase; letter-spacing:.05em; flex-shrink:0; }
+.o-data-val { color:var(--color-text-primary); font-weight:600; }
+.o-triggers { display:flex; flex-direction:column; gap:.3rem; margin-top:.45rem; }
+.o-trig { display:flex; align-items:baseline; gap:.5rem; font-size:11.5px; padding:.35rem .6rem; border-radius:6px; flex-wrap:wrap; }
+.o-trig--up { background:var(--color-success-subtle); } .o-trig--down { background:var(--color-error-subtle); }
+.o-trig-h { font-weight:700; flex-shrink:0; }
+.o-trig--up .o-trig-h { color:var(--color-success); } .o-trig--down .o-trig-h { color:var(--color-error); }
+.o-trig-v { color:var(--color-text-secondary); }
+
+/* 证据链：判断 ↔ 新闻追溯 */
+.o-evidence { padding:.5rem .7rem .6rem; background:var(--color-bg-sunken); border-radius:8px; margin-bottom:.7rem; }
+.o-evidence-h { font-size:10px; font-weight:700; color:var(--color-text-muted); letter-spacing:.06em; text-transform:uppercase; margin-bottom:.4rem; }
+.o-evidence-list { display:flex; flex-direction:column; gap:.2rem; }
+.o-quote { display:block; padding:.3rem .5rem .3rem 1.05rem; position:relative; font-size:12px; color:var(--color-text-secondary); line-height:1.55; cursor:pointer; border-radius:5px; text-decoration:none; transition:background .12s,color .12s; }
+.o-quote::before { content:'\201C'; position:absolute; left:.28rem; top:.05rem; color:var(--color-accent); font-size:17px; font-weight:700; opacity:.6; font-family:Georgia,serif; }
+.o-quote:hover { background:var(--color-bg-hover); color:var(--color-text-primary); }
+.o-quote-src { font-size:9.5px; font-weight:700; opacity:.55; margin-left:5px; white-space:nowrap; }
+a.o-sig { cursor:pointer; text-decoration:none; }
+a.o-sig .o-sig-src { font-size:9.5px; font-weight:700; opacity:.55; margin-left:4px; }
+a.o-sig:hover { background:var(--color-accent); color:#fff; }
+a.o-sig:hover .o-sig-src { opacity:.85; }
+a.o-data-val { cursor:pointer; text-decoration:none; border-bottom:1px dashed var(--color-accent); }
+a.o-data-val:hover { color:var(--color-accent); }
+.seg { scroll-margin-top:96px; }
+.seg-h-row { display:flex; align-items:center; gap:.5rem; margin-bottom:.2rem; }
+.seg-cited { font-size:10px; color:var(--color-accent); background:var(--color-accent-subtle); padding:1px 7px; border-radius:999px; font-weight:600; white-space:nowrap; }
+.seg-cited.empty { color:var(--color-text-muted); background:var(--color-bg-sunken); }
+.cite-flash { animation:citeFlash 1.8s ease; border-radius:6px; }
+@keyframes citeFlash { 0%{background:var(--color-accent-subtle); box-shadow:inset 3px 0 0 var(--color-accent);} 60%{background:var(--color-accent-subtle);} 100%{background:transparent; box-shadow:none;} }
+
+/* ③ 预测兑现复盘 */
+.review { position:relative; padding-left:1.5rem; }
+.review::before { content:""; position:absolute; left:5px; top:6px; bottom:6px; width:2px; background:var(--color-border-medium); }
+.rv-node { position:relative; margin-bottom:1.2rem; }
+.rv-node::before { content:""; position:absolute; left:-1.5rem; top:4px; width:12px; height:12px; border-radius:50%; background:var(--color-bg-base); border:2px solid var(--color-border-strong); }
+.rv-node.pending::before { background:var(--color-warning); border-color:var(--color-warning); }
+.rv-node.done::before { background:var(--color-success); border-color:var(--color-success); }
+.rv-card { background:var(--color-bg-elevated); border:1px solid var(--color-border-subtle); border-radius:10px; padding:.8rem 1rem; box-shadow:var(--shadow-subtle); }
+.rv-date { font-size:11px; color:var(--color-text-muted); display:flex; align-items:center; gap:.5rem; }
+.rv-status { font-size:10.5px; padding:1px 7px; border-radius:999px; font-weight:600; }
+.rv-status.pending { background:var(--color-warning-subtle); color:var(--color-warning); }
+.rv-status.done { background:var(--color-success-subtle); color:var(--color-success); }
+.verdict-rows { margin:.55rem 0; display:flex; flex-direction:column; gap:.3rem; }
+.vr { display:grid; grid-template-columns:1fr auto auto; align-items:center; gap:.6rem; font-size:12.5px; padding:.3rem .5rem; border-radius:6px; background:var(--color-bg-base); }
+.vr .vr-pred { color:var(--color-text-secondary); }
+.vr .vr-actual { font-weight:600; color:var(--color-text-primary); }
+.vr .vr-mark { font-size:11px; font-weight:700; padding:1px 7px; border-radius:999px; }
+.vr-mark.hit   { background:var(--color-success-subtle); color:var(--color-success); }
+.vr-mark.part  { background:var(--color-warning-subtle); color:var(--color-warning); }
+.vr-mark.miss  { background:var(--color-error-subtle); color:var(--color-error); }
+.rv-lesson { font-size:12.5px; color:var(--color-text-primary); background:var(--color-accent-subtle); border-left:2px solid var(--color-accent); padding:.45rem .7rem; border-radius:0 6px 6px 0; margin-top:.4rem; }
+.rv-lesson b { color:var(--color-accent); }
+.rv-foot { display:flex; align-items:center; gap:.5rem; margin-top:.5rem; font-size:11.5px; }
+
+/* ②→④ 次级引导 chip（不影响主线 nextstep） */
+.chip-row { margin:.6rem 0 .3rem; }
+.chip-link { display:inline-flex; align-items:center; gap:4px; font-size:12px; color:var(--color-info); background:var(--color-bg-sunken); border-left:2px solid var(--color-info); padding:.35rem .7rem; border-radius:0 6px 6px 0; cursor:pointer; transition:background .15s,color .15s; }
+.chip-link:hover { background:var(--color-bg-hover); color:var(--color-accent); }
+.chip-link b { color:var(--color-info); }
+
+/* ④ 个股深度辩论 —— 四态 + 板块分组 + 6 agent + 投票柱状图 */
+.debate-stage { min-height:120px; }
+.debate-empty, .debate-loading, .debate-error { display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center; gap:.45rem; padding:2.2rem 1.5rem; background:var(--color-bg-elevated); border:1px dashed var(--color-border-medium); border-radius:12px; }
+.debate-empty-ic { font-size:2.2rem; opacity:.5; line-height:1; }
+.debate-empty-h { font-size:15px; font-weight:700; margin:0; color:var(--color-text-primary); }
+.debate-empty .btn { margin-top:.5rem; }
+.debate-loading { border-style:solid; }
+.debate-loading .dl-spin { font-size:1.6rem; color:var(--color-accent); animation:pulse 1.2s infinite; }
+.debate-loading .dl-h { font-size:14px; font-weight:600; margin-top:.3rem; }
+.debate-loading .dl-roles { display:flex; gap:.4rem; flex-wrap:wrap; justify-content:center; margin-top:.6rem; }
+.debate-loading .dl-role { font-size:11px; padding:2px 9px; border-radius:999px; background:var(--color-bg-sunken); color:var(--color-text-secondary); }
+.debate-error { border-style:solid; border-color:var(--color-error); background:var(--color-error-subtle); }
+.debate-error .de-ic { font-size:1.6rem; }
+.debate-error .de-h { font-size:14px; font-weight:600; color:var(--color-error); }
+.debate-error .de-msg { font-size:12px; color:var(--color-text-secondary); max-width:380px; }
+
+/* 板块分组（呼应②的板块判断） */
+.debate-result { display:flex; flex-direction:column; gap:1.1rem; }
+.stk-group { background:var(--color-bg-elevated); border:1px solid var(--color-border-medium); border-left:3px solid var(--color-accent); border-radius:0 10px 10px 0; padding:.9rem 1.05rem .8rem; box-shadow:var(--shadow-print); }
+.stk-group-h { display:flex; align-items:center; gap:.6rem; padding-bottom:.6rem; margin-bottom:.7rem; border-bottom:1px solid var(--color-border-subtle); }
+.stk-g-name { font-size:15px; font-weight:700; color:var(--color-text-primary); }
+.stk-g-ref { font-size:11.5px; color:var(--color-text-secondary); background:var(--color-bg-sunken); padding:2px 9px; border-radius:999px; }
+.stk-g-ref b { color:var(--color-text-primary); }
+
+/* 单标的卡片 */
+.stk { border:1px solid var(--color-border-subtle); border-radius:9px; background:var(--color-bg-base); padding:.75rem .9rem; }
+.stk + .stk { margin-top:.55rem; }
+.stk-head { display:flex; align-items:center; gap:.55rem; flex-wrap:wrap; margin-bottom:.65rem; }
+.stk-code { font-family:ui-monospace,"Cascadia Code",Menlo,monospace; font-size:12px; color:var(--color-text-muted); background:var(--color-bg-sunken); padding:1px 7px; border-radius:5px; }
+.stk-name { font-weight:700; font-size:13.5px; color:var(--color-text-primary); }
+.stk-verdict { font-size:11.5px; font-weight:700; padding:2px 9px; border-radius:999px; }
+.stk-verdict.up { background:var(--color-success-subtle); color:var(--color-success); }
+.stk-verdict.down { background:var(--color-error-subtle); color:var(--color-error); }
+.stk-verdict.flat { background:var(--color-bg-sunken); color:var(--color-text-muted); }
+.stk-spacer { margin-left:auto; }
+.stk-consensus { font-size:11px; color:var(--color-text-secondary); }
+.stk-consensus b { color:var(--color-text-primary); }
+
+/* 6 agent 网格 */
+.agent-grid { display:grid; grid-template-columns:repeat(6,1fr); gap:.4rem; margin-bottom:.65rem; }
+@media (max-width:680px){ .agent-grid { grid-template-columns:repeat(3,1fr); } }
+.agent-cell { display:flex; flex-direction:column; gap:.2rem; padding:.45rem .5rem; background:var(--color-bg-elevated); border:1px solid var(--color-border-subtle); border-radius:7px; min-width:0; }
+.ag-name { font-size:10.5px; font-weight:700; color:var(--color-text-muted); letter-spacing:.02em; }
+.ag-stance { font-size:11.5px; font-weight:700; padding:1px 7px; border-radius:5px; display:inline-block; width:fit-content; }
+.ag-stance.up { background:var(--color-success-subtle); color:var(--color-success); }
+.ag-stance.down { background:var(--color-error-subtle); color:var(--color-error); }
+.ag-stance.flat { background:var(--color-bg-sunken); color:var(--color-text-muted); }
+.ag-note { font-size:11px; color:var(--color-text-secondary); line-height:1.4; word-break:break-word; }
+
+/* 投票柱状图 */
+.vote-bar { display:flex; flex-direction:column; gap:.28rem; padding:.55rem .65rem; background:var(--color-bg-sunken); border-radius:7px; margin-bottom:.5rem; }
+.vote-row { display:grid; grid-template-columns:42px 1fr 18px; align-items:center; gap:.5rem; font-size:11.5px; }
+.vote-lbl { color:var(--color-text-secondary); font-weight:600; }
+.vote-track { height:8px; background:var(--color-bg-base); border-radius:999px; overflow:hidden; }
+.vote-fill { height:100%; border-radius:999px; transition:width .5s ease; }
+.vote-row.up .vote-fill { background:var(--color-success); }
+.vote-row.flat .vote-fill { background:var(--color-text-muted); }
+.vote-row.down .vote-fill { background:var(--color-error); }
+.vote-num { text-align:right; font-weight:700; color:var(--color-text-primary); }
+.stk-foot { display:flex; align-items:center; gap:.5rem; padding-top:.4rem; border-top:1px dashed var(--color-border-subtle); }
+
+/* 高级折叠 */
+details.adv { background:var(--color-bg-elevated); border:1px solid var(--color-border-subtle); border-radius:10px; padding:.6rem .9rem; }
+details.adv > summary { cursor:pointer; font-size:13px; font-weight:600; color:var(--color-text-secondary); list-style:none; }
+details.adv > summary::-webkit-details-marker { display:none; }
+details.adv > summary::before { content:"▸ "; color:var(--color-text-muted); }
+details.adv[open] > summary::before { content:"▾ "; }
+.adv-body { padding:.6rem 0 0; font-size:12.5px; color:var(--color-text-secondary); }
+.adv-row { display:flex; gap:.5rem; flex-wrap:wrap; align-items:center; margin-bottom:.5rem; }
+.src-chip { display:inline-flex; align-items:center; gap:6px; padding:4px 10px; border-radius:8px; background:var(--color-bg-base); border:1px solid var(--color-border-medium); font-size:12px; }
+.src-chip .ok { color:var(--color-success); }
+.kv { font-size:12px; color:var(--color-text-secondary); }
+.kv b { color:var(--color-text-primary); }
+
+.link-btn { display:inline-flex; align-items:center; gap:3px; padding:2px 7px; border:none; background:none; color:var(--color-text-muted); font-size:11.5px; cursor:pointer; border-radius:5px; font-family:inherit; }
+.link-btn:hover { color:var(--color-accent); background:var(--color-accent-subtle); }
+
+.note { font-size:11.5px; color:var(--color-text-muted); background:var(--color-bg-sunken); border-left:2px solid var(--color-border-medium); padding:.5rem .8rem; border-radius:0 6px 6px 0; margin:.8rem 0; }
+
+/* 认知循环导航（步骤间引导） */
+.loopnav { position:sticky; top:34px; z-index:40; display:flex; align-items:center; gap:0; margin:-.5rem 0 1.5rem; padding:.55rem .8rem; background:var(--color-bg-elevated); border:1px solid var(--color-border-subtle); border-radius:12px; box-shadow:var(--shadow-subtle); }
+.loopnav .ln-label { font-size:10px; letter-spacing:.16em; text-transform:uppercase; color:var(--color-text-muted); font-weight:700; padding-right:.5rem; margin-right:.2rem; border-right:1px solid var(--color-border-medium); }
+.loopnav .ln-step { display:flex; align-items:center; gap:.35rem; padding:.25rem .5rem; cursor:pointer; border:none; background:none; font-family:inherit; font-size:12.5px; color:var(--color-text-muted); border-radius:6px; transition:color .15s,background .15s; }
+.loopnav .ln-step .ln-dot { width:18px; height:18px; border-radius:50%; border:1.5px solid var(--color-border-strong); display:inline-flex; align-items:center; justify-content:center; font-size:10px; font-weight:700; color:var(--color-text-muted); background:var(--color-bg-base); flex-shrink:0; }
+.loopnav .ln-step:hover { color:var(--color-text-secondary); background:var(--color-bg-hover); }
+.loopnav .ln-step.active { color:var(--color-accent); font-weight:600; }
+.loopnav .ln-step.active .ln-dot { background:var(--color-accent); border-color:var(--color-accent); color:#fff; }
+.loopnav .ln-arrow { color:var(--color-border-strong); font-size:13px; padding:0 .15rem; }
+.loopnav .ln-loop { font-size:11px; color:var(--color-text-muted); padding:0 .5rem; }
+.loopnav .ln-aux { margin-left:auto; }
+/* 步骤间承上启下引导条 */
+.nextstep { display:flex; align-items:center; gap:.6rem; margin-top:1rem; padding:.65rem .9rem; background:var(--color-accent-subtle); border-left:3px solid var(--color-accent); border-radius:0 8px 8px 0; cursor:pointer; transition:background .15s,transform .1s; }
+.nextstep:hover { background:var(--color-bg-hover); }
+.nextstep:active { transform:translateX(2px); }
+.nextstep .ns-arrow { color:var(--color-accent); font-weight:700; font-size:15px; }
+.nextstep .ns-text { font-size:12.5px; color:var(--color-text-primary); }
+.nextstep .ns-text b { color:var(--color-accent); }
+.nextstep .ns-hint { margin-left:auto; font-size:10.5px; letter-spacing:.1em; text-transform:uppercase; color:var(--color-text-muted); }
+</style>
+</head>
+<body>
+
+<div class="proto-bar">
+  <span>原型 v3 · 数据增强工作台</span>
+  <span class="muted">v2 三条反馈已落地 + 新增④个股深度辩论（接 FinGenius 多角色博弈）· 术语全换人话</span>
+  <span class="spacer"></span>
+  <button class="theme-toggle" onclick="toggleTheme()"><span id="themeIcon">◐</span> <span id="themeLabel">切换深色</span></button>
+</div>
+
+<main class="workbench">
+
+  <!-- Masthead -->
+  <header class="masthead">
+    <div class="eyebrow">地缘政治 · 持久话题 #1</div>
+    <h1 class="serif">美伊核协议进展与原油市场联动</h1>
+    <div class="lede">
+      <span class="status-pill evolving"><span class="dot"></span>演进中</span>
+      <span>最近一次分析 <b>2026-07-05</b></span>
+      <span class="muted">·</span>
+      <span class="muted">第 3 轮 · 已复盘 2 条</span>
+      <span class="trigger-wrap"><button class="btn btn-primary" onclick="alert('原型：重新分析（约 10-30s，跑完会刷新下方走势和复盘）')">▶ 重新分析</button></span>
+    </div>
+  </header>
+
+  <!-- 认知循环导航：让用户看清四步是一个循环，滚动跟随高亮 -->
+  <nav class="loopnav" id="loopnav">
+    <span class="ln-label">认知循环</span>
+    <button class="ln-step active" data-target="sec1" onclick="jumpTo('sec1')"><span class="ln-dot">1</span> 最近怎么了</button>
+    <span class="ln-arrow">→</span>
+    <button class="ln-step" data-target="sec2" onclick="jumpTo('sec2')"><span class="ln-dot">2</span> 会往哪走</button>
+    <span class="ln-arrow">→</span>
+    <button class="ln-step" data-target="sec3" onclick="jumpTo('sec3')"><span class="ln-dot">3</span> 猜得准吗</button>
+    <span class="ln-arrow">→</span>
+    <button class="ln-step" data-target="sec4" onclick="jumpTo('sec4')"><span class="ln-dot">4</span> 个股辩论</button>
+    <span class="ln-loop">↺ 复盘反哺下一轮</span>
+    <button class="ln-step ln-aux" data-target="sec5" onclick="jumpTo('sec5')"><span class="ln-dot">⚙</span> 数据源</button>
+  </nav>
+
+  <!-- ① 最近怎么了 -->
+  <section class="block">
+    <div class="block-head">
+      <span class="step-no">1</span>
+      <h2 class="serif">最近怎么了</h2>
+      <span class="helper">新闻记忆 · 只随新闻变，分析不回写</span>
+    </div>
+
+    <!-- 周期筛选器（替四档缩放尺） -->
+    <div class="period-picker">
+      <div class="gran-select" id="granSelect">
+        <button class="on" onclick="pickGran(this,'week')">按周</button>
+        <button onclick="pickGran(this,'month')">按月</button>
+        <button onclick="pickGran(this,'year')">按年</button>
+      </div>
+      <div class="period-nav">
+        <button onclick="shiftPeriod(-1)" title="上一周期">‹</button>
+        <span class="cur" id="periodLabel">2026 第 27 周</span>
+        <button onclick="shiftPeriod(1)" title="下一周期">›</button>
+      </div>
+      <span class="fresh-tag fresh-latest" id="freshTag">最新周期</span>
+      <span class="muted" style="font-size:11.5px">共 8 个历史周期可翻</span>
+    </div>
+
+    <div class="narrative">
+      <div class="seg" id="seg-narrative">
+        <div class="seg-h-row">
+          <div class="seg-h serif">叙事脉络</div>
+          <span class="seg-cited" data-cited-for="seg-narrative">·</span>
+        </div>
+        <div class="seg-b">本周美伊完成第四轮间接谈判，框架协议初稿浮出水面。以方对条款存疑，霍尔木兹海峡通行安全成为争议焦点。原油先跌后涨，避险情绪向黄金传导。</div>
+        <span class="seg-edit" onclick="editSeg(this)">✎</span>
+      </div>
+      <div class="seg" id="seg-data">
+        <div class="seg-h-row">
+          <div class="seg-h serif">关键数据波动</div>
+          <span class="seg-cited" data-cited-for="seg-data">·</span>
+        </div>
+        <div class="seg-b">布伦特原油 -2.1% → +4.2%（V 型），黄金现货 +1.8%，美元指数小幅走弱。A 股军工 +3.5%，航运承压。</div>
+        <span class="seg-edit" onclick="editSeg(this)">✎</span>
+      </div>
+      <div class="seg" id="seg-signal">
+        <div class="seg-h-row">
+          <div class="seg-h serif">尚未消化的信号</div>
+          <span class="seg-cited" data-cited-for="seg-signal">·</span>
+        </div>
+        <div class="seg-b">伊朗议会表态分裂，强硬派可能否决。以军近期边境调动尚未被主流媒体跟进，需持续观察。</div>
+        <span class="seg-edit" onclick="editSeg(this)">✎</span>
+      </div>
+      <div class="narrative-foot">
+        <span>来源：AI 汇总</span><span>·</span><span>截止 2026-07-05</span>
+        <span style="margin-left:auto"><button class="btn btn-ghost btn-sm" onclick="alert('原型：重新汇总这一周期')">↻ 重新汇总</button></span>
+      </div>
+    </div>
+    <div class="note"><b>改造 A</b>：周期筛选器替掉了原来的"本周/本月/本年/全部"四档。粒度（周/月/年）+ 具体周期都可翻，5 月、4 月的汇总都在，不再被覆盖。</div>
+    <div class="nextstep" onclick="jumpTo('sec2')">
+      <span class="ns-arrow">↓</span>
+      <span class="ns-text">基于这些新闻，AI 判断<b>板块接下来怎么走</b></span>
+      <span class="ns-hint">下一步</span>
+    </div>
+  </section>
+
+  <!-- ② 会往哪走（新增：板块走势预测） -->
+  <section class="block">
+    <div class="block-head">
+      <span class="step-no">2</span>
+      <h2 class="serif">会往哪走</h2>
+      <span class="helper">板块走向预测 · 基于 07-05 增强分析</span>
+    </div>
+
+    <div class="outlook">
+      <div class="outlook-title">
+        <h3 class="serif">板块走向</h3>
+        <span class="since">解读→查数据→下判断，共 6 步 · <a class="link-btn" onclick="alert('原型：展开看每步查了什么')">查看分析过程</a></span>
+      </div>
+
+      <div class="boards">
+        <div class="o-board open">
+          <button class="o-head" onclick="toggleBoard(this)">
+            <span class="o-chev">▾</span>
+            <span class="o-name">原油</span>
+            <span class="o-dir up"><span class="arrow">↑</span> 上行</span>
+            <span class="o-spacer"></span>
+            <span class="conf"><span class="conf-dots"><span class="on"></span><span class="on"></span><span class="on"></span><span class="on"></span><span></span></span><span class="conf-label">高置信</span></span>
+            <span class="o-horizon">短期 1-2 周</span>
+          </button>
+          <div class="o-body">
+            <div class="o-evidence">
+              <div class="o-evidence-h">原始依据（来自第一步新闻）</div>
+              <div class="o-evidence-list">
+                <a class="o-quote" data-cite="seg-narrative" onclick="citeJump(event,this)">霍尔木兹海峡通行安全成为争议焦点<span class="o-quote-src">↗叙事</span></a>
+                <a class="o-quote" data-cite="seg-signal" onclick="citeJump(event,this)">以军近期边境调动尚未被主流媒体跟进<span class="o-quote-src">↗未消化</span></a>
+                <a class="o-quote" data-cite="seg-data" onclick="citeJump(event,this)">布伦特原油 -2.1% → +4.2%（V 型）<span class="o-quote-src">↗数据</span></a>
+              </div>
+            </div>
+            <div class="o-section">
+              <div class="o-section-h">凭什么这么判断</div>
+              <div class="o-why">
+                <div class="o-why-item"><a class="o-sig" data-cite="seg-narrative" onclick="citeJump(event,this)">霍尔木兹海峡通行争议<span class="o-sig-src">↗叙事</span></a><span class="o-arrow">→</span><span class="o-mech">供应中断风险被重新定价</span></div>
+                <div class="o-why-item"><a class="o-sig" data-cite="seg-signal" onclick="citeJump(event,this)">以军边境调动信号<span class="o-sig-src">↗未消化</span></a><span class="o-arrow">→</span><span class="o-mech">冲突升级预期推升风险溢价</span></div>
+              </div>
+            </div>
+            <div class="o-data"><span class="o-data-label">支撑数据</span><a class="o-data-val" data-cite="seg-data" onclick="citeJump(event,this)">布伦特原油 -2.1% → +4.2%（V 型反转）</a></div>
+            <div class="o-triggers">
+              <div class="o-trig o-trig--up"><span class="o-trig-h">↑ 看多触发</span><span class="o-trig-v">海峡通行实质中断 · 供应减少</span></div>
+              <div class="o-trig o-trig--down"><span class="o-trig-h">↓ 看空触发</span><span class="o-trig-v">正式停火 · 制裁解除</span></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="o-board">
+          <button class="o-head" onclick="toggleBoard(this)">
+            <span class="o-chev">▸</span>
+            <span class="o-name">黄金</span>
+            <span class="o-dir up"><span class="arrow">↑</span> 上行</span>
+            <span class="o-spacer"></span>
+            <span class="conf"><span class="conf-dots"><span class="on"></span><span class="on"></span><span class="on"></span><span></span><span></span></span><span class="conf-label">中置信</span></span>
+            <span class="o-horizon">中期 1-3 月</span>
+          </button>
+          <div class="o-body">
+            <div class="o-evidence">
+              <div class="o-evidence-h">原始依据（来自第一步新闻）</div>
+              <div class="o-evidence-list">
+                <a class="o-quote" data-cite="seg-narrative" onclick="citeJump(event,this)">避险情绪向黄金传导<span class="o-quote-src">↗叙事</span></a>
+                <a class="o-quote" data-cite="seg-data" onclick="citeJump(event,this)">黄金现货 +1.8%，美元指数小幅走弱<span class="o-quote-src">↗数据</span></a>
+              </div>
+            </div>
+            <div class="o-section">
+              <div class="o-section-h">凭什么这么判断</div>
+              <div class="o-why">
+                <div class="o-why-item"><a class="o-sig" data-cite="seg-narrative" onclick="citeJump(event,this)">避险情绪升温<span class="o-sig-src">↗叙事</span></a><span class="o-arrow">→</span><span class="o-mech">地缘风险溢价推升黄金吸引力</span></div>
+                <div class="o-why-item"><a class="o-sig" data-cite="seg-data" onclick="citeJump(event,this)">美元指数走弱<span class="o-sig-src">↗数据</span></a><span class="o-arrow">→</span><span class="o-mech">以美元计价的黄金被动走强</span></div>
+              </div>
+            </div>
+            <div class="o-data"><span class="o-data-label">支撑数据</span><a class="o-data-val" data-cite="seg-data" onclick="citeJump(event,this)">黄金现货 +1.8% · 美元指数 -0.4%</a></div>
+            <div class="o-triggers">
+              <div class="o-trig o-trig--up"><span class="o-trig-h">↑ 看多触发</span><span class="o-trig-v">局势持续紧张 · 实际利率下行</span></div>
+              <div class="o-trig o-trig--down"><span class="o-trig-h">↓ 看空触发</span><span class="o-trig-v">风险情绪消退 · 美元反弹</span></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="o-board">
+          <button class="o-head" onclick="toggleBoard(this)">
+            <span class="o-chev">▸</span>
+            <span class="o-name">军工</span>
+            <span class="o-dir flat"><span class="arrow">↔</span> 震荡</span>
+            <span class="o-spacer"></span>
+            <span class="conf"><span class="conf-dots"><span class="on"></span><span class="on"></span><span></span><span></span><span></span></span><span class="conf-label">低置信</span></span>
+            <span class="o-horizon">短期</span>
+          </button>
+          <div class="o-body">
+            <div class="o-evidence">
+              <div class="o-evidence-h">原始依据（来自第一步新闻）</div>
+              <div class="o-evidence-list">
+                <a class="o-quote" data-cite="seg-narrative" onclick="citeJump(event,this)">本周美伊完成第四轮间接谈判，以方对条款存疑<span class="o-quote-src">↗叙事</span></a>
+                <a class="o-quote" data-cite="seg-data" onclick="citeJump(event,this)">A 股军工 +3.5%<span class="o-quote-src">↗数据</span></a>
+              </div>
+            </div>
+            <div class="o-section">
+              <div class="o-section-h">凭什么这么判断</div>
+              <div class="o-why">
+                <div class="o-why-item"><a class="o-sig" data-cite="seg-narrative" onclick="citeJump(event,this)">地缘冲突利好防御股<span class="o-sig-src">↗叙事</span></a><span class="o-arrow">→</span><span class="o-mech">但本轮未涉及实质军备采购</span></div>
+                <div class="o-why-item"><a class="o-sig" data-cite="seg-data" onclick="citeJump(event,this)">情绪面已部分定价<span class="o-sig-src">↗数据</span></a><span class="o-arrow">→</span><span class="o-mech">前期涨幅消化了短期催化</span></div>
+              </div>
+            </div>
+            <div class="o-data"><span class="o-data-label">支撑数据</span><a class="o-data-val" data-cite="seg-data" onclick="citeJump(event,this)">A 股军工 +3.5%（前周已 +2.1%）</a></div>
+            <div class="o-triggers">
+              <div class="o-trig o-trig--up"><span class="o-trig-h">↑ 看多触发</span><span class="o-trig-v">实质军演 · 军售合同落地</span></div>
+              <div class="o-trig o-trig--down"><span class="o-trig-h">↓ 看空触发</span><span class="o-trig-v">局势缓和 · 资金切换主题</span></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="o-board">
+          <button class="o-head" onclick="toggleBoard(this)">
+            <span class="o-chev">▸</span>
+            <span class="o-name">航运</span>
+            <span class="o-dir down"><span class="arrow">↓</span> 下行</span>
+            <span class="o-spacer"></span>
+            <span class="conf"><span class="conf-dots"><span class="on"></span><span class="on"></span><span class="on"></span><span></span><span></span></span><span class="conf-label">中置信</span></span>
+            <span class="o-horizon">短期 1-2 周</span>
+          </button>
+          <div class="o-body">
+            <div class="o-evidence">
+              <div class="o-evidence-h">原始依据（来自第一步新闻）</div>
+              <div class="o-evidence-list">
+                <a class="o-quote" data-cite="seg-narrative" onclick="citeJump(event,this)">霍尔木兹海峡通行安全成为争议焦点<span class="o-quote-src">↗叙事</span></a>
+                <a class="o-quote" data-cite="seg-data" onclick="citeJump(event,this)">航运承压<span class="o-quote-src">↗数据</span></a>
+              </div>
+            </div>
+            <div class="o-section">
+              <div class="o-section-h">凭什么这么判断</div>
+              <div class="o-why">
+                <div class="o-why-item"><a class="o-sig" data-cite="seg-narrative" onclick="citeJump(event,this)">海峡通行安全争议<span class="o-sig-src">↗叙事</span></a><span class="o-arrow">→</span><span class="o-mech">运费溢价 vs 货量下降双重博弈</span></div>
+                <div class="o-why-item"><a class="o-sig" data-cite="seg-data" onclick="citeJump(event,this)">航运承压<span class="o-sig-src">↗数据</span></a><span class="o-arrow">→</span><span class="o-mech">货量端疲软盖过运费端利好</span></div>
+              </div>
+            </div>
+            <div class="o-data"><span class="o-data-label">支撑数据</span><a class="o-data-val" data-cite="seg-data" onclick="citeJump(event,this)">航运板块 -1.2% · BDI 指数走平</a></div>
+            <div class="o-triggers">
+              <div class="o-trig o-trig--up"><span class="o-trig-h">↑ 看多触发</span><span class="o-trig-v">通行实质中断 · 运费跳涨</span></div>
+              <div class="o-trig o-trig--down"><span class="o-trig-h">↓ 看空触发</span><span class="o-trig-v">通行恢复 · 需求进一步走弱</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="disclaimer">⚠ 这是<b>板块方向判断</b>，不是个股买卖建议。投资决策请结合更多维度。</div>
+    </div>
+    <div class="note"><b>改造 B（新增）</b>：不再只给"一句话演进判断"，每个板块给<b>方向 + 置信度 + 时间窗 + 触发条件</b>。触发条件是关键——让下一轮复盘能对照"预测有没有兑现"。</div>
+    <div class="chip-row"><a class="chip-link" onclick="jumpTo('sec4')">💡 板块方向定了，想看<b>具体哪些股票</b>做深度辩论 → ④ 个股辩论</a></div>
+    <div class="nextstep" onclick="jumpTo('sec3')">
+      <span class="ns-arrow">↓</span>
+      <span class="ns-text">这些预测<b>准不准</b>？看历史兑现复盘</span>
+      <span class="ns-hint">下一步</span>
+    </div>
+  </section>
+
+  <!-- ③ 上次猜得准吗（预测兑现复盘） -->
+  <section class="block">
+    <div class="block-head">
+      <span class="step-no">3</span>
+      <h2 class="serif">上次猜得准吗</h2>
+      <span class="helper">预测兑现复盘 · 不回写新闻记忆</span>
+    </div>
+
+    <div class="review">
+      <!-- 当前轮：待验证 -->
+      <div class="rv-node pending">
+        <div class="rv-card">
+          <div class="rv-date">第 3 轮 · 2026-07-05 <span class="rv-status pending">待验证</span></div>
+          <div class="verdict-rows">
+            <div class="vr"><span class="vr-pred">预测：原油 上行（高）</span><span class="vr-actual">迄今 +4.2%</span><span class="vr-mark hit">✓ 兑现</span></div>
+            <div class="vr"><span class="vr-pred">预测：黄金 走平（中）</span><span class="vr-actual">迄今 +1.8%</span><span class="vr-mark part">△ 方向对 幅度低估</span></div>
+            <div class="vr"><span class="vr-pred">预测：航运 下行（中）</span><span class="vr-actual">迄今 -1.2%</span><span class="vr-mark hit">✓ 兑现</span></div>
+          </div>
+          <div class="rv-foot">
+            <span class="muted">等下一个周期收盘后自动结算</span>
+            <span style="margin-left:auto"><button class="link-btn" onclick="alert('原型：手动写复盘')">✎ 手动写复盘</button></span>
+          </div>
+        </div>
+      </div>
+
+      <!-- 上一轮：已复盘 -->
+      <div class="rv-node done">
+        <div class="rv-card">
+          <div class="rv-date">第 2 轮 · 2026-07-01 <span class="rv-status done">已复盘 · 已采纳</span></div>
+          <div class="verdict-rows">
+            <div class="vr"><span class="vr-pred">预测：原油 承压（高）</span><span class="vr-actual">实际先跌后涨</span><span class="vr-mark miss">✗ 翻转</span></div>
+          </div>
+          <div class="rv-lesson"><b>复盘：</b>把"会谈信号"读成缓和过于线性，忽略了边境调动信号。下一轮解读已纳入"强硬派否决"作为常驻风险因子。</div>
+          <div class="rv-foot">
+            <span class="muted">这条复盘已被第 3 轮解读读取，效果已体现在预测中</span>
+            <span style="margin-left:auto"><button class="link-btn">✎ 编辑复盘</button></span>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="note"><b>改造 C</b>：复盘从"描述风格对比"升级成"<b>预测兑现度</b>"。每个历史预测对照实际走势，兑现/部分/翻转一目了然。复盘结论喂给下一轮解读，形成真正的认知闭环。</div>
+    <div class="nextstep" onclick="jumpTo('sec1')">
+      <span class="ns-arrow">↺</span>
+      <span class="ns-text">复盘结论已自动喂给<b>下一轮解读</b>，循环闭合</span>
+      <span class="ns-hint">回到开头</span>
+    </div>
+  </section>
+
+  <!-- ④ 个股深度辩论（新增：接 FinGenius 多角色博弈） -->
+  <section class="block">
+    <div class="block-head">
+      <span class="step-no">4</span>
+      <h2 class="serif">个股深度辩论</h2>
+      <span class="helper">接 FinGenius · 基于②的板块方向对代表标的做 6 角色辩论</span>
+    </div>
+
+    <div id="debateStage" class="debate-stage">
+      <!-- 态1：空（未辩论） -->
+      <div class="debate-empty">
+        <div class="debate-empty-ic">⚖</div>
+        <p class="debate-empty-h">还没辩论个股</p>
+        <p class="muted">先跑②拿到<b>板块方向 + 代表标的池</b>，再对个股做 6 角色深度辩论（调 FinGenius）。</p>
+        <button class="btn btn-primary" onclick="startDebate()">▶ 开始辩论</button>
+        <p class="muted" style="font-size:11.5px;margin-top:.7rem">基于②的 4 个板块 · 约 8 只代表标的（ETF + 龙头股）· 约 2-3 分钟</p>
+      </div>
+    </div>
+
+    <div class="note"><b>改造 D（新增）</b>：两段式分工——Syntopica 给<b>板块方向 + 代表标的池</b>（不下沉个股买卖建议，守住合规边界），个股博弈交给 FinGenius 6 角色（舆情 / 游资 / 风控 / 技术 / 筹码 / 大单）多轮辩论 + 投票。辩论结果不回写新闻记忆。</div>
+    <div class="nextstep" onclick="jumpTo('sec5')">
+      <span class="ns-arrow">↓</span>
+      <span class="ns-text">辩论结果不回写新闻记忆，配置见<b>数据源与参数</b></span>
+      <span class="ns-hint">下一步</span>
+    </div>
+  </section>
+
+  <!-- ⑤ 高级（折叠，不挡道） -->
+  <section class="block">
+    <div class="block-head">
+      <span class="step-no">5</span>
+      <h2 class="serif">数据源与参数</h2>
+      <span class="helper">高级 · 一般不用动</span>
+    </div>
+    <details class="adv">
+      <summary>展开配置（数据源 / 增强参数）</summary>
+      <div class="adv-body">
+        <div class="adv-row">
+          <span class="kv" style="margin-right:.4rem">已绑数据源：</span>
+          <span class="src-chip">ETF 行情 <span class="ok">✓</span></span>
+          <span class="src-chip">汇率 <span class="ok">✓</span></span>
+          <button class="btn btn-ghost btn-sm">+ 绑定</button>
+        </div>
+        <div class="kv">增强开关：<b>开</b>　·　回看窗口：<b>14 天</b>　·　汇总层数：<b>周 / 月 / 年</b>　·　历史保留：<b>周 8 个 / 月 12 个 / 年 全留</b></div>
+      </div>
+    </details>
+  </section>
+
+</main>
+
+<script>
+function toggleTheme(){
+  const html=document.documentElement;
+  const next = html.getAttribute('data-theme')==='dark' ? 'editorial' : 'dark';
+  html.setAttribute('data-theme', next);
+  document.getElementById('themeLabel').textContent = next==='dark' ? '切换亮色' : '切换深色';
+}
+// 周期筛选器（原型：切换粒度 + 翻历史）
+const PERIODS = {
+  week:['2026 第 27 周','2026 第 26 周','2026 第 25 周','2026 第 24 周','2026 第 23 周'],
+  month:['2026-07','2026-06','2026-05','2026-04','2026-03','2026-02'],
+  year:['2026','2025','2024','2023'],
+};
+let cur={gran:'week', idx:0};
+function pickGran(btn, g){ cur={gran:g, idx:0}; btn.parentElement.querySelectorAll('button').forEach(b=>b.classList.remove('on')); btn.classList.add('on'); renderPeriod(); }
+function shiftPeriod(d){ const list=PERIODS[cur.gran]; cur.idx=Math.max(0,Math.min(list.length-1,cur.idx+d)); renderPeriod(); }
+function renderPeriod(){
+  const list=PERIODS[cur.gran];
+  document.getElementById('periodLabel').textContent=list[cur.idx];
+  const tag=document.getElementById('freshTag');
+  if(cur.idx===0){ tag.className='fresh-tag fresh-latest'; tag.textContent='最新周期'; }
+  else{ tag.className='fresh-tag fresh-stale'; tag.textContent='历史 · '+list.length+' 个可翻'; }
+}
+function editSeg(icon){
+  const seg=icon.parentElement, body=seg.querySelector('.seg-b'), txt=body.textContent;
+  const ta=document.createElement('textarea'); ta.value=txt; body.replaceWith(ta); icon.remove();
+  const acts=document.createElement('div'); acts.className='seg-actions';
+  acts.innerHTML='<button class="btn btn-primary btn-sm">保存</button><button class="btn btn-ghost btn-sm">取消</button>';
+  seg.appendChild(acts);
+  acts.querySelectorAll('button')[0].onclick=()=>{ const nb=document.createElement('div'); nb.className='seg-b'; nb.textContent=ta.value; ta.replaceWith(nb); acts.remove(); readdEdit(seg); };
+  acts.querySelectorAll('button')[1].onclick=()=>{ const nb=document.createElement('div'); nb.className='seg-b'; nb.textContent=txt; ta.replaceWith(nb); acts.remove(); readdEdit(seg); };
+}
+function readdEdit(seg){ const e=document.createElement('span'); e.className='seg-edit'; e.textContent='✎'; e.onclick=()=>editSeg(e); seg.appendChild(e); }
+
+/* ④ 个股深度辩论 —— 四态切换 + mock 渲染（呼应②的 4 板块） */
+// stance: up/down/flat；mock 数据呼应②的板块判断（原油↑高/黄金↑中/军工↔低/航运↓中）
+const DEBATE_MOCK = [
+  { sector:'原油', ref:'② 判断：↑ 上行 · 高置信', stocks:[
+    { code:'161129', name:'易方达原油', verdict:'up', consensus:'4/6',
+      agents:[['舆情','up','热度上升'],['游资','up','龙虎榜净买入'],['风控','flat','政策平稳'],['技术','up','突破20日线'],['筹码','up','主力吸筹'],['大单','down','大单净流出']],
+      votes:{ up:4, flat:1, down:1 } },
+    { code:'601857', name:'中国石油', verdict:'up', consensus:'5/6',
+      agents:[['舆情','up','关注度高'],['游资','up','资金流入'],['风控','flat','无政策变动'],['技术','up','放量上行'],['筹码','up','机构增仓'],['大单','up','大单净流入']],
+      votes:{ up:5, flat:1, down:0 } },
+  ]},
+  { sector:'黄金', ref:'② 判断：↑ 上行 · 中置信', stocks:[
+    { code:'600547', name:'山东黄金', verdict:'up', consensus:'3/6',
+      agents:[['舆情','flat','情绪中性'],['游资','up','避险资金涌入'],['风控','up','实际利率下行利好'],['技术','up','突破前高'],['筹码','flat','主力动作不明'],['大单','down','大单获利了结']],
+      votes:{ up:3, flat:2, down:1 } },
+    { code:'601899', name:'紫金矿业', verdict:'up', consensus:'4/6',
+      agents:[['舆情','up','热度上升'],['游资','up','资金流入'],['风控','flat','政策中性'],['技术','up','上行通道'],['筹码','up','主力吸筹'],['大单','flat','大单一般']],
+      votes:{ up:4, flat:2, down:0 } },
+  ]},
+  { sector:'军工', ref:'② 判断：↔ 震荡 · 低置信', stocks:[
+    { code:'600760', name:'中航沈飞', verdict:'flat', consensus:'2/6 分歧',
+      agents:[['舆情','down','情绪退潮'],['游资','down','资金撤离'],['风控','flat','无实质军售'],['技术','up','超跌反弹'],['筹码','flat','主力犹豫'],['大单','up','大单试探买入']],
+      votes:{ up:2, flat:1, down:3 } },
+    { code:'600150', name:'中国船舶', verdict:'down', consensus:'3/6 分歧',
+      agents:[['舆情','flat','情绪平淡'],['游资','down','游资出货'],['风控','flat','订单平稳'],['技术','down','破位下行'],['筹码','down','主力减仓'],['大单','flat','大单一般']],
+      votes:{ up:1, flat:2, down:3 } },
+  ]},
+  { sector:'航运', ref:'② 判断：↓ 下行 · 中置信', stocks:[
+    { code:'601913', name:'国航远洋', verdict:'down', consensus:'4/6',
+      agents:[['舆情','down','货量悲观'],['游资','down','资金流出'],['风控','flat','无政策支撑'],['技术','down','下行通道'],['筹码','down','主力减仓'],['大单','up','大单抄底']],
+      votes:{ up:1, flat:1, down:4 } },
+    { code:'601872', name:'招商轮船', verdict:'down', consensus:'5/6',
+      agents:[['舆情','down','运价承压'],['游资','down','资金撤离'],['风控','flat','需求疲软'],['技术','down','均线空头'],['筹码','down','主力出货'],['大单','down','大单净流出']],
+      votes:{ up:0, flat:1, down:5 } },
+  ]},
+];
+const VERDICT_LABEL = { up:'偏多', down:'偏空', flat:'中性' };
+function debateStage(){ return document.getElementById('debateStage'); }
+function startDebate(){
+  showDebateLoading();
+  // mock 调 FinGenius 1.8s 后渲染
+  setTimeout(renderDebateResult, 1800);
+}
+function showDebateEmpty(){
+  debateStage().innerHTML =
+    '<div class="debate-empty">' +
+    '<div class="debate-empty-ic">⚖</div>' +
+    '<p class="debate-empty-h">还没辩论个股</p>' +
+    '<p class="muted">先跑②拿到<b>板块方向 + 代表标的池</b>，再对个股做 6 角色深度辩论（调 FinGenius）。</p>' +
+    '<button class="btn btn-primary" onclick="startDebate()">▶ 开始辩论</button>' +
+    '<p class="muted" style="font-size:11.5px;margin-top:.7rem">基于②的 4 个板块 · 约 8 只代表标的 · 约 2-3 分钟</p>' +
+    '</div>';
+}
+function showDebateLoading(){
+  debateStage().innerHTML =
+    '<div class="debate-loading">' +
+    '<div class="dl-spin">⟳</div>' +
+    '<div class="dl-h">FinGenius 6 角色辩论中…</div>' +
+    '<div class="dl-roles"><span class="dl-role">舆情</span><span class="dl-role">游资</span><span class="dl-role">风控</span><span class="dl-role">技术</span><span class="dl-role">筹码</span><span class="dl-role">大单</span></div>' +
+    '<p class="muted" style="font-size:11.5px">约 2-3 分钟，6 个分析师各自分析后进入多轮辩论博弈</p>' +
+    '</div>';
+}
+function showDebateError(msg){
+  debateStage().innerHTML =
+    '<div class="debate-error">' +
+    '<div class="de-ic">⚠</div>' +
+    '<div class="de-h">连接 FinGenius 失败</div>' +
+    '<div class="de-msg">' + (msg||'请检查 FinGenius 服务是否启动，配置见⑤数据源与参数。') + '</div>' +
+    '<button class="btn btn-ghost btn-sm" onclick="startDebate()">↻ 重试</button>' +
+    '</div>';
+}
+function renderDebateResult(){
+  const groups = DEBATE_MOCK.map(g=>{
+    const stocks = g.stocks.map(s=>{
+      const cells = s.agents.map(a =>
+        '<div class="agent-cell"><span class="ag-name">'+a[0]+'</span><span class="ag-stance '+a[1]+'">'+(a[1]==='up'?'多':a[1]==='down'?'空':'中')+'</span><span class="ag-note">'+a[2]+'</span></div>'
+      ).join('');
+      const total = s.votes.up + s.votes.flat + s.votes.down;
+      const pct = v => total ? Math.round(v*100/total)+'%' : '0%';
+      return '<div class="stk">' +
+        '<div class="stk-head">' +
+        '<span class="stk-code">'+s.code+'</span><span class="stk-name">'+s.name+'</span>' +
+        '<span class="stk-verdict '+s.verdict+'">'+VERDICT_LABEL[s.verdict]+'</span>' +
+        '<span class="stk-spacer"></span><span class="stk-consensus">共识 <b>'+s.consensus+'</b></span>' +
+        '</div>' +
+        '<div class="agent-grid">'+cells+'</div>' +
+        '<div class="vote-bar">' +
+          '<div class="vote-row up"><span class="vote-lbl">多头</span><div class="vote-track"><div class="vote-fill" style="width:'+pct(s.votes.up)+'"></div></div><span class="vote-num">'+s.votes.up+'</span></div>' +
+          '<div class="vote-row flat"><span class="vote-lbl">中性</span><div class="vote-track"><div class="vote-fill" style="width:'+pct(s.votes.flat)+'"></div></div><span class="vote-num">'+s.votes.flat+'</span></div>' +
+          '<div class="vote-row down"><span class="vote-lbl">空头</span><div class="vote-track"><div class="vote-fill" style="width:'+pct(s.votes.down)+'"></div></div><span class="vote-num">'+s.votes.down+'</span></div>' +
+        '</div>' +
+        '<div class="stk-foot"><a class="link-btn" onclick="alert(\'原型：跳转 FinGenius 完整 HTML 报告\')">📄 查看完整辩论报告 ↗</a></div>' +
+        '</div>';
+    }).join('');
+    return '<div class="stk-group"><div class="stk-group-h"><span class="stk-g-name">'+g.sector+'</span><span class="stk-g-ref">'+g.ref+'</span></div>'+stocks+'</div>';
+  }).join('');
+  debateStage().innerHTML = '<div class="debate-result">' + groups + '</div>';
+}
+// 步骤导航：给每个区块编号 + 滚动跟随高亮 + 点击跳转
+const SEC_IDS=['sec1','sec2','sec3','sec4','sec5'];
+document.querySelectorAll('.block').forEach((el,i)=>{ if(i<SEC_IDS.length) el.id=SEC_IDS[i]; });
+function jumpTo(id){ document.getElementById(id).scrollIntoView({behavior:'smooth', block:'start'}); }
+function toggleBoard(head){ const board=head.parentElement; board.classList.toggle('open'); head.querySelector('.o-chev').textContent = board.classList.contains('open') ? '▾' : '▸'; }
+// 证据链：点判断信号 → 跳回新闻段落 + 高亮；自动统计每段被引用次数
+function citeJump(e, el){
+  e.preventDefault();
+  const seg=document.getElementById(el.dataset.cite);
+  if(!seg) return;
+  seg.scrollIntoView({behavior:'smooth', block:'center'});
+  seg.classList.remove('cite-flash'); void seg.offsetWidth; seg.classList.add('cite-flash');
+  setTimeout(()=>seg.classList.remove('cite-flash'), 1800);
+}
+document.querySelectorAll('.seg[id]').forEach(seg=>{
+  const n=document.querySelectorAll('[data-cite="'+seg.id+'"]').length;
+  const badge=seg.querySelector('.seg-cited');
+  if(badge){ badge.textContent=n>0?('被 '+n+' 个判断引用'):'未被判断引用'; badge.classList.toggle('empty', n===0); }
+});
+const io=new IntersectionObserver((entries)=>{
+  entries.forEach(e=>{ if(e.isIntersecting){ const id=e.target.id; document.querySelectorAll('.ln-step').forEach(s=>s.classList.toggle('active', s.dataset.target===id)); } });
+},{rootMargin:'-30% 0px -60% 0px', threshold:0});
+SEC_IDS.forEach(id=>{ const el=document.getElementById(id); if(el) io.observe(el); });
+</script>
+</body>
+</html>

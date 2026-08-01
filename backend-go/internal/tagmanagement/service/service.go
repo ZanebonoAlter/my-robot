@@ -95,12 +95,14 @@ type (
 )
 
 var (
-	NewSemanticBoardMatchingService = board.NewSemanticBoardMatchingService
-	NewSemanticBoardBackfillService = board.NewSemanticBoardBackfillService
-	NewSemanticBoardUpgradeService  = board.NewSemanticBoardUpgradeService
-	ComputeMatchDetail              = board.ComputeMatchDetail
-	CosineSimilarity                = board.CosineSimilarity
-	ParsePgVector                   = auxlabel.ParsePgVector
+	NewSemanticBoardMatchingService       = board.NewSemanticBoardMatchingService
+	NewSemanticBoardBackfillService       = board.NewSemanticBoardBackfillService
+	NewSemanticBoardUpgradeService        = board.NewSemanticBoardUpgradeService
+	NewDefaultSemanticBoardUpgradeLLM     = board.NewDefaultSemanticBoardUpgradeLLM
+	ComputeMatchDetail                    = board.ComputeMatchDetail
+	CosineSimilarity                      = board.CosineSimilarity
+	BuildSemanticBoardUpgradeSystemPrompt = board.BuildSemanticBoardUpgradeSystemPrompt
+	ParsePgVector                         = auxlabel.ParsePgVector
 )
 
 // InvalidateMatchingConfigCache clears the cached matching config so the next

@@ -1,9 +1,11 @@
 package repository
 
 import (
+	"fmt"
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 	"syntopica-backend/internal/models"
@@ -324,4 +326,241 @@ func TestGetSectionLifecycle_ExternalRelationIsolation(t *testing.T) {
 		require.NotEqual(t, s80, rel.FromID)
 		require.NotEqual(t, s80, rel.ToID)
 	}
+}
+
+// =============================================================================
+// ListTopicRecentBriefs tests (Slice D: lane context injection)
+// =============================================================================
+
+func seedTestActiveTopic(t *testing.T, db *gorm.DB, boardID uint, label string, lastSeen time.Time) uint {
+	t.Helper()
+	topic := BoardPersistentTopic{
+		SemanticBoardID: boardID,
+		Label:           label,
+		Embedding:       FloatsToPgVector([]float64{0}),
+		Status:          TopicStatusActive,
+		FirstSeenDate:   lastSeen,
+		LastSeenDate:    lastSeen,
+		HitCount:        1,
+	}
+	err := db.Create(&topic).Error
+	require.NoError(t, err)
+	return topic.ID
+}
+
+func seedTestSectionWithTopic(t *testing.T, db *gorm.DB, reportID uint, label string, topicID uint) uint {
+	t.Helper()
+	section := DailyReportSection{
+		ReportID:          reportID,
+		ClusterLabel:      label,
+		ArticleCount:      1,
+		Embedding:         FloatsToPgVector([]float64{0}),
+		PersistentTopicID: &topicID,
+	}
+	err := db.Create(&section).Error
+	require.NoError(t, err)
+	return section.ID
+}
+
+func seedTestThread(t *testing.T, db *gorm.DB, sectionID uint, title string, fitDistance *float64) uint {
+	t.Helper()
+	thread := DailyReportThread{
+		SectionID:   sectionID,
+		Title:       title,
+		Embedding:   FloatsToPgVector([]float64{0}),
+		FitDistance: fitDistance,
+	}
+	err := db.Create(&thread).Error
+	require.NoError(t, err)
+	return thread.ID
+}
+
+func TestListTopicRecentBriefs_Basic(t *testing.T) {
+	db := testutil.SetupTestDB(t)
+	repo := NewTopicGraphRepository(db)
+
+	boardID := seedTestBoard(t, db)
+	now := NormalizeReportDate(time.Now())
+
+	// Active topic
+	topicID := seedTestActiveTopic(t, db, boardID, "AI 编程工具平台化竞争", now)
+
+	// Report + section with threads
+	reportID := seedTestReport(t, db, boardID, now.AddDate(0, 0, -1))
+	sectionID := seedTestSectionWithTopic(t, db, reportID, "开发者 Agent 平台化", topicID)
+
+	// Threads with different fit_distances: best fit first, NULL last
+	dist0 := 0.12
+	dist1 := 0.35
+	seedTestThread(t, db, sectionID, "Codex 推出第三方模型接入", &dist0)
+	seedTestThread(t, db, sectionID, "GitHub Copilot X 发布新功能", &dist1)
+
+	briefs, err := repo.ListTopicRecentBriefs(boardID, 7, 5)
+	require.NoError(t, err)
+	require.Len(t, briefs, 1)
+	require.Contains(t, briefs, topicID)
+
+	items := briefs[topicID]
+	require.Len(t, items, 1)
+	assert.Equal(t, sectionID, items[0].SectionID)
+	assert.Equal(t, "开发者 Agent 平台化", items[0].SectionLabel)
+	require.Len(t, items[0].ThreadTitles, 2)
+	assert.Equal(t, "Codex 推出第三方模型接入", items[0].ThreadTitles[0]) // best fit first
+	assert.Equal(t, "GitHub Copilot X 发布新功能", items[0].ThreadTitles[1])
+}
+
+func TestListTopicRecentBriefs_SevenDayWindow(t *testing.T) {
+	db := testutil.SetupTestDB(t)
+	repo := NewTopicGraphRepository(db)
+
+	boardID := seedTestBoard(t, db)
+	now := NormalizeReportDate(time.Now())
+
+	topicID := seedTestActiveTopic(t, db, boardID, "以黎冲突升级", now)
+
+	// Section within 7 days
+	r1 := seedTestReport(t, db, boardID, now.AddDate(0, 0, -3))
+	s1 := seedTestSectionWithTopic(t, db, r1, "真主党越境打击", topicID)
+	d0 := 0.08
+	seedTestThread(t, db, s1, "真主党向以色列北部发射火箭", &d0)
+
+	// Section outside 7 days (10 days ago)
+	r2 := seedTestReport(t, db, boardID, now.AddDate(0, 0, -10))
+	s2 := seedTestSectionWithTopic(t, db, r2, "以军空袭黎南部", topicID)
+	d1 := 0.05
+	seedTestThread(t, db, s2, "以色列空袭黎巴嫩南部目标", &d1)
+
+	briefs, err := repo.ListTopicRecentBriefs(boardID, 7, 5)
+	require.NoError(t, err)
+	require.Len(t, briefs, 1)
+
+	// Only the 3-day-ago section should be present (7-day window)
+	items := briefs[topicID]
+	assert.Len(t, items, 1)
+	assert.Equal(t, "真主党越境打击", items[0].SectionLabel)
+}
+
+func TestListTopicRecentBriefs_PerTopicLimit(t *testing.T) {
+	db := testutil.SetupTestDB(t)
+	repo := NewTopicGraphRepository(db)
+
+	boardID := seedTestBoard(t, db)
+	now := NormalizeReportDate(time.Now())
+
+	topicID := seedTestActiveTopic(t, db, boardID, "AI 算力生态", now)
+
+	// Create 6 sections (limit is 5), descending by date
+	d0 := 0.10
+	for i := 0; i < 6; i++ {
+		r := seedTestReport(t, db, boardID, now.AddDate(0, 0, -(i+1)))
+		s := seedTestSectionWithTopic(t, db, r, fmt.Sprintf("section-%d", i+1), topicID)
+		seedTestThread(t, db, s, fmt.Sprintf("thread-%d", i+1), &d0)
+	}
+
+	briefs, err := repo.ListTopicRecentBriefs(boardID, 7, 5)
+	require.NoError(t, err)
+	require.Len(t, briefs, 1)
+
+	// Should be truncated to 5 newest sections
+	items := briefs[topicID]
+	assert.Len(t, items, 5, "per-topic limit = 5")
+	// Verify newest first (by period_date DESC)
+	assert.Equal(t, "section-1", items[0].SectionLabel)
+	assert.Equal(t, "section-5", items[4].SectionLabel)
+}
+
+func TestListTopicRecentBriefs_ThreadFitDistanceOrdering(t *testing.T) {
+	db := testutil.SetupTestDB(t)
+	repo := NewTopicGraphRepository(db)
+
+	boardID := seedTestBoard(t, db)
+	now := NormalizeReportDate(time.Now())
+
+	topicID := seedTestActiveTopic(t, db, boardID, "中东局势", now)
+	reportID := seedTestReport(t, db, boardID, now)
+	sectionID := seedTestSectionWithTopic(t, db, reportID, "中东冲突升级", topicID)
+
+	// Threads: 3 threads with different fit_distances; LIMIT 2 returns the two smallest
+	dLarge := 0.95
+	dSmall := 0.15
+	var dMedium float64 = 0.50
+	seedTestThread(t, db, sectionID, "thread-large-dist", &dLarge)
+	seedTestThread(t, db, sectionID, "thread-small-dist", &dSmall)
+	seedTestThread(t, db, sectionID, "thread-medium-dist-excluded", &dMedium)
+
+	briefs, err := repo.ListTopicRecentBriefs(boardID, 7, 5)
+	require.NoError(t, err)
+	require.Len(t, briefs, 1)
+
+	items := briefs[topicID]
+	require.Len(t, items, 1)
+	require.Len(t, items[0].ThreadTitles, 2, "LIMIT 2 per section")
+	// Smallest fit_distance first, then next smallest; largest (0.95) excluded by LIMIT
+	assert.Equal(t, "thread-small-dist", items[0].ThreadTitles[0])
+	assert.Equal(t, "thread-medium-dist-excluded", items[0].ThreadTitles[1])
+}
+
+func TestListTopicRecentBriefs_CandidateExcluded(t *testing.T) {
+	db := testutil.SetupTestDB(t)
+	repo := NewTopicGraphRepository(db)
+
+	boardID := seedTestBoard(t, db)
+	now := NormalizeReportDate(time.Now())
+
+	// Candidate topic — should NOT appear in briefs
+	candidate := BoardPersistentTopic{
+		SemanticBoardID: boardID,
+		Label:           "候选话题",
+		Embedding:       FloatsToPgVector([]float64{0}),
+		Status:          TopicStatusCandidate,
+		FirstSeenDate:   now,
+		LastSeenDate:    now,
+		HitCount:        1,
+	}
+	require.NoError(t, db.Create(&candidate).Error)
+
+	reportID := seedTestReport(t, db, boardID, now)
+	_ = seedTestSectionWithTopic(t, db, reportID, "candidate-section", candidate.ID)
+
+	briefs, err := repo.ListTopicRecentBriefs(boardID, 7, 5)
+	require.NoError(t, err)
+	assert.Len(t, briefs, 0, "candidate topics excluded from briefs")
+}
+
+func TestListTopicRecentBriefs_NoActiveTopics(t *testing.T) {
+	db := testutil.SetupTestDB(t)
+	repo := NewTopicGraphRepository(db)
+
+	boardID := seedTestBoard(t, db)
+
+	briefs, err := repo.ListTopicRecentBriefs(boardID, 7, 5)
+	require.NoError(t, err)
+	assert.Nil(t, briefs)
+}
+
+func TestListTopicRecentBriefs_MultipleTopics(t *testing.T) {
+	db := testutil.SetupTestDB(t)
+	repo := NewTopicGraphRepository(db)
+
+	boardID := seedTestBoard(t, db)
+	now := NormalizeReportDate(time.Now())
+
+	topicA := seedTestActiveTopic(t, db, boardID, "Topic A", now)
+	topicB := seedTestActiveTopic(t, db, boardID, "Topic B", now)
+
+	r := seedTestReport(t, db, boardID, now)
+	sA := seedTestSectionWithTopic(t, db, r, "Section A", topicA)
+	sB := seedTestSectionWithTopic(t, db, r, "Section B", topicB)
+
+	d0 := 0.05
+	seedTestThread(t, db, sA, "Thread A1", &d0)
+	seedTestThread(t, db, sB, "Thread B1", &d0)
+
+	briefs, err := repo.ListTopicRecentBriefs(boardID, 7, 5)
+	require.NoError(t, err)
+	assert.Len(t, briefs, 2)
+	assert.Contains(t, briefs, topicA)
+	assert.Contains(t, briefs, topicB)
+	assert.Len(t, briefs[topicA], 1)
+	assert.Len(t, briefs[topicB], 1)
 }

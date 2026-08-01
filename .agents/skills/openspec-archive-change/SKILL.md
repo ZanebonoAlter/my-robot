@@ -65,7 +65,31 @@ Archive a completed change in the experimental workflow.
 
    If user chooses sync, use Task tool (subagent_type: "general-purpose", prompt: "Use Skill tool to invoke openspec-sync-specs for change '<name>'. Delta spec analysis: <include the analyzed delta spec summary>"). Proceed to archive regardless of choice.
 
-5. **Perform the archive**
+5. **归档前强制门禁（不可跳过）**
+
+   执行《开发执行规范》§11 归档门禁的两道校验。**任一 FAIL 必须阻断 archive**（不是警告确认，是硬拒绝）。
+
+   **校验 1：openspec 制品 schema 一致性**
+   ```bash
+   openspec validate "<name>" --strict
+   ```
+   FAIL → 阻断，列出校验错误，要求修复后重试。
+
+   **校验 2：代码↔文档一致性（项目专属 harness 校验）**
+   ```bash
+   bash scripts/check-standards.sh
+   ```
+   此脚本校验 A-D 段（代码规范结构、domain 白名单、双主题、防孤立引用）。E 段（flow 变更溯源）针对 archive 后校验，此处允许跳过。
+
+   **FAIL 处理**：
+   - 输出 `## Archive Blocked` + 失败项清单
+   - 明确告知用户：归档被门禁阻断，必须先修复失败项再重试 archive
+   - **不得**用 AskUserQuestion 让用户绕过（与"不完整 artifact/task"的软警告不同，这是硬门禁）
+   - 退出，不执行步骤 6
+
+   **PASS**：继续步骤 6。
+
+6. **Perform the archive**
 
    Create the archive directory if it doesn't exist:
    ```bash
@@ -82,7 +106,7 @@ Archive a completed change in the experimental workflow.
    mv openspec/changes/<name> openspec/changes/archive/YYYY-MM-DD-<name>
    ```
 
-6. **Display summary**
+7. **Display summary**
 
    Show archive completion summary including:
    - Change name
@@ -100,15 +124,31 @@ Archive a completed change in the experimental workflow.
 **Schema:** <schema-name>
 **Archived to:** openspec/changes/archive/YYYY-MM-DD-<name>/
 **Specs:** ✓ Synced to main specs (or "No delta specs" or "Sync skipped")
+**Gate:** ✓ check-standards.sh A-D 段通过 + openspec validate --strict 通过
 
 All artifacts complete. All tasks complete.
+```
+
+**Output On Blocked (Gate Failed)**
+
+```
+## Archive Blocked
+
+**Change:** <change-name>
+
+归档门禁未通过，archive 被阻断。必须修复以下失败项后重试 `/archive`：
+
+<check-standards.sh 或 openspec validate 的失败输出>
+
+（这是硬门禁，不可跳过。与"不完整 artifact/task"的软警告不同。）
 ```
 
 **Guardrails**
 - Always prompt for change selection if not provided
 - Use artifact graph (openspec status --json) for completion checking
-- Don't block archive on warnings - just inform and confirm
+- Don't block archive on **软警告**（不完整 artifact/task）- just inform and confirm；但步骤 5 的**门禁 FAIL 是硬阻断**，不得用 AskUserQuestion 绕过
 - Preserve .openspec.yaml when moving to archive (it moves with the directory)
 - Show clear summary of what happened
 - If sync is requested, use openspec-sync-specs approach (agent-driven)
 - If delta specs exist, always run the sync assessment and show the combined summary before prompting
+- 步骤 5 两道校验（openspec validate --strict + check-standards.sh）是《开发执行规范》§11 归档门禁的执行点，FAIL 必须阻断

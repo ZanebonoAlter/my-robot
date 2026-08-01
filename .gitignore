@@ -15,6 +15,7 @@ backend-go/*.exe
 backend-go/syntopica
 backend-go/syntopica.exe
 backend-go/server.exe
+backend-go/instrumenter
 backend-go/bin/fresh.exe
 backend-go/bin/server.exe
 backend-go/bin/server.exe~
@@ -39,3 +40,8 @@ data.7z
 demo/seed/seed.sql
 backups/
 /.*
+pgvector-pg18-arm64.tar
+syntopica-demo-arm64.tar
+tests
+research/readability-spike/readability-spike.exe
+backend-go/verify-cluster-prompt

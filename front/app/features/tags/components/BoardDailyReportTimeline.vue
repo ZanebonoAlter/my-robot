@@ -6,21 +6,41 @@ import TopicDetectiveWall from './TopicDetectiveWall.client.vue'
 import DailyReportMasthead from './daily-report/DailyReportMasthead.vue'
 import DailyReportSidebar from './daily-report/DailyReportSidebar.vue'
 import DailyReportTopicSection from './daily-report/DailyReportTopicSection.vue'
+import DailyReportWatchBar from './daily-report/DailyReportWatchBar.vue'
+import PeelTransition from '~/components/PeelTransition.vue'
 import {
   buildQualityZones,
   formatMagazineDate,
   groupSectionsByTopic,
 } from './daily-report/dailyReportMagazine'
 import { useDailyReportReader } from '~/features/tags/composables/useDailyReportReader'
+import type { PeelDirection } from '~/composables/usePeelTransition'
 
-const props = defineProps<{
+/** 版块切换条所需的最小版块信息（结构兼容 SemanticBoard）。 */
+interface BoardOption {
+  id: number
+  label: string
+}
+
+const props = withDefaults(defineProps<{
   boardId: number
   boardTitle?: string
-}>()
+  /** 可就近切换的版块列表（来自 useTagsPage.boards）；缺省时隐藏切换条。 */
+  boards?: BoardOption[]
+}>(), {
+  boards: () => [],
+})
 
 const emit = defineEmits<{
   openArticle: [articleId: number]
+  /** 就近切换版块（透传给 TagsPage 调 handleSelectBoard）。 */
+  selectBoard: [boardId: number]
 }>()
+
+/** 当前转场方向：切版块→纵向，切日期→横向。须在触发 key 变更前同步写入。 */
+const direction = ref<PeelDirection>('horizontal')
+/** 动画进行中锁，防越界连点。 */
+const animating = ref(false)
 
 const reader = useDailyReportReader(toRef(props, 'boardId'))
 const showReader = ref(false)
@@ -65,6 +85,35 @@ async function shiftReport(offset: number) {
   document.querySelector('.drm-reader')?.scrollTo({ top: 0, behavior: 'smooth' })
 }
 
+/** 切日期（横向翻页）：在 key 变更前同步写入方向，加动画锁。 */
+function shiftReportPeel(offset: number) {
+  if (animating.value) return
+  direction.value = 'horizontal'
+  animating.value = true
+  void shiftReport(offset)
+}
+
+/** 侧栏点击某天（横向翻页）。 */
+function selectReportPeel(index: number) {
+  if (animating.value) return
+  direction.value = 'horizontal'
+  animating.value = true
+  void selectReport(index)
+}
+
+/** 就近切换版块（纵向翻页）：在 boardId 变更前同步写入方向。 */
+function handleSwitchBoard(id: number) {
+  if (animating.value || id === props.boardId) return
+  direction.value = 'vertical'
+  animating.value = true
+  emit('selectBoard', id)
+}
+
+/** Peel 转场结束：释放动画锁。 */
+function onPeelEnd() {
+  animating.value = false
+}
+
 async function loadHistorical(reportIds: number[]) {
   await Promise.all(reportIds.map(reportId => reader.ensureHistoricalDetail(reportId)))
 }
@@ -85,10 +134,10 @@ function handleKeydown(event: KeyboardEvent) {
     void closeReader()
   } else if (event.key === 'ArrowDown' || event.key === 'ArrowRight') {
     event.preventDefault()
-    void shiftReport(1)
+    shiftReportPeel(1)
   } else if (event.key === 'ArrowUp' || event.key === 'ArrowLeft') {
     event.preventDefault()
-    void shiftReport(-1)
+    shiftReportPeel(-1)
   }
 }
 
@@ -104,10 +153,23 @@ watch(showReader, (open) => {
 })
 
 watch(() => props.boardId, () => {
-  showReader.value = false
+  // 不关闭 reader：版块切换发生在 reader 内部（就近切换条），需保持开启以播放纵向翻页转场。
+  // reader 打开时 modal 覆盖侧栏，外部切换不可能发生；reader 关闭时此项为 no-op。
   showThreadBrowser.value = false
   showDetectiveWall.value = false
   detectiveTopicId.value = undefined
+})
+
+// 版块切换后（reader 开着）日报列表重载完成时自动选中第一天，触发纵向翻页进入转场。
+watch(reader.loading, async (isLoading) => {
+  if (isLoading) return
+  if (!showReader.value || reader.currentDayIndex.value >= 0) return
+  if (reader.reports.value.length > 0) {
+    await reader.selectReport(0)
+  } else {
+    // 新版块无日报：无进入转场，兏底释放动画锁
+    animating.value = false
+  }
 })
 
 onUnmounted(() => {
@@ -183,7 +245,7 @@ onUnmounted(() => {
             <button
               type="button"
               :disabled="reader.currentDayIndex.value >= reader.reports.value.length - 1"
-              @click="shiftReport(1)"
+              @click="shiftReportPeel(1)"
             >
               <Icon icon="mdi:chevron-left" width="18" />
               较早一期
@@ -192,7 +254,7 @@ onUnmounted(() => {
             <button
               type="button"
               :disabled="reader.currentDayIndex.value <= 0"
-              @click="shiftReport(-1)"
+              @click="shiftReportPeel(-1)"
             >
               较新一期
               <Icon icon="mdi:chevron-right" width="18" />
@@ -208,47 +270,59 @@ onUnmounted(() => {
           <div v-else-if="reader.detailError.value" class="drm-reader__error" role="alert">
             {{ reader.detailError.value }}
           </div>
-          <template v-else-if="reader.selectedDetail.value">
-            <DailyReportMasthead :report="reader.selectedDetail.value" :board-title="boardTitle" />
-            <div class="drm-layout">
-              <DailyReportSidebar
-                :zones="qualityZones"
-                :active-topics="activeTopics"
-                :reports="reader.reports.value"
-                :current-index="reader.currentDayIndex.value"
-                @scroll-to="scrollTo"
-                @select-report="selectReport"
-                @open-topic-overview="showThreadBrowser = true; closeReader()"
+
+          <!-- Peel 转场容器：始终挂载（reader 开启时），内部文章按 selectedDetail 显隐 + :key 触发方向化翻页 -->
+          <PeelTransition :direction="direction" class="drm-peel-host" @end="onPeelEnd">
+            <div v-if="reader.selectedDetail.value" :key="reader.selectedDetail.value.id" class="drm-peel-page">
+              <DailyReportMasthead :report="reader.selectedDetail.value" :board-title="boardTitle" />
+              <DailyReportWatchBar
+                :board-id="boardId"
+                :report-id="reader.selectedDetail.value.id"
+                :sections="reader.selectedDetail.value.sections"
               />
-              <main class="drm-content">
-                <DailyReportTopicSection
-                  v-for="zone in qualityZones"
-                  :key="`${boardId}-${zone.key}`"
-                  :zone="zone"
-                  :report-date="reader.selectedDetail.value.period_date"
-                  :lifeline-entries="reader.lifelineEntries.value"
-                  :article-entries="reader.articleEntries.value"
-                  :report-details="reader.detailCache.value"
-                  @ensure-lifeline="reader.ensureLifeline"
-                  @ensure-articles="reader.ensureArticleTitles"
-                  @retry-article="reader.retryArticle"
-                  @load-historical="loadHistorical"
-                  @open-article="emit('openArticle', $event)"
-                  @open-detective="openDetectiveWall"
+              <div class="drm-layout">
+                <DailyReportSidebar
+                  :zones="qualityZones"
+                  :active-topics="activeTopics"
+                  :reports="reader.reports.value"
+                  :current-index="reader.currentDayIndex.value"
+                  :boards="boards"
+                  :board-id="boardId"
+                  @scroll-to="scrollTo"
+                  @select-report="selectReportPeel"
+                  @select-board="handleSwitchBoard"
+                  @open-topic-overview="showThreadBrowser = true; closeReader()"
                 />
-                <section v-if="reader.selectedDetail.value.dynamics" class="drm-dynamics">
-                  <span>Board Dynamics</span>
-                  <h2>板块动态</h2>
-                  <p>{{ reader.selectedDetail.value.dynamics }}</p>
-                </section>
-              </main>
+                <main class="drm-content">
+                  <DailyReportTopicSection
+                    v-for="zone in qualityZones"
+                    :key="`${boardId}-${zone.key}`"
+                    :zone="zone"
+                    :report-date="reader.selectedDetail.value.period_date"
+                    :lifeline-entries="reader.lifelineEntries.value"
+                    :article-entries="reader.articleEntries.value"
+                    :report-details="reader.detailCache.value"
+                    @ensure-lifeline="reader.ensureLifeline"
+                    @ensure-articles="reader.ensureArticleTitles"
+                    @retry-article="reader.retryArticle"
+                    @load-historical="loadHistorical"
+                    @open-article="emit('openArticle', $event)"
+                    @open-detective="openDetectiveWall"
+                  />
+                  <section v-if="reader.selectedDetail.value.dynamics" class="drm-dynamics">
+                    <span>Board Dynamics</span>
+                    <h2>板块动态</h2>
+                    <p>{{ reader.selectedDetail.value.dynamics }}</p>
+                  </section>
+                </main>
+              </div>
+              <footer class="drm-colophon" aria-label="本期完">
+                <span class="drm-colophon__ornament" aria-hidden="true">◆</span>
+                <em>本期脉络由 Syntopica 整理</em>
+                <span class="drm-colophon__date">{{ reader.selectedDetail.value ? formatMagazineDate(reader.selectedDetail.value.period_date) : '' }}</span>
+              </footer>
             </div>
-            <footer class="drm-colophon" aria-label="本期完">
-              <span class="drm-colophon__ornament" aria-hidden="true">◆</span>
-              <em>本期脉络由 Syntopica 整理</em>
-              <span class="drm-colophon__date">{{ reader.selectedDetail.value ? formatMagazineDate(reader.selectedDetail.value.period_date) : '' }}</span>
-            </footer>
-          </template>
+          </PeelTransition>
         </article>
       </div>
     </Transition>
@@ -474,6 +548,17 @@ onUnmounted(() => {
   width: 2.5rem;
   margin-left: 0.5rem;
   border-left: 1px solid var(--color-border-medium) !important;
+}
+
+.drm-peel-host {
+  position: relative;
+  perspective: 1400px;
+}
+
+.drm-peel-page {
+  position: relative;
+  z-index: 1;
+  backface-visibility: hidden;
 }
 
 .drm-layout {

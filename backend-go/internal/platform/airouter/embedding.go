@@ -11,6 +11,8 @@ type EmbeddingRequest struct {
 	Model          string   `json:"model"`
 	EncodingFormat string   `json:"encoding_format,omitempty"`
 	Dimensions     int      `json:"dimensions,omitempty"`
+	Operation      string   // 必填，业务操作名
+	SessionID      string   // 可选，编排分组键
 	Metadata       map[string]any
 }
 

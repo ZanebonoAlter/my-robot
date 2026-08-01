@@ -25,7 +25,7 @@ type fakeSemanticBoardHandlerLLM struct {
 	suggestions []service.SemanticBoardUpgradeSuggestion
 }
 
-func (f fakeSemanticBoardHandlerLLM) SuggestSemanticBoardUpgrades(ctx context.Context, prompt string) ([]service.SemanticBoardUpgradeSuggestion, error) {
+func (f fakeSemanticBoardHandlerLLM) SuggestSemanticBoardUpgrades(ctx context.Context, prompt string, mode string) ([]service.SemanticBoardUpgradeSuggestion, error) {
 	return f.suggestions, nil
 }
 
@@ -43,7 +43,7 @@ func setupSemanticBoardHandlerRouter(t *testing.T) (*gorm.DB, *gin.Engine) {
 	}
 	t.Cleanup(func() {
 		semanticBoardLabelEmbedder = service.DefaultAuxiliaryLabelEmbedder
-		semanticBoardUpgradeLLMFactory = newSemanticBoardUpgradeLLM
+		semanticBoardUpgradeLLMFactory = service.NewDefaultSemanticBoardUpgradeLLM
 	})
 
 	api := g.Group("/api")
@@ -253,7 +253,7 @@ func TestSemanticBoardHandlerAuxiliaryGovernanceAndTagAssociations(t *testing.T)
 
 func TestSemanticBoardHandlerUpgradeBackfillAndConfig(t *testing.T) {
 	db, router := setupSemanticBoardHandlerRouter(t)
-	require.NoError(t, db.Create(&models.AISettings{Key: "semantic_board_upgrade_ref_count_threshold", Value: "1"}).Error)
+	require.NoError(t, db.Where(models.AISettings{Key: "semantic_board_upgrade_ref_count_threshold"}).Assign(models.AISettings{Value: "1"}).FirstOrCreate(&models.AISettings{}).Error)
 	auxiliary := createHandlerSemanticLabel(t, db, "OpenAI", "openai", "auxiliary", "active", 5, []float64{1, 0, 0})
 	tag := createHandlerTopicTag(t, db, "GPT-5", models.TagCategoryEvent)
 	require.NoError(t, db.Create(&models.TopicTagSemanticLabel{TopicTagID: tag.ID, SemanticLabelID: auxiliary.ID}).Error)
@@ -264,7 +264,9 @@ func TestSemanticBoardHandlerUpgradeBackfillAndConfig(t *testing.T) {
 
 	suggest := performJSON(t, router, http.MethodPost, "/api/semantic-boards/upgrade-suggest", nil)
 	require.Equal(t, http.StatusOK, suggest.Code)
-	require.Contains(t, suggest.Body.String(), "create_new")
+	// §4.5: a single candidate forms a singleton cluster → observation-pool watch
+	// suggestion (no LLM adjudication), not a create_new.
+	require.Contains(t, suggest.Body.String(), "watch")
 
 	execute := performJSON(t, router, http.MethodPost, "/api/semantic-boards/upgrade-execute", map[string]any{
 		"decision":            "create_new",

@@ -2,22 +2,45 @@ package repository
 
 import (
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
 
 	"gorm.io/gorm"
 	"syntopica-backend/internal/models"
+	"syntopica-backend/internal/platform/logging"
 )
+
+// topicLandscapeActiveWindowDays is N — the active-stance freshness window
+// for the topic-landscape view. A topic is "active" when it was last seen
+// within this many calendar days; otherwise it decays to "stalled". Kept as
+// a package-level constant (not an ai_settings key) so the landscape view
+// ships without a DB migration; promote to config if tuning is needed later.
+const topicLandscapeActiveWindowDays = 7
+
+// topicLandscapeDefaultDays is the default lifeline/vitality window (in days)
+// for the topic-landscape view when the client omits ?days= or passes a
+// non-positive value. Allowed windows are {7,14,30,90}; see
+// ClampTopicLandscapeDays.
+const topicLandscapeDefaultDays = 30
 
 // PersistentTopicConfig holds the runtime-tunable parameters that govern
 // assignment, lifecycle and backfill. Loaded from ai_settings with the
 // defaults baked into the migration seed.
 type PersistentTopicConfig struct {
-	MatchThreshold   float64 // persistent_topic_match_threshold
-	UpgradeThreshold int     // persistent_topic_upgrade_threshold
-	DecayWindow      int     // persistent_topic_decay_window (days)
-	ClusterThreshold float64 // persistent_topic_cluster_threshold
+	MatchThreshold       float64 // persistent_topic_match_threshold
+	UpgradeThreshold     int     // persistent_topic_upgrade_threshold
+	CandidateDecayWindow int     // persistent_topic_candidate_decay_window (days)
+	CandidatePromptLimit int     // persistent_topic_candidate_prompt_limit
+	ClusterThreshold     float64 // persistent_topic_cluster_threshold
+	// Lane-driven clustering params (daily-report-lane-driven-clustering).
+	LaneL1Threshold float64 // persistent_topic_lane_l1_threshold: direct-attach ceiling
+	LaneL2Threshold float64 // persistent_topic_lane_l2_threshold: weak-zone upper bound
+	VacuumRatio     float64 // persistent_topic_vacuum_ratio: is_vacuum trigger
+	CentroidWindow  int     // persistent_topic_centroid_window: # recent sections averaged
+	VacuumWindow    int     // persistent_topic_vacuum_window: attraction stats span (days)
+	L2CandidateK    int     // persistent_topic_l2_candidate_k: top-K candidates for L2 LLM
 }
 
 // DefaultPersistentTopicConfig returns the seed defaults; used when ai_settings
@@ -32,14 +55,84 @@ type PersistentTopicConfig struct {
 // See the change verification-report for the full threshold scan.
 func DefaultPersistentTopicConfig() PersistentTopicConfig {
 	return PersistentTopicConfig{
-		MatchThreshold:   0.30,
-		UpgradeThreshold: 3,
-		DecayWindow:      30,
-		ClusterThreshold: 0.28,
+		MatchThreshold:       0.30,
+		UpgradeThreshold:     3,
+		CandidateDecayWindow: 7,
+		CandidatePromptLimit: 20,
+		ClusterThreshold:     0.28,
+		// Lane defaults calibrated on the real-data diagnosis
+		// (docs/experience/cluster-bias-investigation.md): L1<0.18 lifts
+		// strong-attach from 14% to 62%, L2[0.18,0.30] leaves ~51% to the
+		// LLM, L3>0.30 is the ~1.3% new-narrative tail.
+		LaneL1Threshold: 0.18,
+		LaneL2Threshold: 0.30,
+		VacuumRatio:     0.20,
+		CentroidWindow:  30,
+		VacuumWindow:    7,
+		L2CandidateK:    5,
 	}
 }
 
-// LoadPersistentTopicConfig reads the four persistent_topic_* keys from
+type AnchorableTopicStats struct {
+	ActiveCount      int
+	CandidateCount   int
+	FilteredByWindow int
+	TruncatedByLimit int
+}
+
+func selectAnchorableTopics(topics []BoardPersistentTopic, reportDate time.Time, cfg PersistentTopicConfig) ([]BoardPersistentTopic, AnchorableTopicStats) {
+	stats := AnchorableTopicStats{}
+	active := make([]BoardPersistentTopic, 0, len(topics))
+	candidates := make([]BoardPersistentTopic, 0, len(topics))
+	reportDay := NormalizeReportDate(reportDate)
+	defaults := DefaultPersistentTopicConfig()
+	candidateDecayWindow := cfg.CandidateDecayWindow
+	if candidateDecayWindow <= 0 {
+		candidateDecayWindow = defaults.CandidateDecayWindow
+	}
+	candidatePromptLimit := cfg.CandidatePromptLimit
+	if candidatePromptLimit <= 0 {
+		candidatePromptLimit = defaults.CandidatePromptLimit
+	}
+
+	for _, topic := range topics {
+		switch topic.Status {
+		case TopicStatusActive:
+			stats.ActiveCount++
+			active = append(active, topic)
+		case TopicStatusCandidate:
+			stats.CandidateCount++
+			lastSeen := NormalizeReportDate(topic.LastSeenDate)
+			// gapDays relies on NormalizeReportDate midnight normalisation:
+			// the difference of two noon-UTC timestamps is an integer multiple of 24h.
+			gapDays := int(reportDay.Sub(lastSeen).Hours() / 24)
+			if gapDays > candidateDecayWindow {
+				stats.FilteredByWindow++
+				continue
+			}
+			candidates = append(candidates, topic)
+		}
+	}
+
+	sort.SliceStable(candidates, func(i, j int) bool {
+		left, right := candidates[i], candidates[j]
+		if !left.LastSeenDate.Equal(right.LastSeenDate) {
+			return left.LastSeenDate.After(right.LastSeenDate)
+		}
+		if left.HitCount != right.HitCount {
+			return left.HitCount > right.HitCount
+		}
+		return left.ID < right.ID
+	})
+	if len(candidates) > candidatePromptLimit {
+		stats.TruncatedByLimit = len(candidates) - candidatePromptLimit
+		candidates = candidates[:candidatePromptLimit]
+	}
+
+	return append(active, candidates...), stats
+}
+
+// LoadPersistentTopicConfig reads the persistent_topic_* keys from
 // ai_settings, falling back to defaults on missing/invalid rows. Reading is
 // best-effort: a malformed value never fails the report pipeline.
 func LoadPersistentTopicConfig(db *gorm.DB) PersistentTopicConfig {
@@ -47,8 +140,15 @@ func LoadPersistentTopicConfig(db *gorm.DB) PersistentTopicConfig {
 	keys := []string{
 		"persistent_topic_match_threshold",
 		"persistent_topic_upgrade_threshold",
-		"persistent_topic_decay_window",
+		"persistent_topic_candidate_decay_window",
+		"persistent_topic_candidate_prompt_limit",
 		"persistent_topic_cluster_threshold",
+		"persistent_topic_lane_l1_threshold",
+		"persistent_topic_lane_l2_threshold",
+		"persistent_topic_vacuum_ratio",
+		"persistent_topic_centroid_window",
+		"persistent_topic_vacuum_window",
+		"persistent_topic_l2_candidate_k",
 	}
 	var rows []models.AISettings
 	if err := db.Where("key IN ?", keys).Find(&rows).Error; err != nil {
@@ -64,13 +164,51 @@ func LoadPersistentTopicConfig(db *gorm.DB) PersistentTopicConfig {
 			if v, err := strconv.Atoi(r.Value); err == nil {
 				cfg.UpgradeThreshold = v
 			}
-		case "persistent_topic_decay_window":
-			if v, err := strconv.Atoi(r.Value); err == nil {
-				cfg.DecayWindow = v
+		case "persistent_topic_candidate_decay_window":
+			if v, err := strconv.Atoi(r.Value); err == nil && v > 0 {
+				cfg.CandidateDecayWindow = v
+			} else {
+				logging.Warnf("persistent-topic: invalid candidate decay window %q; using default %d", r.Value, cfg.CandidateDecayWindow)
+			}
+		case "persistent_topic_candidate_prompt_limit":
+			if v, err := strconv.Atoi(r.Value); err == nil && v > 0 {
+				cfg.CandidatePromptLimit = v
+			} else {
+				logging.Warnf("persistent-topic: invalid candidate prompt limit %q; using default %d", r.Value, cfg.CandidatePromptLimit)
 			}
 		case "persistent_topic_cluster_threshold":
 			if v, err := strconv.ParseFloat(r.Value, 64); err == nil {
 				cfg.ClusterThreshold = v
+			}
+		case "persistent_topic_lane_l1_threshold":
+			if v, err := strconv.ParseFloat(r.Value, 64); err == nil {
+				cfg.LaneL1Threshold = v
+			}
+		case "persistent_topic_lane_l2_threshold":
+			if v, err := strconv.ParseFloat(r.Value, 64); err == nil {
+				cfg.LaneL2Threshold = v
+			}
+		case "persistent_topic_vacuum_ratio":
+			if v, err := strconv.ParseFloat(r.Value, 64); err == nil {
+				cfg.VacuumRatio = v
+			}
+		case "persistent_topic_centroid_window":
+			if v, err := strconv.Atoi(r.Value); err == nil && v > 0 {
+				cfg.CentroidWindow = v
+			} else {
+				logging.Warnf("persistent-topic: invalid centroid window %q; using default %d", r.Value, cfg.CentroidWindow)
+			}
+		case "persistent_topic_vacuum_window":
+			if v, err := strconv.Atoi(r.Value); err == nil && v > 0 {
+				cfg.VacuumWindow = v
+			} else {
+				logging.Warnf("persistent-topic: invalid vacuum window %q; using default %d", r.Value, cfg.VacuumWindow)
+			}
+		case "persistent_topic_l2_candidate_k":
+			if v, err := strconv.Atoi(r.Value); err == nil && v > 0 {
+				cfg.L2CandidateK = v
+			} else {
+				logging.Warnf("persistent-topic: invalid l2 candidate k %q; using default %d", r.Value, cfg.L2CandidateK)
 			}
 		}
 	}
@@ -108,24 +246,24 @@ func PersistentTopicColor(topicID uint) string {
 	return persistentTopicPalette[h%uint64(len(persistentTopicPalette))]
 }
 
-// ListActiveTopicsByBoard returns candidate + active topics for a board. These
-// are the anchors injected into ClusterTags and consulted by the assignment
-// step. Archived topics are excluded — they are no longer assignable.
-func (r *TopicGraphRepository) ListActiveTopicsByBoard(boardID uint) ([]BoardPersistentTopic, error) {
+// ListAnchorableTopicsByBoard returns the exact active+candidate frame set
+// shared by clustering and dual-confirmation assignment for one report date.
+func (r *TopicGraphRepository) ListAnchorableTopicsByBoard(boardID uint, reportDate time.Time, cfg PersistentTopicConfig) ([]BoardPersistentTopic, AnchorableTopicStats, error) {
 	var topics []BoardPersistentTopic
 	err := r.db.Where("semantic_board_id = ? AND status IN ?", boardID,
 		[]string{TopicStatusCandidate, TopicStatusActive}).
-		Order("status ASC, last_seen_date DESC, id ASC").
 		Find(&topics).Error
 	if err != nil {
-		return nil, fmt.Errorf("list active topics: %w", err)
+		return nil, AnchorableTopicStats{}, fmt.Errorf("list anchorable topics: %w", err)
 	}
-	return topics, nil
+	selected, stats := selectAnchorableTopics(topics, reportDate, cfg)
+	return selected, stats, nil
 }
 
-// ListAllTopicsByBoard returns every non-archived topic for a board (used by
-// the lifecycle updater, which must update consecutive_hits on candidate and
-// active topics alike).
+// ListAllTopicsByBoard returns every non-archived topic (candidate+active) for
+// a board. It does NOT apply window or limit filtering. Used by the lifecycle
+// updater (planLifecycle) and diagnostics — never for ClusterTags injection or
+// assignment (that is ListAnchorableTopicsByBoard's responsibility).
 func (r *TopicGraphRepository) ListAllTopicsByBoard(boardID uint) ([]BoardPersistentTopic, error) {
 	var topics []BoardPersistentTopic
 	err := r.db.Where("semantic_board_id = ? AND status != ?", boardID, TopicStatusArchived).
@@ -169,6 +307,7 @@ func (r *TopicGraphRepository) DeleteTopic(topicID uint) error {
 				"persistent_topic_id":    nil,
 				"topic_match_distance":   nil,
 				"topic_match_confidence": nil,
+				"topic_status_at_report": nil,
 			}).Error; err != nil {
 			return fmt.Errorf("unlink sections: %w", err)
 		}
@@ -182,6 +321,21 @@ func (r *TopicGraphRepository) DeleteTopic(topicID uint) error {
 		}
 		return nil
 	})
+}
+
+// FilterVisibleTopics returns topics that should appear in the management UI.
+// Active and archived always visible; candidates only visible when their
+// cumulative hit_count >= upgrade_threshold (observing candidates are hidden).
+// Note: the gate is cumulative hits, NOT consecutive hits — a topic that
+// appears on-and-off still qualifies once it has been hit enough times total.
+func FilterVisibleTopics(topics []BoardPersistentTopic, upgradeThreshold int) []BoardPersistentTopic {
+	result := make([]BoardPersistentTopic, 0, len(topics))
+	for _, t := range topics {
+		if t.Status != TopicStatusCandidate || t.HitCount >= upgradeThreshold {
+			result = append(result, t)
+		}
+	}
+	return result
 }
 
 // CreateTopic inserts a new persistent topic row and returns it with the ID set.
@@ -220,18 +374,61 @@ func (r *TopicGraphRepository) SaveTopics(tx *gorm.DB, topics []BoardPersistentT
 	return nil
 }
 
-// UpdateSectionTopicAssignment writes the three assignment columns onto an
+// UpdateSectionTopicAssignment writes the assignment columns onto an
 // already-inserted section row (sections have IDs after CreateInBatches).
-func (r *TopicGraphRepository) UpdateSectionTopicAssignment(tx *gorm.DB, sectionID uint, topicID *uint, distance float64, confidence string) error {
+// laneTier records which lane produced the assignment (l1_direct/l2_llm/
+// l3_new); pass "" to leave the column NULL (historical/backfill rows).
+func (r *TopicGraphRepository) UpdateSectionTopicAssignment(tx *gorm.DB, sectionID uint, topicID *uint, distance float64, confidence string, laneTier string, topicStatusAtReport *string) error {
 	if tx == nil {
 		tx = r.db
 	}
+	updates := map[string]interface{}{
+		"persistent_topic_id":    topicID,
+		"topic_match_distance":   distance,
+		"topic_match_confidence": confidence,
+		"topic_status_at_report": topicStatusAtReport,
+	}
+	// lane_tier: empty string writes NULL (historical rows), a real lane writes
+	// the lane label. Writes happen for every new section so the column reflects
+	// the bucketing source.
+	if laneTier == "" {
+		updates["lane_tier"] = nil
+	} else {
+		updates["lane_tier"] = laneTier
+	}
 	return tx.Model(&DailyReportSection{}).Where("id = ?", sectionID).
-		Updates(map[string]interface{}{
-			"persistent_topic_id":    topicID,
-			"topic_match_distance":   distance,
-			"topic_match_confidence": confidence,
-		}).Error
+		Updates(updates).Error
+}
+
+// ListTagSemanticEmbeddings loads the semantic-track pgvector embedding for
+// each requested tag from topic_tag_embeddings. Tags without a semantic row
+// are absent from the returned map; the caller (lane bucketing) routes such
+// tags to the L3 new-narrative bucket. Additive read-only helper for the
+// lane-driven clustering pipeline.
+func (r *TopicGraphRepository) ListTagSemanticEmbeddings(tagIDs []uint) (map[uint]string, error) {
+	out := make(map[uint]string, len(tagIDs))
+	if len(tagIDs) == 0 {
+		return out, nil
+	}
+	type row struct {
+		TopicTagID uint
+		Embedding  string
+	}
+	var rows []row
+	err := r.db.Raw(`
+		SELECT topic_tag_id, embedding
+		FROM topic_tag_embeddings
+		WHERE embedding_type = 'semantic' AND topic_tag_id IN ?
+	`, tagIDs).Scan(&rows).Error
+	if err != nil {
+		return nil, fmt.Errorf("list tag semantic embeddings: %w", err)
+	}
+	for _, rw := range rows {
+		if rw.Embedding != "" {
+			out[rw.TopicTagID] = rw.Embedding
+		}
+	}
+	return out, nil
 }
 
 // ListSectionsByBoardOrdered returns all sections for a board ordered by date
@@ -303,8 +500,8 @@ func (r *TopicGraphRepository) UpdateTopic(topicID uint, label *string, status *
 		case TopicStatusActive, TopicStatusArchived:
 			if *status == TopicStatusActive && topic.Status == TopicStatusCandidate {
 				threshold := LoadPersistentTopicConfig(r.db).UpgradeThreshold
-				if topic.ConsecutiveHits < threshold {
-					return nil, fmt.Errorf("话题需连续出现至少 %d 天后才能人工确认（当前 %d 天）", threshold, topic.ConsecutiveHits)
+				if topic.HitCount < threshold {
+					return nil, fmt.Errorf("话题需累计命中至少 %d 次后才能人工确认（当前 %d 次）", threshold, topic.HitCount)
 				}
 			}
 			updates["status"] = *status
@@ -527,4 +724,209 @@ func (r *TopicGraphRepository) SplitTopic(sourceTopicID uint, sectionIDs []uint,
 		return nil, err
 	}
 	return newTopic, nil
+}
+
+// ── Lane-driven clustering: centroid + vacuum (daily-report-lane-driven-clustering) ──
+//
+// The functions below are the Foundation layer (Wave 1): pure helpers plus the
+// data-access methods Wave 2's algorithm will call. They touch ONLY additive
+// state (board_persistent_topics.centroid/is_vacuum/vacuum_strong/vacuum_mid);
+// no assignment/cluster/orchestrator logic is changed here.
+
+// meanPgVectors returns the element-wise mean of the given vectors. Vectors of
+// differing length are truncated to the shortest so a malformed row cannot
+// poison the average. Empty input (or a zero-length first row) returns nil;
+// the caller (ComputeTopicCentroid) treats nil as "degrade to first-section".
+//
+// Equal-weight averaging is used deliberately: the spec sets centroid_window
+// (how many sections) but leaves the weighting open, and equal-weight is the
+// simplest defensible choice (a weighted variant can land later without
+// changing the signature). Extracted as a pure helper so the averaging logic
+// is unit-testable without a database.
+func meanPgVectors(vectors [][]float64) []float64 {
+	if len(vectors) == 0 {
+		return nil
+	}
+	dim := len(vectors[0])
+	for _, v := range vectors[1:] {
+		if len(v) < dim {
+			dim = len(v)
+		}
+	}
+	if dim == 0 {
+		return nil
+	}
+	mean := make([]float64, dim)
+	for _, v := range vectors {
+		for j := 0; j < dim; j++ {
+			mean[j] += v[j]
+		}
+	}
+	for j := range mean {
+		mean[j] /= float64(len(vectors))
+	}
+	return mean
+}
+
+// computeVacuumFlag is the pure vacuum test extracted from
+// RecomputeVacuumStats: a topic is flagged is_vacuum when
+// strong/(strong+mid) < vacuumRatio. strong+mid == 0 returns false (no data
+// → not a vacuum) to avoid a divide-by-zero and to keep brand-new topics out
+// of the vacuum lane until they have attraction stats.
+func computeVacuumFlag(strong, mid int, ratio float64) bool {
+	total := strong + mid
+	if total <= 0 {
+		return false
+	}
+	return float64(strong)/float64(total) < ratio
+}
+
+// ComputeTopicCentroid recomputes the centroid for one topic from its recent
+// sections' embeddings. It selects the most recent cfg.CentroidWindow sections
+// (by report period_date) whose persistent_topic_id = topicID, parses each
+// embedding, and takes the equal-weight element-wise mean. When fewer than 2
+// sections have a parseable embedding — the spec's "section不足退化首义向量" case
+// — the centroid falls back to the topic's existing Embedding (the first-
+// section 首义向量). The returned string is a pgvector literal usable in
+// UPDATE ... SET centroid = ?.
+func (r *TopicGraphRepository) ComputeTopicCentroid(topicID uint) (string, error) {
+	cfg := LoadPersistentTopicConfig(r.db)
+	window := cfg.CentroidWindow
+	if window <= 0 {
+		window = DefaultPersistentTopicConfig().CentroidWindow
+	}
+
+	type secRow struct {
+		Embedding string
+	}
+	var rows []secRow
+	err := r.db.Raw(`
+		SELECT s.embedding AS embedding
+		FROM daily_report_sections s
+		JOIN board_daily_reports rpt ON rpt.id = s.report_id
+		WHERE s.persistent_topic_id = ?
+		  AND s.embedding IS NOT NULL
+		ORDER BY rpt.period_date DESC, s.id DESC
+		LIMIT ?
+	`, topicID, window).Scan(&rows).Error
+	if err != nil {
+		return "", fmt.Errorf("load recent sections for centroid: %w", err)
+	}
+
+	var vecs [][]float64
+	for _, rw := range rows {
+		v, perr := repoParsePgVector(rw.Embedding)
+		if perr != nil || len(v) == 0 {
+			continue
+		}
+		vecs = append(vecs, v)
+	}
+	// Degradation: <2 parseable sections → first-section vector.
+	if len(vecs) < 2 {
+		return r.topicEmbeddingFallback(topicID)
+	}
+	mean := meanPgVectors(vecs)
+	if mean == nil {
+		return r.topicEmbeddingFallback(topicID)
+	}
+	return FloatsToPgVector(mean), nil
+}
+
+// topicEmbeddingFallback loads the topic's existing Embedding column (the
+// first-section 首义向量) for use as the centroid when there is not enough
+// section data to average. Shared by ComputeTopicCentroid's degradation paths.
+func (r *TopicGraphRepository) topicEmbeddingFallback(topicID uint) (string, error) {
+	var topic BoardPersistentTopic
+	if err := r.db.Select("embedding").First(&topic, topicID).Error; err != nil {
+		return "", fmt.Errorf("load topic %d embedding fallback: %w", topicID, err)
+	}
+	return topic.Embedding, nil
+}
+
+// UpdateCentroidOnSectionChange recomputes and persists the centroid for one
+// topic. Intended to run after a section is added or its topic assignment
+// changes, so the centroid reflects the latest window. tx is the caller's
+// transaction (nil falls back to r.db) so the centroid write can commit
+// atomically with the triggering section write.
+func (r *TopicGraphRepository) UpdateCentroidOnSectionChange(tx *gorm.DB, topicID uint) error {
+	centroid, err := r.ComputeTopicCentroid(topicID)
+	if err != nil {
+		return fmt.Errorf("compute centroid for topic %d: %w", topicID, err)
+	}
+	exec := r.db
+	if tx != nil {
+		exec = tx
+	}
+	if err := exec.Model(&BoardPersistentTopic{}).Where("id = ?", topicID).
+		Update("centroid", centroid).Error; err != nil {
+		return fmt.Errorf("update topic %d centroid: %w", topicID, err)
+	}
+	return nil
+}
+
+// RecomputeVacuumStats recomputes the vacuum attraction statistics for every
+// active/candidate topic on a board and persists them. For each topic it
+// counts, over the last cfg.VacuumWindow days, the sections assigned to it:
+//
+//	strong = topic_match_distance <  LaneL1Threshold
+//	mid    = topic_match_distance in [LaneL1Threshold, LaneL2Threshold]
+//
+// A topic is flagged is_vacuum when strong/(strong+mid) < VacuumRatio. This is
+// the LLM-free vacuum proxy the main thread specified (an approximation of the
+// spec's "attracted" count via recorded topic_match_distance). Topics with no
+// recent attraction are reset to strong=0/mid=0/is_vacuum=false.
+func (r *TopicGraphRepository) RecomputeVacuumStats(boardID uint) error {
+	cfg := LoadPersistentTopicConfig(r.db)
+	vacuumWindow := cfg.VacuumWindow
+	if vacuumWindow <= 0 {
+		vacuumWindow = DefaultPersistentTopicConfig().VacuumWindow
+	}
+
+	type stat struct {
+		TopicID      uint
+		VacuumStrong int
+		VacuumMid    int
+	}
+	var stats []stat
+	err := r.db.Raw(`
+		SELECT s.persistent_topic_id AS topic_id,
+		       COUNT(*) FILTER (WHERE s.topic_match_distance < ?) AS vacuum_strong,
+		       COUNT(*) FILTER (WHERE s.topic_match_distance >= ? AND s.topic_match_distance <= ?) AS vacuum_mid
+		FROM daily_report_sections s
+		JOIN board_daily_reports rpt ON rpt.id = s.report_id
+		JOIN board_persistent_topics t ON t.id = s.persistent_topic_id
+		WHERE t.semantic_board_id = ?
+		  AND s.persistent_topic_id IS NOT NULL
+		  AND rpt.period_date >= (CURRENT_DATE - ?::int)
+		GROUP BY s.persistent_topic_id
+	`, cfg.LaneL1Threshold, cfg.LaneL1Threshold, cfg.LaneL2Threshold, boardID, vacuumWindow).Scan(&stats).Error
+	if err != nil {
+		return fmt.Errorf("aggregate vacuum stats for board %d: %w", boardID, err)
+	}
+
+	statMap := make(map[uint]stat, len(stats))
+	for _, st := range stats {
+		statMap[st.TopicID] = st
+	}
+
+	topics, err := r.ListAllTopicsByBoard(boardID)
+	if err != nil {
+		return fmt.Errorf("list topics for vacuum update: %w", err)
+	}
+
+	return r.db.Transaction(func(tx *gorm.DB) error {
+		for _, t := range topics {
+			st := statMap[t.ID] // zero-value when the topic had no recent section
+			isVacuum := computeVacuumFlag(st.VacuumStrong, st.VacuumMid, cfg.VacuumRatio)
+			if err := tx.Model(&BoardPersistentTopic{}).Where("id = ?", t.ID).
+				Updates(map[string]interface{}{
+					"vacuum_strong": st.VacuumStrong,
+					"vacuum_mid":    st.VacuumMid,
+					"is_vacuum":     isVacuum,
+				}).Error; err != nil {
+				return fmt.Errorf("update vacuum stats for topic %d: %w", t.ID, err)
+			}
+		}
+		return nil
+	})
 }

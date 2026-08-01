@@ -123,8 +123,10 @@ func (s *ContentCompletionService) CompleteArticleWithMetadata(ctx context.Conte
 		return fmt.Errorf("AI summary not enabled for this feed")
 	}
 
-	if article.FirecrawlStatus != "completed" {
-		return fmt.Errorf("firecrawl not completed for this article")
+	// firecrawl 抓取彻底失败（终态 failed）时也允许降级走摘要，用 RSS description
+	// 作为内容来源，避免文章因抓取失败永久拿不到摘要。
+	if article.FirecrawlStatus != "completed" && article.FirecrawlStatus != "failed" {
+		return fmt.Errorf("firecrawl not completed for this article (status=%s)", article.FirecrawlStatus)
 	}
 
 	if article.CompletionAttempts >= completionRetryLimit(&feed) && !force {
@@ -162,12 +164,16 @@ func (s *ContentCompletionService) CompleteArticleWithMetadata(ctx context.Conte
 		}
 	}
 
-	contentToSummarize := article.FirecrawlContent
+	// firecrawl 抓到全文用全文；失败时降级用 RSS description（比无摘要好）
+	contentToSummarize := strings.TrimSpace(article.FirecrawlContent)
 	if contentToSummarize == "" {
-		if err := s.persistCompletionFailure(&article, &feed, "No firecrawl content available"); err != nil {
+		contentToSummarize = strings.TrimSpace(article.Description)
+	}
+	if contentToSummarize == "" {
+		if err := s.persistCompletionFailure(&article, &feed, "No content available for summary"); err != nil {
 			return fmt.Errorf("persist completion failure: %w", err)
 		}
-		return fmt.Errorf("no firecrawl content available")
+		return fmt.Errorf("no content available for summary")
 	}
 
 	summary, err := s.summarizeContent(article.ID, article.FeedID, article.Title, contentToSummarize, metadata)
@@ -210,7 +216,7 @@ func (s *ContentCompletionService) ListReadyArticles(limit int) ([]models.Articl
 
 	query := repository.Repo.DB().
 		Joins("JOIN feeds ON feeds.id = articles.feed_id").
-		Where("articles.firecrawl_status = ?", "completed").
+		Where("articles.firecrawl_status IN ?", []string{"completed", "failed"}).
 		Where("feeds.article_summary_enabled = ?", true).
 		Where("articles.summary_status = ? OR (articles.summary_status = ? AND (articles.summary_processing_started_at IS NULL OR articles.summary_processing_started_at <= ?))", "incomplete", "pending", staleBefore).
 		Omit("tag_count", "relevance_score").
@@ -382,6 +388,7 @@ func (s *ContentCompletionService) summarizeContent(articleID uint, feedID uint,
 	if s.router != nil {
 		maxTokens := 16000
 		result, err := s.router.Chat(context.Background(), airouter.ChatRequest{
+			Operation:  "reader.content_completion",
 			Capability: airouter.CapabilitySummary,
 			Messages: []airouter.Message{
 				{Role: "system", Content: s.aiService.GetSystemPrompt("zh")},

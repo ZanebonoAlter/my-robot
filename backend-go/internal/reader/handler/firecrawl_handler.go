@@ -67,7 +67,10 @@ func CrawlArticle(c *gin.Context) {
 		return
 	}
 
-	firecrawlService := service.NewFirecrawlService(config)
+	firecrawlService := service.NewFallbackCrawler(
+		service.NewReadabilityCrawler(),
+		service.NewFirecrawlService(config),
+	)
 
 	article.FirecrawlStatus = "processing"
 	repository.Repo.DB().Save(&article)
@@ -86,7 +89,7 @@ func CrawlArticle(c *gin.Context) {
 	}
 
 	article.FirecrawlStatus = "completed"
-	article.FirecrawlContent = result.Data.Markdown
+	article.FirecrawlContent = result.Markdown
 	article.FirecrawlError = ""
 	article.SummaryStatus = "incomplete"
 	now := time.Now()
@@ -105,7 +108,7 @@ func CrawlArticle(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"data": gin.H{
-			"firecrawl_content": result.Data.Markdown,
+			"firecrawl_content": result.Markdown,
 			"firecrawl_status":  "completed",
 			"summary_status":    "incomplete",
 		},

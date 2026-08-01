@@ -8,7 +8,9 @@ import (
 	"strconv"
 	"strings"
 
+	"go.opentelemetry.io/otel"
 	"syntopica-backend/internal/platform/logging"
+	"syntopica-backend/internal/platform/tracing"
 	"syntopica-backend/internal/topicgraph/repository"
 )
 
@@ -76,6 +78,8 @@ func MergeSimilarSections(
 	threadBatches [][]repository.DailyReportThread,
 	tags []repository.TagInput,
 ) ([]repository.DailyReportSection, [][]repository.DailyReportThread, error) {
+	ctx, span := otel.Tracer(tracing.ServiceName).Start(ctx, "service.MergeSimilarSections")
+	defer span.End()
 	if len(sections) <= 1 {
 		return sections, threadBatches, nil
 	}
@@ -249,10 +253,14 @@ func MergeSimilarSections(
 			avgScore = totalScore / float64(scoreCount)
 		}
 
+		// Recompute quality_breakdown from merged tag IDs.
+		breakdownJSON := buildQualityBreakdownJSON(tags, mergedTagIDs)
+
 		primary.ClusterTagIDs = mergedTagIDsJSON
 		primary.ArticleCount = totalArticles
 		primary.BestTier = bestTier
 		primary.AvgScore = avgScore
+		primary.QualityBreakdown = breakdownJSON
 
 		mergedSections = append(mergedSections, primary)
 		mergedThreadBatches = append(mergedThreadBatches, allThreads)

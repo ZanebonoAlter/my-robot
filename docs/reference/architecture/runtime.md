@@ -20,12 +20,13 @@
 
 ## Runtime 里实际启动了什么
 
-`backend-go/internal/app/runtime.go` 里定义的 `Runtime` 目前会启动 9 类后台任务：
+`backend-go/internal/app/runtime.go` 里定义的 `Runtime` 目前会启动 10 类后台任务：
 
 - `AutoRefresh`：扫描到点 feed 并触发刷新
-- `PreferenceUpdate`：更新阅读偏好
-- `ContentCompletion`：基于 Firecrawl 正文生成文章级摘要
-- `Firecrawl`：抓取文章完整正文
+- `PreferenceProfileUpdate`：以 `reading_behaviors` 为权重源重算偏好向量画像（纯向量算术，零 LLM）
+- `RSSHubCatalogSync`：同步自建 RSSHub 实例路由目录 + 增量可用性校验 + 新路由 embedding
+- `ContentCompletion`：基于正文生成文章级摘要
+- `Firecrawl`：抓取文章完整正文（readability 进程内主力，Firecrawl 仅在 readability 不合格时兜底 SPA 站点）
 - `BlockedArticleRecovery`：恢复因 Firecrawl 配置变更等原因阻塞的文章
 - `DailyReport`：基于活跃主题标签生成每日叙事摘要
 - `TagQualityScore`：重算 `topic_tags.quality_score`
@@ -53,7 +54,8 @@
 `StartRuntime()` 里目前写死了几组默认间隔：
 
 - `auto_refresh`：60 秒检查一次
-- `preference_update`：1800 秒检查一次
+- `preference_profile_update`：3600 秒检查一次（偏好向量画像重算，零 LLM）
+- `rsshub_catalog_sync`：86400 秒检查一次（每天一次，同步 RSSHub 路由目录）
 - `content_completion`：60 秒检查一次
 - `firecrawl`：300 秒检查一次
 - `blocked_article_recovery`：3600 秒检查一次
@@ -84,7 +86,9 @@
 - `/api/feeds`：订阅 CRUD、单 feed 刷新、批量刷新、feed 预览抓取
 - `/api/articles`：文章列表、详情、统计、单条/批量状态更新
 - `/api/reading-behavior`：阅读行为上报与统计
-- `/api/user-preferences`：偏好查询与手动更新
+- `/api/preference-profile`：偏好向量画像读取与手动重算
+- `/api/discovery`：订阅源发现（RSSHub 目录同步 / 推荐卡片 / 问答）
+- `/api/settings/rsshub`：RSSHub 实例配置读写
 
 ### AI 与内容处理 API
 
@@ -99,7 +103,7 @@
 
 - `/api/embedding`：embedding 配置与队列管理
 - `/api/topic-tags`：关注标签、标签合并预览
-- `/api/narratives`：叙事摘要列表、详情、历史
+- ~~`/api/narratives`~~：已废弃（narrative 生成并入 daily_report；历史数据经 `/api/semantic-boards/:id/narratives` 只读）
 
 ### Scheduler API
 
@@ -114,7 +118,8 @@
 这组 API 现在统一覆盖：
 
 - `auto_refresh`
-- `preference_update`
+- `preference_profile_update`
+- `rsshub_catalog_sync`
 - `content_completion`
 - `firecrawl`
 - `tag_quality_score`
@@ -129,9 +134,9 @@
 
 但能力不是完全对称的：
 
-- `auto_refresh`、`preference_update`、`content_completion`、`firecrawl`、`tag_quality_score`、`daily_report`、`log_cleanup`、`aux_label_cleanup`、`blocked_article_recovery` 支持统一状态查询
-- `auto_refresh`、`preference_update`、`content_completion`、`firecrawl`、`tag_quality_score`、`daily_report`、`log_cleanup`、`aux_label_cleanup`、`blocked_article_recovery` 支持统一 trigger
-- `auto_refresh`、`preference_update`、`content_completion`、`firecrawl`、`tag_quality_score`、`daily_report`、`log_cleanup`、`aux_label_cleanup`、`blocked_article_recovery` 支持 `reset` / `interval`
+- `auto_refresh`、`preference_profile_update`、`rsshub_catalog_sync`、`content_completion`、`firecrawl`、`tag_quality_score`、`daily_report`、`log_cleanup`、`aux_label_cleanup`、`blocked_article_recovery` 支持统一状态查询
+- `auto_refresh`、`preference_profile_update`、`rsshub_catalog_sync`、`content_completion`、`firecrawl`、`tag_quality_score`、`daily_report`、`log_cleanup`、`aux_label_cleanup`、`blocked_article_recovery` 支持统一 trigger
+- `auto_refresh`、`preference_profile_update`、`rsshub_catalog_sync`、`content_completion`、`firecrawl`、`tag_quality_score`、`daily_report`、`log_cleanup`、`aux_label_cleanup`、`blocked_article_recovery` 支持 `reset` / `interval`
 
 ## Scheduler 状态现在能看到什么
 
@@ -148,7 +153,7 @@
 
 ### 数据库存档状态
 
-当前 9 个调度器（`auto_refresh`、`preference_update`、`content_completion`、`firecrawl`、`blocked_article_recovery`、`daily_report`、`tag_quality_score`、`log_cleanup`、`aux_label_cleanup`）都通过 `NewTaskPersistence` 把最近一轮执行结果写进 `scheduler_tasks`，包含：
+当前 10 个调度器（`auto_refresh`、`preference_profile_update`、`rsshub_catalog_sync`、`content_completion`、`firecrawl`、`blocked_article_recovery`、`daily_report`、`tag_quality_score`、`log_cleanup`、`aux_label_cleanup`）都通过 `NewTaskPersistence` 把最近一轮执行结果写进 `scheduler_tasks`，包含：
 
 - `last_execution_time`
 - `next_execution_time`
@@ -190,7 +195,7 @@
 - `/api/tasks/status` 不再是固定占位，而是聚合 `content_completion`、`firecrawl` 的实时工作量
 - `ResetSchedulerStats` 会真实清空支持调度器的统计状态；其中持久化调度器会同步重置 `scheduler_tasks`
 - `UpdateSchedulerInterval` 会真实更新运行中的调度器间隔，而不是只返回"重启后生效"文案
-- `PreferenceUpdateScheduler` 已挂入统一 runtime registry，也能从 `/api/schedulers/*` 查询和触发
+- `PreferenceProfileUpdateScheduler`（旧 `PreferenceUpdateScheduler` 随偏好分数体系废弃删除）与新 `RSSHubCatalogSyncScheduler` 已挂入统一 runtime registry，也能从 `/api/schedulers/*` 查询和触发
 - 调度器对外使用 `content_completion` 作为规范名，同时继续兼容旧名 `ai_summary`
 
 还保留的边界有一点：
@@ -208,7 +213,8 @@
 
 - TagQueue
 - AutoRefresh
-- PreferenceUpdate
+- PreferenceProfileUpdate
+- RSSHubCatalogSync
 - ContentCompletion
 - Firecrawl
 - BlockedArticleRecovery

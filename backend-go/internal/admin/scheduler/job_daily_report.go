@@ -58,16 +58,12 @@ func DailyReportJob(targetDate ...time.Time) JobFunc {
 
 		reportCount := 0
 		for _, boardID := range boardIDs {
-			report, sections, threadBatches, genErr := daily_report.GenerateDailyReport(ctx, boardID, date)
+			report, genErr := daily_report.GenerateAndSaveReport(ctx, boardID, date)
 			if genErr != nil {
-				logging.Warnf("daily-report: generate failed for board %d: %v", boardID, genErr)
+				logging.Warnf("daily-report: generate/save failed for board %d: %v", boardID, genErr)
 				continue
 			}
 			if report == nil {
-				continue
-			}
-			if saveErr := daily_report.SaveReport(report, sections, threadBatches); saveErr != nil {
-				logging.Warnf("daily-report: save failed for board %d: %v", boardID, saveErr)
 				continue
 			}
 			reportCount++

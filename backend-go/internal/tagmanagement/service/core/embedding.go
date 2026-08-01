@@ -12,7 +12,9 @@ import (
 	"syntopica-backend/internal/models"
 	"syntopica-backend/internal/platform/airouter"
 	"syntopica-backend/internal/platform/logging"
+	"syntopica-backend/internal/platform/tracing"
 
+	"go.opentelemetry.io/otel"
 	"gorm.io/gorm"
 	"syntopica-backend/internal/tagmanagement/repository"
 )
@@ -62,12 +64,15 @@ func NewEmbeddingService() *EmbeddingService {
 
 // GenerateEmbedding generates an embedding for a tag's text representation
 func (s *EmbeddingService) GenerateEmbedding(ctx context.Context, tag *models.TopicTag, embeddingType string, opts ...EmbeddingTextOptions) (*models.TopicTagEmbedding, []float64, error) {
+	ctx, span := otel.Tracer(tracing.ServiceName).Start(ctx, "EmbeddingService.GenerateEmbedding")
+	defer span.End()
 	text := buildTagEmbeddingText(tag, embeddingType, opts...)
 	textHash := hashText(embeddingType + "\n" + text)
 
 	// Use router with failover to generate embedding
 	req := airouter.EmbeddingRequest{
-		Input: []string{text},
+		Input:     []string{text},
+		Operation: "tagmanagement.embedding",
 		Metadata: map[string]any{
 			"tag_id":    tag.ID,
 			"tag_label": tag.Label,
@@ -98,11 +103,14 @@ func (s *EmbeddingService) GenerateEmbedding(ctx context.Context, tag *models.To
 }
 
 func (s *EmbeddingService) GenerateEmbeddingForText(ctx context.Context, tagID uint, embeddingType string, text string) (*models.TopicTagEmbedding, []float64, error) {
+	ctx, span := otel.Tracer(tracing.ServiceName).Start(ctx, "EmbeddingService.GenerateEmbeddingForText")
+	defer span.End()
 	textHash := hashText(embeddingType + "\n" + text)
 
 	req := airouter.EmbeddingRequest{
-		Input:    []string{text},
-		Metadata: map[string]any{"tag_id": tagID},
+		Input:     []string{text},
+		Operation: "tagmanagement.embedding",
+		Metadata:  map[string]any{"tag_id": tagID},
 	}
 	result, err := s.router.Embed(ctx, req, airouter.CapabilityEmbedding)
 	if err != nil {
@@ -151,6 +159,8 @@ func getEventKeywords(tag *models.TopicTag) []string {
 }
 
 func (s *EmbeddingService) FindSimilarTags(ctx context.Context, tag *models.TopicTag, category string, limit int, embeddingType string) ([]TagCandidate, error) {
+	ctx, span := otel.Tracer(tracing.ServiceName).Start(ctx, "EmbeddingService.FindSimilarTags")
+	defer span.End()
 	_, rawFloats, err := s.GenerateEmbedding(ctx, tag, embeddingType)
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate embedding: %w", err)
@@ -216,6 +226,8 @@ func (s *EmbeddingService) FindSimilarTags(ctx context.Context, tag *models.Topi
 
 // TagMatch decides how to handle a candidate tag
 func (s *EmbeddingService) TagMatch(ctx context.Context, label, category string, aliases string) (*TagMatchResult, error) {
+	ctx, span := otel.Tracer(tracing.ServiceName).Start(ctx, "EmbeddingService.TagMatch")
+	defer span.End()
 	slug := Slugify(label)
 	logging.Infof("TagMatch: start label=%q slug=%q category=%s threshold=%.2f", label, slug, category, MatchThreshold)
 	var existingTag models.TopicTag
@@ -311,6 +323,8 @@ func (s *EmbeddingService) TagMatch(ctx context.Context, label, category string,
 // FindSimilarTagsAmongSet finds pairs of tags within a set whose embedding
 // cosine similarity meets the given threshold. Uses pgvector pairwise distance.
 func (s *EmbeddingService) FindSimilarTagsAmongSet(ctx context.Context, tagIDs []uint, threshold float64) ([]SimilarityEdge, error) {
+	_, span := otel.Tracer(tracing.ServiceName).Start(ctx, "EmbeddingService.FindSimilarTagsAmongSet")
+	defer span.End()
 	if len(tagIDs) < 2 {
 		return nil, nil
 	}
@@ -444,7 +458,9 @@ func (s *EmbeddingService) SaveEmbedding(embedding *models.TopicTagEmbedding) er
 
 // ensureVectorDimension checks if the embedding column matches the required dimension
 // and alters it (plus the index) if not. Drops index before ALTER, recreates after.
-// For dimensions > 2000, uses IVFFlat instead of HNSW (HNSW limit is 2000).
+// For dimensions > 2000, skips index creation (pgvector HNSW limit is 2000);
+// aux-label dedup falls back to Go-side cosine via process cache (see sqlMergeMatcher),
+// not a DB-side ANN index.
 func ensureVectorDimension(dim int) error {
 	var typeStr string
 	if err := repository.Repo.DB().Raw(`
@@ -480,7 +496,10 @@ func ensureVectorDimension(dim int) error {
 			logging.Warnf("Failed to recreate HNSW index: %v", err)
 		}
 	} else {
-		logging.Infof("Dimension %d exceeds HNSW limit (2000), skipping vector index", dim)
+		// No DB-side vector index (>2000 dim exceeds pgvector HNSW limit of 2000).
+		// aux-label dedup uses Go-side cosine over the process-cached embeddings
+		// (sqlMergeMatcher), so queries still work without an ANN index here.
+		logging.Infof("Dimension %d exceeds pgvector HNSW limit (2000); skipping DB vector index (aux-label dedup falls back to Go-side cosine via cache)", dim)
 	}
 
 	return nil

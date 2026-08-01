@@ -64,9 +64,16 @@ const (
 
 // PersistentTopicConfidence values recorded on each DailyReportSection.
 const (
-	TopicConfAnchorHit = "anchor_hit" // matched an existing topic via dual confirmation
-	TopicConfAutoNew   = "auto_new"   // dual confirmation failed → opened a new candidate
+	TopicConfAnchorHit = "anchor_hit" // L1/L2 lane anchored to an existing topic
+	TopicConfAutoNew   = "auto_new"   // L3 new-narrative → opened a new candidate
 	TopicConfUnmatched = "unmatched"  // section has no embedding, cannot assign
+	TopicConfManual    = "manual"     // user manually assigned (manual topic lane)
+)
+
+// PersistentTopic source values.
+const (
+	TopicSourceAuto   = "auto"
+	TopicSourceManual = "manual"
 )
 
 // BoardPersistentTopic is a durable narrative frame within a SemanticBoard.
@@ -80,12 +87,23 @@ type BoardPersistentTopic struct {
 	Description     string    `gorm:"type:text" json:"description"`
 	Embedding       string    `gorm:"type:vector" json:"-"`
 	Status          string    `gorm:"size:20;not null;default:candidate;index:idx_persistent_topics_board_status,priority:2" json:"status"`
+	Source          string    `gorm:"size:10;not null;default:auto" json:"source"`
 	FirstSeenDate   time.Time `gorm:"type:date;not null" json:"first_seen_date"`
 	LastSeenDate    time.Time `gorm:"type:date;not null" json:"last_seen_date"`
 	HitCount        int       `gorm:"not null;default:1" json:"hit_count"`
 	ConsecutiveHits int       `gorm:"not null;default:0" json:"consecutive_hits"`
-	CreatedAt       time.Time `json:"created_at"`
-	UpdatedAt       time.Time `json:"updated_at"`
+	// Lane-driven clustering fields (daily-report-lane-driven-clustering).
+	// Centroid is the mean of recent section embeddings (centroid_window);
+	// it supersedes Embedding (the first-section 首义向量) as the matching
+	// anchor. IsVacuum flags over-broad topics that attract tags without
+	// strong matches; VacuumStrong/VacuumMid snapshot the attraction stats
+	// over vacuum_window for the vacuum_ratio test.
+	Centroid     string    `gorm:"type:vector;default:NULL" json:"-"`
+	IsVacuum     bool      `gorm:"not null;default:false" json:"is_vacuum"`
+	VacuumStrong int       `gorm:"not null;default:0" json:"vacuum_strong"`
+	VacuumMid    int       `gorm:"not null;default:0" json:"vacuum_mid"`
+	CreatedAt    time.Time `json:"created_at"`
+	UpdatedAt    time.Time `json:"updated_at"`
 }
 
 func (BoardPersistentTopic) TableName() string {
@@ -94,16 +112,17 @@ func (BoardPersistentTopic) TableName() string {
 
 // DailyReportSection — one section per cluster
 type DailyReportSection struct {
-	ID            uint                `gorm:"primarykey" json:"id"`
-	ReportID      uint                `gorm:"index;not null" json:"report_id"`
-	ClusterIndex  int                 `json:"cluster_index"`
-	ClusterLabel  string              `gorm:"size:200" json:"cluster_label"`
-	ClusterTagIDs JSON                `gorm:"type:jsonb" json:"cluster_tag_ids"`
-	Threads       []DailyReportThread `gorm:"foreignKey:SectionID" json:"threads,omitempty"`
-	ArticleCount  int                 `json:"article_count"`
-	BestTier      int                 `gorm:"default:0" json:"best_tier"`
-	AvgScore      float64             `gorm:"default:0" json:"avg_score"`
-	Embedding     string              `gorm:"type:vector" json:"-"`
+	ID               uint                `gorm:"primarykey" json:"id"`
+	ReportID         uint                `gorm:"index;not null" json:"report_id"`
+	ClusterIndex     int                 `json:"cluster_index"`
+	ClusterLabel     string              `gorm:"size:200" json:"cluster_label"`
+	ClusterTagIDs    JSON                `gorm:"type:jsonb" json:"cluster_tag_ids"`
+	Threads          []DailyReportThread `gorm:"foreignKey:SectionID" json:"threads,omitempty"`
+	ArticleCount     int                 `json:"article_count"`
+	BestTier         int                 `gorm:"default:0" json:"best_tier"`
+	AvgScore         float64             `gorm:"default:0" json:"avg_score"`
+	QualityBreakdown JSON                `gorm:"type:jsonb" json:"quality_breakdown"`
+	Embedding        string              `gorm:"type:vector" json:"-"`
 	// Persistent topic assignment. NOT NULL is intentionally omitted at the DB
 	// layer to tolerate the backfill window and historical rows; the assignment
 	// algorithm guarantees new sections are always assigned (except the
@@ -111,13 +130,20 @@ type DailyReportSection struct {
 	PersistentTopicID    *uint   `gorm:"index" json:"persistent_topic_id,omitempty"`
 	TopicMatchDistance   float64 `json:"topic_match_distance,omitempty"`
 	TopicMatchConfidence string  `gorm:"size:20" json:"topic_match_confidence,omitempty"`
+	TopicStatusAtReport  *string `gorm:"size:20" json:"topic_status_at_report"`
+	// LaneTier records which lane produced this section's topic assignment:
+	// l1_direct (centroid strong match), l2_llm (LLM keep/switch), l3_new
+	// (new candidate). NULL on historical sections (pre-migration).
+	LaneTier string `gorm:"size:16" json:"lane_tier,omitempty"`
 	// PersistentTopic carries the nested topic brief for the daily-report
 	// detail API, so the UI can classify sections by topic status (active vs
 	// candidate). Transient — loaded via AttachTopicBriefsToReport, never
 	// persisted. Mirrors SectionTimelineNode.PersistentTopic.
 	PersistentTopic *PersistentTopicBrief `gorm:"-" json:"persistent_topic,omitempty"`
-	// MatchedTopicID is the topic the LLM picked during ClusterTags; carried
-	// transiently (not persisted) for the dual-confirmation assignment step.
+	// MatchedTopicID is the topic the lane bucketing/LLM picked for this
+	// section; carried transiently (not persisted) for the lane-driven
+	// assignment step (L1 direct / L2 keep-switch carry the owning topic id;
+	// L3 sections leave it nil).
 	MatchedTopicID *uint     `gorm:"-" json:"-"`
 	CreatedAt      time.Time `json:"created_at"`
 }
@@ -128,19 +154,39 @@ func (DailyReportSection) TableName() string {
 
 // DailyReportThread — one narrative thread, stored independently
 type DailyReportThread struct {
-	ID                uint      `gorm:"primarykey" json:"id"`
-	ReportID          uint      `gorm:"index;not null" json:"report_id"`
-	SectionID         uint      `gorm:"index;not null" json:"section_id"`
-	Title             string    `json:"title"`
-	Summary           string    `json:"summary"`
-	TagIDs            JSON      `gorm:"type:jsonb" json:"tag_ids"`
-	Confidence        float64   `gorm:"default:0" json:"confidence"`
-	RelatedArticleIDs JSON      `gorm:"type:jsonb" json:"related_article_ids,omitempty"`
-	CreatedAt         time.Time `json:"created_at"`
+	ID                uint    `gorm:"primarykey" json:"id"`
+	ReportID          uint    `gorm:"index;not null" json:"report_id"`
+	SectionID         uint    `gorm:"index;not null" json:"section_id"`
+	Title             string  `json:"title"`
+	Summary           string  `json:"summary"`
+	TagIDs            JSON    `gorm:"type:jsonb" json:"tag_ids"`
+	Confidence        float64 `gorm:"default:0" json:"confidence"`
+	RelatedArticleIDs JSON    `gorm:"type:jsonb" json:"related_article_ids,omitempty"`
+	Embedding         string  `gorm:"type:vector" json:"-"`
+	// FitDistance is a pointer so that nil ("no signal" — embed failure or
+	// owning section without an embedding) is distinguishable from a real 0.0
+	// ("perfect fit" — thread title embedding identical to its section's).
+	// Under float64+omitempty both serialized to an absent `fit_distance`
+	// field, conflating the best possible fit with no signal. nil is omitted by
+	// omitempty; a non-nil 0.0 is serialized as `"fit_distance":0`. No DB
+	// default so historical rows stay NULL per spec.
+	FitDistance *float64  `json:"fit_distance,omitempty"`
+	CreatedAt   time.Time `json:"created_at"`
 }
 
 func (DailyReportThread) TableName() string {
 	return "daily_report_threads"
+}
+
+// TopicRecentBrief captures a section's recent content for context injection
+// (Slice D: lane context injection). Carried transiently between repository and
+// service — never persisted directly.
+type TopicRecentBrief struct {
+	TopicID      uint      `json:"topic_id"`
+	SectionID    uint      `json:"section_id"`
+	SectionLabel string    `json:"section_label"`
+	PeriodDate   time.Time `json:"period_date"`
+	ThreadTitles []string  `json:"thread_titles"` // 1-2 representative thread titles
 }
 
 // JSON is a custom type for GORM jsonb columns.
@@ -202,6 +248,11 @@ type TagInput struct {
 	Source       string  `json:"source"`
 	MatchReason  string  `json:"match_reason"`
 	Score        float64 `json:"score"`
+	Downgraded   bool    `json:"downgraded"`
+	// ArticleContext carries representative article titles + summaries for the LLM prompt so
+	// highlights/threads are grounded in actual event content, not just tag names. Populated in
+	// collectBoardTags from up to 3 representative articles per tag.
+	ArticleContext string `json:"article_context,omitempty"`
 }
 
 // ClusterGroup represents a group of tags clustered by the LLM.
@@ -212,6 +263,11 @@ type ClusterGroup struct {
 	GroupName      string `json:"group_name"`
 	TagIDs         []uint `json:"tag_ids"`
 	MatchedTopicID *uint  `json:"matched_topic_id,omitempty"`
+	// Lane-driven clustering outcome (Wave2 fills these; Wave1 carries the
+	// fields so the struct/JSON shape is stable before the algorithm lands).
+	Decision      string `json:"decision,omitempty"`        // keep / switch / new (L2)
+	TargetTopicID *uint  `json:"target_topic_id,omitempty"` // L2 keep/switch target
+	Lane          string `json:"lane,omitempty"`            // l1 / l2 / l3
 }
 
 // Highlight represents a key highlight in the daily report.
@@ -354,3 +410,43 @@ func ensurePersistentTopicEmbeddingDimension(dim int) {
 		}
 	}
 }
+
+// ── Topic Watch entities ────────────────────────────────────────────────────
+
+// TopicWatchStatus values.
+const (
+	WatchStatusActive = "active"
+	WatchStatusPaused = "paused"
+)
+
+// BoardTopicWatch is a user-declared watch label on a SemanticBoard.
+// It is deliberately independent from BoardPersistentTopic: no shared
+// foreign keys, no shared lifecycle. A watch is a single-signal AI detector
+// that fires at daily-report end without affecting any topic state.
+type BoardTopicWatch struct {
+	ID              uint      `gorm:"primarykey" json:"id"`
+	SemanticBoardID uint      `gorm:"not null;index" json:"semantic_board_id"`
+	Label           string    `gorm:"size:200;not null" json:"label"`
+	Status          string    `gorm:"size:20;not null;default:active" json:"status"`
+	CreatedAt       time.Time `json:"created_at"`
+	UpdatedAt       time.Time `json:"updated_at"`
+
+	Hits []TopicWatchHit `gorm:"foreignKey:WatchID;constraint:OnDelete:CASCADE" json:"hits,omitempty"`
+}
+
+func (BoardTopicWatch) TableName() string { return "board_topic_watches" }
+
+// TopicWatchHit records a single AI-detected match between a watch and a
+// daily-report section. Each row is a read-only overlay that SHALL NOT
+// change any section's persistent_topic_id or any topic's status.
+type TopicWatchHit struct {
+	ID         uint      `gorm:"primarykey" json:"id"`
+	WatchID    uint      `gorm:"not null;uniqueIndex:idx_watch_section_report" json:"watch_id"`
+	SectionID  uint      `gorm:"not null;uniqueIndex:idx_watch_section_report" json:"section_id"`
+	ReportID   uint      `gorm:"not null;uniqueIndex:idx_watch_section_report" json:"report_id"`
+	PeriodDate time.Time `gorm:"type:date;not null" json:"period_date"`
+	Reason     string    `gorm:"type:text" json:"reason"`
+	CreatedAt  time.Time `json:"created_at"`
+}
+
+func (TopicWatchHit) TableName() string { return "topic_watch_hits" }

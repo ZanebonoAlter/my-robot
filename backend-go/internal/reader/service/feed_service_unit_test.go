@@ -1,6 +1,8 @@
 package service
 
 import (
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"syntopica-backend/internal/models"
@@ -67,89 +69,202 @@ func TestBuildArticleFromEntryTracksOnlyRunnableStates(t *testing.T) {
 	}
 }
 
-// TestResolveFeedIcon_StateMachine locks in the icon source state machine:
-// custom is frozen, auto/fallback recompute, RSS image beats favicon, article
-// images are never used.
-func TestResolveFeedIcon_StateMachine(t *testing.T) {
+// iconTestServers wires two httptest servers for icon resolution tests:
+//   - icons: serves image payloads used as download candidates
+//   - probe: serves homepage HTML used by the favicon probe
+func iconTestServers(t *testing.T) (iconsURL, probeURL string) {
+	t.Helper()
+
+	icons := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/img/rss.png":
+			w.Header().Set("Content-Type", "image/png")
+			_, _ = w.Write(pngBytes)
+		case "/static/icon.png":
+			w.Header().Set("Content-Type", "image/png")
+			_, _ = w.Write(pngBytes)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(icons.Close)
+
+	probe := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/with-link":
+			w.Header().Set("Content-Type", "text/html")
+			_, _ = w.Write([]byte(`<html><head><link rel="icon" href="/static/icon.png"></head></html>`))
+		case "/static/icon.png":
+			w.Header().Set("Content-Type", "image/png")
+			_, _ = w.Write(pngBytes)
+		case "/no-link":
+			w.Header().Set("Content-Type", "text/html")
+			_, _ = w.Write([]byte(`<html><head><title>no icon link</title></head></html>`))
+		case "/favicon.ico":
+			w.Header().Set("Content-Type", "image/x-icon")
+			_, _ = w.Write(icoBytes)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(probe.Close)
+
+	return icons.URL, probe.URL
+}
+
+// resolveTestService returns a FeedService wired to a temp icon store, so the
+// pipeline tests never touch the configured data/icons directory.
+func resolveTestService(t *testing.T) *FeedService {
+	t.Helper()
+	svc := NewFeedService()
+	svc.iconStore = NewIconStore(t.TempDir())
+	return svc
+}
+
+// TestResolveFeedIcon_CustomFrozen locks in: custom icons are never touched by
+// the recompute pipeline, even when a download would succeed.
+func TestResolveFeedIcon_CustomFrozen(t *testing.T) {
+	iconsURL, _ := iconTestServers(t)
+	svc := resolveTestService(t)
+
+	icon, source, ok := svc.resolveFeedIcon(200, "", "custom", iconsURL+"/img/rss.png", "")
+	if ok {
+		t.Errorf("ok = true, want false (custom must be frozen)")
+	}
+	if icon != "" || source != "" {
+		t.Errorf("custom icon must be untouched, got icon=%q source=%q", icon, source)
+	}
+}
+
+// TestResolveFeedIcon_RSSImagePriority: parsed.Image downloads successfully, so
+// it wins without ever probing the site homepage.
+func TestResolveFeedIcon_RSSImagePriority(t *testing.T) {
+	iconsURL, probeURL := iconTestServers(t)
+	svc := resolveTestService(t)
+
+	icon, source, ok := svc.resolveFeedIcon(201, "", "fallback", iconsURL+"/img/rss.png", probeURL+"/with-link")
+	if !ok {
+		t.Fatalf("ok = false, want true")
+	}
+	if source != "auto" {
+		t.Errorf("source = %q, want auto", source)
+	}
+	if icon != "/icons/feeds/201.png" {
+		t.Errorf("icon = %q, want /icons/feeds/201.png", icon)
+	}
+}
+
+// TestResolveFeedIcon_RSSImageFailureFallsThroughToHTMLLink: the RSS image
+// 404s, so the pipeline probes the homepage and downloads its <link rel=icon>.
+func TestResolveFeedIcon_RSSImageFailureFallsThroughToHTMLLink(t *testing.T) {
+	iconsURL, probeURL := iconTestServers(t)
+	svc := resolveTestService(t)
+
+	icon, source, ok := svc.resolveFeedIcon(202, "", "fallback", iconsURL+"/missing.png", probeURL+"/with-link")
+	if !ok {
+		t.Fatalf("ok = false, want true")
+	}
+	if source != "auto" {
+		t.Errorf("source = %q, want auto", source)
+	}
+	if icon != "/icons/feeds/202.png" {
+		t.Errorf("icon = %q, want /icons/feeds/202.png (from HTML link)", icon)
+	}
+}
+
+// TestResolveFeedIcon_HTMLLinkMissingUsesGuess: no RSS image and no HTML icon
+// link, so the {host}/favicon.ico guess is downloaded.
+func TestResolveFeedIcon_HTMLLinkMissingUsesGuess(t *testing.T) {
+	_, probeURL := iconTestServers(t)
+	svc := resolveTestService(t)
+
+	icon, source, ok := svc.resolveFeedIcon(203, "", "fallback", "", probeURL+"/no-link")
+	if !ok {
+		t.Fatalf("ok = false, want true")
+	}
+	if source != "auto" {
+		t.Errorf("source = %q, want auto", source)
+	}
+	if icon != "/icons/feeds/203.ico" {
+		t.Errorf("icon = %q, want /icons/feeds/203.ico (from favicon.ico guess)", icon)
+	}
+}
+
+// TestResolveFeedIcon_AllCandidatesFailKeepsFallback: every candidate fails to
+// download, so the feed stays fallback with mdi:rss.
+func TestResolveFeedIcon_AllCandidatesFailKeepsFallback(t *testing.T) {
+	iconsURL, _ := iconTestServers(t)
+	svc := resolveTestService(t)
+
+	// siteLink = icons server: homepage 404s and its /favicon.ico guess also
+	// 404s, so all three pipeline tiers fail.
+	icon, source, ok := svc.resolveFeedIcon(204, "", "fallback", iconsURL+"/missing.png", iconsURL)
+	if !ok {
+		t.Fatalf("ok = false, want true")
+	}
+	if source != "fallback" {
+		t.Errorf("source = %q, want fallback", source)
+	}
+	if icon != "mdi:rss" {
+		t.Errorf("icon = %q, want mdi:rss", icon)
+	}
+}
+
+// TestResolveFeedIcon_AutoLocalIconSkipsPipeline: an auto source whose icon is
+// already a local /icons/ path must skip the whole pipeline (no download, no
+// homepage probe) — a good downloaded icon survives transient remote failures
+// instead of being downgraded to fallback.
+func TestResolveFeedIcon_AutoLocalIconSkipsPipeline(t *testing.T) {
+	// No test servers wired: if the pipeline ran at all it would hit the real
+	// network and fail, returning a fallback result — the test then fails on ok.
+	svc := resolveTestService(t)
+	icon, source, ok := svc.resolveFeedIcon(206, "/icons/feeds/206.png", "auto", "https://example.com/rss.png", "https://example.com")
+	if ok {
+		t.Fatalf("ok = true, want false (auto + local icon must be frozen)")
+	}
+	if icon != "" || source != "" {
+		t.Errorf("auto + local icon must be untouched, got icon=%q source=%q", icon, source)
+	}
+}
+
+// TestResolveFeedIcon_AutoLegacyRemoteURLStillRunsPipeline: auto with a
+// still-remote (legacy unlocalized) icon must still run the pipeline to
+// complete localization.
+func TestResolveFeedIcon_AutoLegacyRemoteURLStillRunsPipeline(t *testing.T) {
+	iconsURL, _ := iconTestServers(t)
+	svc := resolveTestService(t)
+
+	icon, source, ok := svc.resolveFeedIcon(207, "https://example.com/favicon.ico", "auto", iconsURL+"/img/rss.png", "")
+	if !ok {
+		t.Fatalf("ok = false, want true (legacy remote icon must be localized)")
+	}
+	if source != "auto" || icon != "/icons/feeds/207.png" {
+		t.Errorf("got icon=%q source=%q, want /icons/feeds/207.png auto", icon, source)
+	}
+}
+
+// TestResolveFeedIcon_AutoAndLegacySourcesRefresh: auto and empty (legacy)
+// sources are recomputed like fallback.
+func TestResolveFeedIcon_AutoAndLegacySourcesRefresh(t *testing.T) {
+	iconsURL, _ := iconTestServers(t)
+
 	tests := []struct {
 		name          string
 		currentSource string
-		parsedImage   string
-		siteFavicon   string
-		wantIcon      string
-		wantSource    string
-		wantOk        bool
 	}{
-		{
-			name:          "custom is frozen regardless of candidates",
-			currentSource: "custom",
-			parsedImage:   "https://img.example/rss.png",
-			siteFavicon:   "https://example.com/favicon.ico",
-			wantIcon:      "",
-			wantSource:    "",
-			wantOk:        false,
-		},
-		{
-			name:          "fallback + RSS image -> auto",
-			currentSource: "fallback",
-			parsedImage:   "https://img.example/rss.png",
-			siteFavicon:   "https://example.com/favicon.ico",
-			wantIcon:      "https://img.example/rss.png",
-			wantSource:    "auto",
-			wantOk:        true,
-		},
-		{
-			name:          "fallback + no RSS image + favicon -> auto",
-			currentSource: "fallback",
-			parsedImage:   "",
-			siteFavicon:   "https://example.com/favicon.ico",
-			wantIcon:      "https://example.com/favicon.ico",
-			wantSource:    "auto",
-			wantOk:        true,
-		},
-		{
-			name:          "fallback + neither image nor favicon -> stays fallback mdi:rss",
-			currentSource: "fallback",
-			parsedImage:   "",
-			siteFavicon:   "",
-			wantIcon:      "mdi:rss",
-			wantSource:    "fallback",
-			wantOk:        true,
-		},
-		{
-			name:          "auto can be refreshed to a new image",
-			currentSource: "auto",
-			parsedImage:   "https://img.example/new.png",
-			siteFavicon:   "",
-			wantIcon:      "https://img.example/new.png",
-			wantSource:    "auto",
-			wantOk:        true,
-		},
-		{
-			name:          "empty source treated as fallback (legacy rows)",
-			currentSource: "",
-			parsedImage:   "https://img.example/x.png",
-			siteFavicon:   "",
-			wantIcon:      "https://img.example/x.png",
-			wantSource:    "auto",
-			wantOk:        true,
-		},
-		// Regression: article cover images must NOT be injected here. This test
-		// documents that resolveFeedIcon has no article-image parameter — any
-		// caller passing article images would be a bug.
+		{name: "auto can be refreshed", currentSource: "auto"},
+		{name: "empty source treated as recomputable (legacy rows)", currentSource: ""},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			icon, source, ok := resolveFeedIcon(tt.currentSource, tt.parsedImage, tt.siteFavicon)
-			if ok != tt.wantOk {
-				t.Errorf("ok = %v, want %v", ok, tt.wantOk)
+			svc := resolveTestService(t)
+			icon, source, ok := svc.resolveFeedIcon(205, "", tt.currentSource, iconsURL+"/img/rss.png", "")
+			if !ok {
+				t.Fatalf("ok = false, want true")
 			}
-			if icon != tt.wantIcon {
-				t.Errorf("icon = %q, want %q", icon, tt.wantIcon)
-			}
-			if source != tt.wantSource {
-				t.Errorf("source = %q, want %q", source, tt.wantSource)
+			if source != "auto" || icon != "/icons/feeds/205.png" {
+				t.Errorf("got icon=%q source=%q, want /icons/feeds/205.png auto", icon, source)
 			}
 		})
 	}

@@ -17,6 +17,8 @@ func RegisterRoutes(rg *gin.RouterGroup) {
 		ai.GET("/settings", GetSettings)
 		ai.POST("/settings", SaveSettings)
 		ai.POST("/test", TestConnection)
+		ai.GET("/call-logs", ListCallLogs)
+		ai.GET("/sessions/:session_id", GetSession)
 	}
 
 	schedulers := rg.Group("/schedulers")
@@ -26,6 +28,13 @@ func RegisterRoutes(rg *gin.RouterGroup) {
 		schedulers.POST("/:name/trigger", TriggerScheduler)
 		schedulers.POST("/:name/reset", ResetSchedulerStats)
 		schedulers.PUT("/:name/interval", UpdateSchedulerInterval)
+		schedulers.PUT("/:name/schedule-time", UpdateSchedulerScheduleTime)
+	}
+
+	analysis := rg.Group("/analysis")
+	{
+		analysis.GET("/pause", GetAnalysisPause)
+		analysis.POST("/pause", SetAnalysisPause)
 	}
 
 	readingBehavior := rg.Group("/reading-behavior")
@@ -35,9 +44,37 @@ func RegisterRoutes(rg *gin.RouterGroup) {
 		readingBehavior.GET("/stats", GetReadingStats)
 	}
 
-	preferences := rg.Group("/user-preferences")
+	preferenceProfile := rg.Group("/preference-profile")
 	{
-		preferences.GET("", GetUserPreferences)
-		preferences.POST("/update", TriggerPreferenceUpdate)
+		preferenceProfile.GET("", GetPreferenceProfile)
+		preferenceProfile.POST("/recompute", RecomputePreferenceProfile)
+	}
+
+	discovery := rg.Group("/discovery")
+	{
+		discovery.POST("/catalog/sync", SyncCatalog)
+		discovery.GET("/catalog/status", GetCatalogStatus)
+		discovery.GET("/recommendations", GetRecommendations)
+		discovery.POST("/recommendations/refresh", RefreshRecommendations)
+		discovery.POST("/recommendations/:id/accept", AcceptRecommendation)
+		discovery.POST("/recommendations/:id/dismiss", DismissRecommendation)
+		discovery.POST("/ask", Ask)
+	}
+
+	settings := rg.Group("/settings")
+	{
+		settings.GET("/rsshub", GetRSSHubSettings)
+		settings.POST("/rsshub", SaveRSSHubSettings)
+		settings.GET("/proxy", GetProxySettings)
+		settings.POST("/proxy", SaveProxySettings)
+	}
+
+	// 路由参数可选值字典 CRUD（feed-param-options）
+	routeParamOptions := rg.Group("/admin/route-param-options")
+	{
+		routeParamOptions.GET("", ListRouteParamOptions)
+		routeParamOptions.POST("", CreateRouteParamOption)
+		routeParamOptions.PUT("/:id", UpdateRouteParamOption)
+		routeParamOptions.DELETE("/:id", DeleteRouteParamOption)
 	}
 }

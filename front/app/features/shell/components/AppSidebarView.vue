@@ -173,6 +173,11 @@ const navigateTo = useNuxtApp().$router ? (path: string) => useNuxtApp().$router
         <span v-if="!sidebarCollapsed" class="flex-1 text-left font-medium">叙事工坊</span>
       </button>
 
+      <button class="sidebar-item" @click="navigateTo('/discovery')">
+        <Icon icon="mdi:compass-outline" width="20" height="20" class="text-[var(--color-text-secondary)]" />
+        <span v-if="!sidebarCollapsed" class="flex-1 text-left font-medium">发现订阅源</span>
+      </button>
+
       <div v-if="!sidebarCollapsed" class="divider" />
 
       <div v-if="!sidebarCollapsed" class="watched-tags-section">

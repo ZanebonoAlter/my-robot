@@ -1,0 +1,818 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>探索分析报告 · 见解层（视角+依据）原型</title>
+    <!--
+  causal-analysis-agent 原型 v4（2026-07-20）
+  核心升级：见解 = 事实 × 视角。
+  - 模式丙：agent 提候选视角（具体可讨论的问题），用户选
+  - 见解必须挂文章依据（新闻原文）+ 时间线依据（事件时序），不悬空
+  - 第一版单视角
+  事件链型用「美伊和谈反复横跳动机」示范（真实 section 时序 06-14~06-22）
+-->
+    <style>
+      :root {
+        --stone-50: #faf7f2;
+        --stone-100: #f5f0e6;
+        --stone-200: #e8dfd1;
+        --stone-300: #d9cdb8;
+        --ink-900: #2a2520;
+        --ink-700: #4a4238;
+        --ink-500: #7a7060;
+        --ink-300: #b0a690;
+        --red-500: #d94a4a;
+        --red-bg: #fbeaea;
+        --blue-500: #3d6a8a;
+        --blue-bg: #e8f0f5;
+        --green-500: #3d8a4a;
+        --green-bg: #e8f3ea;
+        --amber-500: #c4883c;
+        --amber-bg: #f7eede;
+        --purple-500: #7a5a9a;
+        --purple-bg: #efe8f5;
+        --serif: Georgia, "Songti SC", "Source Serif 4", "Noto Serif SC", serif;
+        --sans:
+          -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei",
+          sans-serif;
+        --mono: ui-monospace, Menlo, monospace;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --stone-50: #1f1c18;
+          --stone-100: #262220;
+          --stone-200: #332e28;
+          --stone-300: #443d34;
+          --ink-900: #f0ebe0;
+          --ink-700: #d0c8b8;
+          --ink-500: #9a9080;
+          --ink-300: #6a6050;
+          --red-bg: #3a2222;
+          --blue-bg: #1f2d36;
+          --green-bg: #1f2d22;
+          --amber-bg: #332a1c;
+          --purple-bg: #2a2236;
+        }
+      }
+      * {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
+      body {
+        background: var(--stone-50);
+        color: var(--ink-900);
+        font-family: var(--sans);
+        line-height: 1.7;
+        max-width: 1080px;
+        margin: 0 auto;
+        padding: 32px 24px 80px;
+      }
+      .serif {
+        font-family: var(--serif);
+      }
+
+      .masthead {
+        border-top: 3px double var(--ink-700);
+        border-bottom: 3px double var(--ink-700);
+        padding: 20px 0 24px;
+        margin-bottom: 24px;
+      }
+      .eyebrow {
+        font-size: 12px;
+        letter-spacing: 0.18em;
+        text-transform: uppercase;
+        color: var(--ink-500);
+        font-weight: 600;
+        margin-bottom: 10px;
+      }
+      .eyebrow .hi {
+        color: var(--purple-500);
+      }
+      .masthead h1 {
+        font-size: 26px;
+        line-height: 1.25;
+        font-weight: 700;
+        margin-bottom: 10px;
+      }
+      .masthead .sub {
+        font-size: 13.5px;
+        color: var(--ink-500);
+        font-family: var(--serif);
+      }
+      .masthead .sub b {
+        color: var(--purple-500);
+      }
+
+      /* 形态判断 */
+      .judge {
+        background: var(--stone-100);
+        border-left: 4px solid var(--red-500);
+        padding: 13px 18px;
+        border-radius: 0 6px 6px 0;
+        margin-bottom: 20px;
+        font-size: 13.5px;
+      }
+      .judge .jl {
+        font-size: 11px;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+        color: var(--ink-500);
+        font-weight: 700;
+        margin-bottom: 5px;
+      }
+      .judge .jt {
+        font-weight: 600;
+      }
+      .judge .jwhy {
+        color: var(--ink-500);
+        font-size: 12px;
+        margin-top: 4px;
+        font-family: var(--mono);
+      }
+
+      /* ★ 视角选择（模式丙） */
+      .lens-block {
+        background: var(--stone-100);
+        border: 1px solid var(--stone-300);
+        border-radius: 8px;
+        padding: 18px 20px;
+        margin-bottom: 24px;
+      }
+      .lens-block .ll {
+        font-size: 11px;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+        color: var(--purple-500);
+        font-weight: 700;
+        margin-bottom: 4px;
+      }
+      .lens-block .ld {
+        font-size: 12.5px;
+        color: var(--ink-500);
+        margin-bottom: 12px;
+      }
+      .lens-cands {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+      .lens-cand {
+        display: flex;
+        align-items: flex-start;
+        gap: 10px;
+        padding: 11px 14px;
+        border-radius: 6px;
+        border: 1px solid var(--stone-300);
+        background: var(--stone-50);
+        font-size: 13.5px;
+      }
+      .lens-cand.picked {
+        border-color: var(--purple-500);
+        background: var(--purple-bg);
+        border-width: 2px;
+      }
+      .lens-cand .marker {
+        flex-shrink: 0;
+        width: 18px;
+        height: 18px;
+        border-radius: 50%;
+        border: 2px solid var(--ink-300);
+        margin-top: 1px;
+      }
+      .lens-cand.picked .marker {
+        border-color: var(--purple-500);
+        background: var(--purple-500);
+      }
+      .lens-cand.picked .marker::after {
+        content: "✓";
+        color: #fff;
+        font-size: 11px;
+        display: block;
+        text-align: center;
+        line-height: 14px;
+        font-weight: 700;
+      }
+      .lens-cand .ct {
+        font-weight: 600;
+        color: var(--ink-900);
+      }
+      .lens-cand .cv {
+        font-size: 11.5px;
+        color: var(--ink-500);
+        margin-top: 2px;
+      }
+
+      /* 时间线依据轴 */
+      .section-label {
+        font-size: 11px;
+        letter-spacing: 0.16em;
+        text-transform: uppercase;
+        color: var(--ink-500);
+        font-weight: 700;
+        margin: 24px 0 10px;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+      .section-label::after {
+        content: "";
+        flex: 1;
+        height: 1px;
+        background: var(--stone-300);
+      }
+      .section-label .pill {
+        font-size: 10px;
+        background: var(--stone-200);
+        color: var(--ink-700);
+        padding: 2px 8px;
+        border-radius: 10px;
+        letter-spacing: 0.02em;
+        text-transform: none;
+      }
+      .timeline {
+        background: var(--stone-100);
+        border: 1px solid var(--stone-300);
+        border-radius: 8px;
+        padding: 18px 16px 14px;
+        overflow-x: auto;
+      }
+      .tl-track {
+        display: flex;
+        gap: 0;
+        min-width: 720px;
+        position: relative;
+        padding-top: 18px;
+      }
+      .tl-track::before {
+        content: "";
+        position: absolute;
+        top: 24px;
+        left: 4%;
+        right: 4%;
+        height: 2px;
+        background: var(--stone-300);
+      }
+      .tl-node {
+        flex: 1;
+        text-align: center;
+        position: relative;
+        font-size: 11px;
+        padding: 0 4px;
+      }
+      .tl-node .dot {
+        width: 11px;
+        height: 11px;
+        border-radius: 50%;
+        background: var(--stone-50);
+        border: 2px solid var(--red-500);
+        margin: 0 auto 6px;
+        position: relative;
+        z-index: 1;
+      }
+      .tl-node .dot.key {
+        background: var(--red-500);
+        width: 13px;
+        height: 13px;
+      }
+      .tl-node .date {
+        color: var(--ink-500);
+        font-family: var(--mono);
+        font-size: 10.5px;
+      }
+      .tl-node .lbl {
+        color: var(--ink-700);
+        margin-top: 3px;
+        line-height: 1.3;
+        font-size: 11px;
+      }
+      .tl-node .ref {
+        color: var(--red-500);
+        font-weight: 600;
+        font-size: 10px;
+        margin-top: 2px;
+      }
+
+      /* 见解层 */
+      .insight-block {
+        background: linear-gradient(
+          180deg,
+          var(--purple-bg) 0%,
+          var(--stone-100) 100%
+        );
+        border: 1px solid var(--purple-500);
+        border-radius: 8px;
+        padding: 20px;
+        margin-top: 24px;
+      }
+      .ib-head {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        margin-bottom: 4px;
+      }
+      .ib-icon {
+        font-size: 20px;
+      }
+      .ib-title {
+        font-family: var(--serif);
+        font-size: 18px;
+        font-weight: 700;
+        color: var(--purple-500);
+      }
+      .ib-sub {
+        font-size: 12.5px;
+        color: var(--ink-500);
+        margin-bottom: 16px;
+      }
+      .insight {
+        background: var(--stone-50);
+        border-radius: 6px;
+        padding: 13px 15px;
+        margin-bottom: 12px;
+        border-left: 4px solid var(--purple-500);
+      }
+      .insight[data-cert="high"] {
+        border-left-color: var(--green-500);
+      }
+      .insight[data-cert="medium"] {
+        border-left-color: var(--blue-500);
+      }
+      .insight[data-cert="low"] {
+        border-left-color: var(--amber-500);
+      }
+      .insight[data-cert="question"] {
+        border-left-color: var(--purple-500);
+      }
+      .ins-head {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-bottom: 6px;
+        flex-wrap: wrap;
+      }
+      .cert {
+        font-size: 10px;
+        font-weight: 700;
+        padding: 2px 8px;
+        border-radius: 10px;
+        text-transform: uppercase;
+      }
+      .cert.high {
+        background: var(--green-bg);
+        color: var(--green-500);
+      }
+      .cert.medium {
+        background: var(--blue-bg);
+        color: var(--blue-500);
+      }
+      .cert.low {
+        background: var(--amber-bg);
+        color: var(--amber-500);
+      }
+      .cert.question {
+        background: var(--purple-bg);
+        color: var(--purple-500);
+      }
+      .ins-title {
+        font-weight: 700;
+        font-size: 14px;
+        color: var(--ink-900);
+      }
+      .ins-body {
+        font-size: 13px;
+        color: var(--ink-700);
+        line-height: 1.7;
+        margin-top: 4px;
+      }
+      .ins-body .ev {
+        display: block;
+        padding: 7px 10px;
+        background: var(--stone-100);
+        border-radius: 4px;
+        font-size: 11.5px;
+        color: var(--ink-500);
+        margin-top: 7px;
+        border-left: 2px solid var(--stone-300);
+      }
+      .ins-body .ev b {
+        color: var(--ink-700);
+      }
+      .cite {
+        display: inline-block;
+        cursor: help;
+        border-bottom: 1px dotted;
+        font-weight: 600;
+        position: relative;
+        color: var(--red-500);
+      }
+      .cite-tip {
+        position: absolute;
+        bottom: 140%;
+        left: 50%;
+        transform: translateX(-50%);
+        background: var(--ink-900);
+        color: var(--stone-50);
+        padding: 7px 11px;
+        border-radius: 5px;
+        font-size: 10.5px;
+        font-weight: 400;
+        white-space: nowrap;
+        opacity: 0;
+        pointer-events: none;
+        transition: opacity 0.15s;
+        z-index: 10;
+        line-height: 1.5;
+      }
+      .cite:hover .cite-tip {
+        opacity: 1;
+      }
+
+      .about {
+        margin-top: 24px;
+        background: var(--stone-100);
+        border-radius: 6px;
+        padding: 15px 19px;
+        font-size: 12.5px;
+        color: var(--ink-500);
+      }
+      .about h4 {
+        font-size: 11px;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+        color: var(--ink-700);
+        margin-bottom: 8px;
+        font-weight: 700;
+      }
+      .trace {
+        font-family: var(--mono);
+        font-size: 11px;
+        line-height: 1.9;
+        color: var(--ink-500);
+        background: var(--stone-200);
+        padding: 9px 13px;
+        border-radius: 4px;
+        margin-top: 8px;
+      }
+      .trace .ok {
+        color: var(--green-500);
+      }
+      .trace .st {
+        color: var(--blue-500);
+      }
+      .trace .ai {
+        color: var(--purple-500);
+      }
+      .discuss {
+        margin-top: 28px;
+        border: 1px dashed var(--amber-500);
+        background: var(--amber-bg);
+        border-radius: 6px;
+        padding: 14px 18px;
+        font-size: 12.5px;
+        color: var(--ink-700);
+      }
+      .discuss h4 {
+        color: var(--amber-500);
+        font-size: 11px;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+        margin-bottom: 8px;
+      }
+      .discuss li {
+        margin-bottom: 5px;
+        line-height: 1.55;
+      }
+      .discuss code {
+        background: var(--stone-200);
+        padding: 1px 4px;
+        border-radius: 3px;
+        font-size: 11px;
+      }
+    </style>
+  </head>
+  <body>
+    <header class="masthead">
+      <div class="eyebrow">
+        探索分析 · <span class="hi">见解 = 事实 × 视角</span> · 事件链型示范
+      </div>
+      <h1 class="serif">美伊和谈反复横跳：博弈动机拆解</h1>
+      <div class="sub">
+        agent 提候选视角 → 用户选 → 按<b>具体视角</b>推演，每条见解挂<b
+          >文章依据 + 时间线依据</b
+        >，不悬空发散。
+      </div>
+    </header>
+
+    <!-- 形态判断 -->
+    <div class="judge">
+      <div class="jl">形态判断</div>
+      <div class="jt">① 事件链型 — 见解层（视角 × 事实依据）</div>
+      <div class="jwhy">
+        topic: 美伊协议 · hit=35 · section=15 ·
+        时序呈"签-争议-反制-再谈"反复特征
+      </div>
+    </div>
+
+    <!-- ★ 视角选择（模式丙：agent 提候选，用户选） -->
+    <div class="lens-block">
+      <div class="ll">分析视角 · agent 提候选，用户选（模式丙）</div>
+      <div class="ld">
+        视角是推演发动机。同一事件换视角，见解完全不同。agent 列了 3
+        个具体可讨论的方向，用户选了第一个：
+      </div>
+      <div class="lens-cands">
+        <div class="lens-cand picked">
+          <div class="marker"></div>
+          <div>
+            <div class="ct">美国为何在和谈上反复横跳？</div>
+            <div class="cv">政治博弈动机 · 拆解每次反复对应的外部压力源</div>
+          </div>
+        </div>
+        <div class="lens-cand">
+          <div class="marker"></div>
+          <div>
+            <div class="ct">霍尔木兹受阻会传导到哪些经济体？</div>
+            <div class="cv">能源宏观 · 日韩/欧洲输入性通胀链</div>
+          </div>
+        </div>
+        <div class="lens-cand">
+          <div class="marker"></div>
+          <div>
+            <div class="ct">这次和谈对美-沙-以同盟意味着什么？</div>
+            <div class="cv">地缘同盟 · 盟友信任重构</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 时间线依据（真实 section 时序） -->
+    <div class="section-label">
+      时间线依据 <span class="pill">来自 15 个 section · 真实数据</span>
+    </div>
+    <div class="timeline">
+      <div class="tl-track">
+        <div class="tl-node">
+          <div class="dot key"></div>
+          <div class="date">06-14</div>
+          <div class="lbl">官宣到否认博弈</div>
+          <div class="ref">[1]</div>
+        </div>
+        <div class="tl-node">
+          <div class="dot"></div>
+          <div class="date">06-15</div>
+          <div class="lbl">条款确认 / 执行争议</div>
+          <div class="ref">[2]</div>
+        </div>
+        <div class="tl-node">
+          <div class="dot"></div>
+          <div class="date">06-16</div>
+          <div class="lbl">伊朗暂停 / 备忘录</div>
+          <div class="ref">[3]</div>
+        </div>
+        <div class="tl-node">
+          <div class="dot"></div>
+          <div class="date">06-17</div>
+          <div class="lbl">地缘破冰</div>
+          <div class="ref">[4]</div>
+        </div>
+        <div class="tl-node">
+          <div class="dot key"></div>
+          <div class="date">06-18</div>
+          <div class="lbl">临时停战落地</div>
+          <div class="ref">[5]</div>
+        </div>
+        <div class="tl-node">
+          <div class="dot key"></div>
+          <div class="date">06-19</div>
+          <div class="lbl">伊朗反制与合规</div>
+          <div class="ref">[6]</div>
+        </div>
+        <div class="tl-node">
+          <div class="dot"></div>
+          <div class="date">06-20</div>
+          <div class="lbl">执行争议再起</div>
+          <div class="ref">[7]</div>
+        </div>
+        <div class="tl-node">
+          <div class="dot"></div>
+          <div class="date">06-22</div>
+          <div class="lbl">首轮会谈路线图</div>
+          <div class="ref">[8]</div>
+        </div>
+      </div>
+    </div>
+    <div
+      style="
+        font-size: 12px;
+        color: var(--ink-500);
+        margin-top: 8px;
+        font-family: var(--mono);
+      "
+    >
+      → 时序特征：签(14) → 争议(15,20) → 反制(19) → 再谈(22)，反复周期 ~2-3
+      天，每次反复对应一个压力节点
+    </div>
+
+    <!-- 见解层 -->
+    <div class="insight-block">
+      <div class="ib-head">
+        <span class="ib-icon">💡</span
+        ><span class="ib-title">见解 · 视角：反复横跳的博弈动机</span>
+      </div>
+      <div class="ib-sub">
+        每条见解挂时间线节点 + 文章原文。确定性分级。发挥 AI 拆解动机的优势。
+      </div>
+
+      <div class="insight" data-cert="medium">
+        <div class="ins-head">
+          <span class="cert medium">推演·中</span
+          ><span class="ins-title">"反复"是多方拉锯的外显，不是无能</span>
+        </div>
+        <div class="ins-body">
+          时间线上每次"否认/争议"都对应一个具体外部压力源：
+          <span class="ev"
+            ><b>06-15 执行争议</b>
+            <span class="cite"
+              >[2]<span class="cite-tip"
+                >06-15 · 协议执行中的不确定性、漏洞与争议</span
+              ></span
+            >
+            ← 条款模糊留博弈空间</span
+          >
+          <span class="ev"
+            ><b>06-19 伊朗反制</b>
+            <span class="cite"
+              >[6]<span class="cite-tip"
+                >06-19 · 伊朗对美协议的反制与合规</span
+              ></span
+            >
+            ← 伊朗强硬派平衡</span
+          >
+          <span class="ev"
+            ><b>06-20 争议再起</b>
+            <span class="cite"
+              >[7]<span class="cite-tip"
+                >06-20 · 协议执行中的不确定性、漏洞与争议</span
+              ></span
+            >
+            ← 执行技术问题反复</span
+          >
+          → 反复周期稳定(~2-3天)，说明是结构性拉锯，非随机失误。
+        </div>
+      </div>
+
+      <div class="insight" data-cert="medium">
+        <div class="ins-head">
+          <span class="cert medium">推演·中</span
+          ><span class="ins-title">条款"留漏洞"是故意的——给各方留台阶</span>
+        </div>
+        <div class="ins-body">
+          06-15 和 06-20
+          两次"执行争议"指向<b>同一类问题</b>（条款不确定性/漏洞）<span
+            class="cite"
+            >[2]<span class="cite-tip"
+              >06-15 · 执行不确定性、漏洞与争议</span
+            ></span
+          ><span class="cite"
+            >[7]<span class="cite-tip"
+              >06-20 · 执行不确定性、漏洞与争议</span
+            ></span
+          >。
+          条款故意模糊，让美/伊/盟友各自能向国内交代"赢了"——这是达成协议的必要妥协，而非疏忽。
+          <span class="ev"
+            >🔧 web 验证：同类历史协议（伊核 JCPOA）的条款模糊性研究 →
+            模糊条款是多方协议常态</span
+          >
+        </div>
+      </div>
+
+      <div class="insight" data-cert="question">
+        <div class="ins-head">
+          <span class="cert question">提问</span
+          ><span class="ins-title">06-22 路线图能否打破 ~2-3 天反复周期？</span>
+        </div>
+        <div class="ins-body">
+          06-22 达成"首轮会谈路线图"<span class="cite"
+            >[8]<span class="cite-tip"
+              >06-22 · 美伊首轮会谈达成路线图与谅解备忘录</span
+            ></span
+          >——但若压力源（国内鹰派/伊朗强硬派/执行漏洞）未消，路线图可能只是又一个反复的开始。
+          <span class="ev"
+            >❓
+            提问式见解：不预言成败，只指出"决定成败的条件"——压力源是否被路线图机制化解决。</span
+          >
+        </div>
+      </div>
+    </div>
+
+    <!-- 文章依据清单 -->
+    <div class="section-label">
+      文章依据 <span class="pill">8 篇 section · 全部可溯原文</span>
+    </div>
+    <div
+      style="
+        font-size: 12px;
+        color: var(--ink-700);
+        line-height: 1.9;
+        background: var(--stone-100);
+        border-radius: 6px;
+        padding: 14px 18px;
+      "
+    >
+      <div>
+        <span class="cite"
+          >[1]<span class="cite-tip"
+            >06-14 · 美伊协议签署进程：从官宣到否认的博弈</span
+          ></span
+        >
+        06-14 · 美伊协议签署进程：从官宣到否认的博弈 · 22 篇
+      </div>
+      <div>
+        <span class="cite"
+          >[2]<span class="cite-tip"
+            >06-15 · 协议执行中的不确定性、漏洞与争议</span
+          ></span
+        >
+        06-15 · 协议执行中的不确定性、漏洞与争议 · 9 篇
+      </div>
+      <div>
+        <span class="cite"
+          >[3]<span class="cite-tip"
+            >06-16 · 美伊谅解备忘录签署与核心条款确认</span
+          ></span
+        >
+        06-16 · 美伊谅解备忘录签署与核心条款确认 · 19 篇
+      </div>
+      <div>
+        <span class="cite"
+          >[5]<span class="cite-tip"
+            >06-18 · 美伊临时停战协议签署与核心条款落地</span
+          ></span
+        >
+        06-18 · 美伊临时停战协议签署与核心条款落地 · 11 篇
+      </div>
+      <div>
+        <span class="cite"
+          >[6]<span class="cite-tip"
+            >06-19 · 伊朗对美协议的反制与合规</span
+          ></span
+        >
+        06-19 · 伊朗对美协议的反制与合规 · 6 篇
+      </div>
+      <div>
+        <span class="cite"
+          >[7]<span class="cite-tip"
+            >06-20 · 协议执行中的不确定性、漏洞与争议</span
+          ></span
+        >
+        06-20 · 协议执行中的不确定性、漏洞与争议 · 4 篇
+      </div>
+      <div>
+        <span class="cite"
+          >[8]<span class="cite-tip"
+            >06-22 · 美伊首轮会谈达成路线图与谅解备忘录</span
+          ></span
+        >
+        06-22 · 美伊首轮会谈达成路线图与谅解备忘录 · 10 篇
+      </div>
+    </div>
+
+    <aside class="about">
+      <h4>探索过程（视角驱动）</h4>
+      <div class="trace">
+        <span class="st">[1]</span> 形态判断：事件链型（时序反复特征）
+        <span class="ai">[2]</span> <b>agent 提候选视角</b>：反复动机 / 能源传导
+        / 同盟影响 <span class="ai">[3]</span> <b>用户选</b>：反复横跳动机
+        <span class="st">[4]</span> 拉时间线（15 section 时序）+ 挂文章依据
+        <span class="ai">[5]</span>
+        <b>按视角推演</b>：每次反复←压力源；条款留漏洞；路线图能否破周期
+        <span class="st">[6]</span> web 验证：JCPOA 条款模糊性研究（支撑推演）
+      </div>
+    </aside>
+
+    <div class="discuss">
+      <h4>⌗ 商讨点</h4>
+      <ol>
+        <li>
+          <b>视角候选是"具体问题"而非抽象标签</b>（"美国为何反复横跳" vs
+          "用博弈论"）——这个粒度对吗？还是想要更细/更粗？
+        </li>
+        <li>
+          <b>时间线依据轴</b>（06-14~06-22 真实 section 时序）+
+          每个推演挂文章——这种"有据可查"的感觉，是不是你要的扎实感？
+        </li>
+        <li>
+          <b>见解挂原文</b>（hover 看 section 原标题 + 日期 +
+          篇数）——依据的颗粒度够不够？要不要能点开看原文正文？
+        </li>
+        <li>
+          <b>提问式见解</b
+          >（"路线图能否打破周期？"）——指出决定成败的条件而非预言成败，这个分寸
+          OK 吗？
+        </li>
+      </ol>
+    </div>
+  </body>
+</html>

@@ -75,7 +75,7 @@ export interface CreateFeedData {
  */
 export interface UpdateFeedData {
   url?: string
-  category_id?: number
+  category_id?: number | null
   title?: string
   description?: string
   icon?: string

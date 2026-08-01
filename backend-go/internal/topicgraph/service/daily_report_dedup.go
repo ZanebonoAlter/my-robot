@@ -1,9 +1,11 @@
 package service
 
 import (
+	"context"
 	"fmt"
 	"sort"
 
+	"syntopica-backend/internal/platform/tracing"
 	"syntopica-backend/internal/topicgraph/repository"
 )
 
@@ -16,7 +18,10 @@ import (
 // The function takes a slice of repository.TagInput plus a parallel slice of article ID sets
 // (one per tag, in the same order) and returns the deduplicated slice along with
 // the surviving indices.
-func DeduplicateTags(tags []repository.TagInput, articleIDSets [][]uint) []repository.TagInput {
+func DeduplicateTags(ctx context.Context, tags []repository.TagInput, articleIDSets [][]uint) []repository.TagInput {
+	_, span := tracing.Tracer(tracing.ServiceName).Start(ctx, "workflow.daily_report.dedup")
+	defer span.End()
+
 	if len(tags) == 0 {
 		return nil
 	}

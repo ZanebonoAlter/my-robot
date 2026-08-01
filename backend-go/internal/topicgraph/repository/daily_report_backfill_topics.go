@@ -31,8 +31,11 @@ type topicCluster struct {
 // BackfillPersistentTopics reconstructs persistent topics for a board's
 // historical sections that have no topic assignment yet. Unlike the daily
 // assignment (which opens candidates), backfill creates ACTIVE topics
-// directly — these sections already constitute historical evidence of a
-// durable narrative, so there is no observation period to serve.
+// directly for clusters of >= 2 sections — these already constitute
+// historical evidence of a durable narrative, so there is no observation
+// period to serve. Single-member clusters (isolated sections) do NOT seed a
+// topic: they stay unassigned and are left for the daily candidate path to
+// observe over consecutive days (avoids single-section noise lanes).
 //
 // Clustering is COMPLETE-LINK agglomerative: sections are processed in date
 // order, and a section joins an existing cluster only when it is within
@@ -169,8 +172,16 @@ func (r *TopicGraphRepository) backfillTopics(boardID uint, rebuildRelations boo
 		}
 
 		// Create one ACTIVE topic per cluster and backfill its members.
+		// Min-size gate: a single-member cluster is one isolated section that
+		// clusters with nothing else — not durable-narrative evidence on its
+		// own. Seeding an active topic from it would bypass the consecutive-
+		// hits observation window and produce noise lanes, so such sections
+		// stay unassigned and are left for the daily candidate path.
 		for ci := range clusters {
 			c := &clusters[ci]
+			if len(c.members) < 2 {
+				continue
+			}
 			topic := BoardPersistentTopic{
 				SemanticBoardID: boardID,
 				Label:           c.label,
@@ -186,7 +197,7 @@ func (r *TopicGraphRepository) backfillTopics(boardID uint, rebuildRelations boo
 			}
 			created++
 			for _, mi := range c.members {
-				if err := r.UpdateSectionTopicAssignment(tx, sections[mi].ID, &topic.ID, 0, TopicConfAnchorHit); err != nil {
+				if err := r.UpdateSectionTopicAssignment(tx, sections[mi].ID, &topic.ID, 0, TopicConfAnchorHit, "", nil); err != nil {
 					return fmt.Errorf("backfill section %d: %w", sections[mi].ID, err)
 				}
 			}

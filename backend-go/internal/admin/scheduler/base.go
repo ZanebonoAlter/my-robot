@@ -59,6 +59,17 @@ type Config struct {
 
 	// Optional DB persistence. If nil, no SchedulerTask table interaction.
 	Persistence *TaskPersistence
+
+	// Auto-discovery metadata. The admin handler reads these fields to
+	// surface any registry-registered scheduler in /api/schedulers/status
+	// and make it triggerable via /trigger, without a second descriptor list.
+	// Description is the UI text; TaskName is the SchedulerTask DB row key
+	// used by the enrichStatus fallback (empty defaults to the registry key);
+	// Aliases are alternative trigger names (e.g. "ai_summary" for
+	// content_completion, kept for backward compatibility).
+	Description string
+	TaskName    string
+	Aliases     []string
 }
 
 // BaseScheduler implements the Scheduler interface with unified state
@@ -96,6 +107,16 @@ func New(cfg Config) *BaseScheduler {
 		cfg:      cfg,
 		stopChan: make(chan struct{}),
 	}
+}
+
+// GetConfig returns the scheduler's configuration. The admin handler reads
+// Description/TaskName/Aliases from here for auto-discovery. Wrappers that
+// embed *BaseScheduler (e.g. DailyReportSchedulerWrapper) inherit this method,
+// so the wrapper's config is the wrapped base's config.
+func (s *BaseScheduler) GetConfig() Config {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.cfg
 }
 
 // Start implements Scheduler.Start. It launches a background goroutine

@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 
 	"github.com/spf13/viper"
@@ -13,6 +14,8 @@ type Config struct {
 	Database DatabaseConfig
 	CORS     CORSConfig
 	Log      LogConfig
+	Tracing  TracingConfig
+	Storage  StorageConfig
 }
 
 type LogConfig struct {
@@ -38,6 +41,12 @@ type DatabaseConfig struct {
 	Driver   string
 	DSN      string
 	Postgres PostgresConfig
+
+	// AllowDestructiveMigrations controls whether destructive migrations
+	// (TRUNCATE/DROP) execute. Defaults to false (production-safe). Set via
+	// env MIGRATIONS_ALLOW_DESTRUCTIVE=1 for dev/test environments that need
+	// historical data cleanup. See db-migration-safety capability.
+	AllowDestructiveMigrations bool
 }
 
 type PostgresConfig struct {
@@ -51,6 +60,19 @@ type CORSConfig struct {
 	Origins      []string
 	Methods      []string
 	AllowHeaders []string
+}
+
+type TracingConfig struct {
+	SampleRatio    float64 `mapstructure:"sample_ratio"`
+	InstrumentGORM bool    `mapstructure:"instrument_gorm"`
+	InstrumentHTTP bool    `mapstructure:"instrument_http"`
+}
+
+// StorageConfig holds filesystem storage locations.
+type StorageConfig struct {
+	// IconDir is the root directory for locally downloaded feed icons (the
+	// feeds/ subdirectory lives inside it). Defaults to data/icons.
+	IconDir string `mapstructure:"icon_dir"`
 }
 
 var AppConfig *Config
@@ -82,6 +104,12 @@ func LoadConfig(configPath string) error {
 	viper.SetDefault("log.file.max_backups", 30)
 	viper.SetDefault("log.file.max_age_days", 30)
 	viper.SetDefault("log.file.compress", true)
+
+	viper.SetDefault("tracing.sample_ratio", 1.0)
+	viper.SetDefault("tracing.instrument_gorm", true)
+	viper.SetDefault("tracing.instrument_http", true)
+
+	viper.SetDefault("storage.icon_dir", "data/icons")
 
 	if err := viper.ReadInConfig(); err != nil {
 		if _, ok := err.(viper.ConfigFileNotFoundError); !ok {
@@ -124,6 +152,26 @@ func applyEnvOverrides(cfg *Config) {
 
 	if value := strings.TrimSpace(os.Getenv("CORS_ORIGINS")); value != "" {
 		cfg.CORS.Origins = splitCommaSeparated(value)
+	}
+
+	// MIGRATIONS_ALLOW_DESTRUCTIVE=1 enables destructive migrations (TRUNCATE/DROP).
+	// Defaults to false: production never sets this, refusing destructive migrations.
+	cfg.Database.AllowDestructiveMigrations = os.Getenv("MIGRATIONS_ALLOW_DESTRUCTIVE") == "1"
+
+	// Tracing (defaults via viper SetDefault above; env overrides when set)
+	if v := strings.TrimSpace(os.Getenv("TRACE_SAMPLE_RATIO")); v != "" {
+		if r, err := strconv.ParseFloat(v, 64); err == nil {
+			cfg.Tracing.SampleRatio = r
+		}
+	}
+	if v := os.Getenv("TRACE_INSTRUMENT_GORM"); v != "" {
+		cfg.Tracing.InstrumentGORM = v != "0"
+	}
+	if v := os.Getenv("TRACE_INSTRUMENT_HTTP"); v != "" {
+		cfg.Tracing.InstrumentHTTP = v != "0"
+	}
+	if value := strings.TrimSpace(os.Getenv("STORAGE_ICON_DIR")); value != "" {
+		cfg.Storage.IconDir = value
 	}
 }
 

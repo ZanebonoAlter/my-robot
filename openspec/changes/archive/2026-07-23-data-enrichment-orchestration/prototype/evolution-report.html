@@ -1,0 +1,367 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="editorial">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>演进分析报告 · 原型（报刊方向）</title>
+<style>
+/* ============================================================
+   PROTOTYPE — 演进分析报告（报刊方向 · 2026-07-09）
+   引用区分两类：
+   - 📰 新闻 [1][2]    来自 RSS 订阅入库的新闻（循环A汇总的 sections）
+   - 🔧 工具 [T1][T2]  agent 自主调用 opencli skill 查到的（web-search/market-quote/browser）
+   一眼可辨：新闻红 / 工具蓝（T 前缀）；文末清单分两组；tooltip 各显其形。
+   ============================================================ */
+:root {
+  --raw-stone-50:#faf7f2; --raw-stone-100:#f5f0e6; --raw-stone-200:#e8dfd1;
+  --raw-red-500:#d94a4a; --raw-red-600:#c12f2f;
+  --raw-success:#3d8a4a; --raw-warning:#c4883c; --raw-info:#3d7a8a;
+}
+[data-theme="editorial"] {
+  --color-bg-base:var(--raw-stone-50); --color-bg-elevated:var(--raw-stone-100);
+  --color-bg-sunken:var(--raw-stone-200); --color-bg-hover:rgba(255,255,255,.85);
+  --color-text-primary:#1a1a1a; --color-text-secondary:#4a4a4a; --color-text-muted:#8a8a8a;
+  --color-border-subtle:rgba(26,26,26,.08); --color-border-medium:rgba(26,26,26,.15);
+  --color-border-strong:rgba(26,26,26,.28);
+  --color-accent:var(--raw-red-500); --color-accent-hover:var(--raw-red-600);
+  --color-accent-subtle:rgba(217,74,74,.08);
+  --color-info:var(--raw-info); --color-info-subtle:rgba(61,122,138,.10); --color-success:var(--raw-success);
+  --color-success-subtle:rgba(61,138,74,.12);
+  --shadow-subtle:0 1px 3px rgba(26,26,26,.06);
+}
+[data-theme="dark"] {
+  --color-bg-base:#0b0f15; --color-bg-elevated:#141b24; --color-bg-sunken:#0e161d;
+  --color-bg-hover:rgba(255,255,255,.06);
+  --color-text-primary:rgba(255,255,255,.92); --color-text-secondary:rgba(255,255,255,.65);
+  --color-text-muted:rgba(255,255,255,.38);
+  --color-border-subtle:rgba(255,255,255,.07); --color-border-medium:rgba(255,255,255,.12);
+  --color-border-strong:rgba(255,255,255,.22);
+  --color-accent:rgba(240,138,75,.9); --color-accent-hover:rgba(240,138,75,1);
+  --color-accent-subtle:rgba(240,138,75,.09);
+  --color-info:#5a9aab; --color-info-subtle:rgba(90,154,171,.14); --color-success:#5caa9f;
+  --color-success-subtle:rgba(92,170,159,.14);
+  --shadow-subtle:0 1px 3px rgba(0,0,0,.4);
+}
+* { box-sizing:border-box; }
+html,body { margin:0; padding:0; }
+body {
+  background:var(--color-bg-base); color:var(--color-text-primary);
+  font-family:-apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
+  font-size:15px; line-height:1.8; transition:background .3s,color .3s; min-height:100vh;
+}
+.serif { font-family:Georgia,"Songti SC","Source Serif 4","Noto Serif SC",serif; }
+
+/* proto 条 */
+.proto-bar {
+  position:sticky; top:0; z-index:50; display:flex; align-items:center; gap:.75rem;
+  padding:.5rem 1.25rem; background:var(--color-bg-elevated); backdrop-filter:blur(8px);
+  border-bottom:1px solid var(--color-border-subtle); font-size:12px;
+}
+.proto-bar .spacer { flex:1; }
+.theme-toggle {
+  display:inline-flex; align-items:center; gap:6px; cursor:pointer;
+  padding:4px 10px; border-radius:999px; border:1px solid var(--color-border-medium);
+  background:var(--color-bg-base); color:var(--color-text-primary); font-size:12px; font-family:inherit;
+}
+.theme-toggle:hover { border-color:var(--color-accent); color:var(--color-accent); }
+
+.report { max-width:680px; margin:0 auto; padding:2.5rem 1.5rem 4rem; }
+
+/* Masthead */
+.masthead { border-bottom:3px double var(--color-text-primary); padding-bottom:1.2rem; margin-bottom:1.5rem; }
+.masthead .eyebrow { font-size:10.5px; letter-spacing:.22em; text-transform:uppercase; color:var(--color-accent); font-weight:700; margin-bottom:.6rem; }
+.masthead h1 { font-size:2.1rem; line-height:1.2; margin:0 0 .8rem; font-weight:800; letter-spacing:-.015em; }
+.lede { font-size:15.5px; line-height:1.75; color:var(--color-text-secondary); padding:.8rem 0 .6rem; border-top:1px solid var(--color-border-subtle); margin-top:.6rem; }
+.lede .em { color:var(--color-accent); font-weight:600; }
+.byline { display:flex; align-items:center; gap:.6rem; flex-wrap:wrap; font-size:11.5px; color:var(--color-text-muted); margin-top:.7rem; }
+.byline .sep { color:var(--color-border-medium); }
+.board-tag { font-size:11px; padding:1px 8px; border-radius:3px; background:var(--color-bg-sunken); color:var(--color-text-secondary); font-weight:600; }
+
+/* 正文 */
+.article { font-size:16px; line-height:1.9; color:var(--color-text-primary); }
+.article p { margin:0 0 1.2rem; }
+.article h2 { font-size:1.05rem; font-weight:700; margin:2rem 0 .9rem; padding-bottom:.3rem; border-bottom:1px solid var(--color-border-subtle); color:var(--color-text-primary); letter-spacing:-.005em; }
+.article > p:first-of-type::first-letter { font-size:3.2rem; font-weight:800; float:left; line-height:.9; padding:.1rem .5rem .1rem 0; color:var(--color-accent); font-family:Georgia,serif; }
+.article b, .article strong { color:var(--color-text-primary); font-weight:700; }
+
+/* 版块过渡词 */
+.board-cue { display:inline-flex; align-items:center; gap:4px; font-size:11px; font-weight:700; padding:1px 8px; border-radius:3px; background:var(--color-info-subtle); color:var(--color-info); vertical-align:middle; margin:0 2px; letter-spacing:.02em; }
+
+/* ====== 引用标记（两类 · 核心） ====== */
+.cite { display:inline; cursor:pointer; font-weight:600; font-size:.78em; vertical-align:super; line-height:0; padding:0 1px; transition:color .1s; }
+.cite::before { content:"["; }
+.cite::after { content:"]"; }
+/* 📰 新闻：accent 红 */
+.cite.news { color:var(--color-accent); }
+.cite.news:hover { color:var(--color-accent-hover); text-decoration:underline; }
+/* 🔧 工具：info 蓝 */
+.cite.tool { color:var(--color-info); }
+.cite.tool:hover { color:var(--color-info); text-decoration:underline; filter:brightness(1.15); }
+.cite.flash { animation:citeFlash 1.6s ease; }
+@keyframes citeFlash { 0%,60%{background:var(--color-accent-subtle);} 100%{background:transparent;} }
+.cite.tool.flash { animation:toolFlash 1.6s ease; }
+@keyframes toolFlash { 0%,60%{background:var(--color-info-subtle);} 100%{background:transparent;} }
+
+/* tooltip */
+.cite-tip { display:none; position:fixed; z-index:200; max-width:340px; background:var(--color-bg-elevated); border:1px solid var(--color-border-strong); border-radius:8px; padding:.8rem .95rem; font-size:13px; line-height:1.6; color:var(--color-text-secondary); box-shadow:0 6px 24px rgba(0,0,0,.18); font-family:-apple-system,"PingFang SC",sans-serif; }
+.cite-tip .ct-type { font-size:10px; font-weight:700; letter-spacing:.08em; text-transform:uppercase; margin-bottom:.4rem; display:flex; align-items:center; gap:4px; }
+.cite-tip .ct-type.news { color:var(--color-accent); }
+.cite-tip .ct-type.tool { color:var(--color-info); }
+.cite-tip .ct-quote { font-style:italic; color:var(--color-text-primary); }
+.cite-tip .ct-result { color:var(--color-text-primary); font-family:ui-monospace,Menlo,monospace; font-size:12px; background:var(--color-bg-sunken); padding:.4rem .55rem; border-radius:6px; }
+.cite-tip .ct-meta { font-size:11px; color:var(--color-text-muted); margin-top:.5rem; padding-top:.4rem; border-top:1px solid var(--color-border-subtle); display:flex; gap:.5rem; align-items:center; flex-wrap:wrap; }
+.cite-tip .ct-skill { font-family:ui-monospace,Menlo,monospace; font-size:10.5px; background:var(--color-info-subtle); color:var(--color-info); padding:1px 7px; border-radius:4px; font-weight:700; }
+.cite-tip .ct-board { font-size:10px; padding:1px 6px; border-radius:3px; background:var(--color-info-subtle); color:var(--color-info); font-weight:700; }
+.cite-tip .ct-check { font-size:10px; color:var(--color-success); font-weight:700; }
+
+/* 引用块 */
+.pullquote { margin:1.5rem 0; padding:.4rem 0 .4rem 1.1rem; border-left:3px solid var(--color-accent); font-size:15px; font-style:italic; color:var(--color-text-secondary); line-height:1.7; font-family:Georgia,"Songti SC",serif; }
+.pullquote .pq-src { display:block; font-style:normal; font-size:11px; color:var(--color-text-muted); margin-top:.3rem; }
+
+/* 行情内联 */
+.market-note { font-size:13px; color:var(--color-text-muted); background:var(--color-bg-sunken); padding:.15rem .5rem; border-radius:4px; font-family:ui-monospace,Menlo,monospace; white-space:nowrap; }
+
+/* 演进定位条 */
+.position-bar { margin:2rem 0 1rem; padding:1rem 1.2rem; background:var(--color-accent-subtle); border-left:3px solid var(--color-accent); border-radius:0 8px 8px 0; }
+.position-bar .pb-label { font-size:10.5px; font-weight:700; letter-spacing:.12em; text-transform:uppercase; color:var(--color-accent); margin-bottom:.3rem; }
+.position-bar .pb-text { font-size:14.5px; color:var(--color-text-primary); line-height:1.65; }
+.position-bar .pb-text b { color:var(--color-accent); }
+
+/* ====== 资料来源（分两组 · 核心） ====== */
+.sources { margin-top:2.5rem; padding-top:1.2rem; border-top:2px solid var(--color-text-primary); }
+.sources h3 { font-size:11px; letter-spacing:.16em; text-transform:uppercase; color:var(--color-text-muted); font-weight:700; margin:0 0 .9rem; }
+.src-group { margin-bottom:1.4rem; }
+.src-group-h { font-size:12px; font-weight:700; color:var(--color-text-secondary); margin-bottom:.5rem; display:flex; align-items:center; gap:.4rem; padding-bottom:.3rem; border-bottom:1px solid var(--color-border-subtle); }
+.src-group-h .gh-icon { font-size:13px; }
+.src-group-h .gh-count { font-size:10.5px; color:var(--color-text-muted); font-weight:600; margin-left:auto; }
+.src-group-h.news .gh-icon { color:var(--color-accent); }
+.src-group-h.tool .gh-icon { color:var(--color-info); }
+
+.src-list { list-style:none; padding:0; margin:0; }
+.src-item { position:relative; padding:.55rem .7rem .55rem 2rem; margin-bottom:.3rem; border-radius:6px; transition:background .15s; cursor:default; font-size:13px; line-height:1.55; color:var(--color-text-secondary); }
+.src-item:hover { background:var(--color-bg-hover); }
+.src-item.flash { animation:srcFlash 2s ease; }
+.src-item.flash.tool { animation:srcFlashTool 2s ease; }
+@keyframes srcFlash { 0%,70%{background:var(--color-accent-subtle);} 100%{background:transparent;} }
+@keyframes srcFlashTool { 0%,70%{background:var(--color-info-subtle);} 100%{background:transparent;} }
+/* 编号气泡 */
+.src-item .src-no { position:absolute; left:.5rem; top:.55rem; font-size:10.5px; font-weight:700; padding:1px 5px; border-radius:4px; min-width:20px; text-align:center; }
+.src-item .src-no.news { color:var(--color-accent); background:var(--color-accent-subtle); }
+.src-item .src-no.tool { color:var(--color-info); background:var(--color-info-subtle); }
+
+.src-item .src-date { color:var(--color-text-primary); font-weight:600; }
+.src-item .src-pub { font-style:italic; }
+.src-item .src-title { color:var(--color-text-primary); }
+.src-item .src-query { font-family:ui-monospace,Menlo,monospace; font-size:11.5px; color:var(--color-text-secondary); background:var(--color-bg-sunken); padding:1px 6px; border-radius:4px; }
+.src-item .src-result { color:var(--color-text-primary); }
+.src-meta { display:inline-flex; gap:.35rem; align-items:center; margin-left:.4rem; }
+.src-board { font-size:10px; padding:1px 6px; border-radius:3px; background:var(--color-info-subtle); color:var(--color-info); font-weight:700; }
+.src-skill { font-size:10px; padding:1px 6px; border-radius:3px; background:var(--color-info-subtle); color:var(--color-info); font-weight:700; font-family:ui-monospace,Menlo,monospace; }
+.src-check { font-size:10px; color:var(--color-success); font-weight:700; }
+
+/* 编者按 */
+.editor-note { margin-top:1.8rem; padding:.9rem 1.1rem; background:var(--color-bg-sunken); border-radius:8px; font-size:12.5px; line-height:1.7; color:var(--color-text-muted); }
+.editor-note .en-label { font-weight:700; color:var(--color-text-secondary); font-size:11px; letter-spacing:.08em; text-transform:uppercase; display:block; margin-bottom:.3rem; }
+.editor-note a { color:var(--color-info); cursor:pointer; }
+</style>
+</head>
+<body>
+
+<div class="proto-bar">
+  <strong>原型 · 演进分析报告</strong>
+  <span style="color:var(--color-text-muted);">引用区分：<span style="color:var(--color-accent);font-weight:700;">📰 [1] 新闻</span> / <span style="color:var(--color-info);font-weight:700;">🔧 [T1] 工具查证</span></span>
+  <span class="spacer"></span>
+  <button class="theme-toggle" onclick="toggleTheme()">🌓 主题</button>
+</div>
+
+<article class="report">
+
+  <header class="masthead">
+    <div class="eyebrow">演进分析 · 2026-07-09</div>
+    <h1 class="serif">停火两周即破裂：美伊局势重回紧张轨道</h1>
+    <div class="byline">
+      <span class="board-tag">美伊冲突</span>
+      <span class="board-tag">霍尔木兹海峡安全</span>
+      <span class="board-tag">原油供需平衡</span>
+      <span class="board-tag">黄金避险配置</span>
+      <span class="sep">·</span><span>4 条泳道</span>
+      <span class="sep">·</span><span>14 天窗口</span>
+      <span class="sep">·</span><span>23 篇新闻</span>
+      <span class="sep">·</span><span>第 4 次分析</span>
+    </div>
+    <p class="lede serif">
+      这条线从"暂时缓和"<span class="em">反转回"再趋紧张"</span>。停火协议生效不到两周即告破裂，而紧张叙事——它其实从未真正离开。
+    </p>
+  </header>
+
+  <div class="article serif">
+
+    <p>7 月 5 日停火生效后的首次跨境袭击，双方都克制未表态升级，市场也只当插曲处理。但 7 月 9 日以军宣布恢复对胡塞武装的精确打击，等于公开承认停火已经失效<span class="cite news" data-src="1">1</span>。</p>
+
+    <div class="pullquote">
+      "伊朗外长表示将重新评估霍尔木兹海峡的通行安全保障，作为对近期红海航运遭袭的回应。"
+      <span class="pq-src">— 路透社，07-08<span class="cite news" data-src="2">2</span></span>
+    </div>
+
+    <p>这是冲突外溢到航运的关键信号。海峡通行安全一旦松动，影响就不再只是双边——它牵动了整条能源链。</p>
+
+    <h2>供给端叙事的悄然转向</h2>
+
+    <p>海峡风险首先在原油市场显形。国际能源署在 7 月月报中已下调 Q3 全球原油过剩预期 60 万桶/日<span class="cite news" data-src="3">3</span>，理由直指地缘风险扰动供给。经检索确认，多家机构在 7 月同步下调了过剩预期，幅度落在 50-70 万桶/日区间<span class="cite tool" data-src="T1">T1</span>——说明这不是 IEA 一家的判断，而是市场共识的转向。<b>供给端叙事正从"过剩"悄悄转向"紧平衡"</b>。</p>
+
+    <p>行情层面，原油本周 <span class="market-note">+4.2%</span><span class="cite tool" data-src="T2">T2</span>，黄金 <span class="market-note">+1.8%</span><span class="cite tool" data-src="T2">T2</span>——但那只是信号确认，不是判断依据。</p>
+
+    <p>这种供给担忧进一步沿风险链条扩散<span class="board-cue">→ 黄金避险配置</span>。地缘风险叠加供给紧平衡，避险情绪自然升温：全球黄金 ETF 连续 5 日资金净流入，总持仓回升至 6 月初水平<span class="cite news" data-src="4">4</span>。值得注意的是，这和 6 月 24 日停火达成时的"获利回吐"方向<b>完全相反</b>——资金在重新下注"不确定性"。</p>
+
+    <h2>这条线走到哪了</h2>
+
+    <p>把几条相关泳道串起来看，逻辑很清楚：<span class="board-cue">美伊冲突</span>停火破裂 → <span class="board-cue">霍尔木兹海峡安全</span>风险溢价 → <span class="board-cue">原油供需平衡</span>供给担忧 → <span class="board-cue">黄金避险配置</span>避险升温，传导链是市场对"风险重新定价"的过程。</p>
+
+    <p>停火只是<b>战术性间歇</b>，不是结构性缓和。代理人武装对抗和海峡通行安全这两个根本矛盾，一项都没解决——所以任何导火索（这次是红海航运遭袭）都会让紧张叙事快速重启。</p>
+
+    <p>07-01 那次"衰减"判断只活了 8 天，恰恰证明这一点：<b>衰减的是信号热度，不是底层矛盾</b>。</p>
+
+  </div>
+
+  <div class="position-bar">
+    <div class="pb-label">演进定位</div>
+    <div class="pb-text">
+      <b>转折（turning）</b> —— 从 07-01 的"衰减"反转。上次判断停火进入观察期，但停火破裂后紧张叙事重新主导，与 06-24 转折节点性质相同、烈度更低。下一轮观察点：海峡通行是否实质性中断。
+    </div>
+  </div>
+
+  <!-- ====== 资料来源（分两组） ====== -->
+  <div class="sources">
+    <h3>资料来源</h3>
+
+    <!-- 新闻组 -->
+    <div class="src-group">
+      <div class="src-group-h news"><span class="gh-icon">📰</span>新闻报道<span class="gh-count">4 篇 · 来自订阅源</span></div>
+      <ol class="src-list">
+        <li class="src-item" data-id="1">
+          <span class="src-no news">1</span>
+          <span class="src-date">07-09</span> · <span class="src-pub">路透社</span> · <span class="src-title">以军宣布对胡塞武装恢复精确打击，停火协议生效不到两周即破裂</span>
+          <span class="src-meta"><span class="src-board">美伊冲突</span><span class="src-check">✓ 交叉查证</span></span>
+        </li>
+        <li class="src-item" data-id="2">
+          <span class="src-no news">2</span>
+          <span class="src-date">07-08</span> · <span class="src-pub">路透社</span> · <span class="src-title">伊朗外长警告将"重新评估"霍尔木兹海峡通行安全保障</span>
+          <span class="src-meta"><span class="src-board">霍尔木兹海峡安全</span><span class="src-check">✓ 交叉查证</span></span>
+        </li>
+        <li class="src-item" data-id="3">
+          <span class="src-no news">3</span>
+          <span class="src-date">07-07</span> · <span class="src-pub">IEA 月报</span> · <span class="src-title">下调 Q3 全球原油过剩预期 60 万桶/日，称地缘风险扰动供给</span>
+          <span class="src-meta"><span class="src-board">原油供需平衡</span><span class="src-check">✓ 原文查证</span></span>
+        </li>
+        <li class="src-item" data-id="4">
+          <span class="src-no news">4</span>
+          <span class="src-date">07-09</span> · <span class="src-pub">彭博</span> · <span class="src-title">全球黄金 ETF 连续 5 日净流入，总持仓回升至 6 月初水平</span>
+          <span class="src-meta"><span class="src-board">黄金避险配置</span><span class="src-check">✓ 交叉查证</span></span>
+        </li>
+      </ol>
+    </div>
+
+    <!-- 工具查证组 -->
+    <div class="src-group">
+      <div class="src-group-h tool"><span class="gh-icon">🔧</span>工具查证<span class="gh-count">2 次 · agent 自主调用 opencli skill</span></div>
+      <ol class="src-list">
+        <li class="src-item tool" data-id="T1">
+          <span class="src-no tool">T1</span>
+          <span class="src-query">web-search: "IEA Q3 2026 原油过剩预期"</span>
+          <div style="margin-top:.2rem;"><span class="src-result">检索确认 IEA、高盛、花旗在 7 月报中同步下调 Q3 过剩预期，幅度 50-70 万桶/日，IEA 的 60 万在中位。</span></div>
+          <span class="src-meta"><span class="src-skill">web-search</span><span class="src-check">✓ 支撑判断</span></span>
+        </li>
+        <li class="src-item tool" data-id="T2">
+          <span class="src-no tool">T2</span>
+          <span class="src-query">market-quote: 原油ETF / 黄金ETF · 周涨幅</span>
+          <div style="margin-top:.2rem;"><span class="src-result">原油 +4.2%（显著偏离均值），黄金 +1.8%（温和走强）。方向与地缘传导链一致，作辅助佐证。</span></div>
+          <span class="src-meta"><span class="src-skill">market-quote</span><span class="src-check">✓ 辅助佐证</span></span>
+        </li>
+      </ol>
+    </div>
+  </div>
+
+  <div class="editor-note">
+    <span class="en-label">关于这份报告</span>
+    本报告由演进分析工作流自动生成：汇总该话题历史新闻作为上下文，提取 14 天内的脉络与跨版块关联，经关键词检索与内容交叉查证后综合分析。<b style="color:var(--color-accent);">📰 新闻</b>来自订阅源入库报道，<b style="color:var(--color-info);">🔧 工具查证</b>为 agent 自主调用 opencli skill 的检索/查询结果。所引资料均标注于上方清单，<a onclick="alert('PROTOTYPE：点进去可看 agent 的完整查证链路——搜索→命中→采纳/放弃')">查看完整查证链路 »</a>。行情数据仅为辅助佐证，非判断依据；非金融话题不采集行情。
+  </div>
+
+</article>
+
+<div class="cite-tip" id="citeTip"></div>
+
+<script>
+function toggleTheme() {
+  var cur = document.documentElement.getAttribute('data-theme');
+  document.documentElement.setAttribute('data-theme', cur === 'dark' ? 'editorial' : 'dark');
+}
+
+// ===== 引用数据（两类） =====
+var citeData = {
+  // 📰 新闻
+  1: { type:'news', icon:'📰', quote:'以军宣布对胡塞武装恢复精确打击，称是对红海航运遭袭的回应。停火协议生效不到两周即破裂。', date:'07-09', pub:'路透社', board:'美伊冲突', check:'交叉查证' },
+  2: { type:'news', icon:'📰', quote:'伊朗外长表示将"重新评估"霍尔木兹海峡的通行安全保障，回应近期红海航运遭袭事件。', date:'07-08', pub:'路透社', board:'霍尔木兹海峡安全', check:'交叉查证' },
+  3: { type:'news', icon:'📰', quote:'国际能源署在 7 月报中下调 Q3 全球原油过剩预期 60 万桶/日，理由含地缘风险扰动供给。', date:'07-07', pub:'IEA 月报', board:'原油供需平衡', check:'原文查证' },
+  4: { type:'news', icon:'📰', quote:'全球黄金 ETF 连续 5 日净流入，总持仓回升至 6 月初水平。', date:'07-09', pub:'彭博', board:'黄金避险配置', check:'交叉查证' },
+  // 🔧 工具
+  T1: { type:'tool', icon:'🔧', skill:'web-search', query:'"IEA Q3 2026 原油过剩预期"', result:'检索确认 IEA、高盛、花旗 7 月报同步下调 Q3 过剩预期，幅度 50-70 万桶/日。', time:'07-09 查询', board:'原油供需平衡', check:'支撑判断' },
+  T2: { type:'tool', icon:'🔧', skill:'market-quote', query:'原油ETF / 黄金ETF 周涨幅', result:'原油 +4.2%（显著偏离均值），黄金 +1.8%（温和走强）。', time:'07-09 查询', board:'原油供需平衡 / 黄金避险配置', check:'辅助佐证' }
+};
+
+var tip = document.getElementById('citeTip');
+
+document.querySelectorAll('.cite').forEach(function(el){
+  el.addEventListener('mouseenter', function(){
+    var d = citeData[el.dataset.src];
+    if (!d) return;
+    var html = '';
+    // 类型标
+    html += '<div class="ct-type ' + d.type + '">' + d.icon + ' ' + (d.type === 'news' ? '新闻报道' : '工具查证 · ' + d.skill) + '</div>';
+    // 内容
+    if (d.type === 'news') {
+      html += '<div class="ct-quote">' + d.quote + '</div>';
+    } else {
+      html += '<div class="ct-result">' + d.result + '</div>';
+    }
+    // 元信息
+    html += '<div class="ct-meta">';
+    if (d.type === 'news') {
+      html += '<span>' + d.date + ' · ' + d.pub + '</span><span class="ct-board">' + d.board + '</span>';
+    } else {
+      html += '<span class="ct-skill">' + d.skill + '</span><span>' + d.time + '</span>';
+      if (d.board) html += '<span class="ct-board">' + d.board + '</span>';
+      html += '<br><span style="font-family:ui-monospace,Menlo,monospace;font-size:10.5px;color:var(--color-text-muted);">query: ' + d.query + '</span>';
+    }
+    html += '<span class="ct-check">✓ ' + d.check + '</span>';
+    html += '</div>';
+    tip.innerHTML = html;
+    tip.style.display = 'block';
+  });
+  el.addEventListener('mousemove', function(e){
+    var x = e.clientX + 14, y = e.clientY + 14;
+    var w = tip.offsetWidth, h = tip.offsetHeight;
+    if (x + w > window.innerWidth - 10) x = e.clientX - w - 14;
+    if (y + h > window.innerHeight - 10) y = e.clientY - h - 14;
+    tip.style.left = x + 'px'; tip.style.top = y + 'px';
+  });
+  el.addEventListener('mouseleave', function(){ tip.style.display = 'none'; });
+
+  el.addEventListener('click', function(){ flashSource(el.dataset.src); });
+});
+
+function flashSource(id) {
+  document.querySelectorAll('.src-item.flash').forEach(function(el){ el.classList.remove('flash'); });
+  document.querySelectorAll('.cite.flash').forEach(function(el){ el.classList.remove('flash'); });
+  var item = document.querySelector('.src-item[data-id="' + id + '"]');
+  if (item) {
+    item.scrollIntoView({ behavior:'smooth', block:'center' });
+    void item.offsetWidth;
+    item.classList.add('flash');
+  }
+  document.querySelectorAll('.cite[data-src="' + id + '"]').forEach(function(el){
+    void el.offsetWidth; el.classList.add('flash');
+  });
+}
+</script>
+</body>
+</html>

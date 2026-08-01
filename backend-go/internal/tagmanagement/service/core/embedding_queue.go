@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"syntopica-backend/internal/models"
+	"syntopica-backend/internal/platform/analysispause"
 
 	"go.uber.org/zap"
 	"gorm.io/gorm"
@@ -238,6 +239,14 @@ func (s *EmbeddingQueueService) worker() {
 		case <-s.stopCh:
 			return
 		case <-ticker.C:
+			if analysispause.IsPaused() {
+				select {
+				case <-s.stopCh:
+					return
+				case <-time.After(2 * time.Second):
+				}
+				continue
+			}
 			s.processNext()
 		}
 	}

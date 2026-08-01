@@ -11,11 +11,15 @@ import (
 	"syntopica-backend/internal/models"
 	"syntopica-backend/internal/platform/airouter"
 	"syntopica-backend/internal/platform/logging"
+	"syntopica-backend/internal/platform/tracing"
 	tagging "syntopica-backend/internal/tagmanagement"
 	"syntopica-backend/internal/topicgraph/repository"
 )
 
 func GenerateDailyReport(ctx context.Context, boardID uint, date time.Time) (*repository.BoardDailyReport, []repository.DailyReportSection, [][]repository.DailyReportThread, error) {
+	ctx, span := tracing.Tracer(tracing.ServiceName).Start(ctx, "workflow.daily_report.generate")
+	defer span.End()
+
 	startOfDay := repository.NormalizeReportDate(date)
 
 	// Step 1: Collect board event tags
@@ -34,7 +38,7 @@ func GenerateDailyReport(ctx context.Context, boardID uint, date time.Time) (*re
 	}
 
 	// Step 2: Deduplicate
-	tags = DeduplicateTags(tags, articleCounts)
+	tags = DeduplicateTags(ctx, tags, articleCounts)
 
 	// Step 2.5: Quality filter
 	tags = filterTagsByQuality(tags)
@@ -44,14 +48,63 @@ func GenerateDailyReport(ctx context.Context, boardID uint, date time.Time) (*re
 
 	// Step 3: Cluster via LLM (inject the board's durable narrative frames so
 	// the LLM reuses them and carries a matched_topic_id per group).
-	existingTopics, err := repository.Repo.ListActiveTopicsByBoard(boardID)
+	topicCfg := repository.LoadPersistentTopicConfig(repository.Repo.DB())
+	existingTopics, anchorStats, err := repository.Repo.ListAnchorableTopicsByBoard(boardID, startOfDay, topicCfg)
 	if err != nil {
 		logging.Warnf("daily-report: load existing topics for board %d failed: %v", boardID, err)
 		existingTopics = nil // non-fatal: cluster from scratch
+	} else {
+		logging.Infof("daily-report: board %d cluster anchors active=%d candidates=%d filtered_window=%d truncated_limit=%d",
+			boardID, anchorStats.ActiveCount, anchorStats.CandidateCount,
+			anchorStats.FilteredByWindow, anchorStats.TruncatedByLimit)
 	}
-	clusters, err := ClusterTags(ctx, tags, existingTopics)
+
+	// Step 3.5: Load recent briefs for active topics (Slice D — lane context
+	// injection). On failure, degrade to label-only injection — briefs are
+	// purely an enrichment layer and SHALL NOT block ClusterTags.
+	const (
+		briefsSinceDays   = 7
+		briefsPerTopicCap = 5
+	)
+	var topicBriefs map[uint][]repository.TopicRecentBrief
+	if existingTopics != nil {
+		briefs, briefsErr := repository.Repo.ListTopicRecentBriefs(boardID, briefsSinceDays, briefsPerTopicCap)
+		if briefsErr != nil {
+			logging.Warnf("daily-report: load topic briefs for board %d failed (degrading to label-only): %v", boardID, briefsErr)
+		} else {
+			topicBriefs = briefs
+			activeWithBriefs := 0
+			for _, items := range briefs {
+				if len(items) > 0 {
+					activeWithBriefs++
+				}
+			}
+			logging.Infof("daily-report: board %d topic briefs loaded: %d active topics have recent content",
+				boardID, activeWithBriefs)
+		}
+	}
+	// Lane-driven clustering (daily-report-lane-driven-clustering): bucket tags
+	// by centroid distance (L1/L2/L3) instead of a single LLM pass. Load the
+	// day's tag semantic embeddings so BucketTagsByCentroid can route each tag;
+	// tags without an embedding degrade to the L3 new-narrative lane.
+	tagIDs := make([]uint, len(tags))
+	for i, t := range tags {
+		tagIDs[i] = t.ID
+	}
+	tagEmbStr, embErr := repository.Repo.ListTagSemanticEmbeddings(tagIDs)
+	tagEmb := make(map[uint][]float64, len(tagEmbStr))
+	if embErr != nil {
+		logging.Warnf("daily-report: load tag embeddings for board %d failed (tags without embeddings route to L3): %v", boardID, embErr)
+	} else {
+		for id, s := range tagEmbStr {
+			if v, perr := parsePgVector(s); perr == nil && len(v) > 0 {
+				tagEmb[id] = v
+			}
+		}
+	}
+	clusters, err := ClusterTagsLane(ctx, tags, existingTopics, tagEmb, topicBriefs, topicCfg)
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("cluster tags: %w", err)
+		return nil, nil, nil, fmt.Errorf("cluster tags (lane): %w", err)
 	}
 
 	// Step 4: Query yesterday's report for continuity
@@ -143,6 +196,13 @@ func GenerateDailyReport(ctx context.Context, boardID uint, date time.Time) (*re
 		report.PrevReportID = &prevReport.ID
 	}
 
+	// Lane-driven sections carry LaneTier + a ClusterLabel resolved from the
+	// owning topic's label (L1/L2) or the new-narrative group name (L3).
+	topicLabelByID := make(map[uint]string, len(existingTopics))
+	for _, t := range existingTopics {
+		topicLabelByID[t.ID] = t.Label
+	}
+
 	// Build sections
 	var sections []repository.DailyReportSection
 	for i, cluster := range clusters {
@@ -155,7 +215,7 @@ func GenerateDailyReport(ctx context.Context, boardID uint, date time.Time) (*re
 			clusterArticleCount += t.ArticleCount
 		}
 
-		tagIDsJSON, _ := json.Marshal(cluster.TagIDs)
+		tagIDsJSON := marshalJSONArray(cluster.TagIDs)
 
 		// Calculate best_tier and avg_score
 		tagIDSet := make(map[uint]bool)
@@ -167,7 +227,7 @@ func GenerateDailyReport(ctx context.Context, boardID uint, date time.Time) (*re
 		matchCount := 0
 		for _, t := range tags {
 			if tagIDSet[t.ID] {
-				tier := tagging.MatchTier(t.MatchReason, false)
+				tier := tagging.MatchTier(t.MatchReason, t.Downgraded)
 				if tier < bestTier {
 					bestTier = tier
 				}
@@ -180,14 +240,24 @@ func GenerateDailyReport(ctx context.Context, boardID uint, date time.Time) (*re
 			avgScore = totalScore / float64(matchCount)
 		}
 
+		breakdownJSON := buildQualityBreakdownJSON(tags, cluster.TagIDs)
+
+		clusterLabel := cluster.GroupName
+		if cluster.MatchedTopicID != nil {
+			if label, ok := topicLabelByID[*cluster.MatchedTopicID]; ok && label != "" {
+				clusterLabel = label
+			}
+		}
 		sections = append(sections, repository.DailyReportSection{
-			ClusterIndex:   i,
-			ClusterLabel:   cluster.GroupName,
-			ClusterTagIDs:  tagIDsJSON,
-			ArticleCount:   clusterArticleCount,
-			BestTier:       bestTier,
-			AvgScore:       avgScore,
-			MatchedTopicID: cluster.MatchedTopicID,
+			ClusterIndex:     i,
+			ClusterLabel:     clusterLabel,
+			ClusterTagIDs:    tagIDsJSON,
+			ArticleCount:     clusterArticleCount,
+			BestTier:         bestTier,
+			AvgScore:         avgScore,
+			QualityBreakdown: breakdownJSON,
+			MatchedTopicID:   cluster.MatchedTopicID,
+			LaneTier:         clusterLaneToTier(cluster.Lane),
 		})
 	}
 
@@ -220,13 +290,17 @@ func GenerateDailyReport(ctx context.Context, boardID uint, date time.Time) (*re
 		}
 	}
 	if len(embedTexts) > 0 {
-		embedResult, embedErr := airouter.NewRouter().Embed(ctx, airouter.EmbeddingRequest{
-			Input: embedTexts,
+		embedCtx, embedSpan := tracing.Tracer(tracing.ServiceName).Start(ctx, "workflow.daily_report.section_embedding")
+		embedResult, embedErr := airouter.NewRouter().Embed(embedCtx, airouter.EmbeddingRequest{
+			Input:     embedTexts,
+			Operation: "section.embedding",
+			SessionID: SessionIDFromContext(ctx),
 			Metadata: map[string]any{
 				"operation": "daily_report_section_embedding",
 				"board_id":  boardID,
 			},
 		}, airouter.CapabilityEmbedding)
+		embedSpan.End()
 		if embedErr != nil {
 			logging.Warnf("daily-report: section embedding failed for board %d: %v", boardID, embedErr)
 		} else if len(embedResult.Embeddings) >= len(embedTexts) {
@@ -236,6 +310,10 @@ func GenerateDailyReport(ctx context.Context, boardID uint, date time.Time) (*re
 		}
 	}
 
+	// Step 6.5: compute thread↔section title fit distances (System 3 observability).
+	// Non-fatal: threads without fit signal render as normal on the frontend.
+	computeThreadFitDistances(ctx, sections, threadBatches, boardID, airouter.NewRouter().Embed)
+
 	// Step 7: Merge similar same-day sections (two-stage: embedding + LLM)
 	sections, threadBatches, mergeErr := MergeSimilarSections(ctx, sections, threadBatches, tags)
 	if mergeErr != nil {
@@ -244,6 +322,65 @@ func GenerateDailyReport(ctx context.Context, boardID uint, date time.Time) (*re
 	}
 
 	return report, sections, threadBatches, nil
+}
+
+const (
+	maxContextArticles     = 3
+	maxContextSummaryRunes = 200
+)
+
+// buildArticleContextForTag returns a compact "《title》summary; ..." string of up to
+// maxContextArticles representative articles for the given tag in [start, end), to ground the
+// daily report LLM prompts in actual event content. Summary precedence mirrors article_tagger's
+// buildArticleSummary (AIContentSummary > FirecrawlContent > Content > Description) but is
+// reimplemented here because buildArticleSummary is unexported in tagmanagement/service/core.
+func buildArticleContextForTag(tagID uint, start, end time.Time) string {
+	type articleRow struct {
+		Title            string
+		AIContentSummary string
+		FirecrawlContent string
+		Content          string
+		Description      string
+	}
+	var rows []articleRow
+	err := repository.Repo.DB().Model(&models.Article{}).
+		Joins("JOIN article_topic_tags ON article_topic_tags.article_id = articles.id").
+		Where("article_topic_tags.topic_tag_id = ? AND articles.pub_date >= ? AND articles.pub_date < ?", tagID, start, end).
+		Order("articles.pub_date DESC").
+		Limit(maxContextArticles).
+		Find(&rows).Error
+	if err != nil || len(rows) == 0 {
+		return ""
+	}
+	var parts []string
+	for _, r := range rows {
+		summary := pickArticleSummary(r.AIContentSummary, r.FirecrawlContent, r.Content, r.Description)
+		if strings.TrimSpace(summary) == "" {
+			continue
+		}
+		runes := []rune(summary)
+		if len(runes) > maxContextSummaryRunes {
+			summary = string(runes[:maxContextSummaryRunes])
+		}
+		title := strings.TrimSpace(r.Title)
+		if title == "" {
+			parts = append(parts, summary)
+		} else {
+			parts = append(parts, fmt.Sprintf("《%s》%s", title, summary))
+		}
+	}
+	return strings.Join(parts, " ; ")
+}
+
+// pickArticleSummary returns the first non-blank string in precedence order:
+// AIContentSummary > FirecrawlContent > Content > Description.
+func pickArticleSummary(fields ...string) string {
+	for _, s := range fields {
+		if trimmed := strings.TrimSpace(s); trimmed != "" {
+			return trimmed
+		}
+	}
+	return ""
 }
 func collectBoardTags(boardID uint, date time.Time) ([]repository.TagInput, [][]uint, error) {
 	startOfDay := time.Date(date.Year(), date.Month(), date.Day(), 0, 0, 0, 0, date.Location())
@@ -257,6 +394,7 @@ func collectBoardTags(boardID uint, date time.Time) ([]repository.TagInput, [][]
 		Source       string  `json:"source"`
 		MatchReason  string  `json:"match_reason"`
 		Score        float64 `json:"score"`
+		Downgraded   bool    `json:"downgraded"`
 		ArticleCount int     `json:"article_count"`
 	}
 
@@ -269,6 +407,7 @@ func collectBoardTags(boardID uint, date time.Time) ([]repository.TagInput, [][]
 			topic_tags.source AS source,
 			topic_tag_board_labels.match_reason AS match_reason,
 			topic_tag_board_labels.score AS score,
+			topic_tag_board_labels.downgraded AS downgraded,
 			COUNT(DISTINCT articles.id) AS article_count`).
 		Joins("JOIN topic_tag_board_labels ON topic_tag_board_labels.topic_tag_id = topic_tags.id").
 		Joins("JOIN article_topic_tags ON article_topic_tags.topic_tag_id = topic_tags.id").
@@ -277,7 +416,7 @@ func collectBoardTags(boardID uint, date time.Time) ([]repository.TagInput, [][]
 		Where("NOT COALESCE(topic_tag_board_labels.direction_mismatch, false)").
 		Where("topic_tags.status = ? AND topic_tags.category = ?", "active", models.TagCategoryEvent).
 		Where("articles.pub_date >= ? AND articles.pub_date < ?", startOfDay, endOfDay).
-		Group("topic_tags.id, topic_tags.label, topic_tags.category, topic_tags.description, topic_tags.source, topic_tag_board_labels.match_reason, topic_tag_board_labels.score").
+		Group("topic_tags.id, topic_tags.label, topic_tags.category, topic_tags.description, topic_tags.source, topic_tag_board_labels.match_reason, topic_tag_board_labels.score, topic_tag_board_labels.downgraded").
 		Order("article_count DESC, topic_tags.id ASC").
 		Scan(&rows).Error
 	if err != nil {
@@ -292,14 +431,16 @@ func collectBoardTags(boardID uint, date time.Time) ([]repository.TagInput, [][]
 	var articleIDSets [][]uint
 	for _, row := range rows {
 		tags = append(tags, repository.TagInput{
-			ID:           row.ID,
-			Label:        row.Label,
-			Category:     row.Category,
-			Description:  row.Description,
-			ArticleCount: row.ArticleCount,
-			Source:       row.Source,
-			MatchReason:  row.MatchReason,
-			Score:        row.Score,
+			ID:             row.ID,
+			Label:          row.Label,
+			Category:       row.Category,
+			Description:    row.Description,
+			ArticleCount:   row.ArticleCount,
+			Source:         row.Source,
+			MatchReason:    row.MatchReason,
+			Score:          row.Score,
+			Downgraded:     row.Downgraded,
+			ArticleContext: buildArticleContextForTag(row.ID, startOfDay, endOfDay),
 		})
 
 		// Get article IDs for this tag on this date
@@ -358,14 +499,16 @@ func collectBoardTags(boardID uint, date time.Time) ([]repository.TagInput, [][]
 				Pluck("article_topic_tags.article_id", &artIDs)
 
 			tags = append(tags, repository.TagInput{
-				ID:           t.ID,
-				Label:        t.Label,
-				Category:     t.Category,
-				Description:  t.Description,
-				Source:       t.Source,
-				ArticleCount: len(artIDs),
-				MatchReason:  boardMatch.MatchReason,
-				Score:        boardMatch.Score,
+				ID:             t.ID,
+				Label:          t.Label,
+				Category:       t.Category,
+				Description:    t.Description,
+				Source:         t.Source,
+				ArticleCount:   len(artIDs),
+				MatchReason:    boardMatch.MatchReason,
+				Score:          boardMatch.Score,
+				Downgraded:     boardMatch.Downgraded,
+				ArticleContext: buildArticleContextForTag(t.ID, startOfDay, endOfDay),
 			})
 			articleIDSets = append(articleIDSets, artIDs)
 		}
@@ -382,6 +525,36 @@ func findPreviousReportBrief(boardID uint, date time.Time) *repository.BoardDail
 		return nil
 	}
 	return &report
+}
+
+// buildQualityBreakdownJSON builds the quality_breakdown JSON from tags filtered by tagIDs.
+// Each entry carries per-tag match detail: tag_id, label, match_reason, score, downgraded.
+func buildQualityBreakdownJSON(tags []repository.TagInput, tagIDs []uint) []byte {
+	tagIDSet := make(map[uint]bool, len(tagIDs))
+	for _, tid := range tagIDs {
+		tagIDSet[tid] = true
+	}
+	type qEntry struct {
+		TagID       uint    `json:"tag_id"`
+		Label       string  `json:"label"`
+		MatchReason string  `json:"match_reason"`
+		Score       float64 `json:"score"`
+		Downgraded  bool    `json:"downgraded"`
+	}
+	entries := make([]qEntry, 0, len(tagIDs))
+	for _, t := range tags {
+		if tagIDSet[t.ID] {
+			entries = append(entries, qEntry{
+				TagID:       t.ID,
+				Label:       t.Label,
+				MatchReason: t.MatchReason,
+				Score:       t.Score,
+				Downgraded:  t.Downgraded,
+			})
+		}
+	}
+	b, _ := json.Marshal(entries)
+	return b
 }
 func filterTagsByQuality(tags []repository.TagInput) []repository.TagInput {
 	// Separate by match reason quality
@@ -404,8 +577,8 @@ func filterTagsByQuality(tags []repository.TagInput) []repository.TagInput {
 	// If kept > 30, truncate by quality (截断)
 	if len(kept) > 30 {
 		sort.SliceStable(kept, func(i, j int) bool {
-			ti := tagging.MatchTier(kept[i].MatchReason, false)
-			tj := tagging.MatchTier(kept[j].MatchReason, false)
+			ti := tagging.MatchTier(kept[i].MatchReason, kept[i].Downgraded)
+			tj := tagging.MatchTier(kept[j].MatchReason, kept[j].Downgraded)
 			if ti != tj {
 				return ti < tj
 			}

@@ -9,8 +9,8 @@ import FeedDetailEditor from './FeedDetailEditor.vue'
 const apiStore = useApiStore()
 const {
   collapsedCategories, loading, error, success,
-  feedsByCategory, refreshOptions, maxArticlesOptions,
-  updateFeedSetting, refreshFeed,
+  feedsByCategory, categories, refreshOptions, maxArticlesOptions,
+  updateFeedSetting, refreshFeed, createCategoryAndAssign, deleteFeed,
 } = useGlobalSettings()
 
 const selectedFeedId = ref<string | undefined>()
@@ -27,6 +27,21 @@ const allFeeds = computed(() =>
 const selectedFeed = computed(() =>
   allFeeds.value.find(f => f.id === selectedFeedId.value)
 )
+
+function onCreateCategory(name: string) {
+  if (!selectedFeed.value) return
+  createCategoryAndAssign(selectedFeed.value.id, name)
+}
+
+async function onDeleteFeed() {
+  if (!selectedFeed.value) return
+  const ok = await deleteFeed(
+    selectedFeed.value.id,
+    selectedFeed.value.title,
+    selectedFeed.value.articleCount,
+  )
+  if (ok) selectedFeedId.value = undefined
+}
 </script>
 
 <template>
@@ -51,11 +66,14 @@ const selectedFeed = computed(() =>
           v-if="selectedFeed"
           :key="selectedFeed.id"
           :feed="selectedFeed"
+          :categories="categories"
           :refresh-options="refreshOptions"
           :max-articles-options="maxArticlesOptions"
           :loading="loading"
           @update-feed="updateFeedSetting"
           @refresh-feed="refreshFeed"
+          @create-category="onCreateCategory"
+          @delete-feed="onDeleteFeed"
         />
 
         <!-- Empty state -->

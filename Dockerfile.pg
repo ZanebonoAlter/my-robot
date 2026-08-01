@@ -1,0 +1,1 @@
+FROM pgvector/pgvector:pg18-trixie

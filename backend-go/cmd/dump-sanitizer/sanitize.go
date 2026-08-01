@@ -90,7 +90,7 @@ func stripQuery(s string) string {
 
 // defaultRSSHubRewrite rewrites this demo's self-hosted RSSHub to the public
 // instance. Operators with a different source host override via RSSHUB_REWRITE.
-const defaultRSSHubRewrite = "47.110.71.194:1200=rsshub.app"
+const defaultRSSHubRewrite = "rsshub.app=rsshub.app"
 
 // rewriteRSSHubHost rewrites a self-hosted RSSHub host to the public instance
 // so the demo never leaks private infrastructure (e.g. an operator's public IP).

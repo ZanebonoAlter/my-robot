@@ -9,7 +9,10 @@ import (
 	"strings"
 	"time"
 
+	"go.opentelemetry.io/otel"
 	"syntopica-backend/internal/models"
+	"syntopica-backend/internal/platform/httpclient"
+	"syntopica-backend/internal/platform/tracing"
 )
 
 // TestResult 是连通性测试的结果。
@@ -22,6 +25,8 @@ type TestResult struct {
 // TestConnection 用 GET {base_url}/models 探测提供商是否可达，并返回可用模型列表。
 // 这是最轻量的连通性验证（不发推理请求，不消耗 token）。
 func TestConnection(ctx context.Context, provider models.AIProvider) (*TestResult, error) {
+	ctx, span := otel.Tracer(tracing.ServiceName).Start(ctx, "airouter.TestConnection")
+	defer span.End()
 	timeout := time.Duration(provider.TimeoutSeconds) * time.Second
 	if timeout <= 0 {
 		timeout = 15 * time.Second
@@ -36,7 +41,7 @@ func TestConnection(ctx context.Context, provider models.AIProvider) (*TestResul
 		httpReq.Header.Set("Authorization", "Bearer "+provider.APIKey)
 	}
 
-	resp, err := (&http.Client{Timeout: timeout}).Do(httpReq)
+	resp, err := httpclient.New(httpclient.WithTimeout(timeout)).Do(httpReq)
 	if err != nil {
 		return nil, fmt.Errorf("无法连接 %s: %w", endpoint, err)
 	}

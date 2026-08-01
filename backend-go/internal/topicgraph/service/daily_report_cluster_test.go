@@ -12,14 +12,14 @@ import (
 )
 
 func TestClusterTags_Empty(t *testing.T) {
-	groups, err := ClusterTags(nil, nil, nil)
+	groups, err := ClusterTags(nil, nil, nil, nil)
 	assert.NoError(t, err)
 	assert.Nil(t, groups)
 }
 
 func TestClusterTags_SingleTag(t *testing.T) {
 	tags := []repository.TagInput{{ID: 1, Label: "Test Event", ArticleCount: 3}}
-	groups, err := ClusterTags(nil, tags, nil)
+	groups, err := ClusterTags(nil, tags, nil, nil)
 	assert.NoError(t, err)
 	assert.Len(t, groups, 1)
 	assert.Equal(t, "Test Event", groups[0].GroupName)
@@ -31,7 +31,7 @@ func TestClusterTags_TwoTags(t *testing.T) {
 		{ID: 1, Label: "Event A", ArticleCount: 2},
 		{ID: 2, Label: "Event B", ArticleCount: 3},
 	}
-	groups, err := ClusterTags(nil, tags, nil)
+	groups, err := ClusterTags(nil, tags, nil, nil)
 	assert.NoError(t, err)
 	assert.Len(t, groups, 2)
 }
@@ -139,6 +139,37 @@ func TestClusterTags_ManyTagsSkipLLM(t *testing.T) {
 	assert.Contains(t, string(data), "Tech")
 }
 
+// ---- Slice D tests ----
+
+// TestClusterTags_WithBriefsShortCircuit verifies the short-circuit path
+// (≤2 tags) still works when briefs are non-nil — the function SHALL NOT
+// panic or behave differently when briefs are present.
+func TestClusterTags_WithBriefsShortCircuit(t *testing.T) {
+	tags := []repository.TagInput{
+		{ID: 1, Label: "Event A", ArticleCount: 2},
+		{ID: 2, Label: "Event B", ArticleCount: 3},
+	}
+	briefs := map[uint][]repository.TopicRecentBrief{
+		7: {{TopicID: 7, SectionID: 101, SectionLabel: "Test", ThreadTitles: []string{"thread"}}},
+	}
+	// Short-circuit path: ≤2 tags skips LLM, briefs are irrelevant but must not break.
+	groups, err := ClusterTags(nil, tags, nil, briefs)
+	assert.NoError(t, err)
+	assert.Len(t, groups, 2)
+}
+
+// TestClusterTags_NilBriefsDegradation verifies that nil briefs does not
+// break ClusterTags — the function SHALL fall back to label-only injection.
+func TestClusterTags_NilBriefsDegradation(t *testing.T) {
+	tags := []repository.TagInput{
+		{ID: 1, Label: "Test", ArticleCount: 1},
+	}
+	// nil briefs = degradation path
+	groups, err := ClusterTags(nil, tags, nil, nil)
+	assert.NoError(t, err)
+	assert.Len(t, groups, 1)
+}
+
 // TestParseClusterResponse_MatchedTopicID_Preserved confirms a legal
 // matched_topic_id from the LLM is carried onto the cluster group.
 func TestParseClusterResponse_MatchedTopicID_Preserved(t *testing.T) {
@@ -200,7 +231,7 @@ func TestBuildClusterSystemPrompt_InjectsExistingTopics(t *testing.T) {
 		{ID: 8, Label: "量子计算商用突破", Status: repository.TopicStatusCandidate,
 			LastSeenDate: time.Now(), HitCount: 2},
 	}
-	prompt := buildClusterSystemPrompt(10, topics)
+	prompt := buildClusterSystemPrompt(10, topics, nil)
 	assert.Contains(t, prompt, "已有的叙事框架")
 	assert.Contains(t, prompt, "AI 编程工具平台化竞争")
 	assert.Contains(t, prompt, "量子计算商用突破")
@@ -210,6 +241,120 @@ func TestBuildClusterSystemPrompt_InjectsExistingTopics(t *testing.T) {
 // TestBuildClusterSystemPrompt_NoTopicsOmitsSection confirms that without
 // existing topics the prompt stays close to the original (no empty section).
 func TestBuildClusterSystemPrompt_NoTopicsOmitsSection(t *testing.T) {
-	prompt := buildClusterSystemPrompt(10, nil)
+	prompt := buildClusterSystemPrompt(10, nil, nil)
 	assert.NotContains(t, prompt, "已有的叙事框架")
+}
+
+// ---- Slice D: lane context injection tests ----
+
+func TestBuildClusterSystemPrompt_ActiveTopicWithRecentBriefs(t *testing.T) {
+	now := time.Date(2026, 6, 30, 12, 0, 0, 0, time.UTC)
+	topics := []repository.BoardPersistentTopic{
+		{ID: 7, Label: "以黎冲突升级", Status: repository.TopicStatusActive,
+			LastSeenDate: now, HitCount: 5},
+	}
+	briefs := map[uint][]repository.TopicRecentBrief{
+		7: {
+			{
+				TopicID: 7, SectionID: 101,
+				SectionLabel: "真主党越境打击",
+				PeriodDate:   now.AddDate(0, 0, -1),
+				ThreadTitles: []string{"真主党向以色列北部发射火箭", "以军拦截黎方无人机"},
+			},
+			{
+				TopicID: 7, SectionID: 102,
+				SectionLabel: "以军空袭黎南部",
+				PeriodDate:   now.AddDate(0, 0, -2),
+				ThreadTitles: []string{"以色列空袭黎巴嫩南部目标"},
+			},
+		},
+	}
+	prompt := buildClusterSystemPrompt(10, topics, briefs)
+	// Active topic with briefs SHALL include recent content
+	assert.Contains(t, prompt, "以黎冲突升级")
+	assert.Contains(t, prompt, "近期实际内容")
+	assert.Contains(t, prompt, "真主党越境打击")
+	assert.Contains(t, prompt, "真主党向以色列北部发射火箭")
+	assert.Contains(t, prompt, "以军空袭黎南部")
+	assert.Contains(t, prompt, "以色列空袭黎巴嫩南部目标")
+}
+
+func TestBuildClusterSystemPrompt_ActiveTopicEmptyBriefs(t *testing.T) {
+	now := time.Now()
+	topics := []repository.BoardPersistentTopic{
+		{ID: 7, Label: "以黎冲突升级", Status: repository.TopicStatusActive,
+			LastSeenDate: now, HitCount: 5},
+	}
+	// Empty briefs map → degradation: label-only for active topic
+	prompt := buildClusterSystemPrompt(10, topics, map[uint][]repository.TopicRecentBrief{})
+	assert.Contains(t, prompt, "以黎冲突升级")
+	// Degradation: briefs empty means no "近期实际内容" guidance
+	assert.NotContains(t, prompt, "近期实际内容")
+}
+
+func TestBuildClusterSystemPrompt_CandidateTopicNoBriefs(t *testing.T) {
+	now := time.Now()
+	topics := []repository.BoardPersistentTopic{
+		{ID: 15, Label: "候选叙事", Status: repository.TopicStatusCandidate,
+			LastSeenDate: now, HitCount: 2},
+	}
+	briefs := map[uint][]repository.TopicRecentBrief{
+		15: {
+			{TopicID: 15, SectionID: 201, SectionLabel: "some-section",
+				PeriodDate: now, ThreadTitles: []string{"some-thread"}},
+		},
+	}
+	prompt := buildClusterSystemPrompt(10, topics, briefs)
+	// Candidate topic SHALL NOT show recent content even if briefs exist
+	assert.Contains(t, prompt, "候选叙事")
+	assert.NotContains(t, prompt, "some-section")
+	assert.NotContains(t, prompt, "some-thread")
+	assert.NotContains(t, prompt, "近期实际内容")
+}
+
+func TestBuildClusterSystemPrompt_ActiveAndCandidateMixed(t *testing.T) {
+	now := time.Date(2026, 6, 30, 12, 0, 0, 0, time.UTC)
+	topics := []repository.BoardPersistentTopic{
+		{ID: 7, Label: "以黎冲突升级", Status: repository.TopicStatusActive,
+			LastSeenDate: now, HitCount: 5},
+		{ID: 15, Label: "候选叙事", Status: repository.TopicStatusCandidate,
+			LastSeenDate: now, HitCount: 2},
+	}
+	briefs := map[uint][]repository.TopicRecentBrief{
+		7: {
+			{TopicID: 7, SectionID: 101, SectionLabel: "真主党越境打击",
+				PeriodDate: now, ThreadTitles: []string{"真主党发射火箭"}},
+		},
+		15: {
+			{TopicID: 15, SectionID: 201, SectionLabel: "should-not-appear",
+				PeriodDate: now, ThreadTitles: []string{"hidden-thread"}},
+		},
+	}
+	prompt := buildClusterSystemPrompt(10, topics, briefs)
+	// Active has content
+	assert.Contains(t, prompt, "以黎冲突升级")
+	assert.Contains(t, prompt, "真主党越境打击")
+	assert.Contains(t, prompt, "近期实际内容")
+	// Candidate is label-only
+	assert.Contains(t, prompt, "候选叙事")
+	assert.NotContains(t, prompt, "should-not-appear")
+	assert.NotContains(t, prompt, "hidden-thread")
+}
+
+func TestBuildClusterSystemPrompt_GuidanceTextPresent(t *testing.T) {
+	now := time.Now()
+	topics := []repository.BoardPersistentTopic{
+		{ID: 7, Label: "AI 编程工具", Status: repository.TopicStatusActive,
+			LastSeenDate: now, HitCount: 3},
+	}
+	briefs := map[uint][]repository.TopicRecentBrief{
+		7: {
+			{TopicID: 7, SectionID: 101, SectionLabel: "Codex 更新",
+				PeriodDate: now, ThreadTitles: []string{"Codex 推出插件系统"}},
+		},
+	}
+	prompt := buildClusterSystemPrompt(10, topics, briefs)
+	// The guidance text must instruct the LLM to base decisions on actual content
+	assert.Contains(t, prompt, "依据框架近期实际内容判断归属")
+	assert.Contains(t, prompt, "而非仅凭标题字面沾边")
 }

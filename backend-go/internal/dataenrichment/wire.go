@@ -1,0 +1,99 @@
+package dataenrichment
+
+import (
+	"gorm.io/gorm"
+
+	"syntopica-backend/internal/dataenrichment/handler"
+	"syntopica-backend/internal/dataenrichment/repository"
+	"syntopica-backend/internal/dataenrichment/service"
+	"syntopica-backend/internal/platform/airouter"
+)
+
+// InitRepository initializes the dataenrichment repository singleton.
+func InitRepository(db *gorm.DB) {
+	repository.InitRepo(db)
+}
+
+// GetRepo returns the dataenrichment repository singleton.
+func GetRepo() *repository.Repository {
+	return repository.Repo
+}
+
+// Package-level service singletons built by Init. The runtime schedulers
+// (registered in app/runtime.go) consume them via the getters below.
+var (
+	lifelineSvc *service.LifelineContextService
+	topicLister ActiveTopicLister
+)
+
+// Init wires the full data-enrichment domain: repository singleton, cycle-A
+// lifeline context service, cycle-B orchestrator, and the HTTP handler
+// singleton.
+//
+// MUST be called before dataenrichment.RegisterRoutes, which means it runs in
+// main.go BEFORE app.SetupRoutes — mirroring how the other domains call
+// InitRepository in main.go prior to route registration. (app.StartRuntime only
+// registers schedulers and runs AFTER SetupRoutes, so it is too late for the
+// handler singleton that RegisterRoutes dereferences.)
+func Init(db *gorm.DB) {
+	InitRepository(db)
+	repo := GetRepo()
+
+	// Cycle A: lifeline context summary service (news-only, scheduled).
+	lifelineSvc = service.NewLifelineContextService(
+		airouter.NewRouter(),
+		repo,
+		NewTopicGraphSectionReader(db),
+		CapabilityNews,
+	)
+	topicLister = NewDBTopicLister(db)
+
+	// Cycle B: three-role orchestration (interpret → agent loop → analyze + review).
+	boardConfigReader := NewDBBoardConfigReader(db)
+	lifelineReader := NewDBLifelineReader(db)
+	renderer := service.NewLifelineRenderer()
+	boardLister := NewDBBoardLister(db)
+	laneLister := NewDBLaneLister(db)
+	laneDetailRenderer := service.NewRendererLaneDetailAdapter(lifelineReader, renderer)
+	toolRegistry := service.NewRegistry(
+		service.NewDefaultHTTPFetcher(),
+		service.WithWebSearcher(service.NoopWebSearcher{}),
+		service.WithBoardLister(boardLister),
+		service.WithLaneLister(laneLister),
+		service.WithLaneDetailRenderer(laneDetailRenderer),
+	)
+	orchestrator := service.NewOrchestratorService(
+		airouter.NewRouter(),
+		repo,
+		lifelineReader,
+		renderer,
+		toolRegistry,
+		boardConfigReader,
+		CapabilityAnalysis,
+	)
+
+	// Cycle B (optional): FinGenius stock debate (submit → poll → distill → persist).
+	fingeniusClient := service.NewFinGeniusHTTPClient()
+	debateDistiller := service.NewDebateDistiller(airouter.NewRouter(), CapabilityAnalysis)
+	debateSvc := service.NewDebateService(fingeniusClient, debateDistiller, repo)
+
+	// Cycle B (阶段2b): report follow-up QA agent. Reuses the SAME tool registry as
+	// the orchestrator so the exploration tools (list_boards/list_lanes/
+	// get_lane_detail/web_search) are available; never writes to the result table.
+	qaAgent := service.NewQAAgent(airouter.NewRouter(), toolRegistry, repo, CapabilityAnalysis)
+
+	// HTTP handler singleton consumed by handler.RegisterRoutes.
+	handler.InitHandler(repo, lifelineSvc, orchestrator, boardConfigReader, debateSvc, qaAgent, db)
+}
+
+// GetLifelineService returns the cycle-A service built by Init, for scheduler
+// registration in app/runtime.go.
+func GetLifelineService() *service.LifelineContextService {
+	return lifelineSvc
+}
+
+// GetTopicLister returns the active-topic lister built by Init, for scheduler
+// registration in app/runtime.go.
+func GetTopicLister() ActiveTopicLister {
+	return topicLister
+}

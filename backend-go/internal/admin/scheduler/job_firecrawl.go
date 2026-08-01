@@ -33,7 +33,10 @@ func FirecrawlJob(queue *content.FirecrawlJobQueue, batchID string) JobFunc {
 			}, nil
 		}
 
-		firecrawlService := content.NewFirecrawlService(config)
+		firecrawlService := content.NewFallbackCrawler(
+			content.NewReadabilityCrawler(),
+			content.NewFirecrawlService(config),
+		)
 
 		jobs, err := queue.Claim(50, firecrawlLeaseDuration(config))
 		if err != nil {
@@ -99,6 +102,7 @@ func FirecrawlJob(queue *content.FirecrawlJobQueue, batchID string) JobFunc {
 					"firecrawl_status": "failed",
 					"firecrawl_error":  crawlErr.Error(),
 				})
+				terminal := job.AttemptCount >= job.MaxAttempts
 				_ = queue.MarkFailed(job, crawlErr.Error(), firecrawlFailureBackoff(job.AttemptCount))
 				broadcastFirecrawlProgress(batchID, "processing", len(jobs), completed, failed, &ws.FirecrawlArticleProgress{
 					ID:     art.ID,
@@ -107,22 +111,40 @@ func FirecrawlJob(queue *content.FirecrawlJobQueue, batchID string) JobFunc {
 					Error:  crawlErr.Error(),
 				}, &processingCount)
 				logging.Errorf("[Firecrawl] Failed to crawl %s: %v", art.Link, crawlErr)
+
+				// 抓取彻底失败（已达重试上限）：降级用 RSS description 继续，避免标签/
+				// AI 摘要因 firecrawl 失败被永久阻塞。
+				if terminal {
+					if feed.ArticleSummaryEnabled {
+						repository.Repo.DB().Model(&art).Update("summary_status", "incomplete")
+					}
+					if feed.TaggingEnabled {
+						if err := tagging.NewTagJobQueue(repository.Repo.DB()).Enqueue(tagging.TagJobRequest{
+							ArticleID:    art.ID,
+							FeedName:     feed.Title,
+							CategoryName: tagging.FeedCategoryName(feed),
+							ForceRetag:   true,
+							Reason:       "firecrawl_failed_fallback",
+						}); err != nil {
+							logging.Warnf("[Firecrawl] Failed to enqueue fallback retag for article %d: %v", art.ID, err)
+						}
+					}
+					logging.Infof("[Firecrawl] Article %d reached crawl retry limit, falling back to RSS content for tagging/summary", art.ID)
+				}
 				continue
 			}
 
 			now := time.Now()
 			updates := map[string]interface{}{
 				"firecrawl_status":     "completed",
-				"firecrawl_content":    result.Data.Markdown,
+				"firecrawl_content":    result.Markdown,
 				"firecrawl_crawled_at": now,
 			}
 			// Backfill image_url from the scrape metadata (OG image, Twitter card
 			// as fallback). Only fill when RSS left it empty — RSS enclosures are
 			// editor-selected and take priority over scraped OG images.
-			if art.ImageURL == "" {
-				if img := pickMetadataImage(result.Data.Metadata.OgImage, result.Data.Metadata.TwitterImage); img != "" {
-					updates["image_url"] = img
-				}
+			if art.ImageURL == "" && result.OGImage != "" {
+				updates["image_url"] = result.OGImage
 			}
 			if feed.ArticleSummaryEnabled {
 				updates["summary_status"] = "incomplete"
@@ -203,16 +225,6 @@ func minInt(a, b int) int {
 		return a
 	}
 	return b
-}
-
-// pickMetadataImage returns the first non-empty image URL from a scrape's
-// metadata fields. OG image is preferred (editor-picked cover), Twitter card
-// image is the fallback.
-func pickMetadataImage(ogImage, twitterImage string) string {
-	if ogImage != "" {
-		return ogImage
-	}
-	return twitterImage
 }
 
 func broadcastFirecrawlProgress(batchID, status string, total, completed, failed int, current *ws.FirecrawlArticleProgress, processingCount *int32) {

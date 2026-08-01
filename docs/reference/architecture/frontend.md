@@ -1,6 +1,6 @@
 # 前端架构
 
-> 最后更新：2026-06-11（v1.3.3 架构深化：Store 拆分、事件流统一、错误通知、API 归一化、Feature Facade、大组件拆分）
+> 最后更新：2026-08-01（revamp-landscape-charts：图表库选型，新增 §图表库选型）
 
 ## 技术栈
 
@@ -13,6 +13,7 @@
 - Day.js
 - marked
 - motion-v
+- echarts（模块化按需引入，见 §图表库选型）
 - Vitest
 
 ## 入口与路由
@@ -20,6 +21,7 @@
 - 应用壳入口：`front/app/app.vue`
 - 主阅读页：`front/app/pages/index.vue`
 - 标签管理：`front/app/pages/tags.vue`
+- 设置中心：`front/app/pages/settings.vue`（工作台式 7-section 设置页，详见 §设置中心）
 
 `app.vue` 只做一件事：启动时调用 `apiStore.initialize()`，先拉分类、订阅源和文章，再渲染页面。
 
@@ -84,19 +86,22 @@ features/
 │  ├─ components/      # FeedEmptyGuide（RSS 源空状态引导卡片）
 │  ├─ composables/     # useAutoRefresh、useRefreshPolling
 │  └─ public.ts        # 跨 feature 共享 facade
-├─ summaries/          # AI 总结列表、队列进度（通过 useEventStream 实时更新）
-├─ digest/             # 日报、周报、详情页、配置抽屉
 ├─ preferences/        # 阅读行为埋点与偏好
 │  ├─ composables/     # useReadingTracker
 │  └─ public.ts        # 跨 feature 共享 facade
-├─ tags/               # 标签管理、合并、质量评分
-│  ├─ components/      # TagsPage、BoardCRUD、Timeline、Merge 等
-│  ├─ components/detective-wall/  # 3D 侦探照片墙（Three.js 子模块，见 §3D 侦探墙）
+├─ discovery/          # 订阅源发现（推荐卡片 + 填参分流）
+│  ├─ components/      # DiscoveryPanel、DiscoveryCard（param_options 字典驱动 select/input 分流 + 官方文档链接）
+│  └─ composables/     # useDiscovery
+├─ tags/               # 标签/板块/日报/数据富化的前端主体
+│  ├─ components/      # TagsPage、BoardCRUD、Timeline、Merge、BoardEnrichmentPanel 等
+│  ├─ components/daily-report/   # 日报全屏阅读层（见 §日报全屏阅读层）
+│  ├─ components/detective-wall/ # 3D 侦探照片墙（Three.js 子模块，见 §3D 侦探墙）
 │  └─ composables/     # useTagsPage、useBoardCRUD、useBoardTimeline、useAuxiliaryLabels
-├─ ai/                 # AI Router 设置面板、Embedding 队列
-│  ├─ components/      # AIRouterSettingsPanel、EmbeddingQueuePanel 等
+├─ ai/                 # AI 调用路由配置 + 嵌入队列面板（仅路由/供应商管理，不含日报/叙事/digest）
+│  ├─ components/      # AIRouterSettingsPanel、AIRouterBackupProviders、AIRouterCapabilityRoutes、AIProviderManagement、EmbeddingQueuePanel
 │  └─ composables/     # useAIRouterSettings
-└─ hierarchy-config/   # 层级配置管理
+└─ settings/           # 设置中心（工作台式 7-section，由 pages/settings.vue 挂载，见 §设置中心）
+   └─ components/      # SettingsWorkspace、SettingsSidebar、7 个 SettingsSection*、FeedMasterList、FeedDetailEditor、TagQueuePanel
 ```
 
 ### Feature Facade 约定
@@ -108,6 +113,22 @@ features/
 - `features/preferences/public.ts` → `useReadingTracker`、`useScrollDepthTracker`
 
 **禁止跨 feature 深 import 对方内部实现**（组件、composable、工具函数）。共享 normalizer 上移到 `api/normalizers/`，共享 UI 上移到 `components/` 或通过 feature facade 暴露。
+
+## 设置中心（features/settings/）
+
+`pages/settings.vue` 挂载的工作台式设置页。`SettingsWorkspace.vue` 提供左侧 `SettingsSidebar` + 右侧 section 内容区，当前 section 由 URL query `?section=<key>` 驱动（`activeSection` computed，默认 `feeds`），切换走 `router.replace({ query: { section: key } })`。共 7 个 section：
+
+| Section key | 标签 | section 组件 | 复用面板 / 说明 |
+| ------ | ------ | ------ | ------ |
+| `feeds` | 订阅源 | `SettingsSectionFeeds` | 本 feature 的 `FeedMasterList` + `FeedDetailEditor` |
+| `ai-providers` | AI 模型 | `SettingsSectionAiProviders` | 复用 `features/ai/components/AIProviderManagement.vue` |
+| `capability-routes` | 能力路由 | `SettingsSectionCapabilityRoutes` | 复用 `features/ai/` 的 `useAIRouterSettings` + `AIRouterCapabilityRoutes.vue` |
+| `queues` | 队列 | `SettingsSectionQueues` | 复用 `features/ai/components/EmbeddingQueuePanel.vue` + 本 feature 的 `TagQueuePanel.vue`（tag-queue / embedding-queue / merge-reembedding-queue 监控与 retry） |
+| `preferences` | 阅读偏好 | `SettingsSectionPreferences` | 阅读统计、来源评分、推荐偏好 |
+| `firecrawl` | Firecrawl | `SettingsSectionFirecrawl` | Firecrawl 服务配置与抓取参数 |
+| `schedulers` | 定时任务 | `SettingsSectionSchedulers` | 复用 `components/dialog/SchedulerStatusPanel.vue`，13 个 scheduler 状态查看与手动触发 |
+
+> `features/settings/` 只提供工作台编排与 section 外壳；AI 路由/队列/调度等具体面板复用 `features/ai/` 与 `components/dialog/` 的现成实现。
 
 ## 数据层约定
 
@@ -127,7 +148,7 @@ features/
 **唯一权威原则（D19）：**
 
 | 职责 | 唯一权威 Module |
-|------|-----------------|
+| ------ | ----------------- |
 | 查询参数构建 | `utils/api-helpers.ts` → `buildQueryString()` |
 | 响应解包 | `utils/api-helpers.ts` → `mapApiResponse()` / `unwrapResponse()` |
 | camelCase 转换 | `utils/api-helpers.ts` → `camelizeKeys()` |
@@ -135,14 +156,14 @@ features/
 
 **已落地的 API 模块：**
 
-`categories` · `feeds` · `articles` · `summaries` · `digest` · `opml` · `reading_behavior` · `firecrawl` · `scheduler` · `aiAdmin` · `abstractTags` · `semanticBoards` · `auxiliaryLabels` · `embeddingConfig` · `embeddingQueue` · `mergeReembeddingQueue` · `tagMergePreview` · `tagQueue` · `watchedTags` · `dailyReports`
+`categories` · `feeds` · `articles` · `opml` · `reading_behavior` · `firecrawl` · `scheduler` · `aiAdmin` · `abstractTags` · `semanticBoards` · `auxiliaryLabels` · `embeddingQueue` · `tagMergePreview` · `tagQueue` · `watchedTags` · `dailyReports` · `boardEnrichment` · `persistentTopics` · `topicWatches`
 
 ### Store 层
 
 **Store 职责分离（D13/D16）：**
 
 | Store | 职责 | 自有状态 |
-|-------|------|---------|
+| ------- | ------ | --------- |
 | `useApiStore` | 应用初始化、categories/feeds 的加载与基本 CRUD | `categories`、`feeds`、全局 loading/error |
 | `useArticlesStore` | 文章状态管理，所有文章 mutation 直接调用 API | `articles`、`totalArticles`、`filters`、`currentArticle`、`loading` |
 | `useFeedsStore` | Feed 派生视图层（computed from apiStore） | 无独立状态 |
@@ -170,20 +191,7 @@ features/
 
 **使用模式：**
 
-```typescript
-const stream = useEventStream()
-
-// 订阅
-const off = stream.on(EVENT_TYPES.TAG_COMPLETED, (data) => { ... })
-
-// 组件卸载时清理（onUnmounted 中）
-off()
-```
-
-**禁止：**
-
-- Feature/Component 中直接 `new WebSocket` 或 `new EventSource` 订阅全局事件
-- 组件卸载后不退订（必须在 `onUnmounted` 执行返回的 unsubscribe 函数）
+> 使用模式与禁止行为（禁止自建 WebSocket/EventSource、`onUnmounted` 必须退订）的权威定义见 [`standard/frontend/code-style.md`](../standard/frontend/code-style.md) §5。
 
 **特例：** 专用长任务 stream（如 tag merge preview 的 scan/evaluate SSE）在对应 API module 中作为命名 Adapter 暴露。
 
@@ -201,20 +209,18 @@ off()
 **通知责任层（唯一责任原则）：**
 
 | 层级 | 责任 |
-|------|------|
+| ------ | ------ |
 | Store / Composable | 执行写操作失败时调用 `notify.error()` |
 | 底层 API module | **不直接弹 toast**，只返回错误 |
 | View 组件 | 可保留局部 `error` 展示状态，全局错误走 `useNotify()` |
 
 **禁止同一次失败由多个层同时通知**（如 `apiStore` 和 feature store 同时弹 toast）。
 
+> 该责任分工的权威定义见 [`standard/frontend/code-style.md`](../standard/frontend/code-style.md) §6。
+
 ## 数据映射规则
 
-- 后端字段以 `snake_case` 为主
-- 前端 store 和组件内部统一用 `camelCase`
-- 转换只发生在 API 边界（`api/normalizers/` 和 `utils/api-helpers.ts`）
-- ID 在前端统一存成 `string`；数字 ID 与字符串 ID 的转换只在 API 边界
-- 后端 snake_case DTO 进入 Store/Feature 前必须经 normalizer 转为前端领域类型
+> `snake_case → camelCase` 转换、数字 ID 转字符串、转换只发生在 API 边界的权威定义见 [`standard/frontend/code-style.md`](../standard/frontend/code-style.md) §9；具体字段映射见 [`flow/reading.md`](../flow/reading.md)。
 
 ## 页面骨架
 
@@ -224,7 +230,9 @@ off()
 - 中栏：文章列表或 AI 总结列表
 - 右栏：文章正文或 AI 总结详情
 
-Digest 页面走独立路由和独立视觉壳，不复用主阅读页的三栏壳。
+日报详情不走独立路由，而是在 `/tags` 页内由 `BoardDailyReportTimeline.vue` 渲染为全屏阅读层（独立视觉壳，不复用主阅读页三栏壳），详见 §日报全屏阅读层。
+
+`/tags` 页（`TagsPage.vue`）顶部 tab：板块内容 / 日报 / 文章 / 数据增强 / 话题总览（`BoardThreadBrowser`，与日报平级）。
 
 ## 大组件拆分阈值（D14）
 
@@ -235,7 +243,7 @@ Digest 页面走独立路由和独立视觉壳，不复用主阅读页的三栏�
 
 ## 3D 侦探墙（detective-wall）
 
-`features/tags/components/detective-wall/` 是项目内首个直接使用 Three.js 的特性，将话题总览（`BoardThreadBrowser` 2D SVG DAG）升级为沉浸式 3D 侦探照片墙。入口在 `BoardThreadBrowser` 的"侦探墙"按钮（仅 WebGL 可用且屏幕宽 ≥768px 显示），全屏视图 `TopicDetectiveWall.client.vue` 由 `BoardDailyReportTimeline` 渲染。
+`features/tags/components/detective-wall/` 是项目内首个直接使用 Three.js 的特性，将话题总览（`BoardThreadBrowser` 2D SVG DAG）升级为沉浸式 3D 侦探照片墙。入口在 `BoardThreadBrowser` 的“侦探墙”按钮（仅 WebGL 可用且屏幕宽 ≥768px 显示）；话题总览现为 `TagsPage` 平级 tab（`contentTab='topic-overview'`），全屏视图 `TopicDetectiveWall.client.vue` 由 `TagsPage` 顶层（话题总览 tab）与 `BoardDailyReportTimeline`（日报 tab 内 toggle）双入口渲染。
 
 ### 子模块结构
 
@@ -297,6 +305,17 @@ surgical 边界：不改相机坐标系/布局算法/交互/BFS/红线/全局迷
 
 复用现有 API，无新增后端接口：`getBoardSectionTimeline(boardId, days)`、`getSectionLifecycle(sectionId)`、`getDailyReportDetail(id)`（均来自 `~/api/dailyReports`）。其中 timeline/lifecycle section node 扩展 `image_url` 字符串字段，由后端优先从该 section 的线程关联文章选择第一张非空图片，找不到时再从 cluster tags 当天文章里选择第一张非空图片；仍无图时返回空字符串，由侦探墙卡面渲染默认缩略图。
 
+## 图表库选型（echarts）
+
+项目首个通用 2D 图表库为 **ECharts**（`revamp-landscape-charts` 引入，首个落地场景 `topic-landscape`）。3D 场景仍走 Three.js（见 §3D 侦探墙），关系 DAG（`BoardThreadBrowser`）等非数据图表不受本约定约束。
+
+- **引入方式**：`echarts/core` 模块化按需引入 + `echarts.use()` 按需注册（Bar/Scatter/Line + Grid/Tooltip/DataZoom/Legend + CanvasRenderer），Canvas renderer，不引 vue-echarts 等封装库；产物为独立 chunk（约 104KB gzip）。
+- **统一封装约定**（落地于 `features/tags/components/topic-landscape/`）：
+  - `useEcharts.ts` composable：`onMounted` init / `ResizeObserver` 自动 resize / `onBeforeUnmount` dispose，暴露 `elRef` / `setOption` / `on`；init 放 `onMounted`（SSR 安全），模板用 `<ClientOnly>` 包裹图表容器。
+  - `chart-options.ts`：option 构建**纯函数**（`buildRhythmOption` / `buildMiniBarOption` / `buildVitalityOption`），组件只负责挂载/传参/事件桥接——纯函数可被 Vitest 直接断言（happy-dom 无 canvas，不测 echarts 渲染，对齐 `standard/frontend/testing.md`「逻辑与渲染分离」惯例）。
+- **主题适配**：`readPalette()` 运行期 `getComputedStyle` 从 CSS 变量取色（单一事实源在 main.css），组件 `watch(useTheme().theme)` 后用 `setOption` 重建 option，亮/暗主题跟随，禁止硬编码色板。
+- **代码红线**：见 [`standard/frontend/code-style.md`](../standard/frontend/code-style.md) §11 图表约定。
+
 ## 设计系统
 
 ### 主题系统
@@ -304,24 +323,28 @@ surgical 边界：不改相机坐标系/布局算法/交互/BFS/红线/全局迷
 前端采用三层 Token 架构和双主题系统，确保视觉一致性：
 
 **三层 Token 架构：**
+
 1. **Layer 1: Primitive Tokens (`--raw-*`)** - 原始色值，项目色板的唯一来源，不直接在组件中使用
 2. **Layer 2: Semantic Tokens (`--color-*`)** - 跟主题走，组件直接引用这一层
 3. **Layer 3: Component Tokens (`--dialog-*`, `--button-*` 等)** - 可选，复杂组件的局部 token
 
 **双主题：**
+
 - **Editorial Theme (`data-theme="editorial"`)** - 暖白印刷厂风格，主色 Print Red，背景 Paper Warmth
 - **Dark Theme (`data-theme="dark"`)** - 深色调查风格，强调色 Amber，背景深蓝灰
 
 **主题切换：**
+
 - 通过 `<html data-theme="editorial|dark">` 属性切换
 - 使用 `useTheme()` composable 管理主题状态，支持 localStorage 记忆
 - 首次绘制前 `<html>` 必须已有有效 `data-theme`，避免主题闪烁
 
 **Token 使用规则：**
+
 - 组件只引用 Layer 2 语义 token（`--color-*`），不直接使用原始色值
 - `--color-bg-overlay` 仅用于模态遮罩，不得作为普通表面背景
 - 页面表面按层级使用 `base → elevated → sunken`
-- SVG、Canvas 和 CSS gradient 颜色必须由当前主题 token 派生
+- SVG、Canvas 和 CSS gradient 颜色必须由当前主题 token 派生（ECharts 图表经 `readPalette` 读 CSS 变量，见 §图表库选型）
 
 ### 统一组件库
 
@@ -334,6 +357,7 @@ surgical 边界：不改相机坐标系/布局算法/交互/BFS/红线/全局迷
 - **AppSectionHeader** - 统一 section 标题组件，可选 icon box + 标题 + 描述
 
 **使用约束：**
+
 - 所有对话框必须使用 AppDialog，禁止自建对话框模式
 - 所有按钮必须使用 AppButton，禁止使用原生 button 样式类
 - 所有开关必须使用 AppToggle，禁止使用原生 checkbox 或手写 toggle
@@ -357,7 +381,7 @@ surgical 边界：不改相机坐标系/布局算法/交互/BFS/红线/全局迷
 ## 相关文档
 
 - `docs/reference/architecture/backend.md`
-- `docs/reference/architecture/data-flow.md`
+- `docs/reference/flow/`（业务流程链路）
 - `docs/reference/architecture/overview.md`
 - `front/AGENTS.md`
 
@@ -369,7 +393,7 @@ surgical 边界：不改相机坐标系/布局算法/交互/BFS/红线/全局迷
 
 - `DailyReportMasthead.vue`：板块标题、日报头条与 highlights。
 - `DailyReportSidebar.vue`：目录、持续话题和历史日报切换。
-- `DailyReportTopicSection.vue`：active / candidate / unassigned 分区、单列话题、thread 与文章展开。
+- `DailyReportTopicSection.vue`：按报告时快照 `topic_status_at_report` 分"关心的话题"（active）/ "其他动态"（candidate / archived / null）两区、单列话题、thread 与文章展开。
 - `DailyReportMiniLifeline.vue`：最近七个自然日的通栏泳道、identity 贝塞尔连线、当前日原位详情和侦探墙出口。
 
 `useDailyReportReader.ts` 是唯一数据编排边界：按 board 缓存日报列表与详情，按 topic id 缓存 lifeline，按 article id 去重标题请求；单篇失败只影响对应文章并允许重试。组件仅通过 `openArticle`、`openLifecycle`、`openDetective` 等事件把预览和旧入口交还父级，切换 board 时统一清理日期、展开态和缓存。

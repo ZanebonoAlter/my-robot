@@ -439,3 +439,55 @@ func TestCompleteArticleEnqueuesRetagJobAfterSuccessfulCompletion(t *testing.T) 
 		t.Fatalf("tag job count = %d, want 1", jobCount)
 	}
 }
+
+// TestCompleteArticle_FirecrawlFailedFallsBackToDescription 验证 firecrawl 抓取
+// 彻底失败（终态 failed）后，AI 摘要不再被永久阻塞：放行 failed 状态，并降级
+// 用 RSS description 作为摘要内容来源。
+func TestCompleteArticle_FirecrawlFailedFallsBackToDescription(t *testing.T) {
+	setupServicesTestDB(t)
+
+	aiServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"# 降级摘要\n\n## 导读\n- from description"}}]}`))
+	}))
+	defer aiServer.Close()
+
+	provider := models.AIProvider{Name: "completion-primary", ProviderType: airouter.ProviderTypeOpenAICompatible, BaseURL: aiServer.URL, APIKey: "token", Model: "test-model", Enabled: true}
+	if err := database.DB.Create(&provider).Error; err != nil {
+		t.Fatalf("create provider: %v", err)
+	}
+	route := models.AIRoute{Name: airouter.DefaultRouteName, Capability: string(airouter.CapabilitySummary), Enabled: true, Strategy: "ordered_failover"}
+	if err := database.DB.Create(&route).Error; err != nil {
+		t.Fatalf("create route: %v", err)
+	}
+	if err := database.DB.Create(&models.AIRouteProvider{RouteID: route.ID, ProviderID: provider.ID, Priority: 1, Enabled: true}).Error; err != nil {
+		t.Fatalf("create route provider: %v", err)
+	}
+
+	feed := models.Feed{Title: "Feed", URL: fmt.Sprintf("https://example.com/%s", t.Name()), ArticleSummaryEnabled: true, FirecrawlEnabled: true, TaggingEnabled: true, MaxCompletionRetries: 2}
+	if err := database.DB.Create(&feed).Error; err != nil {
+		t.Fatalf("create feed: %v", err)
+	}
+
+	// firecrawl 抓取彻底失败（终态 failed），无全文，但有 RSS description
+	article := models.Article{FeedID: feed.ID, Title: "crawl failed", Link: "https://example.com/a-fail", FirecrawlStatus: "failed", FirecrawlContent: "", Description: "RSS description 提供的内容，用于降级生成摘要。", SummaryStatus: "incomplete"}
+	if err := database.DB.Create(&article).Error; err != nil {
+		t.Fatalf("create article: %v", err)
+	}
+
+	service := NewContentCompletionService()
+	if err := service.CompleteArticle(context.Background(), article.ID); err != nil {
+		t.Fatalf("complete article: %v", err)
+	}
+
+	var refreshed models.Article
+	if err := database.DB.First(&refreshed, article.ID).Error; err != nil {
+		t.Fatalf("reload article: %v", err)
+	}
+	if refreshed.SummaryStatus != "complete" {
+		t.Fatalf("summary status = %q, want complete (failed firecrawl should fall back to description)", refreshed.SummaryStatus)
+	}
+	if refreshed.AIContentSummary == "" {
+		t.Fatal("expected AI content summary to be populated from description fallback")
+	}
+}

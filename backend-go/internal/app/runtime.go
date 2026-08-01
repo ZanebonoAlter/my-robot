@@ -8,6 +8,7 @@ import (
 
 	"syntopica-backend/internal/admin"
 	"syntopica-backend/internal/admin/scheduler"
+	"syntopica-backend/internal/dataenrichment"
 	"syntopica-backend/internal/models"
 	"syntopica-backend/internal/platform/database"
 	"syntopica-backend/internal/platform/logging"
@@ -90,6 +91,7 @@ func StartRuntime() *Runtime {
 
 	registry.Register("log_cleanup", scheduler.New(scheduler.Config{
 		Name:         "Log Cleanup",
+		Description:  "Clean up expired ai_call_logs and otel_spans rows",
 		Interval:     86400 * time.Second,
 		StartupDelay: 5 * time.Minute,
 		Job:          admin.LogCleanupJob,
@@ -99,6 +101,7 @@ func StartRuntime() *Runtime {
 
 	registry.Register("aux_label_cleanup", scheduler.New(scheduler.Config{
 		Name:         "Aux Label Cleanup",
+		Description:  "Clean up auxiliary labels with no active topic_tag references",
 		Interval:     3600 * time.Second,
 		StartupDelay: 10 * time.Minute,
 		Job:          admin.AuxLabelCleanupJob,
@@ -107,34 +110,50 @@ func StartRuntime() *Runtime {
 	}))
 
 	registry.Register("blocked_article_recovery", scheduler.New(scheduler.Config{
-		Name:     "Blocked Article Recovery",
-		Interval: 3600 * time.Second,
-		Job:      admin.BlockedArticleRecoveryJob,
+		Name:        "Blocked Article Recovery",
+		Description: "Recover articles stuck in blocked state",
+		Interval:    3600 * time.Second,
+		Job:         admin.BlockedArticleRecoveryJob,
 		Persistence: admin.NewTaskPersistence("blocked_article_recovery",
 			"恢复被阻塞的文章"),
 	}))
 
 	// Medium schedulers: with SchedulerTask DB persistence
-	registry.Register("preference_update", scheduler.New(scheduler.Config{
-		Name:     "Preference Update",
-		Interval: 1800 * time.Second,
-		Job:      admin.PreferenceUpdateJob,
-		Persistence: admin.NewTaskPersistence("preference_update",
-			"Update reading preferences from behavior data"),
+
+	// preference-vector-feed-discovery: 偏好向量画像重算（D1，零 LLM/embedding）。
+	registry.Register("preference_profile_update", scheduler.New(scheduler.Config{
+		Name:        "Preference Profile Update",
+		Description: "重算偏好向量画像（行为加权标签向量质心，按版块分桶）",
+		Interval:    3600 * time.Second,
+		Job:         admin.PreferenceProfileUpdateJob,
+		Persistence: admin.NewTaskPersistence("preference_profile_update",
+			"重算偏好向量画像"),
+	}))
+
+	// preference-vector-feed-discovery: RSSHub 路由目录同步（D2/D8，自建实例 /api/namespace）。
+	registry.Register("rsshub_catalog_sync", scheduler.New(scheduler.Config{
+		Name:        "RSSHub Catalog Sync",
+		Description: "同步 RSSHub 路由目录（自建实例 /api/namespace）",
+		Interval:    24 * time.Hour,
+		Job:         admin.RSSHubCatalogSyncJob,
+		Persistence: admin.NewTaskPersistence("rsshub_catalog_sync",
+			"同步 RSSHub 路由目录"),
 	}))
 
 	registry.Register("tag_quality_score", scheduler.New(scheduler.Config{
-		Name:     "Tag Quality Score",
-		Interval: 3600 * time.Second,
-		Job:      admin.TagQualityScoreJob,
+		Name:        "Tag Quality Score",
+		Description: "Recompute persistent quality scores for topic tags",
+		Interval:    3600 * time.Second,
+		Job:         scheduler.PauseAware(admin.TagQualityScoreJob),
 		Persistence: admin.NewTaskPersistence("tag_quality_score",
 			"Recompute persistent quality scores for topic tags"),
 	}))
 
 	registry.Register("auto_refresh", scheduler.New(scheduler.Config{
-		Name:     "Auto Refresh",
-		Interval: 60 * time.Second,
-		Job:      admin.AutoRefreshJob,
+		Name:        "Auto Refresh",
+		Description: "Auto-refresh RSS feeds",
+		Interval:    60 * time.Second,
+		Job:         admin.AutoRefreshJob,
 		Persistence: admin.NewTaskPersistence("auto_refresh",
 			"Auto-refresh RSS feeds"),
 	}))
@@ -142,9 +161,12 @@ func StartRuntime() *Runtime {
 	// Complex schedulers
 	content.InitContentCompletionHandler()
 	registry.Register("content_completion", scheduler.New(scheduler.Config{
-		Name:     "Content Completion",
-		Interval: 60 * time.Second,
-		Job:      admin.ContentCompletionJob(content.GetContentCompletionService()),
+		Name:        "Content Completion",
+		Description: "Complete article content and generate article summaries",
+		TaskName:    "ai_summary",
+		Aliases:     []string{"ai_summary"},
+		Interval:    60 * time.Second,
+		Job:         scheduler.PauseAware(admin.ContentCompletionJob(content.GetContentCompletionService())),
 		Persistence: admin.NewTaskPersistence("ai_summary",
 			"Complete article content and generate article summaries"),
 	}))
@@ -152,9 +174,10 @@ func StartRuntime() *Runtime {
 	// DailyReport: wrapped with TriggerNowWithDate support
 	dailyReportNextRunFn := scheduler.NextDailyReportTime
 	dailyReportBase := scheduler.New(scheduler.Config{
-		Name:    "Daily Report",
-		NextRun: dailyReportNextRunFn,
-		Job:     admin.DailyReportJob(), // uses current time at each execution
+		Name:        "Daily Report",
+		Description: "Generate daily reports for all active semantic boards",
+		NextRun:     dailyReportNextRunFn,
+		Job:         scheduler.PauseAware(admin.DailyReportJob()), // uses current time at each execution
 		Persistence: admin.NewTaskPersistenceWithNextRun("daily_report",
 			"Generate daily reports for all active semantic boards",
 			dailyReportNextRunFn),
@@ -162,16 +185,71 @@ func StartRuntime() *Runtime {
 	dailyReportWrapper := admin.NewDailyReportSchedulerWrapper(dailyReportBase)
 	registry.Register("daily_report", dailyReportWrapper)
 
+	// BoardUpgradeSuggest: daily discover_new generation + watch GC (design D4).
+	// Loosely coupled fixed-time trigger (default 06:30), not chained to the
+	// daily report. Manual trigger via POST /upgrade-suggestions/generate.
+	boardUpgradeNextRunFn := scheduler.NextBoardUpgradeSuggestTime
+	registry.Register("board_upgrade_suggest", scheduler.New(scheduler.Config{
+		Name:        "Board Upgrade Suggest",
+		Description: "每日生成版块升级建议 + 观察池 watch GC",
+		NextRun:     boardUpgradeNextRunFn,
+		Job:         scheduler.PauseAware(admin.BoardUpgradeSuggestJob()),
+		Persistence: admin.NewTaskPersistenceWithNextRun("board_upgrade_suggest",
+			"每日生成版块升级建议(discover_new)+观察池GC",
+			boardUpgradeNextRunFn),
+	}))
+
 	// Firecrawl: with custom status enricher
 	firecrawlQueue := content.NewFirecrawlJobQueue(database.DB)
 	registry.Register("firecrawl", scheduler.New(scheduler.Config{
 		Name:         "Firecrawl Crawler",
+		Description:  "Auto-crawl full content for articles",
 		Interval:     300 * time.Second,
 		StartupDelay: 0,
-		Job:          admin.FirecrawlJob(firecrawlQueue, "scheduled"),
+		Job:          scheduler.PauseAware(admin.FirecrawlJob(firecrawlQueue, "scheduled")),
 		StatusDetail: admin.FirecrawlStatusEnricher(),
 		Persistence: admin.NewTaskPersistence("firecrawl",
 			"自动爬取文章全文"),
+	}))
+
+	// ── Lifeline context schedulers (cycle A) ──────────────────────────────────
+	// The repository, cycle-A service, cycle-B orchestrator, and HTTP handler
+	// singleton are all wired by dataenrichment.Init in main.go (which runs
+	// BEFORE SetupRoutes). StartRuntime only registers the schedulers below.
+	lifelineSvc := dataenrichment.GetLifelineService()
+	lister := dataenrichment.GetTopicLister()
+
+	// Weekly lifeline: every Monday 03:00 Asia/Shanghai.
+	weeklyNextRun := dataenrichment.NextWeeklyLifelineTime
+	registry.Register("lifeline_weekly", scheduler.New(scheduler.Config{
+		Name:        "Lifeline Weekly Refresh",
+		Description: "每周一刷新所有活跃话题的周度新闻汇总（循环A，含历史回填）",
+		NextRun:     weeklyNextRun,
+		Job:         scheduler.PauseAware(dataenrichment.WeeklyLifelineJob(lifelineSvc, lister)),
+		Persistence: admin.NewTaskPersistenceWithNextRun("lifeline_weekly",
+			"每周一刷新所有活跃话题的周度新闻汇总上下文", weeklyNextRun),
+	}))
+
+	// Monthly lifeline: every 1st of month 03:30 Asia/Shanghai.
+	monthlyNextRun := dataenrichment.NextMonthlyLifelineTime
+	registry.Register("lifeline_monthly", scheduler.New(scheduler.Config{
+		Name:        "Lifeline Monthly Refresh",
+		Description: "每月1号刷新所有活跃话题的月度新闻汇总（循环A，含历史回填）",
+		NextRun:     monthlyNextRun,
+		Job:         scheduler.PauseAware(dataenrichment.MonthlyLifelineJob(lifelineSvc, lister)),
+		Persistence: admin.NewTaskPersistenceWithNextRun("lifeline_monthly",
+			"每月1号刷新所有活跃话题的月度新闻汇总上下文", monthlyNextRun),
+	}))
+
+	// Yearly lifeline: every Jan 1 04:00 Asia/Shanghai.
+	yearlyNextRun := dataenrichment.NextYearlyLifelineTime
+	registry.Register("lifeline_yearly", scheduler.New(scheduler.Config{
+		Name:        "Lifeline Yearly Refresh",
+		Description: "每年1月1号刷新所有活跃话题的年度新闻汇总（循环A，含历史回填）",
+		NextRun:     yearlyNextRun,
+		Job:         scheduler.PauseAware(dataenrichment.YearlyLifelineJob(lifelineSvc, lister)),
+		Persistence: admin.NewTaskPersistenceWithNextRun("lifeline_yearly",
+			"每年1月1号刷新所有活跃话题的年度新闻汇总上下文", yearlyNextRun),
 	}))
 
 	// Set global registry for handler access

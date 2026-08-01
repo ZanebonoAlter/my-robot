@@ -2,6 +2,35 @@
 
 基础地址：`http://localhost:5000/api`
 
+通用响应：成功为 `{"success": true, "data": ...}`（个别管理端点如 DELETE 仅返回 `{"success": true}`）；失败为 `{"success": false, "error": "..."}`。
+
+## 端点汇总
+
+| 方法 | 路径 | 说明 |
+| ------ | ------ | ------ |
+| POST | `/daily-reports/generate` | 手动触发日报生成（异步） |
+| GET | `/daily-reports/:id` | 查询单篇日报详情 |
+| GET | `/semantic-boards/:id/daily-reports` | 查询板块日报列表 |
+| GET | `/semantic-boards/:id/section-timeline` | 板块 section 时间线 |
+| GET | `/semantic-boards/:id/topics` | 列出板块全部持久话题（含归档/孤儿）+ section 计数 |
+| GET | `/semantic-boards/:id/topic-landscape` | 板块话题态势版图（持久话题 identity 轨只读聚合） |
+| GET | `/daily-reports/sections/:id/lifecycle` | section 连通分量生命周期 |
+| GET | `/daily-reports/topics/:id/lifeline` | 持久话题全量 section |
+| PATCH | `/daily-reports/topics/:id` | 更新话题标题/状态 |
+| DELETE | `/daily-reports/topics/:id` | 硬删话题（解绑 section） |
+| POST | `/daily-reports/topics/:id/merge` | 合并源话题到目标 |
+| POST | `/daily-reports/topics/:id/split` | 拆分 section 为新话题 |
+| POST | `/daily-reports/backfill-embeddings` | 回填 section 向量 |
+| POST | `/daily-reports/backfill-relations` | 回填话题关系 |
+| POST | `/daily-reports/backfill-topics` | 历史重建持久话题 |
+| GET | `/semantic-boards/:id/persistent-topics/compose-candidates` | 手动编排候选 section |
+| POST | `/semantic-boards/:id/persistent-topics/embed-query` | 自然语言向量化 |
+| POST | `/semantic-boards/:id/topic-watches` | 新建话题盯盘 |
+| GET | `/semantic-boards/:id/topic-watches` | 列出盯盘规则 |
+| PATCH | `/topic-watches/:id` | 更新盯盘 label/status |
+| DELETE | `/topic-watches/:id` | 删除盯盘规则 |
+| GET | `/daily-reports/:id/watch-hits` | 查询日报命中盯盘 |
+
 ## POST `/daily-reports/generate`
 
 手动异步触发日报生成。`board_id` 为空时生成所有当日有事件标签的板块。
@@ -83,11 +112,13 @@ Response `data`：
 
 ## PATCH `/daily-reports/topics/:id`
 
-更新话题标题或状态。candidate 只有在 `consecutive_hits >= persistent_topic_upgrade_threshold` 后才允许人工更新为 active；未达门禁返回 400。active 才进入独立持久话题泳道。
+更新话题标题或状态，`label` 与 `status` 均为可选，省略的字段保持不变。`status` 仅接受 `active` / `archived`：candidate 只有在 `hit_count >= persistent_topic_upgrade_threshold` 后才允许人工更新为 active，未达门禁返回 400；active 才进入独立持久话题泳道。
 
 ```json
-{ "status": "active" }
+{ "label": "美伊博弈", "status": "active" }
 ```
+
+Response `data`：更新后的持久话题对象（含 `id` / `label` / `status` / `hit_count` / `consecutive_hits` / `first_seen_date` / `last_seen_date` 等）。
 
 终态总会广播：
 
@@ -103,11 +134,144 @@ Response `data`：
 
 `daily_report_progress.status` 使用 `generating`、`completed`、`failed`。
 
+## DELETE `/daily-reports/topics/:id`
+
+硬删除一条持久话题，并把其名下 section 的 `persistent_topic_id` 置空（section 内容保留，仅解除归属）。操作不可逆；可逆路径是 PATCH `status=archived`。
+
+无需请求体。Response：
+
+```json
+{ "success": true }
+```
+
+## POST `/daily-reports/topics/:id/merge`
+
+把一组源话题的全部 section 归并到目标话题 `:id` 下，源话题被归档（不物理删除，保留审计痕迹）。源话题必须与目标同属一个 board 且不能等于目标；后端会重建 board 关系保证血统一致。
+
+Request：
+
+```json
+{ "source_topic_ids": [2, 3] }
+```
+
+- `source_topic_ids` 必填，源话题 id 列表；为空或全部等于目标时返回 400。
+
+Response `data`：合并后的目标话题对象（结构同 PATCH）。
+
+## POST `/daily-reports/topics/:id/split`
+
+从源话题 `:id` 切出一组 section，聚合新建一条话题；被切的 section 重新归属到新话题。
+
+Request：
+
+```json
+{ "section_ids": [10, 11], "label": "新拆出的话题" }
+```
+
+- `section_ids` 必填，要切出的 section id 列表。
+- `label` 新话题展示名。
+
+Response `data`：新建的话题对象（结构同 PATCH）。
+
+## GET `/semantic-boards/:id/topics`
+
+列出某板块下的全部持久话题（active / candidate / archived / 孤儿），并附带每个话题的 section 计数。与 `section-timeline` 不同，该接口不受时间窗限制，专门用于管理 UI 暴露 backfill 产生的异常话题；返回前会过滤掉 `hit_count < persistent_topic_upgrade_threshold` 的观测期 candidate。
+
+Response `data`：
+
+```json
+{
+  "topics": [
+    {
+      "id": 9,
+      "semantic_board_id": 7,
+      "label": "美伊谈判",
+      "description": "",
+      "status": "active",
+      "source": "auto",
+      "first_seen_date": "2026-06-01",
+      "last_seen_date": "2026-07-01",
+      "hit_count": 12,
+      "consecutive_hits": 5,
+      "created_at": "2026-06-01T...",
+      "updated_at": "2026-07-01T...",
+      "section_count": 8,
+      "color": "#60a5fa",
+      "can_activate": false
+    }
+  ]
+}
+```
+
+`color` 由话题 id 稳定哈希得到；`can_activate` 表示 candidate 是否已达激活门禁。
+
+## GET `/semantic-boards/:id/topic-landscape?days=30`
+
+板块话题态势版图：持久话题 identity 轨只读聚合，供「板块内容」tab 首屏态势总览（分区卡片墙 + mini-lifeline + 活力顶栏）。
+
+**参数：**
+
+- `id`：semantic_board_id。
+- `days`：lifeline 窗口天数，允许 `7 / 14 / 30 / 90`，缺省 30；非法值 clamp 到最近合法值（`days=0` 视为默认 30）。活跃判定窗口与 `days` 无关，固定 N=7 天（包级常量 `topicLandscapeActiveWindowDays`）。
+
+态势**全部基于 identity 轨字段派生**（`status` / `hit_count` / `consecutive_hits` / `last_seen_date` / `is_vacuum`），**禁用 similarity 轨五态**（匈牙利二分法 section 级配对，长跨度不可靠）。`stance` 枚举（主态势互斥，按序匹配第一个命中）：
+
+| stance | 图标 | 派生规则 |
+| ------ | ---- | -------- |
+| `emerging` | 🌱 | `status='candidate' AND 1 <= hit_count < upgrade_threshold` |
+| `pending` | 🔴 | `status='candidate' AND hit_count >= upgrade_threshold`（`can_activate=true`） |
+| `active` | 🟢 | `status='active' AND consecutive_hits > 0 AND days_since(last_seen_date) <= 7` |
+| `stalled` | ⏸️ | `status='active' AND (consecutive_hits = 0 OR days_since(last_seen_date) > 7)` |
+| `archived` | ⬛ | `status='archived'` |
+
+`is_vacuum=true` 为与主态势正交的叠加标记（🌀强吸引，附 `vacuum_strong` 数值），可叠加在活跃/停滞上。可见口径：保留 `hit_count>=1` 全部（含 emerging 新苗头），仅剔 `hit=0` 纯 orphan——与话题管理 UI 的 `FilterVisibleTopics` 口径故意不同。
+
+Response `data`：
+
+```json
+{
+  "topics": [
+    {
+      "id": 12,
+      "label": "芯片战",
+      "status": "active",
+      "source": "auto",
+      "stance": "active",
+      "is_vacuum": false,
+      "vacuum_strong": 0,
+      "hit_count": 47,
+      "consecutive_hits": 22,
+      "first_seen_date": "2026-05-01",
+      "last_seen_date": "2026-06-22",
+      "days_since_last": 0,
+      "can_activate": false,
+      "lifeline": [
+        { "date": "2026-06-01", "section_count": 2 },
+        { "date": "2026-06-02", "section_count": 0 }
+      ]
+    }
+  ],
+  "vitality": {
+    "days": 30,
+    "article_count": 142,
+    "section_count": 38,
+    "active_topic_count": 6,
+    "feed_active": null,
+    "trend": [3, 1, 2, 5, 7, 6, 4, 3]
+  }
+}
+```
+
+- `lifeline` 为近 N 日按天聚合（identity 轨），空日补 `section_count=0` 保证日期轴连续（`generate_series` LEFT JOIN）；`trend` 为近 N 日每日 section 数（活力顶栏缩略折线用）。
+- `topics=[]` 表示板块无任何持久话题（含未达 `upgrade_threshold` 的 observing candidate，对前端隐藏）；`vitality.trend=[]` 表示窗口内无日报。
+- `feed_active` MVP 可空（跨域 feed 查询，后续补）。
+
 ## GET `/semantic-boards/:id/daily-reports?days=7`
 
 查询板块日报列表。
 
 **参数：**
+
 - `days`：查询最近 N 天的日报。默认值为 7（当 `days` 未提供或 `days <= 0` 时）。对于任意正数 `days`，系统将按实际请求天数查询，不再静默截断到 30 天。
 
 Response `data`：
@@ -161,6 +325,7 @@ Response `data`：
           "consecutive_hits": 3,
           "can_activate": false
         },
+        "topic_status_at_report": "active",
         "threads": []
       }
     ]
@@ -169,11 +334,179 @@ Response `data`：
 ```
 
 当 section 已归属持久话题时，详情响应会附带轻量 `persistent_topic` 描述，供前端按
-`active` / `candidate` 状态分区。历史未归属 section 不返回该字段。
+`topic_status_at_report` 快照分区（`active` / `candidate` / `null`）。历史未归属 section 返回 `null`。
+
+## POST `/daily-reports/backfill-embeddings`
+
+异步回填缺少 embedding 的 section 向量（最长运行 30 分钟，进度写日志，不广播 WebSocket）。
+
+无需请求体。Response `data`：
+
+```json
+{ "status": "processing" }
+```
+
+## POST `/daily-reports/backfill-relations`
+
+异步重建 section 间关系。可选 query `?board_id=` 限定单个板块；不传则重建全部板块。
+
+Query：
+
+- `board_id` 可选，限定单个板块。
+
+Response `data`：
+
+```json
+{ "status": "processing" }
+```
+
+## POST `/daily-reports/backfill-topics`
+
+异步从历史未归属 section 重建持久话题。可选 query `?board_id=` 限定单个板块；不传则处理所有含未归属 section 的板块。
+
+Query：
+
+- `board_id` 可选，限定单个板块。
+
+Response `data`：
+
+```json
+{ "status": "processing" }
+```
+
+## GET `/semantic-boards/:id/persistent-topics/compose-candidates`
+
+为手动编排 UI（`POST /semantic-boards/:id/persistent-topics/manual`）加载候选 section（带可用向量）及配置的 `match_threshold`，前端据此实时计算聚合锚点与离群距离。
+
+Query：
+
+- `days` 可选，时间窗天数；不传或 `<=0` 取全部历史，`>90` 截断到 90。窗口以该板块最新 completed 日报为终点。
+
+Response `data`：
+
+```json
+{
+  "sections": [
+    {
+      "id": 101,
+      "report_id": 12,
+      "period_date": "2026-07-01T12:00:00Z",
+      "cluster_label": "...",
+      "embedding": [0.0123, -0.0456],
+      "persistent_topic_id": 9,
+      "topic_match_confidence": "anchor_hit",
+      "persistent_topic": { "id": 9, "label": "美伊谈判", "status": "active", "color": "#60a5fa" }
+    }
+  ],
+  "match_threshold": 0.6
+}
+```
+
+## POST `/semantic-boards/:id/persistent-topics/embed-query`
+
+把自然语言查询向量化，供编排 UI 按余弦相似度排序候选。使用与 section embedding 相同的全局模型（`CapabilityEmbedding`），因此 `:id` 仅为路由占位（与同树的 manual / compose-candidates 并列，不实际读取该板块）。
+
+Request：
+
+```json
+{ "query": "美伊博弈与油价联动" }
+```
+
+- `query` 必填，自然语言查询；空白返回 400。
+
+Response `data`：
+
+```json
+{ "embedding": [0.0123, -0.0456] }
+```
+
+## 话题盯盘（Topic Watches）
+
+话题盯盘是用户声明的单信号 AI 检测器：每期日报结束时按盯盘 label 检测命中的 section，命中记录为只读叠加层，**不改变**任何 section 的 `persistent_topic_id` 或话题状态。board 级路由参数用 `:id`（与同树 `/semantic-boards/:id/*` 共存所需），独立操作路由用 `/topic-watches/:id`。
+
+### POST `/semantic-boards/:id/topic-watches`
+
+为板块 `:id` 新建一条盯盘规则，默认 `status=active`。
+
+Request：
+
+```json
+{ "label": "盯盘：美伊停火" }
+```
+
+- `label` 必填，盯盘展示名；为空返回 400。
+
+Response `data`：
+
+```json
+{
+  "id": 1,
+  "semantic_board_id": 7,
+  "label": "盯盘：美伊停火",
+  "status": "active",
+  "created_at": "2026-07-01T...",
+  "updated_at": "2026-07-01T..."
+}
+```
+
+### GET `/semantic-boards/:id/topic-watches`
+
+列出板块 `:id` 的全部盯盘规则（含 paused）。Response `data` 直接为盯盘对象数组：
+
+```json
+[
+  { "id": 1, "semantic_board_id": 7, "label": "盯盘：美伊停火", "status": "active", "created_at": "...", "updated_at": "..." }
+]
+```
+
+### PATCH `/topic-watches/:id`
+
+更新盯盘 `label` 和/或 `status`，二者皆可选，省略则不变。`status` 仅接受 `active` / `paused`，其余值返回 400。
+
+Request：
+
+```json
+{ "label": "盯盘：美伊停火（暂停）", "status": "paused" }
+```
+
+Response `data`：更新后的盯盘对象（结构同 POST）。
+
+### DELETE `/topic-watches/:id`
+
+删除盯盘规则，关联命中记录随外键级联删除。Response：
+
+```json
+{ "success": true, "message": "deleted" }
+```
+
+### GET `/daily-reports/:id/watch-hits`
+
+查询某篇日报命中盯盘的情况（`:id` 为日报 id）。Response `data` 直接为命中记录数组：
+
+```json
+[
+  {
+    "id": 5,
+    "watch_id": 1,
+    "section_id": 101,
+    "report_id": 12,
+    "period_date": "2026-07-01",
+    "reason": "...",
+    "created_at": "2026-07-01T..."
+  }
+]
+```
+
+每条记录由 `(watch_id, section_id, report_id)` 唯一索引去重。
 
 ## 前端消费约定
 
-日报阅读层不新增 API：列表和详情分别消费 `GET /semantic-boards/:id/daily-reports` 与 `GET /daily-reports/:id`，并以 `persistent_topic.status` 建立 active / candidate / unassigned 质量分区。masthead 顶部使用板块标题，日报 `title` / `summary` 映射为头条；highlights 最多展示三项。
+日报阅读层不新增 API：列表和详情分别消费 `GET /semantic-boards/:id/daily-reports` 与 `GET /daily-reports/:id`，按 `topic_status_at_report` 快照分区：
+
+- `"active"` → "关心的话题"
+- `"candidate"` / `null`（含旧数据缺失）→ "其他动态"
+
+前端不再读取 `persistent_topic.status` 做历史日报分区，避免 topic 后续状态变化改变历史归位。masthead 顶部使用板块标题，日报 `title` / `summary` 映射为头条；highlights 最多展示三项。
 
 active 话题展开时按 `persistent_topic.id` 懒加载 `GET /daily-reports/topics/:id/lifeline`。前端只截取当前日报向前七个自然日，同日多个 section 聚合为一个带数量角标的节点；连线只消费 `relation_type=identity`，`similarity` 不进入 mini 泳道。节点点击按 `report_id` 复用日报详情缓存，在时间线模块内原位展示当日 section/thread。
 

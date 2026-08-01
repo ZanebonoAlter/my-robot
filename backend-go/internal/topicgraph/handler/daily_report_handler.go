@@ -6,13 +6,14 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 
 	"syntopica-backend/internal/models"
-	"syntopica-backend/internal/platform/database"
+	"syntopica-backend/internal/platform/airouter"
 	"syntopica-backend/internal/platform/logging"
 	"syntopica-backend/internal/platform/ws"
 	"syntopica-backend/internal/topicgraph/repository"
@@ -36,6 +37,10 @@ func RegisterDailyReportRoutes(api *gin.RouterGroup) {
 	// GET /api/semantic-boards/:id/topics — every topic on a board (incl. archived
 	// and orphans) with section counts, for the management UI.
 	api.GET("/semantic-boards/:id/topics", listBoardTopics)
+
+	// GET /api/semantic-boards/:id/topic-landscape — topic stance overview
+	// (identity-track derived) + mini-lifeline + board vitality. Read-only.
+	api.GET("/semantic-boards/:id/topic-landscape", getBoardTopicLandscape)
 
 	// GET /api/daily-reports/sections/:id/lifecycle
 	api.GET("/daily-reports/sections/:id/lifecycle", getSectionLifecycle)
@@ -63,6 +68,22 @@ func RegisterDailyReportRoutes(api *gin.RouterGroup) {
 	// POST /api/daily-reports/backfill-topics — reconstruct persistent topics
 	// from historical sections. Optional ?board_id scopes to one board.
 	api.POST("/daily-reports/backfill-topics", triggerBackfillTopics)
+
+	// POST /api/semantic-boards/:id/persistent-topics/manual
+	// Create a manual persistent topic (user-curated lane) from selected sections.
+	api.POST("/semantic-boards/:id/persistent-topics/manual", createManualTopic)
+
+	// GET /api/semantic-boards/:id/persistent-topics/compose-candidates
+	// Load the candidate sections (with embeddings) for the manual-compose UI.
+	api.GET("/semantic-boards/:id/persistent-topics/compose-candidates", composeCandidates)
+
+	// POST /api/semantic-boards/:id/persistent-topics/embed-query
+	// Embed a natural-language query so the compose UI can rank candidates by
+	// cosine similarity. Uses the same global model as section embeddings.
+	api.POST("/semantic-boards/:id/persistent-topics/embed-query", embedQuery)
+
+	// Topic watch routes
+	RegisterTopicWatchRoutes(api)
 }
 
 // triggerGenerateDailyReport handles POST /api/daily-reports/generate
@@ -114,22 +135,15 @@ func generateSingleBoard(boardID uint, date time.Time, jobID string) {
 	boardName := dailyReportBoardName(boardID)
 	broadcastProgress(jobID, "generating", boardID, boardName, 0, "0/1")
 
-	report, sections, threadBatches, err := service.GenerateDailyReport(ctx, boardID, date)
+	report, err := service.GenerateAndSaveReport(ctx, boardID, date)
 	if err != nil {
-		logging.Errorf("daily-report: generate failed for board %d: %v", boardID, err)
+		logging.Errorf("daily-report: generate/save failed for board %d: %v", boardID, err)
 		broadcastProgress(jobID, "failed", boardID, boardName, 0, "1/1")
 		broadcastDone(jobID, 0, 1)
 		return
 	}
 	if report == nil {
 		broadcastProgress(jobID, "completed", boardID, boardName, 0, "1/1")
-		broadcastDone(jobID, 0, 1)
-		return
-	}
-
-	if err := repository.Repo.SaveReport(report, sections, threadBatches); err != nil {
-		logging.Errorf("daily-report: save failed for board %d: %v", boardID, err)
-		broadcastProgress(jobID, "failed", boardID, boardName, 0, "1/1")
 		broadcastDone(jobID, 0, 1)
 		return
 	}
@@ -161,20 +175,14 @@ func generateAllBoards(date time.Time, jobID string) {
 		boardName := dailyReportBoardName(boardID)
 		broadcastProgress(jobID, "generating", boardID, boardName, savedCount, fmt.Sprintf("%d/%d", idx, totalBoards))
 
-		report, sections, threadBatches, genErr := service.GenerateDailyReport(ctx, boardID, date)
+		report, genErr := service.GenerateAndSaveReport(ctx, boardID, date)
 		if genErr != nil {
-			logging.Warnf("daily-report: generate failed for board %d: %v", boardID, genErr)
+			logging.Warnf("daily-report: generate/save failed for board %d: %v", boardID, genErr)
 			broadcastProgress(jobID, "failed", boardID, boardName, savedCount, fmt.Sprintf("%d/%d", idx+1, totalBoards))
 			continue
 		}
 		if report == nil {
 			broadcastProgress(jobID, "completed", boardID, boardName, savedCount, fmt.Sprintf("%d/%d", idx+1, totalBoards))
-			continue
-		}
-
-		if saveErr := repository.Repo.SaveReport(report, sections, threadBatches); saveErr != nil {
-			logging.Warnf("daily-report: save failed for board %d: %v", boardID, saveErr)
-			broadcastProgress(jobID, "failed", boardID, boardName, savedCount, fmt.Sprintf("%d/%d", idx+1, totalBoards))
 			continue
 		}
 		savedCount++
@@ -235,7 +243,14 @@ func getBoardSectionTimeline(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "invalid board id"})
 		return
 	}
-	days, _ := strconv.Atoi(c.DefaultQuery("days", "14"))
+	// days 缺省或 <=0 → 全部历史；显式传 7/14/30 则按天窗口。
+	daysStr := c.Query("days")
+	days := 0
+	if daysStr != "" {
+		if d, err := strconv.Atoi(daysStr); err == nil {
+			days = d
+		}
+	}
 
 	resp, err := repository.Repo.GetBoardSectionTimeline(uint(boardID), days)
 	if err != nil {
@@ -274,25 +289,15 @@ func listBoardTopics(c *gin.Context) {
 		return
 	}
 	// Aggregate section counts per topic in one query (left-joined topics show 0).
-	type countRow struct {
-		PersistentTopicID uint
-		N                 int
-	}
-	var counts []countRow
-	if err := database.DB.Table("daily_report_sections").
-		Select("persistent_topic_id, count(*) AS n").
-		Where("persistent_topic_id IS NOT NULL").
-		Group("persistent_topic_id").
-		Scan(&counts).Error; err != nil {
+	countMap, err := repository.Repo.CountSectionsByTopic()
+	if err != nil {
 		logging.Errorf("list board topics: count sections: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "failed to count sections"})
 		return
 	}
-	countMap := make(map[uint]int, len(counts))
-	for _, cr := range counts {
-		countMap[cr.PersistentTopicID] = cr.N
-	}
-	upgradeThreshold := repository.LoadPersistentTopicConfig(database.DB).UpgradeThreshold
+	upgradeThreshold := repository.LoadPersistentTopicConfig(repository.Repo.DB()).UpgradeThreshold
+	// Filter out observing candidates (hit_count < upgrade_threshold).
+	topics = repository.FilterVisibleTopics(topics, upgradeThreshold)
 	type topicListItem struct {
 		repository.BoardPersistentTopic
 		SectionCount int    `json:"section_count"`
@@ -305,10 +310,31 @@ func listBoardTopics(c *gin.Context) {
 			BoardPersistentTopic: t,
 			SectionCount:         countMap[t.ID],
 			Color:                repository.PersistentTopicColor(t.ID),
-			CanActivate:          t.Status == repository.TopicStatusCandidate && t.ConsecutiveHits >= upgradeThreshold,
+			CanActivate:          t.Status == repository.TopicStatusCandidate && t.HitCount >= upgradeThreshold,
 		})
 	}
 	c.JSON(http.StatusOK, gin.H{"success": true, "data": gin.H{"topics": items}})
+}
+
+// getBoardTopicLandscape handles GET /api/semantic-boards/:id/topic-landscape.
+// Returns the topic-landscape view: per-topic stance (derived from the
+// identity track) + mini-lifeline + board vitality. Read-only — it neither
+// reads nor writes the similarity track (daily_report_section_relations /
+// matching / assignment). ?days= is clamped to {7,14,30,90} (default 30).
+func getBoardTopicLandscape(c *gin.Context) {
+	boardID, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "invalid board id"})
+		return
+	}
+	days := repository.ClampTopicLandscapeDays(c.Query("days"))
+	resp, err := repository.Repo.GetBoardTopicLandscape(uint(boardID), days)
+	if err != nil {
+		logging.Errorf("get board topic landscape: board=%d: %v", boardID, err)
+		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "failed to get topic landscape"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": resp})
 }
 
 // getSectionLifecycle handles GET /api/daily-reports/sections/:id/lifecycle
@@ -617,4 +643,130 @@ func dailyReportBoardName(boardID uint) string {
 
 func timeoutCtx(d time.Duration) (context.Context, context.CancelFunc) {
 	return context.WithTimeout(context.Background(), d)
+}
+
+// createManualTopic handles POST /api/semantic-boards/:id/persistent-topics/manual.
+// Body: {"label": "...", "section_ids": [1,2,3]}
+// Creates a new persistent topic with source=manual from the selected sections'
+// mean embedding, then reassigns those sections to the new topic.
+func createManualTopic(c *gin.Context) {
+	boardID, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "invalid board id"})
+		return
+	}
+
+	var req struct {
+		Label      string `json:"label"`
+		SectionIDs []uint `json:"section_ids"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "invalid body"})
+		return
+	}
+	if req.Label == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "label is required"})
+		return
+	}
+
+	topic, skipped, err := repository.Repo.CreateManualTopic(uint(boardID), req.Label, req.SectionIDs)
+	if err != nil {
+		logging.Errorf("create manual topic: board=%d label=%q: %v", boardID, req.Label, err)
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": err.Error()})
+		return
+	}
+
+	resp := gin.H{
+		"success": true,
+		"data": gin.H{
+			"topic":   topic,
+			"skipped": skipped,
+		},
+	}
+	if len(skipped) > 0 {
+		resp["message"] = fmt.Sprintf("%d 条 section 因无向量被跳过", len(skipped))
+	}
+	c.JSON(http.StatusOK, resp)
+}
+
+// composeCandidates handles GET
+// /api/semantic-boards/:id/persistent-topics/compose-candidates?days=N.
+// Returns the in-window sections that carry a usable embedding (parsed to a
+// float slice) plus the configured match_threshold, so the compose UI can
+// compute aggregate anchors / outlier distances client-side in real time.
+func composeCandidates(c *gin.Context) {
+	boardID, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "invalid board id"})
+		return
+	}
+	days := 0
+	if daysStr := c.Query("days"); daysStr != "" {
+		if d, err := strconv.Atoi(daysStr); err == nil {
+			days = d
+		}
+	}
+	resp, err := repository.Repo.GetComposeCandidates(uint(boardID), days)
+	if err != nil {
+		logging.Errorf("compose candidates: board=%d: %v", boardID, err)
+		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "failed to load compose candidates"})
+		return
+	}
+	if resp.Sections == nil {
+		resp.Sections = []repository.ComposeCandidateSection{}
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": resp})
+}
+
+// embedText encodes a natural-language query with the global CapabilityEmbedding
+// model — the same model used for section embeddings, so cosine similarity
+// between a query vector and candidate embeddings is meaningful. Package-level
+// variable so tests can inject a mock (real model calls can't run in unit tests);
+// mirrors the embedFunc injection pattern in daily_report_thread_fit.go.
+var embedText = func(ctx context.Context, query string) ([]float64, error) {
+	result, err := airouter.NewRouter().Embed(ctx, airouter.EmbeddingRequest{
+		Input:     []string{query},
+		Operation: "section.embedding",
+	}, airouter.CapabilityEmbedding)
+	if err != nil {
+		return nil, fmt.Errorf("embed query: %w", err)
+	}
+	if len(result.Embeddings) == 0 {
+		return nil, fmt.Errorf("embed query: empty result")
+	}
+	return result.Embeddings[0], nil
+}
+
+// embedQuery handles POST
+// /api/semantic-boards/:id/persistent-topics/embed-query.
+// Body: {"query": "..."} → {"embedding": [...]}
+//
+// Powers the compose-UI candidate search: the frontend embeds the user's
+// natural-language query here, then ranks candidate sections by cosine
+// similarity to this vector (and, once candidates are selected, by similarity
+// to the selected set's aggregate anchor). The embedding model is global
+// (CapabilityEmbedding), so :id is a route placeholder only — it keeps the
+// endpoint grouped with the compose-candidates/manual siblings in the route tree.
+func embedQuery(c *gin.Context) {
+	var req struct {
+		Query string `json:"query"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "invalid body"})
+		return
+	}
+	if strings.TrimSpace(req.Query) == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "query is required"})
+		return
+	}
+
+	ctx, cancel := timeoutCtx(30 * time.Second)
+	defer cancel()
+	vec, err := embedText(ctx, req.Query)
+	if err != nil {
+		logging.Errorf("embed query: board=%s query=%q: %v", c.Param("id"), req.Query, err)
+		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "failed to embed query"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": gin.H{"embedding": vec}})
 }

@@ -198,7 +198,7 @@ function getIntervalColor(minutes: number): string {
                   {{ formatMaxArticles(feed.maxArticles ?? 100) }}
                 </span>
                 <span class="text-gray-500">
-                  <Icon icon="mdi:article" width="12" height="12" class="inline-block mr-1" />
+                  <Icon icon="mdi:file-document" width="12" height="12" class="inline-block mr-1" />
                   {{ feed.articleCount }} 篇
                 </span>
               </div>

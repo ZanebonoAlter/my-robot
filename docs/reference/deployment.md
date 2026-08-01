@@ -151,6 +151,21 @@ BACKEND_PORT=5000
 
 AI 相关设置（LLM 凭证、Firecrawl、Digest 导出）通过 Web UI 配置并存储在数据库中 — 不通过环境变量设置。详见 [配置指南](configuration.md#数据库存储的设置ai-功能)。
 
+### 破坏性迁移开关
+
+部分历史版本迁移会 `TRUNCATE` 业务表以清理与旧 schema 不兼容的数据（如 `20260706_0001`、`20260712_0001`、`20260718_0001`）。这些迁移由 `MIGRATIONS_ALLOW_DESTRUCTIVE` 环境变量控制：
+
+| 环境 | 是否设置 `MIGRATIONS_ALLOW_DESTRUCTIVE=1` | 行为 |
+|---|---|---|
+| **生产** | ❌ **绝不设置** | 破坏性迁移自动跳过（仅打 WARN 日志），业务数据保留，迁移版本仍标记为已应用。这是安全默认。 |
+| **dev / 本地开发** | ✅ 建议设置 | 历史清理迁移正常执行，dev 库等价于「全量生产迁移 + 历史数据清理」。 |
+
+> **为什么默认拒绝**：破坏性迁移一旦执行不可逆（TRUNCATE 清空全表）。生产环境若误设此变量，启动时即清空 `topic_lifeline_context`/`topic_enrichment_result` 等表数据。dev/测试库常重建，清理历史数据无成本，故建议 dev 设、生产不设。
+
+> **测试环境**：testcontainer 集成测试路径（`testutil.runTestMigrations`）自动 `t.Setenv("MIGRATIONS_ALLOW_DESTRUCTIVE","1")`，无需手动设置，维持「测试库跑全量生产迁移」不变量。
+
+完整环境变量说明见 [配置指南](configuration.md#环境变量)。
+
 ### 代理设置（中国 / 受限网络）
 
 两个 Dockerfile 接受构建参数代理用于依赖下载：

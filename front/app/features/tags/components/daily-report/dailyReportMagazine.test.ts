@@ -4,11 +4,18 @@ import {
   buildLifelineWindow,
   buildQualityZones,
   createRequestCache,
+  groupSectionsByTopic,
   selectLeadStory,
 } from './dailyReportMagazine'
 import type { DailyReport, DailyReportSection, SectionRelation, SectionTimelineNode } from '~/api/dailyReports'
 
-function section(id: number, tier: number, score: number, status?: string): DailyReportSection {
+function section(
+  id: number,
+  tier: number,
+  score: number,
+  status?: string,
+  topicStatusAtReport?: string | null,
+): DailyReportSection {
   return {
     id,
     cluster_index: id,
@@ -18,7 +25,7 @@ function section(id: number, tier: number, score: number, status?: string): Dail
     article_count: 1,
     best_tier: tier,
     avg_score: score,
-    persistent_topic_id: status ? id : undefined,
+    persistent_topic_id: status || topicStatusAtReport != null ? id : undefined,
     persistent_topic: status ? {
       id,
       label: `topic-${id}`,
@@ -27,20 +34,75 @@ function section(id: number, tier: number, score: number, status?: string): Dail
       consecutive_hits: 1,
       can_activate: false,
     } : undefined,
+    topic_status_at_report: topicStatusAtReport,
   }
 }
 
 describe('dailyReportMagazine data mapping', () => {
-  it('sorts sections inside active, candidate, and unassigned zones', () => {
+  it('sorts sections inside active and briefs zones by snapshot', () => {
     const zones = buildQualityZones([
-      section(1, 2, 0.5, 'active'),
-      section(2, 0, 0.9, 'candidate'),
-      section(3, 1, 0.7, 'active'),
-      section(4, 3, 0.1),
+      section(1, 2, 0.5, 'active', 'active'),
+      section(2, 0, 0.9, 'candidate', 'candidate'),
+      section(3, 1, 0.7, 'active', 'active'),
+      section(4, 3, 0.1, undefined, null),
     ])
 
-    expect(zones.map(zone => zone.key)).toEqual(['active', 'candidate', 'unassigned'])
+    expect(zones.map(zone => zone.key)).toEqual(['active', 'briefs'])
     expect(zones[0]?.sections.map(item => item.id)).toEqual([3, 1])
+  })
+
+  it('puts snapshot=active into "关心的话题"', () => {
+    const zones = buildQualityZones([section(1, 0, 0.9, 'active', 'active')])
+    expect(zones).toHaveLength(1)
+    expect(zones[0]!.key).toBe('active')
+    expect(zones[0]!.label).toBe('关心的话题')
+  })
+
+  it('puts snapshot=candidate into "其他动态" (briefs)', () => {
+    const zones = buildQualityZones([section(1, 0, 0.9, 'candidate', 'candidate')])
+    expect(zones).toHaveLength(1)
+    expect(zones[0]!.key).toBe('briefs')
+    expect(zones[0]!.label).toBe('其他动态')
+  })
+
+  it('puts snapshot=null into "其他动态"', () => {
+    const zones = buildQualityZones([section(1, 0, 0.9, 'active', null)])
+    expect(zones).toHaveLength(1)
+    expect(zones[0]!.key).toBe('briefs')
+  })
+
+  it('puts missing snapshot (undefined) into "其他动态"', () => {
+    const zones = buildQualityZones([section(1, 0, 0.9, 'active')])
+    expect(zones).toHaveLength(1)
+    expect(zones[0]!.key).toBe('briefs')
+  })
+
+  it('does not give candidates sorting bonus — briefs zone sorted only by (tier, score)', () => {
+    const zones = buildQualityZones([
+      section(1, 1, 0.3, 'candidate', 'candidate'),
+      section(2, 1, 0.7, 'active', 'active'),
+      section(3, 1, 0.5, 'active', 'candidate'),
+    ])
+    const briefs = zones.find(z => z.key === 'briefs')!
+    // Both sections in briefs sorted by tier ASC, score DESC; candidate gets no bonus.
+    expect(briefs.sections.map(s => s.id)).toEqual([3, 1])
+  })
+
+  it('uses snapshot, not current topic.status, for zoning (immutable)', () => {
+    // section was active at report time; topic later archived
+    const zones = buildQualityZones([section(1, 0, 0.9, 'archived', 'active')])
+    expect(zones[0]!.key).toBe('active')
+    expect(zones[0]!.label).toBe('关心的话题')
+  })
+
+  it('no longer renders three zones or "突发的新话题" label', () => {
+    const zones = buildQualityZones([
+      section(1, 0, 0.9, 'active', 'active'),
+      section(2, 1, 0.5, 'candidate', 'candidate'),
+      section(3, 2, 0.3),
+    ])
+    expect(zones.map(z => z.key)).toEqual(['active', 'briefs'])
+    expect(zones.flatMap(z => z.sections.map(s => s.id))).toEqual(expect.arrayContaining([1, 2, 3]))
   })
 
   it('uses the first highlight, then falls back to the best section', () => {
@@ -105,6 +167,64 @@ describe('dailyReportMagazine data mapping', () => {
 
   it('uses the shared cubic bezier geometry', () => {
     expect(buildBezierPath(10, 20, 110, 60)).toBe('M10,20 C60,20 60,60 110,60')
+  })
+})
+
+describe('groupSectionsByTopic — 双轨命名（当天组名 + 规范名）', () => {
+  // 复用 section() 工厂：有 persistent_topic 时 id 传作 topicId，label=`topic-${id}`。
+  function zone(sections: DailyReportSection[]) {
+    return { key: 'active' as const, label: '关心的话题', eyebrow: 'Following', sections }
+  }
+
+  it('命中已有话题：label 用当天 cluster_label，canonicalLabel 用 persistent_topic.label', () => {
+    // section() 传 status='active' 时会带上 persistent_topic(id=id, label=`topic-${id}`)。
+    const sec = section(7, 0, 0.9, 'active', 'active')
+    sec.cluster_label = '当日组名'
+    const groups = groupSectionsByTopic(zone([sec]))
+
+    expect(groups).toHaveLength(1)
+    expect(groups[0]!.label).toBe('当日组名')
+    expect(groups[0]!.canonicalLabel).toBe('topic-7')
+    expect(groups[0]!.topicId).toBe(7)
+  })
+
+  it('无 persistent_topic：canonicalLabel 为 undefined，label 回退 cluster_label', () => {
+    const sec = section(7, 0, 0.9) // 不传 status / topicStatusAtReport → 无 persistent_topic
+    sec.cluster_label = '孤儿组名'
+    const groups = groupSectionsByTopic(zone([sec]))
+
+    expect(groups).toHaveLength(1)
+    expect(groups[0]!.label).toBe('孤儿组名')
+    expect(groups[0]!.canonicalLabel).toBeUndefined()
+    expect(groups[0]!.topicId).toBeUndefined()
+  })
+
+  it('同一 topic 的多个 section 合并为一个 group，计数累加', () => {
+    const a = section(7, 0, 0.9, 'active', 'active')
+    a.cluster_label = '组名A'
+    a.article_count = 3
+    a.threads = [{ id: 1, title: 't1', summary: '', tag_ids: [], confidence: 0, related_article_ids: [] } as never]
+    const b = section(7, 1, 0.5, 'active', 'active')
+    b.cluster_label = '组名B'
+    b.article_count = 2
+    b.threads = [{ id: 2, title: 't2', summary: '', tag_ids: [], confidence: 0, related_article_ids: [] } as never]
+    const groups = groupSectionsByTopic(zone([a, b]))
+
+    expect(groups).toHaveLength(1)
+    expect(groups[0]!.sections).toHaveLength(2)
+    // label/canonicalLabel 取组内首个 section 的值（现有聚合规则）。
+    expect(groups[0]!.label).toBe('组名A')
+    expect(groups[0]!.canonicalLabel).toBe('topic-7')
+    expect(groups[0]!.articleCount).toBe(5)
+    expect(groups[0]!.threadCount).toBe(2)
+  })
+
+  it('不同 topic 分别成组，按出现顺序排列', () => {
+    const groups = groupSectionsByTopic(zone([
+      section(7, 0, 0.9, 'active', 'active'),
+      section(8, 0, 0.8, 'active', 'active'),
+    ]))
+    expect(groups.map(g => g.topicId)).toEqual([7, 8])
   })
 })
 

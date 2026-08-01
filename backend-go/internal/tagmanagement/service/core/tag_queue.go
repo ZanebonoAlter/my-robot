@@ -11,6 +11,7 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/baggage"
 	"syntopica-backend/internal/models"
+	"syntopica-backend/internal/platform/analysispause"
 	"syntopica-backend/internal/platform/logging"
 	"syntopica-backend/internal/platform/tracing"
 	"syntopica-backend/internal/platform/ws"
@@ -185,6 +186,14 @@ func (q *TagQueue) worker() {
 			q.drainRemaining()
 			return
 		case <-ticker.C:
+			if analysispause.IsPaused() {
+				select {
+				case <-q.stopChan:
+					return
+				case <-time.After(q.pollInterval):
+				}
+				continue
+			}
 			q.processAvailableJobs()
 		}
 	}

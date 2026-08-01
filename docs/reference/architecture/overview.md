@@ -10,7 +10,7 @@ Syntopica 是一个个人部署的 RSS 阅读器，采用前后端分离的单�
 ## 技术栈
 
 | 层级 | 技术 | 说明 |
-|------|------|------|
+| ------ | ------ | ------ |
 | 前端 | Nuxt 4 + Vue 3 + TypeScript + Pinia + Tailwind CSS v4 | SSR/SPA 混合，Composition API |
 | 后端 | Go + Gin + GORM + PostgreSQL + pgvector | 单二进制 HTTP 服务 |
 | AI | OpenAI 兼容 API（通过 airouter 多 provider 路由） | 摘要、内容补全、主题分析 |
@@ -62,6 +62,7 @@ Feed 管理（`backend-go/internal/reader/`）和文章管理构成系统的基�
 - `topicgraph`（主题图谱域）：每日报告生成
 
 此外，`tagmanagement` 还承担了以下高级能力：
+
 - Tag embedding 向量化与自动合并（源 DELETE，不再使用 status='merged'）
 - Event 标签多行 embedding（semantic title + event_keyword 关键词行）
 - SemanticBoard 匹配与升级建议
@@ -71,11 +72,20 @@ Feed 管理（`backend-go/internal/reader/`）和文章管理构成系统的基�
 - 7 Phase 层级清理（僵尸 Tag → 低质量 → 空 Node → 同 Level 去重 → Template 校验 → Sector 健康 → 聚类信号）
 
 `tagmanagement/service/watched` 负责：
+
 - 关注标签（watched tags）管理
 
 ### 4. 叙事摘要
 
-叙事摘要子系统（`backend-go/internal/topicgraph/`），基于活跃主题标签生成每日叙事摘要。由 `daily_report` 调度器定时触发，支持按日期查询、历史版本回溯。前端通过 `/api/narratives` 接口读取。
+叙事摘要（narrative）生成管线已废弃——生成能力并入 `daily_report` 日报（见 `flow/daily-report.md`）。`narrative_summaries`/`narrative_boards` 两张表仅保留只读历史数据，前端经 `/api/semantic-boards/:id/narratives`（`getBoardNarratives`）访问。原 `/api/narratives/*` 路由已全部移除。
+
+### 4.5 话题总览工作台
+
+话题总览工作台（`front/app/features/tags/components/BoardThreadBrowser.vue`）是叙事摘要的前端编排入口，把持久话题（persistent topic）从纯算法产物升级为用户可干预的编排对象。工作台占满 content：顶部工具条（时间范围选择器 / 视图模式切换 / 回刷归属 / 合并 / 新建泳道）+ 主体 lanes 总览（话题标签列 + 时间网格），泳道 hover 出操作菜单（重命名 / 归档 / 删除）。原 `TopicManageDialog.vue` 弹窗能力（回刷 / 重命名 / 归档 / 合并）已并入工具条与 hover 菜单，弹窗弃用。
+
+视图模式四态：`timeline`（匈牙利相似度 DAG，默认）、`lanes`（按话题分泳道，identity 驱动）、`focus`（单话题专注）、`compose`（手动建泳道编排态，预览 + 候选池 + 体检报告）。
+
+手动建泳道是用户即时操作（独立 API + 事务，不在 `SaveReport` 日报生成流程内）。后端 `topicgraph/repository.CreateManualTopic` 在单事务内：聚合选中 section 的 embedding（mean pooling 纯向量，不走 AI）→ `CreateTopic(status=active, source=manual)` 绕过 candidate 门禁 → 批量 `UpdateSectionTopicAssignment(confidence=manual)` 覆盖单值归属 → `RebuildBoardRelations` 幂等重建该 board 全部关系（含 identity 边）。任一步失败整事务回滚。建好的 active topic 在下一期日报被 `ListAnchorableTopicsByBoard` 纳入 AND-gate，与算法生成的 active topic 一视同仁。`board_persistent_topics.source` 区分 `auto`（算法）/ `manual`（人工），`daily_report_sections.topic_match_confidence` 第四态 `manual` 标记人工归属（不套用算法三态样式）。
 
 ### 5. 阅读偏好
 
@@ -87,32 +97,13 @@ OpenTelemetry 集成（`backend-go/internal/platform/tracing/`），HTTP 请求�
 
 ## 数据流
 
-系统主数据流按以下路径运行：
+> 业务链路的详细设计已迁至 [`flow/`](../flow/README.md)（按大功能切分，配 mermaid）。本节只给定位。
 
-```text
-RSS 源
-  → 后端定时/手动拉取解析
-  → PostgreSQL 持久化（feeds + articles）
-  → [可选] Firecrawl 全文抓取 → 内容补全生成 AI 整理稿
-  → [可选] 主题标签提取 → 主题分析 → 图谱构建
-  → [可选] 主题标签 embedding 向量化 → 自动合并相似标签 → 叙事摘要生成
-  → Event 标签延迟 embedding: 描述+关键词生成后入队 → 多行 embedding (semantic + event_keyword)
-  → 概念 bootstrap: 连通分量聚类 → 最小簇过滤 → LLM 命名概念
-  → 前端 REST API 拉取 / WebSocket 推送
-  → Pinia store 映射为 camelCase 前端模型
-  → feature 组件消费渲染
-```
+主数据流：RSS 源 → 后端拉取/解析 → PostgreSQL 持久化 → 可选（Firecrawl 全文抓取 / 内容补全 / AI 总结 / Digest 聚合 / 标签向量化 / 叙事生成）→ 前端 REST API + WebSocket → Pinia store 映射 → feature 组件渲染。
 
-前端内部数据流：
+前端内部：`pages`（路由入口）→ `features/*/components`（业务壳）→ `app/api/*`（唯一 HTTP 边界）→ `stores/api.ts`（主数据源 `useApiStore`）→ `stores/feeds.ts` + `stores/articles.ts`（派生视图）→ 组件渲染。
 
-```text
-pages（路由入口）
-  → features/*/components（业务壳）
-  → app/api/*（唯一 HTTP 边界）
-  → stores/api.ts（主数据源 useApiStore）
-  → stores/feeds.ts + stores/articles.ts（派生视图）
-  → 组件渲染
-```
+逐条链路的代码级追读见 [`map.md`](map.md) 与各 `flow/<大功能>.md`。
 
 ## 目录结构
 
@@ -179,7 +170,7 @@ my-robot/
 ## 后台调度器一览
 
 | 调度器 | 间隔 | 职责 |
-|--------|------|------|
+| -------- | ------ | ------ |
 | AutoRefresh | 60 秒 | 扫描到点 feed 并触发 RSS 刷新 |
 | Firecrawl | 300 秒 | 抓取待处理文章完整正文 |
 | ContentCompletion | 60 秒 | 基于 Firecrawl 正文生成 AI 整理稿 |
@@ -195,7 +186,7 @@ my-robot/
 后端通过 `backend-go/internal/app/router.go` 注册以下主路由组：
 
 | 路由组 | 职责 |
-|--------|------|
+| -------- | ------ |
 | `/api/categories` | 分类 CRUD |
 | `/api/feeds` | 订阅 CRUD、刷新、OPML |
 | `/api/articles` | 文章列表、详情、状态更新、统计、标签管理 |
@@ -208,7 +199,7 @@ my-robot/
 | `/api/user-preferences` | 偏好查询与更新 |
 | `/api/embedding` | Embedding 配置与队列管理 |
 | `/api/topic-tags` | 关注标签、标签合并预览 |
-| `/api/narratives` | 叙事摘要查询与历史 |
+| ~~`/api/narratives`~~ | 已废弃（并入 daily_report；历史数据经 `/api/semantic-boards/:id/narratives` 只读） |
 | `/api/traces` | 链路追踪查询与统计 |
 | `/ws` | WebSocket 实时推送 |
 
@@ -227,11 +218,12 @@ my-robot/
 - [后端运行时](runtime.md)：启动顺序、调度器管理、路由面、优雅退出
 - [前端架构](frontend.md)：Nuxt 4 分层、feature 组织、数据映射规则、设计系统
 - [前端组件分工](frontend-components.md)：各 feature 组件职责与交互关系
-- [数据流](data-flow.md)：主链路、前端状态职责、定时任务链路
+- [业务流程](../flow/README.md)：主链路、前端状态职责、定时任务链路、叙事数据流
+- [详细设计地图](map.md)：业务域 → 流程文档 → 架构骨架 / 代码入口
 - [链路追踪](tracing.md)：OpenTelemetry 集成、埋点分层、查询 API
 - [数据库字段说明](../database/DATABASE_FIELDS.md)：35 张表完整字段字典
 - [全局实体关系图](../database/ER_DIAGRAM.md)：FK 关系图与约束矩阵
 - [数据生命周期](../database/DATA_LIFECYCLE.md)：6 条数据链路的状态字段流转
 - [开发指南](../development.md)：构建、测试、验证命令
-- [内容增强](../content-processing.md)：Firecrawl + AI 内容补全流程
+- [内容增强](../flow/content-enrichment.md)：Firecrawl + AI 内容补全流程
 - [API 文档](../api/_index.md)：按领域拆分的 REST API 参考

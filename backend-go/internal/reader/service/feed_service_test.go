@@ -81,22 +81,23 @@ func TestCleanupOldArticlesDoesNotPreservePendingOrIncompleteArticles(t *testing
 func TestRefreshFeedEnqueuesTagJobWhenCompletionDisabled(t *testing.T) {
 	setupFeedsTestDB(t)
 
-	rssServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	var rssServer *httptest.Server
+	rssServer = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/rss+xml")
-		_, _ = w.Write([]byte(`<?xml version="1.0" encoding="UTF-8"?>
+		_, _ = fmt.Fprintf(w, `<?xml version="1.0" encoding="UTF-8"?>
 <rss version="2.0">
   <channel>
     <title>OpenAI Feed</title>
     <description>Feed for tests</description>
-    <link>https://example.com</link>
+    <link>%s</link>
     <item>
       <title>OpenAI launches new AI agent runtime</title>
-      <link>https://example.com/openai-agent</link>
+      <link>%s/openai-agent</link>
       <description>OpenAI agentic workflow update</description>
       <pubDate>Sun, 22 Mar 2026 09:00:00 GMT</pubDate>
     </item>
   </channel>
-</rss>`))
+</rss>`, rssServer.URL, rssServer.URL)
 	}))
 	defer rssServer.Close()
 
@@ -112,8 +113,20 @@ func TestRefreshFeedEnqueuesTagJobWhenCompletionDisabled(t *testing.T) {
 	}
 
 	service := NewFeedService()
+	service.iconStore = NewIconStore(t.TempDir())
 	if err := service.RefreshFeed(context.Background(), feed.ID); err != nil {
 		t.Fatalf("refresh feed: %v", err)
+	}
+
+	// Icon candidates all fail against the local test server (no RSS image, no
+	// HTML icon link, /favicon.ico returns non-image content): the feed must
+	// stay fallback while the refresh itself succeeds.
+	var refreshed models.Feed
+	if err := database.DB.First(&refreshed, feed.ID).Error; err != nil {
+		t.Fatalf("reload feed: %v", err)
+	}
+	if refreshed.IconSource != "fallback" || refreshed.Icon != "mdi:rss" {
+		t.Errorf("after failed icon candidates: icon_source=%q icon=%q, want fallback mdi:rss", refreshed.IconSource, refreshed.Icon)
 	}
 
 	var article models.Article
@@ -133,22 +146,23 @@ func TestRefreshFeedEnqueuesTagJobWhenCompletionDisabled(t *testing.T) {
 func TestRefreshFeedEnqueuesFirecrawlJobWhenEnabled(t *testing.T) {
 	setupFeedsTestDB(t)
 
-	rssServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	var rssServer *httptest.Server
+	rssServer = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/rss+xml")
-		_, _ = w.Write([]byte(`<?xml version="1.0" encoding="UTF-8"?>
+		_, _ = fmt.Fprintf(w, `<?xml version="1.0" encoding="UTF-8"?>
 <rss version="2.0">
   <channel>
     <title>Queued Feed</title>
     <description>Feed for tests</description>
-    <link>https://example.com</link>
+    <link>%s</link>
     <item>
       <title>Queued article</title>
-      <link>https://example.com/queued</link>
+      <link>%s/queued</link>
       <description>queued desc</description>
       <pubDate>Sun, 22 Mar 2026 09:00:00 GMT</pubDate>
     </item>
   </channel>
-</rss>`))
+</rss>`, rssServer.URL, rssServer.URL)
 	}))
 	defer rssServer.Close()
 
@@ -163,6 +177,7 @@ func TestRefreshFeedEnqueuesFirecrawlJobWhenEnabled(t *testing.T) {
 	}
 
 	service := NewFeedService()
+	service.iconStore = NewIconStore(t.TempDir())
 	if err := service.RefreshFeed(context.Background(), feed.ID); err != nil {
 		t.Fatalf("refresh feed: %v", err)
 	}
@@ -188,22 +203,23 @@ func ptrTime(value time.Time) *time.Time {
 func TestEnqueueArticleProcessingTaggingMatrix(t *testing.T) {
 	setupFeedsTestDB(t)
 
-	rssServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	var rssServer *httptest.Server
+	rssServer = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/rss+xml")
-		_, _ = w.Write([]byte(`<?xml version="1.0" encoding="UTF-8"?>
+		_, _ = fmt.Fprintf(w, `<?xml version="1.0" encoding="UTF-8"?>
 <rss version="2.0">
   <channel>
     <title>Test Feed</title>
     <description>desc</description>
-    <link>https://example.com</link>
+    <link>%s</link>
     <item>
       <title>Test Article</title>
-      <link>https://example.com/test</link>
+      <link>%s/test</link>
       <description>desc</description>
       <pubDate>Sun, 22 Mar 2026 09:00:00 GMT</pubDate>
     </item>
   </channel>
-</rss>`))
+</rss>`, rssServer.URL, rssServer.URL)
 	}))
 	defer rssServer.Close()
 
@@ -261,6 +277,7 @@ func TestEnqueueArticleProcessingTaggingMatrix(t *testing.T) {
 			database.DB.Model(&feed).Update("tagging_enabled", tt.taggingEnabled)
 
 			service := NewFeedService()
+			service.iconStore = NewIconStore(t.TempDir())
 			if err := service.RefreshFeed(context.Background(), feed.ID); err != nil {
 				t.Fatalf("refresh feed: %v", err)
 			}

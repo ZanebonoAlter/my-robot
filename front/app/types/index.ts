@@ -14,6 +14,9 @@ export * from './ai'
 // 阅读行为类型
 export * from './reading_behavior'
 
+// 订阅源发现 / 兴趣画像类型
+export * from './discovery'
+
 // 调度器类型
 export * from './scheduler'
 

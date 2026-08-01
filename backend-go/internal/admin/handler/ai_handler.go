@@ -8,7 +8,6 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
-	"gorm.io/gorm"
 
 	"syntopica-backend/internal/admin/repository"
 	"syntopica-backend/internal/models"
@@ -366,24 +365,4 @@ func TestConnection(c *gin.Context) {
 		"message": msg,
 		"data":    result,
 	})
-}
-
-func upsertAISetting(key, value, description string) error {
-	var existing models.AISettings
-	err := repository.Repo.DB().Where("key = ?", key).First(&existing).Error
-	if err == nil {
-		existing.Value = value
-		if description != "" {
-			existing.Description = description
-		}
-		return repository.Repo.DB().Save(&existing).Error
-	}
-	if err == gorm.ErrRecordNotFound {
-		return repository.Repo.DB().Create(&models.AISettings{
-			Key:         key,
-			Value:       value,
-			Description: description,
-		}).Error
-	}
-	return err
 }

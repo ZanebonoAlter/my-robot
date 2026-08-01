@@ -6,11 +6,13 @@ import (
 	"strings"
 	"time"
 
+	"go.opentelemetry.io/otel"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 
 	"syntopica-backend/internal/models"
 	"syntopica-backend/internal/platform/logging"
+	"syntopica-backend/internal/platform/tracing"
 	"syntopica-backend/internal/tagmanagement/repository"
 )
 
@@ -35,10 +37,14 @@ type tagArticleOptions struct {
 
 // TagArticle extracts and stores tags for a single article.
 func TagArticle(ctx context.Context, article *models.Article, feedName, categoryName string) error {
+	ctx, span := otel.Tracer(tracing.ServiceName).Start(ctx, "core.TagArticle")
+	defer span.End()
 	return tagArticle(ctx, article, feedName, categoryName, tagArticleOptions{})
 }
 
 func RetagArticle(ctx context.Context, article *models.Article, feedName, categoryName string) error {
+	ctx, span := otel.Tracer(tracing.ServiceName).Start(ctx, "core.RetagArticle")
+	defer span.End()
 	return tagArticle(ctx, article, feedName, categoryName, tagArticleOptions{Force: true})
 }
 
@@ -235,6 +241,8 @@ func buildArticleSummary(article models.Article) string {
 // TagArticles batch tags multiple articles for a feed
 // This is called from auto_summary when processing a feed's articles
 func TagArticles(ctx context.Context, articles []models.Article, feedName, categoryName string) error {
+	ctx, span := otel.Tracer(tracing.ServiceName).Start(ctx, "core.TagArticles")
+	defer span.End()
 	if len(articles) == 0 {
 		return nil
 	}

@@ -52,54 +52,75 @@ func cosineDistance(a, b []float64) float64 {
 	return 1 - dot/(math.Sqrt(na)*math.Sqrt(nb))
 }
 
-// parsedTopic pairs a topic id with its pre-parsed embedding.
-type parsedTopic struct {
-	ID        uint
-	Embedding []float64
+// topicAnchor pairs a topic id with its parsed matching anchor vector: the
+// Centroid (mean of recent sections) when present, degrading to the Embedding
+// first-section 首义向量 otherwise. This is the lane-driven matching anchor
+// (supersedes the old first-section-only embedding). Topics with neither a
+// parseable centroid nor embedding are dropped.
+type topicAnchor struct {
+	ID     uint
+	Anchor []float64
+	Status string
 }
 
-// parseTopicEmbeddings parses each topic's embedding once, dropping unparseable
-// rows (they cannot participate in nearest-neighbour assignment).
-func parseTopicEmbeddings(topics []BoardPersistentTopic) []parsedTopic {
-	out := make([]parsedTopic, 0, len(topics))
+// parseTopicAnchors parses each topic's matching anchor (Centroid, else
+// Embedding). Unparseable topics are dropped — they cannot participate in
+// distance computation.
+func parseTopicAnchors(topics []BoardPersistentTopic) []topicAnchor {
+	out := make([]topicAnchor, 0, len(topics))
 	for _, t := range topics {
-		vec, err := repoParsePgVector(t.Embedding)
-		if err != nil || len(vec) == 0 {
+		vec := topicAnchorVec(t)
+		if len(vec) == 0 {
 			continue
 		}
-		out = append(out, parsedTopic{ID: t.ID, Embedding: vec})
+		out = append(out, topicAnchor{ID: t.ID, Anchor: vec, Status: t.Status})
 	}
 	return out
 }
 
-// findNearestTopic returns the topic id with the smallest cosine distance to
-// the given embedding and that distance. ok=false when no comparable topic.
-func findNearestTopic(vec []float64, topics []parsedTopic) (id uint, dist float64, ok bool) {
+// topicAnchorVec returns the topic's centroid vector when present, else its
+// first-section embedding. Empty when neither parses.
+func topicAnchorVec(t BoardPersistentTopic) []float64 {
+	if v, err := repoParsePgVector(t.Centroid); err == nil && len(v) > 0 {
+		return v
+	}
+	if v, err := repoParsePgVector(t.Embedding); err == nil && len(v) > 0 {
+		return v
+	}
+	return nil
+}
+
+// findNearestAnchor returns the anchor with the smallest cosine distance to
+// vec and that distance. ok=false when no comparable anchor.
+func findNearestAnchor(vec []float64, anchors []topicAnchor) (id uint, dist float64, ok bool) {
 	best := math.MaxFloat64
 	var bestID uint
 	found := false
-	for _, t := range topics {
-		if len(t.Embedding) == 0 {
+	for _, a := range anchors {
+		if len(a.Anchor) == 0 {
 			continue
 		}
-		d := cosineDistance(vec, t.Embedding)
+		d := cosineDistance(vec, a.Anchor)
 		if d < best {
 			best = d
-			bestID = t.ID
+			bestID = a.ID
 			found = true
 		}
 	}
 	return bestID, best, found
 }
 
-// topicAssignmentDecision is the per-section outcome of the dual-confirmation
+// topicAssignmentDecision is the per-section outcome of the lane-driven
 // assignment. topicID is set for anchor_hit; newCandidate is set for auto_new.
+// laneTier records the bucketing source carried onto the section row.
 type topicAssignmentDecision struct {
-	sectionIdx   int
-	topicID      uint
-	distance     float64
-	confidence   string
-	newCandidate *candidateTopicSpec
+	sectionIdx          int
+	topicID             uint
+	distance            float64
+	confidence          string
+	laneTier            string
+	newCandidate        *candidateTopicSpec
+	topicStatusAtReport *string
 }
 
 // candidateTopicSpec describes a candidate topic to insert during assignment.
@@ -110,13 +131,24 @@ type candidateTopicSpec struct {
 }
 
 // planTopicAssignments computes the per-section assignment plan with NO DB
-// access — pure and unit-testable. For each section it either anchors to an
-// existing topic (dual confirmation: nearest embedding within threshold AND
-// the LLM's matched_topic_id agrees) or opens a new candidate (auto_new), or
-// is marked unmatched when it has no embedding. Candidate specs are collected
-// in the returned slice; each auto_new decision points at its spec.
+// access — pure and unit-testable. Attribution was already decided upstream by
+// the lane bucketing (section.LaneTier + section.MatchedTopicID); this step
+// only maps the lane outcome onto a confidence + distance:
+//
+//	l1_direct / l2_llm with a MatchedTopicID → anchor_hit (distance = section
+//	  embedding to that topic's centroid anchor)
+//	l3_new or no MatchedTopicID → auto_new (distance = nearest anchor, for
+//	  diagnostics)
+//	empty section embedding → unmatched (distance 0)
+//
+// cfg is retained in the signature for caller symmetry; the lane-driven path
+// no longer applies an embedding threshold (the AND-gate is gone).
 func planTopicAssignments(sections []DailyReportSection, existingTopics []BoardPersistentTopic, cfg PersistentTopicConfig, today time.Time) []topicAssignmentDecision {
-	parsed := parseTopicEmbeddings(existingTopics)
+	anchors := parseTopicAnchors(existingTopics)
+	anchorByID := make(map[uint]topicAnchor, len(anchors))
+	for _, a := range anchors {
+		anchorByID[a.ID] = a
+	}
 	decisions := make([]topicAssignmentDecision, 0, len(sections))
 	var candidates []candidateTopicSpec
 	for i := range sections {
@@ -124,19 +156,25 @@ func planTopicAssignments(sections []DailyReportSection, existingTopics []BoardP
 		vec, err := repoParsePgVector(sec.Embedding)
 		if err != nil || len(vec) == 0 {
 			decisions = append(decisions, topicAssignmentDecision{
-				sectionIdx: i, confidence: TopicConfUnmatched,
+				sectionIdx: i, confidence: TopicConfUnmatched, laneTier: sec.LaneTier,
 			})
 			continue
 		}
-		nearestID, nearestDist, found := findNearestTopic(vec, parsed)
-		llmAgrees := sec.MatchedTopicID != nil && *sec.MatchedTopicID == nearestID
-		if found && nearestDist <= cfg.MatchThreshold && llmAgrees {
-			decisions = append(decisions, topicAssignmentDecision{
-				sectionIdx: i, topicID: nearestID, distance: nearestDist,
-				confidence: TopicConfAnchorHit,
-			})
-			continue
+		if (sec.LaneTier == "l1_direct" || sec.LaneTier == "l2_llm") && sec.MatchedTopicID != nil {
+			if a, ok := anchorByID[*sec.MatchedTopicID]; ok {
+				status := a.Status
+				decisions = append(decisions, topicAssignmentDecision{
+					sectionIdx: i, topicID: a.ID, distance: cosineDistance(vec, a.Anchor),
+					confidence: TopicConfAnchorHit, laneTier: sec.LaneTier,
+					topicStatusAtReport: &status,
+				})
+				continue
+			}
 		}
+		// l3_new, or lane said anchor but the topic is absent from the anchorable
+		// set → open a new candidate. lane_tier becomes l3_new so the persisted
+		// row keeps confidence + lane consistent.
+		_, nearestDist, _ := findNearestAnchor(vec, anchors)
 		candidates = append(candidates, candidateTopicSpec{
 			label:     sec.ClusterLabel,
 			embedding: sec.Embedding,
@@ -144,11 +182,16 @@ func planTopicAssignments(sections []DailyReportSection, existingTopics []BoardP
 		})
 		decisions = append(decisions, topicAssignmentDecision{
 			sectionIdx: i, distance: nearestDist,
-			confidence:   TopicConfAutoNew,
-			newCandidate: &candidates[len(candidates)-1],
+			confidence: TopicConfAutoNew, laneTier: "l3_new",
+			newCandidate:        &candidates[len(candidates)-1],
+			topicStatusAtReport: topicStatusPtr(TopicStatusCandidate),
 		})
 	}
 	return decisions
+}
+
+func topicStatusPtr(value string) *string {
+	return &value
 }
 
 // topicLifecycleChange is a pure lifecycle transition computed without DB
@@ -161,21 +204,22 @@ type topicLifecycleChange struct {
 	lastSeen        time.Time
 }
 
-// planLifecycle computes the candidate→active→archived transitions for a
-// board's topics given today's hit set. Pure and unit-testable.
+// planLifecycle computes hit-count updates for a board's topics given today's
+// hit set. Pure and unit-testable.
 //
-// hit: consecutive_hits+1, hit_count+1, last_seen=today. Candidates remain
-// candidates until a user confirms them after they reach UpgradeThreshold.
-// miss: consecutive_hits reset to 0; active archives after DecayWindow days.
+// hit:   consecutive_hits+1, hit_count+1, last_seen=today, status unchanged.
+// miss:  consecutive_hits reset to 0, status unchanged (manual-archive only).
+//
+// No automatic archiving — candidate→archived and active→archived transitions
+// are exclusively triggered by user operations (updateTopicStatus, DeleteTopic).
 //
 // New candidates created by the assignment step already carry consecutive_hits=1
 // in the DB; they are NOT passed through here (they are in hitTopicIDs only if
 // the caller includes them, which it should not — see assignAndUpdateTopics).
-func planLifecycle(topics []BoardPersistentTopic, today time.Time, hitTopicIDs map[uint]bool, cfg PersistentTopicConfig) []topicLifecycleChange {
+func planLifecycle(topics []BoardPersistentTopic, today time.Time, hitTopicIDs map[uint]bool) []topicLifecycleChange {
 	todayDate := NormalizeReportDate(today)
 	var changes []topicLifecycleChange
 	for _, t := range topics {
-		lastSeen := NormalizeReportDate(t.LastSeenDate)
 		if hitTopicIDs[t.ID] {
 			newHits := t.ConsecutiveHits + 1
 			ch := topicLifecycleChange{
@@ -186,21 +230,13 @@ func planLifecycle(topics []BoardPersistentTopic, today time.Time, hitTopicIDs m
 			changes = append(changes, ch)
 			continue
 		}
-		if t.Status == TopicStatusCandidate && t.ConsecutiveHits != 0 {
+		// Miss: consecutive resets to 0; status and last_seen stay unchanged.
+		if t.Status != TopicStatusArchived && t.ConsecutiveHits != 0 {
 			changes = append(changes, topicLifecycleChange{
-				topicID: t.ID, status: TopicStatusCandidate,
-				consecutiveHits: 0, hitCount: t.HitCount, lastSeen: lastSeen,
+				topicID: t.ID, status: t.Status,
+				consecutiveHits: 0, hitCount: t.HitCount,
+				lastSeen: NormalizeReportDate(t.LastSeenDate),
 			})
-			continue
-		}
-		if t.Status == TopicStatusActive {
-			gapDays := int(todayDate.Sub(lastSeen).Hours() / 24)
-			if gapDays > cfg.DecayWindow {
-				changes = append(changes, topicLifecycleChange{
-					topicID: t.ID, status: TopicStatusArchived,
-					consecutiveHits: 0, hitCount: t.HitCount, lastSeen: lastSeen,
-				})
-			}
 		}
 	}
 	return changes
@@ -209,19 +245,24 @@ func planLifecycle(topics []BoardPersistentTopic, today time.Time, hitTopicIDs m
 // assignAndUpdateTopics runs the full assignment + lifecycle pipeline for one
 // report save, inside the caller's transaction:
 //  1. load existing anchorable topics + config
-//  2. plan per-section assignment (pure, dual confirmation)
+//  2. plan per-section assignment (pure, lane-driven)
 //  3. create candidate topics
-//  4. write assignment columns onto sections
+//  4. write assignment columns (incl. lane_tier) onto sections
 //  5. advance the topic lifecycle (candidate→active→archived)
 //
-// Identity edges written later by RebuildBoardRelations depend on the
-// persistent_topic_id set here, so this must run before relation rebuild and
-// inside the same transaction.
-func assignAndUpdateTopics(tx *gorm.DB, boardID uint, periodDate time.Time, sections []DailyReportSection) error {
+// It returns the set of topic ids touched by this report (anchor_hit topics +
+// newly created candidates) so the caller can refresh their centroids after
+// the transaction commits. Identity edges written later by
+// RebuildBoardRelations depend on the persistent_topic_id set here, so this
+// must run before relation rebuild and inside the same transaction.
+func assignAndUpdateTopics(tx *gorm.DB, boardID uint, periodDate time.Time, sections []DailyReportSection) ([]uint, error) {
 	cfg := LoadPersistentTopicConfig(tx)
-	existingTopics, err := Repo.ListActiveTopicsByBoard(boardID)
+	// periodDate must equal the orchestrator's startOfDay (=report.PeriodDate).
+	// Both sides call ListAnchorableTopicsByBoard with the same (boardID, date, cfg)
+	// so the injection set and the acceptance set are guaranteed identical.
+	existingTopics, anchorStats, err := Repo.ListAnchorableTopicsByBoard(boardID, periodDate, cfg)
 	if err != nil {
-		return fmt.Errorf("load existing topics: %w", err)
+		return nil, fmt.Errorf("load existing topics: %w", err)
 	}
 	today := NormalizeReportDate(periodDate)
 	decisions := planTopicAssignments(sections, existingTopics, cfg, today)
@@ -246,15 +287,17 @@ func assignAndUpdateTopics(tx *gorm.DB, boardID uint, periodDate time.Time, sect
 			ConsecutiveHits: 1,
 		}
 		if err := Repo.CreateTopic(tx, &topic); err != nil {
-			return fmt.Errorf("create candidate topic: %w", err)
+			return nil, fmt.Errorf("create candidate topic: %w", err)
 		}
 		candIDs[spec] = topic.ID
 	}
 
-	// Write assignment columns and collect the set of hit topic ids.
+	// Write assignment columns and collect the set of hit topic ids + every
+	// touched topic (anchor targets + new candidates) for centroid refresh.
 	// Newly created candidates are already at consecutive_hits=1, so they are
 	// excluded from the lifecycle hit set to avoid double-counting.
 	hitTopicIDs := make(map[uint]bool, len(decisions))
+	touched := make(map[uint]bool, len(decisions))
 	for _, d := range decisions {
 		var topicID *uint
 		switch d.confidence {
@@ -262,27 +305,29 @@ func assignAndUpdateTopics(tx *gorm.DB, boardID uint, periodDate time.Time, sect
 			id := d.topicID
 			topicID = &id
 			hitTopicIDs[id] = true
+			touched[id] = true
 		case TopicConfAutoNew:
 			if d.newCandidate != nil {
 				id := candIDs[d.newCandidate]
 				topicID = &id
+				touched[id] = true
 			}
 		}
 		if d.sectionIdx >= len(sections) {
 			continue
 		}
 		secID := sections[d.sectionIdx].ID
-		if err := Repo.UpdateSectionTopicAssignment(tx, secID, topicID, d.distance, d.confidence); err != nil {
-			return fmt.Errorf("update section %d assignment: %w", secID, err)
+		if err := Repo.UpdateSectionTopicAssignment(tx, secID, topicID, d.distance, d.confidence, d.laneTier, d.topicStatusAtReport); err != nil {
+			return nil, fmt.Errorf("update section %d assignment: %w", secID, err)
 		}
 	}
 
 	// Advance the lifecycle for pre-existing topics only.
 	allTopics, err := Repo.ListAllTopicsByBoard(boardID)
 	if err != nil {
-		return fmt.Errorf("load topics for lifecycle: %w", err)
+		return nil, fmt.Errorf("load topics for lifecycle: %w", err)
 	}
-	changes := planLifecycle(allTopics, today, hitTopicIDs, cfg)
+	changes := planLifecycle(allTopics, today, hitTopicIDs)
 	if len(changes) > 0 {
 		toSave := make([]BoardPersistentTopic, 0, len(changes))
 		for _, ch := range changes {
@@ -298,7 +343,7 @@ func assignAndUpdateTopics(tx *gorm.DB, boardID uint, periodDate time.Time, sect
 			}
 		}
 		if err := Repo.SaveTopics(tx, toSave); err != nil {
-			return fmt.Errorf("save topic lifecycle changes: %w", err)
+			return nil, fmt.Errorf("save topic lifecycle changes: %w", err)
 		}
 	}
 
@@ -313,7 +358,13 @@ func assignAndUpdateTopics(tx *gorm.DB, boardID uint, periodDate time.Time, sect
 			unmatched++
 		}
 	}
-	logging.Infof("persistent-topic: board %d assigned %d sections (anchor_hit=%d, auto_new=%d, unmatched=%d)",
-		boardID, len(decisions), matched, autoNew, unmatched)
-	return nil
+	logging.Infof("persistent-topic: board %d anchors active=%d candidates=%d filtered_window=%d truncated_limit=%d; assigned %d sections (anchor_hit=%d, auto_new=%d, unmatched=%d)",
+		boardID, anchorStats.ActiveCount, anchorStats.CandidateCount, anchorStats.FilteredByWindow, anchorStats.TruncatedByLimit,
+		len(decisions), matched, autoNew, unmatched)
+
+	touchedIDs := make([]uint, 0, len(touched))
+	for id := range touched {
+		touchedIDs = append(touchedIDs, id)
+	}
+	return touchedIDs, nil
 }

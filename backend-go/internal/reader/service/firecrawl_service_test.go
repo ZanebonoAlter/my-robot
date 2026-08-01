@@ -42,7 +42,7 @@ func TestScrapeResponse_ParsesImageMetadata(t *testing.T) {
 
 // TestScrapePage_BackfillsMetadataImage drives the real ScrapePage path
 // against a stub Firecrawl endpoint and asserts metadata returned by Firecrawl
-// survives the round-trip (mirrors how job_firecrawl.go consumes the result).
+// survives the round-trip into the neutral ScrapeResult.
 func TestScrapePage_BackfillsMetadataImage(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var body map[string]interface{}
@@ -77,11 +77,21 @@ func TestScrapePage_BackfillsMetadataImage(t *testing.T) {
 		APIUrl: srv.URL, APIKey: "k", Enabled: true, Mode: "scrape", Timeout: 5,
 	})
 
-	resp, err := svc.ScrapePage(context.Background(), "https://news.example/x")
+	res, err := svc.ScrapePage(context.Background(), "https://news.example/x")
 	if err != nil {
 		t.Fatalf("ScrapePage failed: %v", err)
 	}
-	if resp.Data.Metadata.OgImage != "https://cdn.test/cover.jpg" {
-		t.Errorf("ogImage = %q, want cover.jpg", resp.Data.Metadata.OgImage)
+	// 中立 ScrapeResult：OGImage 由 pickMetadataImage 从 metadata 转换而来。
+	if res.OGImage != "https://cdn.test/cover.jpg" {
+		t.Errorf("OGImage = %q, want cover.jpg", res.OGImage)
+	}
+	if res.Source != "firecrawl" {
+		t.Errorf("Source = %q, want firecrawl", res.Source)
+	}
+	if res.Markdown != "# body" {
+		t.Errorf("Markdown = %q, want %q", res.Markdown, "# body")
+	}
+	if res.Title != "T" {
+		t.Errorf("Title = %q, want T", res.Title)
 	}
 }

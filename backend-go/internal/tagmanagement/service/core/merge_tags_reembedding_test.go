@@ -38,13 +38,10 @@ func TestMergeTagsEnqueuesReembeddingAfterSuccess(t *testing.T) {
 	if err := db.Create(&article).Error; err != nil {
 		t.Fatalf("create article: %v", err)
 	}
-	if err := db.Exec("INSERT INTO article_feeds(article_id, feed_id) VALUES (?, ?)", article.ID, 1).Error; err != nil {
-		t.Fatalf("create article_feeds row: %v", err)
-	}
 	if err := db.Create(&models.ArticleTopicTag{ArticleID: article.ID, TopicTagID: source.ID}).Error; err != nil {
 		t.Fatalf("create article topic tag: %v", err)
 	}
-	if err := db.Create(&models.TopicTagEmbedding{TopicTagID: source.ID, EmbeddingVec: "[0.100000]", Dimension: 1, Model: "test", TextHash: "source"}).Error; err != nil {
+	if err := db.Create(&models.TopicTagEmbedding{TopicTagID: source.ID, EmbeddingType: EmbeddingTypeIdentity, EmbeddingVec: makeValidVector(4096), Dimension: 4096, Model: "test", TextHash: "source"}).Error; err != nil {
 		t.Fatalf("create source embedding: %v", err)
 	}
 
@@ -88,9 +85,6 @@ func TestMergeTagsReturnsErrorWhenReembeddingEnqueueFails(t *testing.T) {
 	db := setupMergeReembeddingTestDB(t)
 	source, target := seedMergeQueueTags(t, db)
 
-	if err := db.Exec("INSERT INTO article_feeds(article_id, feed_id) VALUES (?, ?)", 1, 1).Error; err != nil {
-		t.Fatalf("seed article_feeds: %v", err)
-	}
 
 	originalFactory := MergeReembeddingQueueFactory
 	MergeReembeddingQueueFactory = func() mergeReembeddingEnqueuer {

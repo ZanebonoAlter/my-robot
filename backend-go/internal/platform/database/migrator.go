@@ -7,12 +7,43 @@ import (
 	"gorm.io/gorm"
 
 	"syntopica-backend/internal/models"
+	"syntopica-backend/internal/platform/config"
+	"syntopica-backend/internal/platform/logging"
 )
 
 type Migration struct {
 	Version     string
 	Description string
 	Up          func(db *gorm.DB) error
+	// RunOutsideTx controls whether Up runs outside an outer transaction.
+	// The zero value (false) keeps the default in-transaction behavior: Up +
+	// version-record share one transaction (atomic apply/record, roll back both
+	// on failure). Set true for migrations whose Up uses transaction-incompatible
+	// DDL such as CREATE INDEX CONCURRENTLY — Up runs on the bare *gorm.DB, and
+	// on success the version is recorded with a separate non-transactional
+	// INSERT. An outside-tx Up failure is NOT recorded, so the next startup
+	// retries (mirroring the in-tx path's rollback semantics). Only use
+	// RunOutsideTx=true for a single transaction-incompatible statement; multi-
+	// step migrations that need atomicity must stay in-transaction.
+	RunOutsideTx bool
+	// Down declares this migration's rollback logic; nil (the zero value) means
+	// the migration is irreversible. This is a declarative placeholder only —
+	// no executor is implemented yet (no CLI/HTTP rollback entry point exists,
+	// per AGENTS.md "Simplicity First"). Destructive migrations should leave
+	// Down nil and instead annotate irreversibility in Description.
+	Down func(db *gorm.DB) error
+}
+
+// allowDestructive controls whether destructive migrations (TRUNCATE/DROP) run.
+// Initialized in RunMigrations from config.AppConfig.Database.AllowDestructiveMigrations
+// (env MIGRATIONS_ALLOW_DESTRUCTIVE=1). Defaults to false (production-safe).
+// Migrations read it via IsDestructiveAllowed() to self-guard destructive operations.
+var allowDestructive bool
+
+// IsDestructiveAllowed reports whether destructive migrations are permitted.
+// Call at the top of a migration Up closure to self-guard TRUNCATE/DROP operations.
+func IsDestructiveAllowed() bool {
+	return allowDestructive
 }
 
 // extraModels holds domain-specific models registered via RegisterModels.
@@ -38,6 +69,7 @@ func RunAutoMigrate(db *gorm.DB) error {
 		&models.TopicTagSemanticLabel{},
 		&models.TopicTagBoardLabel{},
 		&models.BoardComposition{},
+		&models.BoardUpgradeSuggestion{},
 		&models.TopicTagEmbedding{},
 		&models.TopicTagAnalysis{},
 		&models.TopicAnalysisCursor{},
@@ -54,7 +86,12 @@ func RunAutoMigrate(db *gorm.DB) error {
 		&models.AIRouteProvider{},
 		&models.AICallLog{},
 		&models.ReadingBehavior{},
-		&models.UserPreference{},
+		// preference-vector-feed-discovery: 偏好向量 / RSSHub 路由目录 / 订阅源推荐
+		&models.PreferenceVector{},
+		&models.RSSHubRoute{},
+		&models.RouteParamOption{},
+		&models.RouteEmbedding{},
+		&models.FeedRecommendation{},
 		&models.FirecrawlJob{},
 		&models.TagJob{},
 		&models.NarrativeSummary{},
@@ -71,6 +108,30 @@ func RunMigrations(db *gorm.DB) error {
 		return fmt.Errorf("database connection is required")
 	}
 
+	// Initialize the destructive-migration gate from config. Production never sets
+	// MIGRATIONS_ALLOW_DESTRUCTIVE, so allowDestructive stays false and destructive
+	// migrations self-skip. See db-migration-safety capability.
+	allowDestructive = false
+	if config.AppConfig != nil {
+		allowDestructive = config.AppConfig.Database.AllowDestructiveMigrations
+	}
+	if allowDestructive {
+		logging.Warnf("Destructive migrations ENABLED (MIGRATIONS_ALLOW_DESTRUCTIVE=1): TRUNCATE/DROP migrations will execute")
+	}
+
+	return runMigrationsList(db, migrationsSorted())
+}
+
+// runMigrationsList is the core migration loop, factored out so tests can drive
+// it with a hand-built migration list (e.g. a probe migration declaring
+// RunOutsideTx=true) without mutating the production postgresMigrations() slice.
+// It is responsible for: ensuring the schema_migrations table exists, loading
+// already-applied versions, and executing each pending migration with the
+// in-tx or outside-tx path chosen by Migration.RunOutsideTx.
+//
+// The caller (RunMigrations) is responsible for setting allowDestructive from
+// config before calling, since this function must not read config itself.
+func runMigrationsList(db *gorm.DB, migrations []Migration) error {
 	if err := ensureSchemaMigrationsTable(db); err != nil {
 		return err
 	}
@@ -80,11 +141,35 @@ func RunMigrations(db *gorm.DB) error {
 		return err
 	}
 
-	for _, migration := range migrationsSorted() {
+	for _, migration := range migrations {
 		if appliedVersions[migration.Version] {
 			continue
 		}
 
+		if migration.RunOutsideTx {
+			// Outside-tx path: Up runs on the bare db (no surrounding
+			// transaction), so CREATE INDEX CONCURRENTLY and other
+			// transaction-incompatible DDL can succeed. On Up failure the
+			// version is NOT recorded — the next startup retries. This mirrors
+			// the in-tx path's rollback semantics (Up + INSERT roll back
+			// together), so "a failed migration is retried" is invariant across
+			// both paths. Idempotency/retry-safety is the migration's own
+			// responsibility (IF NOT EXISTS / cleanup guards), not the
+			// executor's.
+			if err := migration.Up(db); err != nil {
+				return fmt.Errorf("apply migration %s (outside tx): %w", migration.Version, err)
+			}
+			if err := db.Exec(
+				"INSERT INTO schema_migrations (version, driver) VALUES (?, 'postgres')",
+				migration.Version,
+			).Error; err != nil {
+				return fmt.Errorf("record migration %s: %w", migration.Version, err)
+			}
+			continue
+		}
+
+		// In-tx path (default, unchanged): Up + version-record share one
+		// transaction — atomic apply/record, both roll back on Up failure.
 		if err := db.Transaction(func(tx *gorm.DB) error {
 			if err := migration.Up(tx); err != nil {
 				return fmt.Errorf("apply migration %s: %w", migration.Version, err)

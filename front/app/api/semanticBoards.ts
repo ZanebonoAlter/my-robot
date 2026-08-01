@@ -13,6 +13,12 @@ export interface SemanticBoard {
   source: string
   status: string
   protected: boolean
+  /** 循环 B 增强开关（板块级，默认 false）。 */
+  enrichment_enabled: boolean
+  /** 循环 B 实时详情窗口（默认 14）。 */
+  window_days: number
+  /** 解读员读取的上下文层（默认 week/month/year/all）。 */
+  context_layers: string[]
   created_at: string
   updated_at: string
 }
@@ -83,6 +89,38 @@ export interface UpgradeSuggestion {
 
 export interface UpgradeSuggestResponse {
   suggestions: UpgradeSuggestion[]
+}
+
+/** 持久化建议行（GET /upgrade-suggestions）。字段对齐后端 boardUpgradeSuggestionRowDTO。 */
+export interface UpgradeSuggestionRow {
+  id: number
+  batch_id: string
+  mode: string
+  decision: string
+  board_label: string
+  description: string
+  target_board_id?: number
+  target_board_label?: string
+  auxiliary_label_ids: number[]
+  auxiliary_labels: { id: number; label: string; status?: string }[]
+  confidence: string
+  /** 证据快照 {shortlist, margins, cotag_events, lane_briefs, ...}，按 key 安全读取，缺 key 降级。 */
+  evidence?: Record<string, unknown>
+  status: string
+  dismiss_reason?: string
+  created_at: string
+  resolved_at?: string
+}
+
+/** POST /upgrade-suggestions/generate 返回的计数。 */
+export interface GenerateSuggestionsResponse {
+  inserted: number
+  skipped: number
+  cooldown_blocked: number
+}
+
+export interface UpgradeSuggestionsListResponse {
+  suggestions: UpgradeSuggestionRow[]
 }
 
 export interface BackfillTask {
@@ -201,6 +239,50 @@ export interface BoardArticle {
   [key: string]: unknown
 }
 
+// ── 话题态势版图（identity 轨，design §3 契约） ────────────────────────────
+/** 持久话题主态势标签（后端派生，前端不重复算）。 */
+export type TopicStance = 'emerging' | 'pending' | 'active' | 'stalled' | 'archived'
+
+/** mini-lifeline 单日格点（后端 generate_series 补空日，保证日期轴连续）。 */
+export interface LifelinePoint {
+  date: string
+  section_count: number
+}
+
+/** 话题态势版图单行（对齐 GET /topic-landscape 响应 topics[]）。 */
+export interface TopicLandscapeTopic {
+  id: number
+  label: string
+  status: string
+  source: string
+  stance: TopicStance
+  is_vacuum: boolean
+  vacuum_strong: number
+  hit_count: number
+  consecutive_hits: number
+  first_seen_date: string
+  last_seen_date: string
+  days_since_last: number
+  can_activate: boolean
+  lifeline: LifelinePoint[]
+}
+
+/** 活力顶栏指标（design §3 vitality）。feed_active MVP 可空。 */
+export interface Vitality {
+  days: number
+  article_count: number
+  section_count: number
+  active_topic_count: number
+  feed_active: number | null
+  trend: number[]
+}
+
+/** GET /topic-landscape 响应 data。 */
+export interface TopicLandscapeResponse {
+  topics: TopicLandscapeTopic[]
+  vitality: Vitality
+}
+
 export function useSemanticBoardsApi() {
   async function getBoards(params?: { search?: string; status?: string }): Promise<ApiResponse<{ items: SemanticBoard[]; total: number }>> {
     const query = apiClient.buildQueryParams(params)
@@ -223,6 +305,9 @@ export function useSemanticBoardsApi() {
     display_order?: number
     protected?: boolean
     status?: string
+    enrichment_enabled?: boolean
+    window_days?: number
+    context_layers?: string[]
   }): Promise<ApiResponse<{ id: number }>> {
     return apiClient.put(`/semantic-boards/${id}`, data)
   }
@@ -233,6 +318,12 @@ export function useSemanticBoardsApi() {
 
   async function getComposition(id: number): Promise<ApiResponse<BoardCompositionResponse>> {
     return apiClient.get(`/semantic-boards/${id}/composition`)
+  }
+
+  /** 话题态势版图（identity 轨，只读）：GET /semantic-boards/:id/topic-landscape?days=N。 */
+  async function getTopicLandscape(boardId: number, days?: number): Promise<ApiResponse<TopicLandscapeResponse>> {
+    const query = days ? apiClient.buildQueryParams({ days }) : ''
+    return apiClient.get(`/semantic-boards/${boardId}/topic-landscape${query ? `?${query}` : ''}`)
   }
 
   async function removeFromComposition(boardId: number, auxiliaryLabelId: number): Promise<ApiResponse<{ board_id: number; auxiliary_label_id: number }>> {
@@ -254,8 +345,26 @@ export function useSemanticBoardsApi() {
     description?: string
     target_board_id?: number
     auxiliary_label_ids: number[]
+    /** 携带持久化建议 id：后端在同一事务内置为 confirmed（spec: confirm 联动）。 */
+    suggestion_id?: number
   }): Promise<ApiResponse<{ semantic_board_id: number; auxiliary_label_ids: number[] }>> {
     return apiClient.post('/semantic-boards/upgrade-execute', data)
+  }
+
+  /** 读持久化建议表。status 默认 pending；decision 空=默认列表（排除 watch），`watch`=观察池，其它=精确匹配。 */
+  async function getUpgradeSuggestions(params?: { status?: string; decision?: string }): Promise<ApiResponse<UpgradeSuggestionsListResponse>> {
+    const query = apiClient.buildQueryParams(params)
+    return apiClient.get(`/semantic-boards/upgrade-suggestions${query ? `?${query}` : ''}`)
+  }
+
+  /** 将 pending 建议置为 dismissed（写冷却记录）。 */
+  async function dismissUpgradeSuggestion(id: number, reason?: string): Promise<ApiResponse<{ id: number; status: string }>> {
+    return apiClient.post(`/semantic-boards/upgrade-suggestions/${id}/dismiss`, reason ? { reason } : undefined)
+  }
+
+  /** 同步执行一轮 discover_new 生成入表，返回新增/跳过/冷却拦截计数。 */
+  async function generateUpgradeSuggestions(): Promise<ApiResponse<GenerateSuggestionsResponse>> {
+    return apiClient.post('/semantic-boards/upgrade-suggestions/generate')
   }
 
   async function triggerBackfill(data: { mode: string; board_id?: number }): Promise<ApiResponse<BackfillTask>> {
@@ -314,11 +423,15 @@ return {
     updateBoard,
     deleteBoard,
     getComposition,
+    getTopicLandscape,
     removeFromComposition,
     addComposition,
     getUpgradeCandidates,
     suggestUpgrade,
     executeUpgrade,
+    getUpgradeSuggestions,
+    dismissUpgradeSuggestion,
+    generateUpgradeSuggestions,
     suggestAuxiliaries,
     suggestAuxiliariesForBoard,
     getBoardArticles,

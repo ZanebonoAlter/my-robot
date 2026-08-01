@@ -16,7 +16,7 @@ defineEmits<{
 
 <template>
   <div class="feed-empty-guide">
-    <Icon icon="mdi:rss-plus" width="40" height="40" class="feed-empty-guide__icon" />
+    <Icon icon="mdi:rss" width="40" height="40" class="feed-empty-guide__icon" />
     <p class="feed-empty-guide__title">添加你的第一个 RSS 源</p>
     <p class="feed-empty-guide__desc">订阅博客、新闻或任意 RSS 地址，文章会自动抓取并归类。</p>
     <button type="button" class="feed-empty-guide__btn" @click="$emit('add')">

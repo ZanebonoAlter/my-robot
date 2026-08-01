@@ -2,8 +2,10 @@ package airouter
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -17,12 +19,15 @@ import (
 )
 
 const maxResponseSnippet = 10000
+const maxPromptRunes = 20000
 
 var defaultConcurrency = map[Capability]int{
 	CapabilityTopicTagging: 3,
-	CapabilityDigestPolish:  2,
-	CapabilityOpenNotebook:  2,
+	CapabilityDigestPolish: 2,
+	CapabilityOpenNotebook: 2,
 	CapabilityEmbedding:    5,
+	// CapabilityFeedDiscovery: 推荐精排 LLM，低频突发（手动刷新/问答），与总结同档并发。
+	CapabilityFeedDiscovery: 2,
 }
 
 func truncateSnippet(s string) string {
@@ -31,6 +36,42 @@ func truncateSnippet(s string) string {
 		return string(runes[:maxResponseSnippet]) + "..."
 	}
 	return s
+}
+
+// formatMessages joins ChatRequest messages into a human-readable prompt string
+// for logging. Format: [role]\n{content}\n\n[role]\n{content}. If the result
+// exceeds 20000 runes, the first 18000 and last 2000 are kept with a truncation
+// marker in between.
+func formatMessages(messages []Message) string {
+	var b strings.Builder
+	for i, m := range messages {
+		b.WriteString("[")
+		b.WriteString(m.Role)
+		b.WriteString("]\n")
+		b.WriteString(m.Content)
+		if i < len(messages)-1 {
+			b.WriteString("\n\n")
+		}
+	}
+	raw := b.String()
+	runes := []rune(raw)
+	if len(runes) <= maxPromptRunes {
+		return raw
+	}
+	keptHead := runes[:18000]
+	keptTail := runes[len(runes)-2000:]
+	truncated := len(runes) - 18000 - 2000
+	return fmt.Sprintf("%s\n...[truncated %d runes]...\n%s", string(keptHead), truncated, string(keptTail))
+}
+
+// encodeTokenUsage marshals a TokenUsage pointer into a JSON string suitable for
+// a jsonb column. Returns empty string when usage is nil.
+func encodeTokenUsage(u *TokenUsage) string {
+	if u == nil {
+		return ""
+	}
+	b, _ := json.Marshal(u)
+	return string(b)
 }
 
 type Router struct {
@@ -100,6 +141,10 @@ func (r *Router) releaseSem(sem chan struct{}) {
 }
 
 func (r *Router) Chat(ctx context.Context, req ChatRequest) (result *ChatResult, err error) {
+	if req.Operation == "" {
+		return nil, errors.New("airouter: Operation is required")
+	}
+
 	ctx, span := otel.Tracer(tracing.ServiceName).Start(ctx, "Router.Chat")
 	defer span.End()
 	defer func() {
@@ -109,8 +154,9 @@ func (r *Router) Chat(ctx context.Context, req ChatRequest) (result *ChatResult,
 		}
 	}()
 	span.SetAttributes(attribute.String("ai.capability", string(req.Capability)))
-	if op, _ := req.Metadata["operation"].(string); op != "" {
-		span.SetAttributes(attribute.String("ai.operation", op))
+	span.SetAttributes(attribute.String("ai.operation", req.Operation))
+	if req.SessionID != "" {
+		span.SetAttributes(attribute.String("ai.session_id", req.SessionID))
 	}
 	if b := baggage.FromContext(ctx); b.Len() > 0 {
 		for _, m := range b.Members() {
@@ -137,21 +183,34 @@ func (r *Router) Chat(ctx context.Context, req ChatRequest) (result *ChatResult,
 		}
 
 		start := time.Now()
-		content, callErr := client.Chat(ctx, provider, req)
+		chatResp, callErr := client.Chat(ctx, provider, req)
 		latencyMs := int(time.Since(start).Milliseconds())
 		if callErr == nil {
 			r.store.LogCall(ctx, &models.AICallLog{
+				Operation:       req.Operation,
 				Capability:      string(req.Capability),
 				RouteName:       route.Name,
 				ProviderName:    provider.Name,
+				Model:           provider.Model,
 				Success:         true,
 				IsFallback:      idx > 0,
 				LatencyMs:       latencyMs,
+				Prompt:          formatMessages(req.Messages),
 				RequestMeta:     encodeMeta(req.Metadata),
-				ResponseSnippet: truncateSnippet(content),
+				ResponseSnippet: truncateSnippet(chatResp.Content),
+				TokenUsage:      encodeTokenUsage(chatResp.Usage),
+				SessionID:       req.SessionID,
 			})
 
-			return &ChatResult{Content: content, ProviderID: provider.ID, ProviderName: provider.Name, RouteName: route.Name, UsedFallback: idx > 0, AttemptCount: idx + 1}, nil
+			return &ChatResult{
+				Content:      chatResp.Content,
+				ProviderID:   provider.ID,
+				ProviderName: provider.Name,
+				RouteName:    route.Name,
+				UsedFallback: idx > 0,
+				AttemptCount: idx + 1,
+				Usage:        chatResp.Usage,
+			}, nil
 		}
 
 		providerErr := &ProviderError{}
@@ -162,16 +221,20 @@ func (r *Router) Chat(ctx context.Context, req ChatRequest) (result *ChatResult,
 			}
 		}
 		r.store.LogCall(ctx, &models.AICallLog{
+			Operation:       req.Operation,
 			Capability:      string(req.Capability),
 			RouteName:       route.Name,
 			ProviderName:    provider.Name,
+			Model:           provider.Model,
 			Success:         false,
 			IsFallback:      idx > 0,
 			LatencyMs:       latencyMs,
 			ErrorCode:       code,
 			ErrorMessage:    callErr.Error(),
+			Prompt:          formatMessages(req.Messages),
 			RequestMeta:     encodeMeta(req.Metadata),
 			ResponseSnippet: truncateSnippet(callErr.Error()),
+			SessionID:       req.SessionID,
 		})
 		attemptErrors = append(attemptErrors, fmt.Errorf("%s: %w", provider.Name, callErr))
 	}
@@ -186,9 +249,17 @@ func (r *Router) ResolvePrimaryProvider(capability Capability) (*models.AIProvid
 }
 
 func (r *Router) Embed(ctx context.Context, req EmbeddingRequest, capability Capability) (result *EmbeddingResult, err error) {
+	if req.Operation == "" {
+		return nil, errors.New("airouter: Operation is required")
+	}
+
 	_, span := otel.Tracer(tracing.ServiceName).Start(ctx, "Router.Embed")
 	defer span.End()
 	span.SetAttributes(attribute.String("ai.capability", string(capability)))
+	span.SetAttributes(attribute.String("ai.operation", req.Operation))
+	if req.SessionID != "" {
+		span.SetAttributes(attribute.String("ai.session_id", req.SessionID))
+	}
 
 	route, providers, err := r.store.LoadRouteWithProviders(capability)
 	if err != nil {
@@ -214,13 +285,16 @@ func (r *Router) Embed(ctx context.Context, req EmbeddingRequest, capability Cap
 		latencyMs := int(time.Since(start).Milliseconds())
 		if callErr == nil {
 			r.store.LogCall(ctx, &models.AICallLog{
+				Operation:    req.Operation,
 				Capability:   string(capability),
 				RouteName:    route.Name,
 				ProviderName: provider.Name,
+				Model:        provider.Model,
 				Success:      true,
 				IsFallback:   idx > 0,
 				LatencyMs:    latencyMs,
 				RequestMeta:  encodeMeta(req.Metadata),
+				SessionID:    req.SessionID,
 			})
 			return res, nil
 		}
@@ -233,15 +307,18 @@ func (r *Router) Embed(ctx context.Context, req EmbeddingRequest, capability Cap
 			}
 		}
 		r.store.LogCall(ctx, &models.AICallLog{
+			Operation:    req.Operation,
 			Capability:   string(capability),
 			RouteName:    route.Name,
 			ProviderName: provider.Name,
+			Model:        provider.Model,
 			Success:      false,
 			IsFallback:   idx > 0,
 			LatencyMs:    latencyMs,
 			ErrorCode:    code,
 			ErrorMessage: callErr.Error(),
 			RequestMeta:  encodeMeta(req.Metadata),
+			SessionID:    req.SessionID,
 		})
 		attemptErrors = append(attemptErrors, fmt.Errorf("%s: %w", provider.Name, callErr))
 	}

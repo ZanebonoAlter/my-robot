@@ -97,3 +97,12 @@ func (c *boardCache) InvalidateConfig() {
 func InvalidateMatchingConfigCache() {
 	packageBoardCache.InvalidateConfig()
 }
+
+// InvalidateBoardCache clears the package-level board cache (board data + config).
+// Tests must call this after ResetTestData truncates semantic_labels / board tables,
+// since ResetTestData clears the DB but not this in-memory cache (stale entries
+// would otherwise span test boundaries and break backfill/matching assertions).
+func InvalidateBoardCache() {
+	packageBoardCache.InvalidateBoardData()
+	packageBoardCache.InvalidateConfig()
+}

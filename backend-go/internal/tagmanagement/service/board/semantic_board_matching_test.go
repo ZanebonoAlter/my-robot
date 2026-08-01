@@ -17,6 +17,7 @@ import (
 func setupSemanticBoardMatchingTestDB(t *testing.T) *gorm.DB {
 	db := testutil.SetupTestDB(t)
 	repository.InitRepository(db)
+	InvalidateBoardCache() // 避免包级缓存跨测试残留（ResetTestData 清 db 但不清内存缓存）
 	return db
 }
 
@@ -50,10 +51,11 @@ func TestSemanticBoardMatchingDirectHit(t *testing.T) {
 
 func TestSemanticBoardMatchingThreeRules(t *testing.T) {
 	db := setupSemanticBoardMatchingTestDB(t)
-	require.NoError(t, db.Create(&models.AISettings{Key: "semantic_board_match_sim_threshold", Value: "0.6"}).Error)
-	require.NoError(t, db.Create(&models.AISettings{Key: "semantic_board_match_direct_max_sim_min_hits", Value: "1"}).Error)
-	require.NoError(t, db.Create(&models.AISettings{Key: "semantic_board_match_direct_max_sim_min_hit_rate", Value: "0"}).Error)
-	require.NoError(t, db.Create(&models.AISettings{Key: "semantic_board_match_min_effective_sample", Value: "1"}).Error)
+	upsertMatchSetting(t, db, "semantic_board_match_sim_threshold", "0.6")
+	upsertMatchSetting(t, db, "semantic_board_match_direct_max_sim_min_hits", "1")
+	upsertMatchSetting(t, db, "semantic_board_match_direct_max_sim_min_hit_rate", "0")
+	upsertMatchSetting(t, db, "semantic_board_match_min_effective_sample", "1")
+	upsertMatchSetting(t, db, "semantic_board_match_direct_hit_min_overlap", "1")
 	tag := createMatchTag(t, db, "model-release")
 	tagAuxA := createMatchLabel(t, db, "OpenAI", "openai", "auxiliary", "active", []float64{1, 0, 0})
 	tagAuxB := createMatchLabel(t, db, "Release", "release", "auxiliary", "active", []float64{0, 1, 0})
@@ -83,9 +85,10 @@ func TestSemanticBoardMatchingThreeRules(t *testing.T) {
 
 func TestSemanticBoardMatchingMaxBoardsTruncation(t *testing.T) {
 	db := setupSemanticBoardMatchingTestDB(t)
-	require.NoError(t, db.Create(&models.AISettings{Key: "semantic_board_match_direct_hit_rate", Value: "1"}).Error)
-	require.NoError(t, db.Create(&models.AISettings{Key: "semantic_board_match_max_boards", Value: "2"}).Error)
-	require.NoError(t, db.Create(&models.AISettings{Key: "semantic_board_match_min_effective_sample", Value: "1"}).Error)
+	upsertMatchSetting(t, db, "semantic_board_match_direct_hit_rate", "1")
+	upsertMatchSetting(t, db, "semantic_board_match_max_boards", "2")
+	upsertMatchSetting(t, db, "semantic_board_match_min_effective_sample", "1")
+	upsertMatchSetting(t, db, "semantic_board_match_direct_hit_min_overlap", "1")
 	tag := createMatchTag(t, db, "ranked-boards")
 	tagAux := createMatchLabel(t, db, "GPU", "gpu", "auxiliary", "active", []float64{1, 0, 0})
 	require.NoError(t, db.Create(&models.TopicTagSemanticLabel{TopicTagID: tag.ID, SemanticLabelID: tagAux.ID}).Error)

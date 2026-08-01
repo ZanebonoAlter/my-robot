@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { Icon } from '@iconify/vue'
-import { onMounted } from 'vue'
+import { onMounted, ref } from 'vue'
 import { useSchedulerStatus } from '~/composables/useSchedulerStatus'
 import {
   formatLastRunSummary,
@@ -17,6 +17,7 @@ const {
   schedulerStatuses, schedulerTriggerFeedback, schedulerLoading,
   schedulerTriggerLoading, schedulerError, schedulerSuccess,
   loadSchedulersStatus, triggerScheduler,
+  scheduleTimeLoading, updateScheduleTime,
 } = useSchedulerStatus()
 
 onMounted(() => {
@@ -46,6 +47,30 @@ function getStatusDotStyle(status: string) {
     case 'triggered': return { background: 'var(--color-warning)' }
     case 'error': return { background: 'var(--color-error)' }
     default: return { background: 'var(--color-text-muted)' }
+  }
+}
+
+function isWallClockScheduler(name: string): boolean {
+  return name === 'board_upgrade_suggest' || name === 'daily_report'
+}
+
+const editingScheduleName = ref<string | null>(null)
+const editingScheduleTime = ref('')
+
+function startEditSchedule(scheduler: { name: string; schedule_time?: string }) {
+  editingScheduleName.value = scheduler.name
+  editingScheduleTime.value = scheduler.schedule_time || ''
+}
+
+function cancelEditSchedule() {
+  editingScheduleName.value = null
+  editingScheduleTime.value = ''
+}
+
+async function saveScheduleTime(name: string) {
+  const ok = await updateScheduleTime(name, editingScheduleTime.value)
+  if (ok) {
+    cancelEditSchedule()
   }
 }
 </script>
@@ -108,6 +133,54 @@ function getStatusDotStyle(status: string) {
               执行
             </button>
           </div>
+        </div>
+
+        <!-- Wall-clock schedule time editor (board_upgrade_suggest / daily_report) -->
+        <div v-if="isWallClockScheduler(scheduler.name)" class="mt-3 flex flex-wrap items-center gap-2 text-xs" style="color: var(--color-text-secondary)">
+          <Icon icon="mdi:clock-outline" width="14" class="shrink-0" />
+          <span>定时</span>
+          <template v-if="editingScheduleName !== scheduler.name">
+            <span class="font-mono">{{ scheduler.schedule_time || '—' }}</span>
+            <button
+              type="button"
+              class="px-2 py-0.5 text-xs rounded-md transition-colors"
+              style="background: var(--color-bg-sunken); color: var(--color-text-muted)"
+              :disabled="scheduleTimeLoading"
+              @click="startEditSchedule(scheduler)"
+            >
+              <Icon icon="mdi:pencil-outline" width="12" class="inline -mt-0.5" />
+              编辑
+            </button>
+          </template>
+          <template v-else>
+            <input
+              v-model="editingScheduleTime"
+              type="time"
+              class="px-2 py-0.5 text-xs rounded-md font-mono"
+              style="border: 1px solid var(--color-border-subtle); background: var(--color-bg-sunken); color: var(--color-text-primary)"
+            >
+            <button
+              type="button"
+              class="px-2 py-0.5 text-xs font-medium rounded-md transition-colors"
+              :style="scheduleTimeLoading
+                ? 'background: var(--color-bg-sunken); color: var(--color-text-muted); cursor: not-allowed'
+                : 'background: var(--color-link); color: #fff'"
+              :disabled="scheduleTimeLoading"
+              @click="saveScheduleTime(scheduler.name)"
+            >
+              <Icon v-if="scheduleTimeLoading" icon="mdi:loading" width="12" class="animate-spin inline -mt-0.5" />
+              保存
+            </button>
+            <button
+              type="button"
+              class="px-2 py-0.5 text-xs rounded-md transition-colors"
+              style="background: var(--color-bg-sunken); color: var(--color-text-secondary)"
+              :disabled="scheduleTimeLoading"
+              @click="cancelEditSchedule"
+            >
+              取消
+            </button>
+          </template>
         </div>
 
         <div v-if="getSchedulerFeedback(schedulerTriggerFeedback, scheduler.name)" class="mt-3">

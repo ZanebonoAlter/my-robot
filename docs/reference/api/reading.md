@@ -1,4 +1,6 @@
-# 阅读行为与用户偏好
+# 阅读行为（Reading Behavior）
+
+> 旧 `/api/user-preferences/*` 端点已随偏好分数体系废弃删除（preference-vector-feed-discovery）；偏好向量画像见 [preference-profile.md](preference-profile.md)，订阅源发现见 [discovery.md](discovery.md)。
 
 ## 阅读行为 Reading Behavior
 
@@ -48,23 +50,4 @@
 
 ---
 
-## 用户偏好 User Preferences
-
-| 方法 | 路径 | 说明 |
-|------|------|------|
-| GET | `/api/user-preferences` | 偏好列表 |
-| POST | `/api/user-preferences/update` | 触发偏好重算 |
-
-### GET /api/user-preferences
-
-| 参数 | 类型 | 说明 |
-|------|------|------|
-| `type` | string | `feed`/`category`，留空返回全部 |
-
-按偏好分数降序，含关联 Feed/Category 信息。自动过滤已删除的 Feed/Category。
-
-### POST /api/user-preferences/update
-
-后台执行偏好重算。若调度器可用则通过 `TriggerNow()` 触发，否则启动 goroutine 异步执行。
-
-调度器正忙时返回 `409`。
+> **已移除**：`GET /api/user-preferences` 与 `POST /api/user-preferences/update`（旧偏好分数聚合端点）已删除。`reading_behaviors` 采集链路保留，改为偏好向量画像的权重源，见 [preference-profile.md](preference-profile.md)。

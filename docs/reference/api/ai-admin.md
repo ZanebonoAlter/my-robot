@@ -1,10 +1,9 @@
 # AI 管理 Admin
 
 | 方法 | 路径 | 说明 |
-|------|------|------|
+| ------ | ------ | ------ |
 | GET | `/api/ai/settings` | 获取 AI 设置 |
 | POST | `/api/ai/settings` | 保存 AI 设置 |
-| POST | `/api/ai/summarize` | AI 总结文章 |
 | POST | `/api/ai/test` | 测试 AI 连接 |
 | GET | `/api/ai/providers` | 列出提供商 |
 | POST | `/api/ai/providers` | 创建/更新提供商 |
@@ -39,30 +38,17 @@
 ### POST /api/ai/settings
 
 | 字段 | 类型 | 必填 | 说明 |
-|------|------|------|------|
+| ------ | ------ | ------ | ------ |
 | `api_key` | string | 否 | API Key（本地无认证服务可留空） |
 | `base_url` | string | 否 | 默认 `https://api.openai.com/v1` |
 | `model` | string | 否 | 默认 `gpt-4o-mini` |
 
 同时更新 legacy 配置和 AI Provider/Route，并热更新 content completion 的 AI 凭据。
 
-### POST /api/ai/summarize
-
-| 字段 | 类型 | 必填 | 说明 |
-|------|------|------|------|
-| `title` | string | 是 | 文章标题 |
-| `content` | string | 是 | 文章内容 |
-| `base_url` | string | 否 | 覆盖服务地址 |
-| `api_key` | string | 否 | 覆盖 API Key |
-| `model` | string | 否 | 覆盖模型名 |
-| `language` | string | 否 | 默认 `zh` |
-
-若 `base_url`/`api_key`/`model` 均提供则直接调用，否则走 AI Router。
-
 ### POST /api/ai/test
 
 | 字段 | 类型 | 必填 | 说明 |
-|------|------|------|------|
+| ------ | ------ | ------ | ------ |
 | `base_url` | string | 是 | 服务地址 |
 | `model` | string | 是 | 模型名 |
 | `api_key` | string | 否 | ollama 可省略 |
@@ -77,7 +63,7 @@
 按 name 匹配创建/更新：
 
 | 字段 | 类型 | 必填 | 说明 |
-|------|------|------|------|
+| ------ | ------ | ------ | ------ |
 | `name` | string | 是 | 名称 |
 | `base_url` | string | 是 | 服务地址 |
 | `model` | string | 是 | 模型名 |
@@ -87,7 +73,7 @@
 | `timeout_seconds` | int | 否 | 超时 |
 | `max_tokens` | int* | 否 | 最大 tokens |
 | `temperature` | float64* | 否 | 温度 |
-| `enable_thinking` | bool | 否 | 清理推理输出（剥离 `<think>` 标签），默认 `false` |
+| `enable_thinking` | bool | 否 | 是否开启模型推理思考（透传 `chat_template_kwargs.enable_thinking=true` 到请求体），默认 `false`。用于差异化控制：同一台本地模型（如 Qwythos）可配两条 provider——一条 `true` 挂 `digest_polish`（日报思考）、一条 `false` 挂 `topic_tagging`（打标签不思考） |
 | `metadata` | string | 否 | 附加元数据 |
 
 返回 `{"success": true, "data": {"id": ...}}`。
@@ -107,7 +93,7 @@
 ### PUT /api/ai/routes/:capability
 
 | 字段 | 类型 | 必填 | 说明 |
-|------|------|------|------|
+| ------ | ------ | ------ | ------ |
 | `provider_ids` | uint[] | 是 | 关联提供商 ID |
 | `name` | string | 否 | 路由名称（空则用默认） |
 | `enabled` | bool | 否 | 默认 `true` |

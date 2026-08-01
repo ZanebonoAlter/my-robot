@@ -1,6 +1,5 @@
 package core
 
-
 type ExtractionInput struct {
 	Title        string
 	Summary      string

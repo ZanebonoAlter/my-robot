@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"syntopica-backend/internal/platform/httpclient"
 	"syntopica-backend/internal/platform/tracing"
 )
 
@@ -56,13 +57,14 @@ func NewFirecrawlService(config *FirecrawlConfig) *FirecrawlService {
 
 	return &FirecrawlService{
 		config: config,
-		client: &http.Client{
-			Timeout: time.Duration(timeout) * time.Second,
-		},
+		client: httpclient.New(httpclient.WithTimeout(time.Duration(timeout) * time.Second)),
 	}
 }
 
-func (s *FirecrawlService) ScrapePage(ctx context.Context, url string) (result *ScrapeResponse, err error) {
+// compile-time guard: FirecrawlService 满足 Crawler 接口。
+var _ Crawler = (*FirecrawlService)(nil)
+
+func (s *FirecrawlService) ScrapePage(ctx context.Context, url string) (result *ScrapeResult, err error) {
 	_, span := otel.Tracer(tracing.ServiceName).Start(ctx, "FirecrawlService.ScrapePage")
 	defer span.End()
 	defer func() {
@@ -71,7 +73,7 @@ func (s *FirecrawlService) ScrapePage(ctx context.Context, url string) (result *
 			span.RecordError(err)
 		}
 	}()
-	/*line backend-go/internal/domain/contentprocessing/firecrawl_service.go:60:2*/ requestBody := map[string]interface{}{
+	requestBody := map[string]interface{}{
 		"url": url,
 	}
 
@@ -128,11 +130,19 @@ func (s *FirecrawlService) ScrapePage(ctx context.Context, url string) (result *
 		maxLength = 50000
 	}
 
-	if len(scrapeResp.Data.Markdown) > maxLength {
-		scrapeResp.Data.Markdown = scrapeResp.Data.Markdown[:maxLength]
+	markdown := scrapeResp.Data.Markdown
+	if len(markdown) > maxLength {
+		markdown = markdown[:maxLength]
 	}
 
-	return &scrapeResp, nil
+	// 转换为中立 ScrapeResult，调用方不再感知 Firecrawl 专有的 ScrapeResponse 结构。
+	return &ScrapeResult{
+		Markdown: markdown,
+		HTML:     scrapeResp.Data.HTML,
+		Title:    scrapeResp.Data.Metadata.Title,
+		OGImage:  pickMetadataImage(scrapeResp.Data.Metadata.OgImage, scrapeResp.Data.Metadata.TwitterImage),
+		Source:   "firecrawl",
+	}, nil
 }
 
 func buildFirecrawlEndpoint(baseURL, path string) string {
@@ -142,4 +152,13 @@ func buildFirecrawlEndpoint(baseURL, path string) string {
 	}
 
 	return trimmedBaseURL + path
+}
+
+// pickMetadataImage returns the first non-empty image URL from scrape
+// metadata fields. OG image is preferred, Twitter card image is the fallback.
+func pickMetadataImage(ogImage, twitterImage string) string {
+	if ogImage != "" {
+		return ogImage
+	}
+	return twitterImage
 }

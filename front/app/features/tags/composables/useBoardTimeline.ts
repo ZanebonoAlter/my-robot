@@ -1,6 +1,7 @@
 import { ref, computed } from 'vue'
 import { useSemanticBoardsApi, type BoardArticle, type BoardArticleTag } from '~/api/semanticBoards'
 import { useFeedsStore } from '~/stores/feeds'
+import { matchReasonColor, matchInfoLabel } from '~/utils/matchQuality'
 
 export function useBoardTimeline() {
   const sbApi = useSemanticBoardsApi()
@@ -117,27 +118,6 @@ export function useBoardTimeline() {
 
   function isSelectedDetailTag(tag: BoardArticleTag): boolean {
     return selectedTagForDetail.value?.id === tag.id
-  }
-
-  function matchReasonColor(reason: string, downgraded?: boolean): string {
-    const colors: Record<string, string> = {
-      direct_hit: '#22c55e',
-      hit_rate: '#3b82f6',
-      max_sim: '#f59e0b',
-      weighted: '#94a3b8',
-    }
-    const color = colors[reason] || '#94a3b8'
-    return downgraded ? color + '80' : color
-  }
-
-  function matchInfoLabel(tag: BoardArticleTag): string {
-    const labels: Record<string, string> = {
-      direct_hit: '直接命中',
-      hit_rate: '命中率',
-      max_sim: '相似度',
-      weighted: '综合',
-    }
-    return `${labels[tag.match_reason] || tag.match_reason} ${tag.score.toFixed(2)}${tag.downgraded ? '↓' : ''}`
   }
 
   function strongestMatch(tags: BoardArticleTag[]): BoardArticleTag | null {

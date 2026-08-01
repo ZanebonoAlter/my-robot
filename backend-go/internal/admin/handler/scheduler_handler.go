@@ -8,13 +8,19 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"syntopica-backend/internal/admin/repository"
+	"syntopica-backend/internal/admin/scheduler"
 	"syntopica-backend/internal/models"
+	"syntopica-backend/internal/platform/aisettings"
+	"syntopica-backend/internal/platform/analysispause"
 	"syntopica-backend/internal/platform/logging"
 )
 
 // SchedulerRegistry is the minimal interface for the global scheduler registry.
 type SchedulerRegistry interface {
 	Get(name string) (interface{}, bool)
+	// OrderedNames returns scheduler keys in registration order, so /status
+	// rendering is stable and auto-discovers every registered scheduler.
+	OrderedNames() []string
 }
 
 // Reg is the global scheduler registry, set by app.StartRuntime via admin.SetRegistry.
@@ -40,118 +46,49 @@ type SchedulerStatusResponse struct {
 	StaleProcessingCount   int                    `json:"stale_processing_count,omitempty"`
 	StaleProcessingArticle interface{}            `json:"stale_processing_article,omitempty"`
 	AIConfigured           bool                   `json:"ai_configured,omitempty"`
+	ScheduleTime           string                 `json:"schedule_time,omitempty"`
 }
 
-type schedulerDescriptor struct {
-	Name        string
-	DisplayName string
-	Aliases     []string
-	Description string
-	TaskName    string
-	Get         func() interface{}
-}
-
-func schedulerDescriptors() []schedulerDescriptor {
-	return []schedulerDescriptor{
-		{
-			Name:        "auto_refresh",
-			DisplayName: "Auto Refresh",
-			Description: "Auto-refresh RSS feeds",
-			TaskName:    "auto_refresh",
-			Get: func() interface{} {
-				s, _ := Reg.Get("auto_refresh")
-				return s
-			},
-		},
-		{
-			Name:        "preference_update",
-			DisplayName: "Preference Update",
-			Description: "Update reading preferences from behavior data",
-			Get: func() interface{} {
-				s, _ := Reg.Get("preference_update")
-				return s
-			},
-		},
-		{
-			Name:        "content_completion",
-			DisplayName: "Content Completion",
-			Aliases:     []string{"ai_summary"},
-			Description: "Complete article content and generate article summaries",
-			TaskName:    "ai_summary",
-			Get: func() interface{} {
-				s, _ := Reg.Get("content_completion")
-				return s
-			},
-		},
-		{
-			Name:        "firecrawl",
-			DisplayName: "Firecrawl Crawler",
-			Description: "Auto-crawl full content for articles",
-			Get: func() interface{} {
-				s, _ := Reg.Get("firecrawl")
-				return s
-			},
-		},
-		{
-			Name:        "tag_quality_score",
-			DisplayName: "Tag Quality Score",
-			Description: "Recompute persistent quality scores for topic tags",
-			Get: func() interface{} {
-				s, _ := Reg.Get("tag_quality_score")
-				return s
-			},
-		},
-		{
-			Name:        "log_cleanup",
-			DisplayName: "Log Cleanup",
-			Description: "Clean up expired ai_call_logs and otel_spans rows",
-			Get: func() interface{} {
-				s, _ := Reg.Get("log_cleanup")
-				return s
-			},
-		},
-		{
-			Name:        "daily_report",
-			DisplayName: "Daily Report",
-			Description: "Generate daily reports for all active semantic boards",
-			Get: func() interface{} {
-				s, _ := Reg.Get("daily_report")
-				return s
-			},
-		},
-		{
-			Name:        "aux_label_cleanup",
-			DisplayName: "Aux Label Cleanup",
-			Description: "Clean up auxiliary labels with no active topic_tag references",
-			Get: func() interface{} {
-				s, _ := Reg.Get("aux_label_cleanup")
-				return s
-			},
-		},
-		{
-			Name:        "blocked_article_recovery",
-			DisplayName: "Blocked Article Recovery",
-			Description: "Recover articles stuck in blocked state",
-			Get: func() interface{} {
-				s, _ := Reg.Get("blocked_article_recovery")
-				return s
-			},
-		},
+// schedulerConfig returns the scheduler's Config, or the zero value if the
+// scheduler does not expose one (e.g. a non-BaseScheduler implementation).
+// The admin handler reads Description/TaskName/Aliases from here for
+// auto-discovery, instead of a hardcoded descriptor list.
+func schedulerConfig(s interface{}) scheduler.Config {
+	if cfg, ok := s.(interface{ GetConfig() scheduler.Config }); ok {
+		return cfg.GetConfig()
 	}
+	return scheduler.Config{}
 }
 
-func ResolveScheduler(name string) (*schedulerDescriptor, interface{}) {
-	for _, descriptor := range schedulerDescriptors() {
-		if descriptor.Name == name {
-			return &descriptor, descriptor.Get()
+// schedulerLabel returns a human-readable label (Config.Name) for log/error
+// messages, falling back to the registry key.
+func schedulerLabel(s interface{}, key string) string {
+	if name := schedulerConfig(s).Name; name != "" {
+		return name
+	}
+	return key
+}
+
+// ResolveScheduler finds a scheduler by registry key or alias. It returns the
+// canonical registry key and the scheduler instance. Auto-discovered: any
+// scheduler registered with the registry (plus its Config.Aliases) is
+// resolvable here without a separate descriptor list.
+func ResolveScheduler(name string) (string, interface{}) {
+	if s, ok := Reg.Get(name); ok {
+		return name, s
+	}
+	for _, key := range Reg.OrderedNames() {
+		s, ok := Reg.Get(key)
+		if !ok {
+			continue
 		}
-		for _, alias := range descriptor.Aliases {
+		for _, alias := range schedulerConfig(s).Aliases {
 			if alias == name {
-				return &descriptor, descriptor.Get()
+				return key, s
 			}
 		}
 	}
-	return nil, nil
+	return "", nil
 }
 
 func safeGetStatus(scheduler interface{}, displayName string) *SchedulerStatusResponse {
@@ -182,30 +119,41 @@ func safeGetStatus(scheduler interface{}, displayName string) *SchedulerStatusRe
 
 func GetSchedulersStatus(c *gin.Context) {
 	schedulers := make([]SchedulerStatusResponse, 0)
-	for _, descriptor := range schedulerDescriptors() {
-		scheduler := descriptor.Get()
-		if status := safeGetStatus(scheduler, descriptor.DisplayName); status != nil {
-			enrichStatus(scheduler, descriptor, status)
+	for _, key := range Reg.OrderedNames() {
+		s, ok := Reg.Get(key)
+		if !ok {
+			continue
+		}
+		if status := safeGetStatus(s, schedulerLabel(s, key)); status != nil {
+			enrichStatus(s, key, status)
 			schedulers = append(schedulers, *status)
 		}
 	}
 
+	pausedAt := analysispause.PausedAt()
+	pausedAtStr := ""
+	if pausedAt != nil {
+		pausedAtStr = pausedAt.Format(time.RFC3339)
+	}
+
 	c.JSON(http.StatusOK, gin.H{
-		"success": true,
-		"data":    schedulers,
+		"success":            true,
+		"data":               schedulers,
+		"analysis_paused":    analysispause.IsPaused(),
+		"analysis_paused_at": pausedAtStr,
 	})
 }
 
 func GetSchedulerStatus(c *gin.Context) {
 	name := c.Param("name")
-	descriptor, scheduler := ResolveScheduler(name)
-	if descriptor == nil {
+	key, scheduler := ResolveScheduler(name)
+	if scheduler == nil {
 		c.JSON(http.StatusNotFound, gin.H{"success": false, "error": "Scheduler not found: " + name})
 		return
 	}
 
-	if status := safeGetStatus(scheduler, descriptor.DisplayName); status != nil {
-		enrichStatus(scheduler, *descriptor, status)
+	if status := safeGetStatus(scheduler, schedulerLabel(scheduler, key)); status != nil {
+		enrichStatus(scheduler, key, status)
 		c.JSON(http.StatusOK, gin.H{"success": true, "data": status})
 		return
 	}
@@ -215,8 +163,8 @@ func GetSchedulerStatus(c *gin.Context) {
 
 func TriggerScheduler(c *gin.Context) {
 	requestedName := c.Param("name")
-	descriptor, scheduler := ResolveScheduler(requestedName)
-	if descriptor == nil || scheduler == nil {
+	key, scheduler := ResolveScheduler(requestedName)
+	if scheduler == nil {
 		c.JSON(http.StatusNotFound, gin.H{"success": false, "error": "Scheduler not found or cannot be triggered: " + requestedName})
 		return
 	}
@@ -225,23 +173,23 @@ func TriggerScheduler(c *gin.Context) {
 		TriggerNowWithDate(dateStr string) map[string]interface{}
 	}); ok {
 		dateStr := c.Query("date")
-		respondTriggerResult(c, descriptor.Name, triggerable.TriggerNowWithDate(dateStr))
+		respondTriggerResult(c, key, triggerable.TriggerNowWithDate(dateStr))
 		return
 	}
 
 	if triggerable, ok := scheduler.(interface{ TriggerNow() map[string]interface{} }); ok {
-		respondTriggerResult(c, descriptor.Name, triggerable.TriggerNow())
+		respondTriggerResult(c, key, triggerable.TriggerNow())
 		return
 	}
 
 	if triggerable, ok := scheduler.(interface{ Trigger() }); ok {
-		logging.Infof("Triggering %s scheduler manually", descriptor.Name)
+		logging.Infof("Triggering %s scheduler manually", key)
 		triggerable.Trigger()
 		c.JSON(http.StatusOK, gin.H{
 			"success": true,
-			"message": descriptor.Description + " triggered",
+			"message": schedulerConfig(scheduler).Description + " triggered",
 			"data": gin.H{
-				"name":   descriptor.Name,
+				"name":   key,
 				"status": "triggered",
 			},
 		})
@@ -271,8 +219,8 @@ func respondTriggerResult(c *gin.Context, name string, result map[string]interfa
 
 func ResetSchedulerStats(c *gin.Context) {
 	requestedName := c.Param("name")
-	descriptor, scheduler := ResolveScheduler(requestedName)
-	if descriptor == nil || scheduler == nil {
+	key, scheduler := ResolveScheduler(requestedName)
+	if scheduler == nil {
 		c.JSON(http.StatusNotFound, gin.H{"success": false, "error": "Scheduler not found: " + requestedName})
 		return
 	}
@@ -282,26 +230,28 @@ func ResetSchedulerStats(c *gin.Context) {
 			c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": err.Error()})
 			return
 		}
-		c.JSON(http.StatusOK, gin.H{"success": true, "message": fmt.Sprintf("Statistics reset for scheduler '%s'", descriptor.Name)})
+		c.JSON(http.StatusOK, gin.H{"success": true, "message": fmt.Sprintf("Statistics reset for scheduler '%s'", key)})
 		return
 	}
 
-	if descriptor.TaskName != "" {
-		if err := resetSchedulerTask(descriptor.TaskName); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": err.Error()})
-			return
-		}
-		c.JSON(http.StatusOK, gin.H{"success": true, "message": fmt.Sprintf("Statistics reset for scheduler '%s'", descriptor.Name)})
+	// Fallback: reset the SchedulerTask DB row directly. taskName defaults to
+	// the registry key when Config.TaskName is unset (e.g. "ai_summary" for
+	// content_completion).
+	taskName := schedulerConfig(scheduler).TaskName
+	if taskName == "" {
+		taskName = key
+	}
+	if err := resetSchedulerTask(taskName); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": err.Error()})
 		return
 	}
-
-	c.JSON(http.StatusConflict, gin.H{"success": false, "error": "Scheduler stats cannot be reset: " + requestedName})
+	c.JSON(http.StatusOK, gin.H{"success": true, "message": fmt.Sprintf("Statistics reset for scheduler '%s'", key)})
 }
 
 func UpdateSchedulerInterval(c *gin.Context) {
 	requestedName := c.Param("name")
-	descriptor, scheduler := ResolveScheduler(requestedName)
-	if descriptor == nil || scheduler == nil {
+	key, scheduler := ResolveScheduler(requestedName)
+	if scheduler == nil {
 		c.JSON(http.StatusNotFound, gin.H{"success": false, "error": "Scheduler not found: " + requestedName})
 		return
 	}
@@ -329,10 +279,59 @@ func UpdateSchedulerInterval(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
-		"message": fmt.Sprintf("Interval updated for scheduler '%s'", descriptor.Name),
+		"message": fmt.Sprintf("Interval updated for scheduler '%s'", key),
 		"data": gin.H{
-			"name":           descriptor.Name,
+			"name":           key,
 			"check_interval": req.Interval,
+		},
+	})
+}
+
+type UpdateSchedulerScheduleTimeRequest struct {
+	Time string `json:"time" binding:"required"`
+}
+
+// UpdateSchedulerScheduleTime updates the wall-clock trigger time (HH:MM) for
+// the two wall-clock schedulers (board_upgrade_suggest, daily_report). The time
+// is persisted to ai_settings under the same key the scheduler reads at trigger
+// computation, so the change takes effect on the next tick. Other schedulers
+// (cron-based, interval-based) return 400.
+func UpdateSchedulerScheduleTime(c *gin.Context) {
+	requestedName := c.Param("name")
+	key, scheduler := ResolveScheduler(requestedName)
+	if scheduler == nil {
+		c.JSON(http.StatusNotFound, gin.H{"success": false, "error": "Scheduler not found: " + requestedName})
+		return
+	}
+
+	var req UpdateSchedulerScheduleTimeRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "Valid time (HH:MM) is required"})
+		return
+	}
+
+	switch key {
+	case "board_upgrade_suggest":
+		if err := aisettings.SaveBoardUpgradeSuggestTimeConfig(req.Time); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": err.Error()})
+			return
+		}
+	case "daily_report":
+		if err := aisettings.SaveDailyReportTimeConfig(req.Time); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": err.Error()})
+			return
+		}
+	default:
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "Schedule time configuration is not supported for scheduler: " + requestedName})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": fmt.Sprintf("Schedule time updated for scheduler '%s'", key),
+		"data": gin.H{
+			"name": key,
+			"time": req.Time,
 		},
 	})
 }
@@ -401,9 +400,31 @@ func safeGetTaskStatus(scheduler interface{}) map[string]interface{} {
 	return nil
 }
 
-func enrichStatus(scheduler interface{}, descriptor schedulerDescriptor, status *SchedulerStatusResponse) {
-	status.Name = descriptor.Name
-	status.Description = descriptor.Description
+// enrichStatus fills in display metadata (Name/Description) and, when the
+// scheduler implements GetTaskStatusDetails, the runtime/database detail
+// fields. It is fully generic — no per-scheduler branching. The DB-table
+// fallback at the end handles schedulers that only expose a SchedulerTask row.
+func enrichStatus(scheduler interface{}, key string, status *SchedulerStatusResponse) {
+	status.Name = key
+	cfg := schedulerConfig(scheduler)
+	status.Description = cfg.Description
+	taskName := key
+	if cfg.TaskName != "" {
+		taskName = cfg.TaskName
+	}
+
+	// Wall-clock schedulers surface their configured HH:MM trigger time so the
+	// status panel can show/edit it. Only these two read HH:MM from ai_settings.
+	switch key {
+	case "board_upgrade_suggest":
+		if t, err := aisettings.LoadBoardUpgradeSuggestTimeConfig(); err == nil {
+			status.ScheduleTime = t
+		}
+	case "daily_report":
+		if t, err := aisettings.LoadDailyReportTimeConfig(); err == nil {
+			status.ScheduleTime = t
+		}
+	}
 
 	if detailer, ok := scheduler.(interface{ GetTaskStatusDetails() map[string]interface{} }); ok {
 		details := detailer.GetTaskStatusDetails()
@@ -446,10 +467,6 @@ func enrichStatus(scheduler interface{}, descriptor schedulerDescriptor, status 
 		return
 	}
 
-	taskName := descriptor.TaskName
-	if taskName == "" {
-		taskName = descriptor.Name
-	}
 	var task models.SchedulerTask
 	if err := repository.Repo.DB().Where("name = ?", taskName).First(&task).Error; err == nil {
 		status.DatabaseState = task.ToDict()

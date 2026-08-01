@@ -119,6 +119,11 @@
   --color-error:   var(--raw-error);
   --color-info:    var(--raw-info);
 
+  /* Subtle (translucent) variants for soft backgrounds (health cards, outlier
+     highlights in the compose workbench). Mirror the accent-subtle convention. */
+  --color-success-subtle: rgba(61, 138, 74, 0.12);
+  --color-warning-subtle: rgba(196, 136, 60, 0.14);
+
   --color-input-bg:    rgba(255, 255, 255, 0.6);
   --color-input-border: rgba(26, 26, 26, 0.12);
   --color-input-focus:  var(--raw-red-500);
@@ -137,6 +142,21 @@
   --color-tag-keyword:        rgba(74, 93, 138, 0.85);
   --color-tag-keyword-bg:     rgba(74, 93, 138, 0.12);
   --color-tag-keyword-border: rgba(74, 93, 138, 0.25);
+
+  /* Match-quality tiers (direct_hit / hit_rate / max_sim / weighted).
+     Shared by TagsPage chips, daily-report explore panel and section tier badge.
+     Downgraded indicators halve opacity at the call site via color-mix. */
+  --color-match-direct-hit: #22c55e;
+  --color-match-hit-rate:   #3b82f6;
+  --color-match-max-sim:    #f59e0b;
+  --color-match-weighted:   #94a3b8;
+
+  /* Thread lifecycle status (BoardThreadBrowser) */
+  --color-thread-status-emerging:  #16a34a;
+  --color-thread-status-continuing: #2563eb;
+  --color-thread-status-split:      #ea580c;
+  --color-thread-status-merge:      #9333ea;
+  --color-thread-status-ending:     #64748b;
 
   /* Interactive/link blue */
   --color-link:            rgba(63, 124, 255, 0.9);
@@ -184,6 +204,11 @@
   --color-error:   var(--raw-error);
   --color-info:    var(--raw-info);
 
+  /* Subtle (translucent) variants for soft backgrounds (health cards, outlier
+     highlights in the compose workbench). Mirror the accent-subtle convention. */
+  --color-success-subtle: rgba(78, 166, 143, 0.14);
+  --color-warning-subtle: rgba(240, 162, 75, 0.14);
+
   --color-input-bg:    rgba(255, 255, 255, 0.04);
   --color-input-border: rgba(255, 255, 255, 0.10);
   --color-input-focus:  rgba(240, 138, 75, 0.85);
@@ -202,6 +227,19 @@
   --color-tag-keyword:        rgba(99, 102, 241, 0.72);
   --color-tag-keyword-bg:     rgba(99, 102, 241, 0.18);
   --color-tag-keyword-border: rgba(99, 102, 241, 0.32);
+
+  /* Match-quality tiers — brightened for the deep dark ground. */
+  --color-match-direct-hit: #4ade80;
+  --color-match-hit-rate:   #60a5fa;
+  --color-match-max-sim:    #fbbf24;
+  --color-match-weighted:   #94a3b8;
+
+  /* Thread lifecycle status (BoardThreadBrowser) — brighter on dark bg */
+  --color-thread-status-emerging:  #34d399;
+  --color-thread-status-continuing: #60a5fa;
+  --color-thread-status-split:      #fb923c;
+  --color-thread-status-merge:      #c084fc;
+  --color-thread-status-ending:     #9ca3af;
 
   /* Interactive/link blue */
   --color-link:            rgba(99, 179, 237, 0.9);

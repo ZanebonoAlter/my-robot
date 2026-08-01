@@ -47,6 +47,14 @@
 
 `grep` 核实：两文件 setup/NewRepository/gorm.Open/`database.DB` 调用均为 0，import 无任何 DB 包，是纯算法测试（CosineDistance 正交/同向/长度不匹配、匈牙利算法各场景、PlanLifecycle 状态机）。强行迁 PG 是无谓增成本，且会模糊「该层是纯逻辑、本就该 unit」的正确分层。
 
+### 决策⑤：迁移暴露的 DeleteWatch 级联 bug —— 拆 change 追踪，不在本 change 修
+
+切片 1 实测发现 `DeleteWatch` 在 PG 不级联删 hits（model tag CASCADE 形同虚设，迁移漏建 FK，详见 proposal「迁移副产品」）。三个选项：(a) 本 change 加 FK 迁移修；(b) `DeleteWatch` 内手动级联；(c) 改断言为留孤儿。**决策：都不在本 change 做**——(a)/(b) 超出「3 文件/不动产品代码」范围，且 FK 迁移涉及历史孤儿数据兼容（testing.md「schema 迁移要在 testcontainer PG + 历史数据下测」硬约束）；(c) 掩盖 bug。改为**拆 `fix-watch-delete-cascade` change** 独立追踪，本 change 2 个级联测试 `t.Skip` 指向它（skip message 已更新为明确归属，非「awaiting decision」悬空）。这是本次迁移的最大价值——把 SQLite 掩盖的生产 bug 真正抓出来了。
+
+### 决策⑥：rollback 测试删除（SQLite 遗物）
+
+`TestCreateManualTopic_RollbackOnRebuildRelationsFailure` 前提是「`period_date::date` 在 SQLite 必败→事务回滚」，迁 PG 后 cast 合法、调用成功，断言全翻转，是 SQLite 遗物。PG happy-path 已被 `TestManualTopic_CreateAndReassign` 覆盖。**决策：删除**（非 skip）——留个前提反转的死测试无意义；「事务回滚」保护若要 PG 下真测，应构造真实中途失败（独立工作，可后续补）。原 8 个 DB 测试现为 7 个。
+
 ## Risks / Trade-offs
 
 - **[迁移后测试变慢]** repository 测试加入 testcontainer，但黄金 schema 进程内复用，增量只是每次 `ResetTestData` 的 reset 成本（秒级），且 CI 本就跑 testcontainer。→ 可接受，不额外优化。

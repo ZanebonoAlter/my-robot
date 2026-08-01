@@ -28,3 +28,9 @@
 - **spec**：`openspec/specs/test-infrastructure/spec.md`（delta 加 requirement）。
 - **依赖**：无新增。复用现有 `testutil.SetupTestDB` + 黄金 schema；model `BoardTopicWatch`/`TopicWatchHit` 已在 `daily_report_models.go` 且纳入生产 AutoMigrate。
 - **无产品行为变化 / 无 API 变化 / 无 schema 变化**——纯测试基础设施与规范收敛。
+
+## 迁移副产品：发现的生产 bug（拆 change 追踪）
+
+切片 1 迁移过程暴露出一个**已存在的生产 bug**（非本 change 引入）：`DeleteWatch` 在 PostgreSQL 上不级联删 `topic_watch_hits`，留孤儿行。根因：model tag 声明 `constraint:OnDelete:CASCADE`，但 `db.go`/`testutil.go` 开 `DisableForeignKeyConstraintWhenMigrating=true` 致 AutoMigrate 不建 FK，版本化迁移 `20260630_*` 也漏建 FK CASCADE（对比 `topic_tags` 在迁移里显式加了）。SQLite 测试靠 `PRAGMA foreign_keys=ON` 让级联生效，**掩盖了这个 bug**——正是本 change 要消灭的「SQLite 全绿」温床。
+
+本 change 不修产品代码（超范围），已拆 **`fix-watch-delete-cascade`** change 独立追踪（加 FK CASCADE 迁移 + 历史孤儿数据清理）。本 change 的 2 个级联测试保留 `t.Skip` 指向该 change，落地后 re-enable。

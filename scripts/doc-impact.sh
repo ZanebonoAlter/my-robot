@@ -325,9 +325,13 @@ cmd_verify() {
 				add_fail "声明的文档不存在: $f"
 				continue
 			fi
-			# 规则 2：不在 changed 集合
+			# 规则 2：不在 changed 集合，且未在 git 历史提交
+			# （事后补归档场景：change 改动已 commit 进主线，工作树 diff 为空；
+			#   只要文件曾被提交即视为「已更新」，避免 base=HEAD 对已提交改动的误报）
 			if ! echo "$changed" | grep -qxF "$f"; then
-				add_fail "声明了未更新: $f"
+				if ! git log --oneline -- "$f" 2>/dev/null | grep -q .; then
+					add_fail "声明了未更新: $f"
+				fi
 			fi
 		done <<<"$declared_files"
 	fi

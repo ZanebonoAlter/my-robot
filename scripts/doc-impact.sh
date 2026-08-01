@@ -27,7 +27,9 @@ changed_files() {
 	local base="${1:-HEAD}"
 	# 已跟踪：git diff（含未 stage 的工作区改动 + 已 stage）
 	# core.quotepath=false 让中文路径原样输出（否则 git 八进制转义，verify 比对失败）
-	git -c core.quotepath=false diff --name-only "$base" 2>/dev/null
+	# core.checkStat=minimal：WSL DrvFS(/mnt/*) 上完整 stat 极慢（29s→2s），
+	# 对启发式门禁而言 mtime+size 粒度足够
+	git -c core.checkStat=minimal -c core.quotepath=false diff --name-only "$base" 2>/dev/null
 	git -c core.quotepath=false diff --cached --name-only 2>/dev/null
 	# 未跟踪新文件
 	git -c core.quotepath=false ls-files --others --exclude-standard 2>/dev/null
@@ -35,12 +37,13 @@ changed_files() {
 
 # ---------------------------------------------------------------------------
 # 启发式：某文档域是否被改动文件集合命中
-#   $1 = 域 key；$2 = base ref。命中则 echo 命中的文件路径（可能多个），否则空。
+#   $1 = 域 key；$2 = 预先算好的改动文件列表（换行分隔）。命中则 echo 命中的
+#   文件路径（可能多个），否则空。
+#   ⚠ 调用方必须预计算文件列表传入——曾在函数内每次重跑 changed_files，
+#   verify/suggest 的 7 域循环导致 7+ 次全量 git 扫描（DrvFS 上每次 ~30s）。
 # ---------------------------------------------------------------------------
 heuristic_hit() {
-	local domain="$1" base="$2"
-	local files
-	files="$(changed_files "$base" | sort -u)"
+	local domain="$1" files="$2"
 	case "$domain" in
 	flow)
 		echo "$files" | grep -E 'backend-go/internal/(admin|reader|tagmanagement|topicgraph|dataenrichment)/service/' ||
@@ -98,10 +101,11 @@ cmd_suggest() {
 	local base="HEAD"
 	[ "${1:-}" = "--base" ] && base="${2:-HEAD}"
 	echo "文档域预勾选（--base $base）："
-	local declared=""
+	local declared="" files
+	files="$(changed_files "$base" | sort -u)"
 	for domain in flow api database architecture standard configuration deployment; do
 		local hit
-		hit="$(heuristic_hit "$domain" "$base")"
+		hit="$(heuristic_hit "$domain" "$files")"
 		if [ -n "$hit" ]; then
 			local first
 			first="$(echo "$hit" | head -1)"
@@ -303,14 +307,14 @@ cmd_verify() {
 	# --- 规则 4：声明 none 但启发式命中 ---
 	if echo "$declared_domains" | grep -qw none; then
 		for domain in flow api database architecture standard configuration deployment; do
-			if [ -n "$(heuristic_hit "$domain" "$base")" ]; then
+			if [ -n "$(heuristic_hit "$domain" "$changed")" ]; then
 				add_fail "声明 none 但启发式命中 $domain"
 			fi
 		done
 	else
 		# --- 规则 3：反向启发式命中未声明域 ---
 		for domain in flow api database architecture standard configuration deployment; do
-			if [ -n "$(heuristic_hit "$domain" "$base")" ] && ! echo "$declared_domains" | grep -qw "$domain" && ! echo "$excused_domains" | grep -qw "$domain"; then
+			if [ -n "$(heuristic_hit "$domain" "$changed")" ] && ! echo "$declared_domains" | grep -qw "$domain" && ! echo "$excused_domains" | grep -qw "$domain"; then
 				add_fail "疑似遗漏: 改了 ${domain} 相关代码未声明 $domain"
 			fi
 		done

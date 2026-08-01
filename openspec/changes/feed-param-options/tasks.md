@@ -30,7 +30,7 @@
 ## 6. 字典 seed（首版数据）
 
 - [x] 6.1 查询：跑 `feed_recommendations` 取 `RequiresParameters=true` 且被推荐/接受过的路由 Top-N
-- [ ] 6.2 人工录可选值入库（SQL，`source=manual`）
+- [x] 6.2 人工录可选值入库（SQL，`source=manual`）— `scripts/seed-route-param-options.sql`（qbitai/tencent/ithome×2/36kr 共 26 值，源自 RSSHub 源码 description 表格；重启后端后执行，ON CONFLICT 幂等）
 
 ## 测试
 

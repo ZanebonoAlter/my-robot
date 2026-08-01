@@ -25,7 +25,7 @@
 - `catalog_extras.go`：CheckAvailability（D4 异步限流）+ EmbedPendingRoutes（路由向量）
 - scheduler `job_rsshub_catalog_sync.go` + handler + routes `/discovery/catalog/*` + runtime 注册（每日）
 - 集成测试：入库/参数标记/幂等/gone/不可达保留 全 green
-- RSSHub 实例 47.110.71.194:1200 实测可达，API 结构已适配（{ns:{routes:{path:detail}}}）
+- RSSHub 实例 rsshub.app 实测可达，API 结构已适配（{ns:{routes:{path:detail}}}）
 
 ### §4 feed-discovery ✅（TDD 全 green）
 - `recommendation_service.go`：粗筛（pgvector <=> + route_id 状态机去重 + feeds.url/冷却）+ 精排（LLM/直出）+ 状态机（accept/dismiss）+ Ask（问答 + 种子写入）

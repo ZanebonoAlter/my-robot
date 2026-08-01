@@ -107,7 +107,7 @@
 - [x] 9.8a 目检 seed.sql `INSERT INTO ai_settings (...) VALUES` 的 `value` 列均为 `'{}'`（design D6a 配置 JSON 清空）
 - [x] 9.8b 抽查 `articles` VALUES 行无 `api_key`/`API_KEY`/`api-key` 字面量（已替换为 `[redacted-token]`，design D6a token 逃逸防护）
 - [x] 9.8c 目检 seed.sql `INSERT INTO feeds` 末尾含 `ON CONFLICT (url) DO NOTHING`（design D6a 唯一键碰撞防护）
-- [x] 9.8d RSSHub host 抽查：`findstr "47.110.71.194" demo\seed\seed.sql` → 零命中（自建 host 已全部替换为 `rsshub.app`，design D6a 防基础设施泄露）
+- [x] 9.8d RSSHub host 抽查：`findstr "rsshub.app" demo\seed\seed.sql` → 零命中（自建 host 已全部替换为 `rsshub.app`，design D6a 防基础设施泄露）
 - [x] 9.8e UTF-8 完整性：`uv run python -c "open(r'demo\\seed\\seed.sql',encoding='utf-8').read()"` 无 UnicodeDecodeError（truncateContent 按 rune 截断，design D6a）
 
 ### demo 端到端

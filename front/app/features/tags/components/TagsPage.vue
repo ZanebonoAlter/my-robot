@@ -78,6 +78,17 @@ function openTopicOverviewDetectiveWall(topicId?: number) {
   showTopicOverviewWall.value = true
 }
 
+// 话题态势版图卡片/气泡 click → 切「话题总览」tab 并聚焦该 topic（BoardThreadBrowser focus 视图，不弹侦探墙）
+const focusTopicIdInBrowser = ref<number | null>(null)
+function handleLandscapeSelectTopic(topicId: number) {
+  contentTab.value = 'topic-overview'
+  // 先清再设，保证同一话题重复点击也触发 BoardThreadBrowser 的 watch
+  focusTopicIdInBrowser.value = null
+  nextTick(() => {
+    focusTopicIdInBrowser.value = topicId
+  })
+}
+
 onMounted(() => {
   if (isTagsFirstRun.value) {
     void startTagsTour()
@@ -150,6 +161,7 @@ onMounted(() => {
             :loading="compositionLoading"
             @remove="handleRemoveComposition"
             @refresh="() => loadComposition(selectedBoardId!)"
+            @select-topic="handleLandscapeSelectTopic"
           />
 
           <BoardEnrichmentPanel
@@ -169,6 +181,7 @@ onMounted(() => {
           <BoardThreadBrowser
             v-if="contentTab === 'topic-overview'"
             :board-id="selectedBoardId"
+            :focus-topic-id="focusTopicIdInBrowser"
             @open-article="openArticlePreview"
             @open-detective-wall="openTopicOverviewDetectiveWall()"
           />

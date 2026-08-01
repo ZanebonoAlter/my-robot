@@ -5,6 +5,9 @@ import { isHotScheduler } from '~/utils/schedulerMeta'
 
 export function useSchedulerStatus() {
   const schedulerStatuses = ref<SchedulerStatus[]>([])
+  // 分析暂停总闸是后端全局开关，用 useState 跨组件共享（同 useNotify 模式，SSR 安全）
+  const analysisPaused = useState<boolean>('scheduler:analysis-paused', () => false)
+  const analysisPausedAt = useState<string>('scheduler:analysis-paused-at', () => '')
   const schedulerTriggerFeedback = ref<Record<string, SchedulerTriggerResult | undefined>>({})
   const lastSchedulerTriggerAt = ref<number | null>(null)
   const schedulerLoading = ref(false)
@@ -22,6 +25,8 @@ export function useSchedulerStatus() {
       const response = await getSchedulersStatus()
       if (response.success && response.data) {
         schedulerStatuses.value = response.data
+        analysisPaused.value = response.analysis_paused === true
+        analysisPausedAt.value = response.analysis_paused_at ?? ''
       }
     } catch {
       schedulerError.value = '加载定时任务状态失败'
@@ -106,6 +111,21 @@ export function useSchedulerStatus() {
     }
   }
 
+  async function setAnalysisPaused(paused: boolean): Promise<{ ok: boolean; message: string }> {
+    try {
+      const { setAnalysisPause } = useSchedulerApi()
+      const response = await setAnalysisPause(paused)
+      if (response.success && response.data) {
+        analysisPaused.value = response.data.paused
+        analysisPausedAt.value = response.data.paused_at ?? ''
+        return { ok: true, message: response.message || (paused ? '分析已暂停' : '分析已恢复') }
+      }
+      return { ok: false, message: response.error || '操作失败' }
+    } catch {
+      return { ok: false, message: '操作失败' }
+    }
+  }
+
   onUnmounted(() => {
     stopSchedulerPolling()
   })
@@ -113,6 +133,7 @@ export function useSchedulerStatus() {
   return {
     schedulerStatuses, schedulerTriggerFeedback, schedulerLoading,
     schedulerTriggerLoading, schedulerError, schedulerSuccess,
+    analysisPaused, analysisPausedAt, setAnalysisPaused,
     loadSchedulersStatus, stopSchedulerPolling, triggerScheduler,
     scheduleTimeLoading, updateScheduleTime,
   }

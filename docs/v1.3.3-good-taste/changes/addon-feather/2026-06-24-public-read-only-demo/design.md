@@ -110,7 +110,7 @@ if os.Getenv("DEMO_READ_ONLY") != "1" {
    - `articles.content` / `ai_content_summary` 用 `composeSanitizers(redactSensitiveTokens, truncateContent(2000))`：先做 `api_key/API_KEY/api-key/API-Key` → `[redacted-token]` 文本替换，再截断
    - 验证口径：`api_key` 只允许作为 `INSERT INTO ai_providers (...,api_key,...)` 的列名出现，VALUES 侧为空串
 
-3. **基础设施 host 泄露**：真实 feed URL 可能指向运营者自建的 RSSHub（如 `http://<公网IP>:1200/...`），公网 demo 会暴露其基础设施。解法：`feeds.url` 用 `composeSanitizers(rewriteRSSHubHost, stripQuery)`，`rewriteRSSHubHost` 把自建 host 替换成官方 `https://rsshub.app`（保留路径，官方实例兼容同套路由），由 `RSSHUB_REWRITE=源host=目标host` 环境变量配置，默认替换本 demo 数据源的 `47.110.71.194:1200`。
+3. **基础设施 host 泄露**：真实 feed URL 可能指向运营者自建的 RSSHub（如 `http://<公网IP>:1200/...`），公网 demo 会暴露其基础设施。解法：`feeds.url` 用 `composeSanitizers(rewriteRSSHubHost, stripQuery)`，`rewriteRSSHubHost` 把自建 host 替换成官方 `https://rsshub.app`（保留路径，官方实例兼容同套路由），由 `RSSHUB_REWRITE=源host=目标host` 环境变量配置，默认替换本 demo 数据源的 `rsshub.app`。
 
 4. **UTF-8 多字节切断**：`truncateContent` 早期按 byte 切（`s[:maxLen]`），会把中文等多字节字符从中间切断产生非法 UTF-8 字节，导致 seed.sql 解码失败。解法：按 rune 切（`[]rune(s)[:maxLen]`），保证不切断字符边界。
 

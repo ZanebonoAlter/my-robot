@@ -241,7 +241,21 @@ func (p *RSSParser) ProbeFaviconCandidates(siteURL string) []string {
 		return nil
 	}
 	base, _ := url.Parse(siteURL)
-	if href := p.fetchIconLinkHref(siteURL); href != "" {
+	homeURL := siteURL
+	if base != nil && base.Scheme != "" && base.Host != "" {
+		homeURL = base.Scheme + "://" + base.Host + "/"
+	}
+	// RSS channel link 常带具体路径（如 https://wallstreetcn.com/live/global），
+	// 该页面往往因 SPA/鉴权返回非 200 或缺少 <link rel="icon">。先试 siteURL
+	// 指向的页面，失败再回退站点首页（favicon 声明一般在首页 <head>）。
+	for _, page := range []string{siteURL, homeURL} {
+		if page == "" {
+			continue
+		}
+		href := p.fetchIconLinkHref(page)
+		if href == "" {
+			continue
+		}
 		if abs := resolveIconURL(base, href); abs != "" {
 			// The <link> href resolved to the same URL the /favicon.ico guess
 			// produces — list it once to avoid a duplicate download.

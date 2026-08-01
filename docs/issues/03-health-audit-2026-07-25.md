@@ -131,7 +131,7 @@
 | **P0** | `service/catalog_sync_service.go:58-135` | `SyncAll` 逐条 err 已处理，但**整批无外层事务**：fetch→diff→N×Save/Create/Updates→mark gone 串联，中途失败 `CatalogSyncSummary` 数字与实际不符 |
 | P1 | `service/recommendation_service.go:228` | `filterByFeedsURL` 内 `Pluck("url", &urls)` 忽略 `.Error`（误报为 catalog_sync:228，实为 recommendation_service） |
 | P1 | `service/catalog_sync_service.go:297-302` | `GetStatus` 内 `countStatus(...)` ×5 与 `Count(&st.Embedded)` 全忽略 `.Error`，统计接口 DB 抖动静默返 0 |
-| P1 | `service/catalog_sync_service.go:27` + `service/recommendation_service.go:236,532` + `discovery_helpers.go:26` | `DefaultRSSHubBaseURL = "http://47.110.71.194:1200"` 写死公网 IP + http，跨 3 文件复用；`discovery_helpers.go:26` 注释声称「可由 ai_settings 覆盖」但 **grep 全仓无任何代码读取 ai_settings 覆盖** — 注释撒谎，配置化未实现 |
+| P1 | `service/catalog_sync_service.go:27` + `service/recommendation_service.go:236,532` + `discovery_helpers.go:26` | `DefaultRSSHubBaseURL = "http://rsshub.app"` 写死公网 IP + http，跨 3 文件复用；`discovery_helpers.go:26` 注释声称「可由 ai_settings 覆盖」但 **grep 全仓无任何代码读取 ai_settings 覆盖** — 注释撒谎，配置化未实现 |
 | P1 | `service/preference_profile_service.go:557` | `err == gorm.ErrRecordNotFound` 裸 ==，应 `errors.Is` 防 wrap |
 | P2 | `handler/discovery_handler.go:18-20` | 每请求 `newRecommendationService()` 重建 `airouter.NewRouter()`，浪费内部并发 map |
 | P2 | `handler/discovery_handler.go:85` | `_ = c.ShouldBindJSON(&req)` 吞 bind err |

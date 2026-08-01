@@ -27,7 +27,7 @@ import (
 // 同步按 content_hash diff：新增/变更入库，消失的标 gone（不物理删除）。
 
 // DefaultRSSHubBaseURL 是 dump-sanitizer 已知的自建实例（design D2）。
-const DefaultRSSHubBaseURL = "http://47.110.71.194:1200"
+const DefaultRSSHubBaseURL = "https://rsshub.app"
 
 // CatalogSyncService 同步 RSSHub 路由目录。
 type CatalogSyncService struct {

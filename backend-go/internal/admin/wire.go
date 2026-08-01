@@ -54,6 +54,12 @@ var (
 	GetTasksStatus              = handler.GetTasksStatus
 )
 
+// Analysis pause handlers (pause-analysis)
+var (
+	GetAnalysisPause = handler.GetAnalysisPause
+	SetAnalysisPause = handler.SetAnalysisPause
+)
+
 // AI call log handlers
 var (
 	ListCallLogs = handler.ListCallLogs

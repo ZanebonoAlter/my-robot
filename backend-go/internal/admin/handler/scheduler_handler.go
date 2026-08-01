@@ -11,6 +11,7 @@ import (
 	"syntopica-backend/internal/admin/scheduler"
 	"syntopica-backend/internal/models"
 	"syntopica-backend/internal/platform/aisettings"
+	"syntopica-backend/internal/platform/analysispause"
 	"syntopica-backend/internal/platform/logging"
 )
 
@@ -129,9 +130,17 @@ func GetSchedulersStatus(c *gin.Context) {
 		}
 	}
 
+	pausedAt := analysispause.PausedAt()
+	pausedAtStr := ""
+	if pausedAt != nil {
+		pausedAtStr = pausedAt.Format(time.RFC3339)
+	}
+
 	c.JSON(http.StatusOK, gin.H{
-		"success": true,
-		"data":    schedulers,
+		"success":            true,
+		"data":               schedulers,
+		"analysis_paused":    analysispause.IsPaused(),
+		"analysis_paused_at": pausedAtStr,
 	})
 }
 

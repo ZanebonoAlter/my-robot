@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"regexp"
 	"strings"
+	"time"
 
 	"gorm.io/gorm"
 	"syntopica-backend/internal/models"
@@ -24,6 +25,7 @@ const boardUpgradeSuggestTimeKey = "semantic_board_upgrade_suggest_time"
 const defaultBoardUpgradeSuggestTime = "06:30"
 const rsshubDocBaseKey = "rsshub_doc_base"
 const defaultRSSHubDocBase = "https://docs.rsshub.app"
+const analysisPausedKey = "analysis_paused"
 
 // DefaultRSSHubDocBase 返回 rsshub_doc_base 的默认值（design D4），供 handler 透传给前端。
 func DefaultRSSHubDocBase() string { return defaultRSSHubDocBase }
@@ -264,4 +266,35 @@ func SaveRSSHubDocBaseConfig(value string) error {
 		Value:       value,
 		Description: "RSSHub 官方文档基址（用于生成参数文档链接）",
 	}).Error
+}
+
+// LoadAnalysisPausedConfig reads the analysis_paused flag from ai_settings.
+// Returns (paused=false, pausedAt=nil) when the key is missing so the default
+// is "not paused" (fail-open). The value is stored as a JSON object
+// {"paused":bool,"paused_at":RFC3339}.
+func LoadAnalysisPausedConfig() (paused bool, pausedAt *time.Time, err error) {
+	config, _, err := loadConfigByKey(analysisPausedKey)
+	if err != nil {
+		return false, nil, err
+	}
+	if v, ok := config["paused"].(bool); ok {
+		paused = v
+	}
+	if v, ok := config["paused_at"].(string); ok && v != "" {
+		if t, parseErr := time.Parse(time.RFC3339, v); parseErr == nil {
+			pausedAt = &t
+		}
+	}
+	return paused, pausedAt, nil
+}
+
+// SaveAnalysisPausedConfig writes the analysis_paused flag. When engaging
+// (paused=true), paused_at is stamped to now (UTC); when releasing (false),
+// paused_at is cleared.
+func SaveAnalysisPausedConfig(paused bool) error {
+	config := map[string]interface{}{"paused": paused}
+	if paused {
+		config["paused_at"] = time.Now().UTC().Format(time.RFC3339)
+	}
+	return saveConfigByKey(analysisPausedKey, config, "分析暂停总闸开关（paused + paused_at）")
 }

@@ -31,6 +31,12 @@ func RegisterRoutes(rg *gin.RouterGroup) {
 		schedulers.PUT("/:name/schedule-time", UpdateSchedulerScheduleTime)
 	}
 
+	analysis := rg.Group("/analysis")
+	{
+		analysis.GET("/pause", GetAnalysisPause)
+		analysis.POST("/pause", SetAnalysisPause)
+	}
+
 	readingBehavior := rg.Group("/reading-behavior")
 	{
 		readingBehavior.POST("/track", TrackReadingBehavior)

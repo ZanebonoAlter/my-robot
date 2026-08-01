@@ -58,7 +58,7 @@ Flags / env:
 | `DATABASE_DSN` | `configs/config.yaml` | source DB DSN |
 | `EXPORT_DAYS` / `--days` | `30` | recent-data window |
 | `SEED_OUT` / `--out` | `../demo/seed/seed.sql` | output path |
-| `RSSHUB_REWRITE` | `47.110.71.194:1200=rsshub.app` | rewrite a self-hosted RSSHub host to the public instance, formatted `sourceHost=targetHost`, to avoid leaking private infrastructure in `feeds.url` |
+| `RSSHUB_REWRITE` | `rsshub.app=rsshub.app` | rewrite a self-hosted RSSHub host to the public instance, formatted `sourceHost=targetHost`, to avoid leaking private infrastructure in `feeds.url` |
 
 > **Security review**: after regenerating, confirm the file contains no
 > `INSERT INTO ai_call_logs`, no `INSERT INTO schema_migrations`, and that every

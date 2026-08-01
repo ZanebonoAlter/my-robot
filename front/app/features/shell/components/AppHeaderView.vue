@@ -1,10 +1,37 @@
 <script setup lang="ts">
+import { onMounted, ref } from 'vue'
 import { Icon } from '@iconify/vue'
 import { useTheme } from '~/composables/useTheme'
 import { useOnboarding } from '~/composables/useOnboarding'
+import { useSchedulerStatus } from '~/composables/useSchedulerStatus'
+import { useAnalysisPauseFavicon } from '~/composables/useAnalysisPauseFavicon'
+import { useNotify } from '~/composables/useNotify'
 
 const { toggleTheme, isDark } = useTheme()
 const { startTour } = useOnboarding()
+const { analysisPaused, loadSchedulersStatus, setAnalysisPaused } = useSchedulerStatus()
+useAnalysisPauseFavicon()
+const notify = useNotify()
+const analysisPauseToggling = ref(false)
+
+async function toggleAnalysisPause() {
+  if (analysisPauseToggling.value) return
+  analysisPauseToggling.value = true
+  try {
+    const result = await setAnalysisPaused(!analysisPaused.value)
+    if (result.ok) {
+      notify.success(result.message)
+    } else {
+      notify.error(result.message)
+    }
+  } finally {
+    analysisPauseToggling.value = false
+  }
+}
+
+onMounted(() => {
+  loadSchedulersStatus()
+})
 
 interface Props {
   showRefreshMessage?: boolean
@@ -50,6 +77,19 @@ import '~/components/layout/AppHeader.css'
     </div>
 
     <div class="header-right">
+      <button
+        class="header-btn"
+        :title="analysisPaused ? '分析已暂停 · 点击恢复' : '暂停分析'"
+        :disabled="analysisPauseToggling"
+        @click="toggleAnalysisPause"
+      >
+        <Icon
+          :icon="analysisPaused ? 'mdi:play' : 'mdi:pause'"
+          width="20"
+          height="20"
+          :class="analysisPaused ? 'text-amber-500' : 'text-gray-600'"
+        />
+      </button>
       <button class="header-btn" title="刷新" @click="$emit('refresh')">
         <Icon icon="mdi:refresh" width="20" height="20" class="text-gray-600" />
       </button>

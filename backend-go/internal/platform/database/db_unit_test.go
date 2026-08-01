@@ -157,6 +157,29 @@ func TestWatchHitUniqueIndexMigrationRegistered(t *testing.T) {
 	)
 }
 
+func TestWatchHitFKCascadeMigrationRegistered(t *testing.T) {
+	migration := mustFindMigration(t, postgresMigrations(), "20260801_0002")
+	if !strings.Contains(strings.ToLower(migration.Description), "topic_watch_hits") {
+		t.Fatalf("expected topic_watch_hits migration description, got %q", migration.Description)
+	}
+
+	source, err := os.ReadFile("postgres_migrations.go")
+	if err != nil {
+		t.Fatalf("read postgres_migrations.go: %v", err)
+	}
+	joined := string(source)
+
+	// 清理孤儿 + 幂等加 FK + 长锁守卫（design D2/D3/D4）。
+	mustContainAll(t, joined,
+		"DELETE FROM topic_watch_hits WHERE watch_id NOT IN (SELECT id FROM board_topic_watches)",
+		"ADD CONSTRAINT fk_topic_watch_hits_watch",
+		"FOREIGN KEY (watch_id) REFERENCES board_topic_watches(id)",
+		"ON DELETE CASCADE",
+		`withLockTimeout(db, "5s"`,
+		"IF NOT EXISTS",
+	)
+}
+
 func TestQualityBreakdownMigrationRegistered(t *testing.T) {
 	migration := mustFindMigration(t, postgresMigrations(), "20260625_0001")
 	if !strings.Contains(strings.ToLower(migration.Description), "quality_breakdown") {

@@ -17,7 +17,7 @@
 { "success": true, "data": { "total": 3245, "added": 18, "updated": 2, "gone": 0 } }
 ```
 
-> 实例地址读 `ai_settings.rsshub_config.rsshub_base_url`（缺省回落 `http://47.110.71.194:1200`），见 [settings/rsshub](#rsshub-实例配置)。
+> 实例地址读 `ai_settings.rsshub_config.rsshub_base_url`（缺省回落 `http://rsshub.app`），见 [settings/rsshub](#rsshub-实例配置)。
 
 ### GET /api/discovery/catalog/status
 
@@ -128,18 +128,18 @@
 ### GET /api/settings/rsshub
 
 ```json
-{ "success": true, "data": { "rsshub_base_url": "http://47.110.71.194:1200", "rsshub_doc_base": "https://docs.rsshub.app", "rsshub_doc_base_default": "https://docs.rsshub.app" } }
+{ "success": true, "data": { "rsshub_base_url": "http://rsshub.app", "rsshub_doc_base": "https://docs.rsshub.app", "rsshub_doc_base_default": "https://docs.rsshub.app" } }
 ```
 
 ### POST /api/settings/rsshub
 
 ```json
-{ "rsshub_base_url": "http://47.110.71.194:1200", "rsshub_doc_base": "https://docs.rsshub.app" }
+{ "rsshub_base_url": "http://rsshub.app", "rsshub_doc_base": "https://docs.rsshub.app" }
 ```
 
 `rsshub_doc_base` 可选，缺省回落默认 `https://docs.rsshub.app`；提供非空值则写入 `ai_settings.rsshub_doc_base`（仅改 `rsshub_base_url` 时不影响 doc_base）。
 
-> 实例地址存 `ai_settings.rsshub_config`，缺省回落 `DefaultRSSHubBaseURL=http://47.110.71.194:1200`。改一处全链路（目录同步 + 推荐订阅落地）生效。
+> 实例地址存 `ai_settings.rsshub_config`，缺省回落 `DefaultRSSHubBaseURL=http://rsshub.app`。改一处全链路（目录同步 + 推荐订阅落地）生效。
 >
 > `rsshub_doc_base` 存 `ai_settings.rsshub_doc_base`（官方文档基址，用于推荐卡片「官方文档」链接生成）。缺省 `https://docs.rsshub.app`；官方文档站国内可能访问受限，可配换镜像。
 

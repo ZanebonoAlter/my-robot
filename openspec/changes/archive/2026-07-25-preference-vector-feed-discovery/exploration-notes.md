@@ -29,14 +29,14 @@
 | dismiss 冷却模式 | `board_upgrade_suggestions`：`ComputeSuggestionHash` 幂等 + `CountDismissedInCooldown`（`tagmanagement/service/board/board_upgrade_suggestion_persist.go`） | 推荐 hash 幂等 + 冷却照抄 |
 | Feed 模型 | `backend-go/internal/models/feed.go`：URL unique 约束、CategoryID 可空 | 已订阅去重按 feeds.url |
 
-## 3. RSSHub 目录实测数据（2026-07-24，自建实例 47.110.71.194:1200）
+## 3. RSSHub 目录实测数据（2026-07-24，自建实例 rsshub.app）
 
 - `GET /api/namespace` → 200，**2.9 MB 全量目录**：**1563 命名空间 / 3245 条路由**
 - **91.9%（2981 条）带 example** → 可用性校验可行；59.5% 中文名
 - 每条含：path（如 `/81rc/:category{.+}?`）、name、url、maintainers、example、parameters（中文说明）、description（markdown）
 - 参数语法：`:param` 必填、`:param?` 可选、`{.+}?` 正则约束——D3 解析规则按此
 - 外网注意：rsshub.app / raw.githubusercontent.com 从本环境不可达，**目录来源只能走自建实例**（design D2 已锁）
-- dump-sanitizer 有现成实例地址参考：`backend-go/cmd/dump-sanitizer/sanitize.go:91-103`（`defaultRSSHubRewrite = "47.110.71.194:1200=rsshub.app"`，env `RSSHUB_REWRITE`）
+- dump-sanitizer 有现成实例地址参考：`backend-go/cmd/dump-sanitizer/sanitize.go:91-103`（`defaultRSSHubRewrite = "rsshub.app=rsshub.app"`，env `RSSHUB_REWRITE`）
 
 ## 4. 旧功能废弃清单（design D9 的代码级落点）
 

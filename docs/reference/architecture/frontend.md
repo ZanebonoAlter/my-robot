@@ -1,6 +1,6 @@
 # 前端架构
 
-> 最后更新：2026-06-11（v1.3.3 架构深化：Store 拆分、事件流统一、错误通知、API 归一化、Feature Facade、大组件拆分）
+> 最后更新：2026-08-01（revamp-landscape-charts：图表库选型，新增 §图表库选型）
 
 ## 技术栈
 
@@ -13,6 +13,7 @@
 - Day.js
 - marked
 - motion-v
+- echarts（模块化按需引入，见 §图表库选型）
 - Vitest
 
 ## 入口与路由
@@ -304,6 +305,17 @@ surgical 边界：不改相机坐标系/布局算法/交互/BFS/红线/全局迷
 
 复用现有 API，无新增后端接口：`getBoardSectionTimeline(boardId, days)`、`getSectionLifecycle(sectionId)`、`getDailyReportDetail(id)`（均来自 `~/api/dailyReports`）。其中 timeline/lifecycle section node 扩展 `image_url` 字符串字段，由后端优先从该 section 的线程关联文章选择第一张非空图片，找不到时再从 cluster tags 当天文章里选择第一张非空图片；仍无图时返回空字符串，由侦探墙卡面渲染默认缩略图。
 
+## 图表库选型（echarts）
+
+项目首个通用 2D 图表库为 **ECharts**（`revamp-landscape-charts` 引入，首个落地场景 `topic-landscape`）。3D 场景仍走 Three.js（见 §3D 侦探墙），关系 DAG（`BoardThreadBrowser`）等非数据图表不受本约定约束。
+
+- **引入方式**：`echarts/core` 模块化按需引入 + `echarts.use()` 按需注册（Bar/Scatter/Line + Grid/Tooltip/DataZoom/Legend + CanvasRenderer），Canvas renderer，不引 vue-echarts 等封装库；产物为独立 chunk（约 104KB gzip）。
+- **统一封装约定**（落地于 `features/tags/components/topic-landscape/`）：
+  - `useEcharts.ts` composable：`onMounted` init / `ResizeObserver` 自动 resize / `onBeforeUnmount` dispose，暴露 `elRef` / `setOption` / `on`；init 放 `onMounted`（SSR 安全），模板用 `<ClientOnly>` 包裹图表容器。
+  - `chart-options.ts`：option 构建**纯函数**（`buildRhythmOption` / `buildMiniBarOption` / `buildVitalityOption`），组件只负责挂载/传参/事件桥接——纯函数可被 Vitest 直接断言（happy-dom 无 canvas，不测 echarts 渲染，对齐 `standard/frontend/testing.md`「逻辑与渲染分离」惯例）。
+- **主题适配**：`readPalette()` 运行期 `getComputedStyle` 从 CSS 变量取色（单一事实源在 main.css），组件 `watch(useTheme().theme)` 后用 `setOption` 重建 option，亮/暗主题跟随，禁止硬编码色板。
+- **代码红线**：见 [`standard/frontend/code-style.md`](../standard/frontend/code-style.md) §11 图表约定。
+
 ## 设计系统
 
 ### 主题系统
@@ -332,7 +344,7 @@ surgical 边界：不改相机坐标系/布局算法/交互/BFS/红线/全局迷
 - 组件只引用 Layer 2 语义 token（`--color-*`），不直接使用原始色值
 - `--color-bg-overlay` 仅用于模态遮罩，不得作为普通表面背景
 - 页面表面按层级使用 `base → elevated → sunken`
-- SVG、Canvas 和 CSS gradient 颜色必须由当前主题 token 派生
+- SVG、Canvas 和 CSS gradient 颜色必须由当前主题 token 派生（ECharts 图表经 `readPalette` 读 CSS 变量，见 §图表库选型）
 
 ### 统一组件库
 

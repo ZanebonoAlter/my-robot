@@ -454,6 +454,7 @@ AI 管理则已经扩展到 provider 和 route 级别，而不是只有"摘要�
 - `/api/auxiliary-labels`：辅助标签池查询和治理
 - `/api/tags/:id/auxiliary-labels`：tag 辅助标签查询
 - `/api/tags/:id/semantic-boards`：tag 所属 SemanticBoard 查询
+- `/icons`：本地化 feed 图标的静态服务（存 `storage.icon_dir`，默认 `data/icons`；带 `X-Content-Type-Options: nosniff` + `Content-Security-Policy: sandbox` 响应头）
 
 ## 具体数据链路示例
 

@@ -1610,6 +1610,58 @@ ON CONFLICT (route_id, param_name, value) DO NOTHING`,
 				return nil
 			},
 		},
+
+		// ── fix-watch-delete-cascade: topic_watch_hits FK ON DELETE CASCADE ──
+		// GORM model tag 已声明 OnDelete:CASCADE（daily_report_models.go），但
+		// DisableForeignKeyConstraintWhenMigrating=true 致 AutoMigrate 不建 FK，
+		// 20260630_0001/_0002 也漏建——DeleteWatch 在 PG 上留下孤儿 hits。本迁移
+		// 补齐真实 DB FK，对齐 model tag 意图。详见 openspec/changes/fix-watch-delete-cascade。
+		// 幂等：孤儿清理天然幂等 + ADD CONSTRAINT 用 IF NOT EXISTS 守卫。
+		{
+			Version:     "20260801_0002",
+			Description: "Add FK ON DELETE CASCADE on topic_watch_hits(watch_id)→board_topic_watches(id); clean orphan hits first. Idempotent.",
+			Up: func(db *gorm.DB) error {
+				if !tableExists(db, "topic_watch_hits") || !tableExists(db, "board_topic_watches") {
+					return nil // watch tables not registered on this deployment
+				}
+
+				// 1. 清理孤儿 hits（引用已删 watch 的行）。必须无条件执行——否则
+				//    ADD CONSTRAINT FK 校验现有行失败 → 迁移报错 → 启动失败。孤儿是
+				//    垃圾数据（引用不存在的 watch），不套 IsDestructiveAllowed 守卫
+				//    （守卫按 db-migration-safety spec 只留给 TRUNCATE/DROP）。
+				res := db.Exec(`DELETE FROM topic_watch_hits WHERE watch_id NOT IN (SELECT id FROM board_topic_watches)`)
+				if res.Error != nil {
+					return fmt.Errorf("clean orphan topic_watch_hits: %w", res.Error)
+				}
+				if res.RowsAffected > 0 {
+					logging.Infof("Migration 20260801_0002: cleaned %d orphan topic_watch_hits rows", res.RowsAffected)
+				}
+
+				// 2. 加 FK ON DELETE CASCADE（幂等 IF NOT EXISTS 守卫）。ADD CONSTRAINT
+				//    FOREIGN KEY 与 UNIQUE 同构（AccessExclusiveLock + 全表行校验），
+				//    按 db-migration-execution spec「长锁 DDL」套 withLockTimeout 守卫。
+				if err := withLockTimeout(db, "5s", func(tx *gorm.DB) error {
+					if err := tx.Exec(`DO $$ BEGIN
+							IF NOT EXISTS (
+								SELECT 1 FROM information_schema.table_constraints
+								WHERE constraint_name = 'fk_topic_watch_hits_watch'
+								  AND table_name = 'topic_watch_hits'
+							) THEN
+								ALTER TABLE topic_watch_hits
+									ADD CONSTRAINT fk_topic_watch_hits_watch
+									FOREIGN KEY (watch_id) REFERENCES board_topic_watches(id)
+									ON DELETE CASCADE;
+							END IF;
+						END $$`).Error; err != nil {
+						return fmt.Errorf("add fk_topic_watch_hits_watch: %w", err)
+					}
+					return nil
+				}); err != nil {
+					return err
+				}
+				return nil
+			},
+		},
 	}
 }
 

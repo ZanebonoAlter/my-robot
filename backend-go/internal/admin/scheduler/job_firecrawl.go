@@ -102,6 +102,7 @@ func FirecrawlJob(queue *content.FirecrawlJobQueue, batchID string) JobFunc {
 					"firecrawl_status": "failed",
 					"firecrawl_error":  crawlErr.Error(),
 				})
+				terminal := job.AttemptCount >= job.MaxAttempts
 				_ = queue.MarkFailed(job, crawlErr.Error(), firecrawlFailureBackoff(job.AttemptCount))
 				broadcastFirecrawlProgress(batchID, "processing", len(jobs), completed, failed, &ws.FirecrawlArticleProgress{
 					ID:     art.ID,
@@ -110,6 +111,26 @@ func FirecrawlJob(queue *content.FirecrawlJobQueue, batchID string) JobFunc {
 					Error:  crawlErr.Error(),
 				}, &processingCount)
 				logging.Errorf("[Firecrawl] Failed to crawl %s: %v", art.Link, crawlErr)
+
+				// 抓取彻底失败（已达重试上限）：降级用 RSS description 继续，避免标签/
+				// AI 摘要因 firecrawl 失败被永久阻塞。
+				if terminal {
+					if feed.ArticleSummaryEnabled {
+						repository.Repo.DB().Model(&art).Update("summary_status", "incomplete")
+					}
+					if feed.TaggingEnabled {
+						if err := tagging.NewTagJobQueue(repository.Repo.DB()).Enqueue(tagging.TagJobRequest{
+							ArticleID:    art.ID,
+							FeedName:     feed.Title,
+							CategoryName: tagging.FeedCategoryName(feed),
+							ForceRetag:   true,
+							Reason:       "firecrawl_failed_fallback",
+						}); err != nil {
+							logging.Warnf("[Firecrawl] Failed to enqueue fallback retag for article %d: %v", art.ID, err)
+						}
+					}
+					logging.Infof("[Firecrawl] Article %d reached crawl retry limit, falling back to RSS content for tagging/summary", art.ID)
+				}
 				continue
 			}
 

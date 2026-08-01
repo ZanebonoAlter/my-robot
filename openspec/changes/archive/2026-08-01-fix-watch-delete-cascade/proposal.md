@@ -25,11 +25,13 @@ SQLite 测试靠 `PRAGMA foreign_keys=ON` 让级联生效所以全绿，**掩盖
 
 ### Modified Capabilities
 
-- `db-migration-execution`: 新增一条 FK ON DELETE CASCADE 迁移（board_topic_watches ← topic_watch_hits），含历史孤儿数据清理步骤。
+- `db-migration-execution`: 把 `ADD CONSTRAINT ... FOREIGN KEY` 显式补进「长锁 DDL 须在 lock_timeout 守卫内执行」requirement 的枚举清单——FK 加约束与 `ADD CONSTRAINT ... UNIQUE` 同构（AccessExclusiveLock + 全表行校验），本就在该 requirement「等长 AccessExclusiveLock」精神内，本次显式化并防后人加 FK 迁移时漏套 `withLockTimeout`。本 change 的 FK 迁移即首个落地用例（design D3）。
 
 ## Impact
 
-- **代码**：`backend-go/internal/platform/database/postgres_migrations.go`（加迁移）。
-- **测试**：`topic_watch_repository_test.go` 2 个级联测试去掉 `t.Skip`（re-enable）。
-- **无 API 变化 / 无 model 变化**——model tag 已声明 CASCADE 意图，本 change 只是补齐迁移让 PG 行为对齐意图。
-- **部署后影响**：生产 `DeleteWatch` 将真正级联删 hits（当前留孤儿）；迁移会清理存量孤儿数据。
+- **代码**：`backend-go/internal/platform/database/postgres_migrations.go`（加迁移 `20260801_0002`）。
+- **spec delta**：`specs/db-migration-execution/spec.md` MODIFIED「长锁 DDL」requirement（FK 补进枚举 + 专属 scenario）。
+- **测试**：`topic_watch_repository_test.go` 2 个级联测试去掉 `t.Skip`；`db_unit_test.go` 加迁移注册断言；新增 testcontainer PG 历史数据迁移测试（testing.md §146 硬约束）。
+- **文档**：`docs/reference/database/ER_DIAGRAM.md`（「外键约束真相」全库真实 FK 1→2）+ `DATABASE_FIELDS.md`（`watch_id` FK 约束列 + 约束表）。
+- **无 API 变化 / 无 model 变化 / 不改 DeleteWatch 产品代码**——model tag 已声明 CASCADE 意图，本 change 补齐迁移让 PG 行为对齐意图。
+- **部署后影响**：① 生产 `DeleteWatch` 将真正级联删 hits（当前留孤儿）；② 迁移先无条件清理存量孤儿 hit 再加 FK（孤儿清理**不**套破坏性守卫——否则生产默认不清理→FK 校验失败→启动失败，见 design D2）；③ 全库真实 DB 级 FK 从 1 条变 2 条。**无需用户手动操作**，迁移随启动自动跑；旧孤儿 hit 行被清理（垃圾数据，不可逆但本就不该存在）。

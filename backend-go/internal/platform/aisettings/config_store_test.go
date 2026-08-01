@@ -2,6 +2,9 @@ package aisettings
 
 import (
 	"testing"
+
+	"github.com/stretchr/testify/require"
+	"syntopica-backend/internal/platform/testutil"
 )
 
 func TestParseValidHHMM(t *testing.T) {
@@ -52,6 +55,38 @@ func TestDefaultRSSHubDocBase(t *testing.T) {
 	if rsshubDocBaseKey != "rsshub_doc_base" {
 		t.Errorf("rsshubDocBaseKey = %q, want %q", rsshubDocBaseKey, "rsshub_doc_base")
 	}
+}
+
+// TestLoadAnalysisPausedConfig_DefaultFalse covers the fail-open default: when
+// the analysis_paused key is absent from ai_settings, Load must return
+// (false, nil, nil) — analysis is NOT paused.
+func TestLoadAnalysisPausedConfig_DefaultFalse(t *testing.T) {
+	testutil.SetupTestDB(t)
+
+	paused, pausedAt, err := LoadAnalysisPausedConfig()
+	require.NoError(t, err)
+	require.False(t, paused)
+	require.Nil(t, pausedAt)
+}
+
+// TestSaveAndLoadAnalysisPausedConfig covers the store round trip: engaging
+// (true) stamps paused_at, releasing (false) clears it again.
+func TestSaveAndLoadAnalysisPausedConfig(t *testing.T) {
+	testutil.SetupTestDB(t)
+
+	// Engage: paused=true, paused_at stamped to now (UTC, RFC3339).
+	require.NoError(t, SaveAnalysisPausedConfig(true))
+	paused, pausedAt, err := LoadAnalysisPausedConfig()
+	require.NoError(t, err)
+	require.True(t, paused)
+	require.NotNil(t, pausedAt)
+
+	// Release: paused=false, paused_at cleared.
+	require.NoError(t, SaveAnalysisPausedConfig(false))
+	paused, pausedAt, err = LoadAnalysisPausedConfig()
+	require.NoError(t, err)
+	require.False(t, paused)
+	require.Nil(t, pausedAt)
 }
 
 func TestIsValidHTTPURL(t *testing.T) {

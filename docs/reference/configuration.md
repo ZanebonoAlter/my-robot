@@ -168,7 +168,7 @@ AI 相关配置不存储在文件或环境变量中 — 通过 Web UI 管理并�
 | `auto_summary_config` | 自动摘要调度器设置（时间范围、模型参数） |
 | `firecrawl_config` | Firecrawl 集成设置（启用、API URL、API key、模式、超时、最大内容长度） |
 | `open_notebook_config` | Open Notebook digest 导出设置（启用、base URL、API key、model、目标笔记本、prompt 模式、自动发送日报/周报） |
-| `rsshub_config` | RSSHub 实例配置（订阅源发现用，见下「订阅源发现」节；`rsshub_base_url` 缺省回落 `http://47.110.71.194:1200`） |
+| `rsshub_config` | RSSHub 实例配置（订阅源发现用，见下「订阅源发现」节；`rsshub_base_url` 缺省回落 `http://rsshub.app`） |
 | `http_proxy_config` | 全局出站代理配置（feed 抓取 / Firecrawl / LLM 等所有外部请求；见下「出站代理」节；`http_proxy_url` 空=直连） |
 | `daily_report_time` | 日报生成时刻（HH:MM 格式，默认 `21:00`） |
 | `persistent_topic_match_threshold` | 新 section 锚定已有话题的余弦距离阈值（默认 `0.30`） |
@@ -248,7 +248,7 @@ AI 相关配置不存储在文件或环境变量中 — 通过 Web UI 管理并�
 
 | 字段 | 默认值 | 说明 |
 |------|--------|------|
-| `rsshub_base_url` | `http://47.110.71.194:1200`（`DefaultRSSHubBaseURL`） | 自建 RSSHub 实例地址；缺省/空回落默认值。目录同步与推荐订阅落地共用，改一处全链路生效 |
+| `rsshub_base_url` | `http://rsshub.app`（`DefaultRSSHubBaseURL`） | 自建 RSSHub 实例地址；缺省/空回落默认值。目录同步与推荐订阅落地共用，改一处全链路生效 |
 
 **官方文档基址（`rsshub_doc_base`）**：同经 `GET/POST /api/settings/rsshub` 配置（响应附 `rsshub_doc_base` + `rsshub_doc_base_default`），存 `ai_settings.rsshub_doc_base`。默认 `https://docs.rsshub.app`，用于推荐卡片「官方文档」链接生成（`{doc_base}/routes/{namespace}#{slug}`）。官方文档站国内可能访问受限，可配换镜像。链路见 [flow/discovery.md](flow/discovery.md) §参数可选值字典。
 

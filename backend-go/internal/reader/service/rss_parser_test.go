@@ -239,3 +239,32 @@ func TestProbeFaviconCandidates(t *testing.T) {
 		})
 	}
 }
+
+// TestProbeFaviconCandidates_FallsBackToHomepageWhenArticlePathFails 复现
+// RSS channel link 带具体路径（如 wallstreetcn /live/global）且该路径不可用、
+// 但站点首页 <head> 声明了 <link rel="icon"> 的场景：应回退首页拿到候选，
+// 而不是只返回 /favicon.ico guess（实测 wallstreetcn /favicon.ico 是 404）。
+func TestProbeFaviconCandidates_FallsBackToHomepageWhenArticlePathFails(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/":
+			w.Header().Set("Content-Type", "text/html")
+			_, _ = w.Write([]byte(`<html><head><link rel="icon" href="https://static.example.net/icon.png"></head></html>`))
+		default:
+			w.WriteHeader(http.StatusInternalServerError)
+		}
+	}))
+	defer srv.Close()
+
+	p := NewRSSParser()
+	got := p.ProbeFaviconCandidates(srv.URL + "/live/global")
+	want := []string{"https://static.example.net/icon.png", srv.URL + "/favicon.ico"}
+	if len(got) != len(want) {
+		t.Fatalf("got %v, want %v (article path should fall back to homepage)", got, want)
+	}
+	for i := range got {
+		if got[i] != want[i] {
+			t.Errorf("candidate[%d] = %q, want %q", i, got[i], want[i])
+		}
+	}
+}

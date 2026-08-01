@@ -10,7 +10,11 @@ import ComposeSidebar from './ComposeSidebar.vue'
 import { TIER_LABEL } from './composeReport'
 import { useInlineCompose, type MoveOutItem, type NodeTierInfo, type SidebarCandidateItem } from '../composables/useInlineCompose'
 
-const props = defineProps<{ boardId: number }>()
+const props = defineProps<{
+  boardId: number
+  /** 外部聚焦入口（话题态势卡片/气泡点击）：非空时进入 focus 专注视图聚焦该话题。 */
+  focusTopicId?: number | null
+}>()
 
 const {
   getBoardSectionTimeline,
@@ -674,6 +678,17 @@ function enterFocus(topicId: number) {
   expandedThreadId.value = null
   viewMode.value = 'focus'
 }
+
+// 外部聚焦入口：TagsPage 从话题态势卡片/气泡点击切入本 tab 时聚焦该话题（focus 视图）。
+// sections 未加载完时先记下 id，数据就绪后 focusNodes computed 自动补全视图。
+watch(
+  () => props.focusTopicId,
+  (id) => {
+    if (id == null) return
+    enterFocus(id)
+  },
+  { immediate: true },
+)
 function exitFocus() {
   viewMode.value = 'lanes'
 }

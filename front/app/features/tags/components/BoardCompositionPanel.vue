@@ -4,6 +4,7 @@ import { useNotify } from '~/composables/useNotify'
 import { Icon } from '@iconify/vue'
 import { useSemanticBoardsApi, type AuxiliaryLabelItem } from '~/api/semanticBoards'
 import AuxiliaryLabelPicker from './AuxiliaryLabelPicker.vue'
+import TopicLandscapePanel from './topic-landscape/TopicLandscapePanel.vue'
 
 const props = defineProps<{
   boardId: number
@@ -14,6 +15,7 @@ const props = defineProps<{
 const emit = defineEmits<{
   remove: [auxiliaryLabelId: number]
   refresh: []
+  selectTopic: [topicId: number]
 }>()
 
 const { success: notifySuccess } = useNotify()
@@ -115,6 +117,10 @@ async function handleConfirmAdd() {
         </button>
       </div>
     </div>
+
+    <!-- 视觉分隔 + 话题态势版图（design §5：构成标签管理区下方） -->
+    <hr class="bcp-divider">
+    <TopicLandscapePanel :board-id="boardId" @select-topic="(id) => emit('selectTopic', id)" />
   </div>
 </template>
 
@@ -324,5 +330,11 @@ async function handleConfirmAdd() {
 .bcp-chip-remove:hover {
   color: rgba(252, 165, 165, 0.9);
   background: rgba(239, 68, 68, 0.12);
+}
+
+.bcp-divider {
+  border: none;
+  border-top: 1px solid var(--color-border-subtle);
+  margin: 0.25rem 0;
 }
 </style>

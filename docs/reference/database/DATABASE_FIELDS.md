@@ -825,7 +825,7 @@
 | 字段名 | 类型 | 约束/默认/索引 | 用途 |
 | -------- | ------ | ------ | ------ |
 | `id` | SERIAL | PK | 主键 |
-| `watch_id` | INTEGER | NOT NULL; 复合唯一 `idx_watch_section_report` | 关联 Watch ID |
+| `watch_id` | INTEGER | NOT NULL; 复合唯一 `idx_watch_section_report`; **FK** `fk_topic_watch_hits_watch → board_topic_watches(id) ON DELETE CASCADE`（迁移 `20260801_0002`） | 关联 Watch ID |
 | `section_id` | INTEGER | NOT NULL; 复合唯一同上 | 命中分区 |
 | `report_id` | INTEGER | NOT NULL; 复合唯一同上 | 所属日报 |
 | `period_date` | DATE | NOT NULL | 周期日期 |
@@ -1242,11 +1242,12 @@ UNIQUE(route_id, param_name, value) 复合唯一索引防同参数重复录入�
 | `chk_board_persistent_topics_source` | board_persistent_topics | `source IN ('auto','manual')` | `20260702_0001` |
 | `chk_board_topic_watches_status` | board_topic_watches | `status IN ('active','paused')` | `20260630_0001` |
 
-### DB 级外键（全库唯一）
+### DB 级外键（全库共 2 条）
 
 | 约束名 | 表.列 | 引用 | 行为 | 迁移 |
 | -------- | ------ | ------ | ------ | ------ |
 | `topic_tags_merged_into_id_fkey` | `topic_tags.merged_into_id` | `topic_tags(id)` | ON DELETE CASCADE | `20260601_0001` |
+| `fk_topic_watch_hits_watch` | `topic_watch_hits.watch_id` | `board_topic_watches(id)` | ON DELETE CASCADE | `20260801_0002` |
 
 > 其余所有表间关联均为 GORM 逻辑关联，**DB 层未强制**（`DisableForeignKeyConstraintWhenMigrating: true`）。
 

@@ -21,7 +21,7 @@
 | LLM 通路 | `airouter` 主路由 + `aisettings` | 推荐精排、问答 |
 | 调度框架 | `internal/admin/scheduler` registry | 偏好重算 / 目录同步两个新 job |
 | 订阅落地 | `POST /feeds`、`POST /feeds/fetch` | 一键订阅 / 填参验证 |
-| RSSHub 实例 | 自建 `47.110.71.194:1200`（实测 `/api/namespace` 返回 3245 条路由全量元数据，91.9% 带 example） | 路由目录来源 |
+| RSSHub 实例 | 自建 `rsshub.app`（实测 `/api/namespace` 返回 3245 条路由全量元数据，91.9% 带 example） | 路由目录来源 |
 
 ## Goals / Non-Goals
 

@@ -13,6 +13,7 @@
 | GET | `/semantic-boards/:id/daily-reports` | 查询板块日报列表 |
 | GET | `/semantic-boards/:id/section-timeline` | 板块 section 时间线 |
 | GET | `/semantic-boards/:id/topics` | 列出板块全部持久话题（含归档/孤儿）+ section 计数 |
+| GET | `/semantic-boards/:id/topic-landscape` | 板块话题态势版图（持久话题 identity 轨只读聚合） |
 | GET | `/daily-reports/sections/:id/lifecycle` | section 连通分量生命周期 |
 | GET | `/daily-reports/topics/:id/lifeline` | 持久话题全量 section |
 | PATCH | `/daily-reports/topics/:id` | 更新话题标题/状态 |
@@ -203,6 +204,67 @@ Response `data`：
 ```
 
 `color` 由话题 id 稳定哈希得到；`can_activate` 表示 candidate 是否已达激活门禁。
+
+## GET `/semantic-boards/:id/topic-landscape?days=30`
+
+板块话题态势版图：持久话题 identity 轨只读聚合，供「板块内容」tab 首屏态势总览（分区卡片墙 + mini-lifeline + 活力顶栏）。
+
+**参数：**
+
+- `id`：semantic_board_id。
+- `days`：lifeline 窗口天数，允许 `7 / 14 / 30 / 90`，缺省 30；非法值 clamp 到最近合法值（`days=0` 视为默认 30）。活跃判定窗口与 `days` 无关，固定 N=7 天（包级常量 `topicLandscapeActiveWindowDays`）。
+
+态势**全部基于 identity 轨字段派生**（`status` / `hit_count` / `consecutive_hits` / `last_seen_date` / `is_vacuum`），**禁用 similarity 轨五态**（匈牙利二分法 section 级配对，长跨度不可靠）。`stance` 枚举（主态势互斥，按序匹配第一个命中）：
+
+| stance | 图标 | 派生规则 |
+| ------ | ---- | -------- |
+| `emerging` | 🌱 | `status='candidate' AND 1 <= hit_count < upgrade_threshold` |
+| `pending` | 🔴 | `status='candidate' AND hit_count >= upgrade_threshold`（`can_activate=true`） |
+| `active` | 🟢 | `status='active' AND consecutive_hits > 0 AND days_since(last_seen_date) <= 7` |
+| `stalled` | ⏸️ | `status='active' AND (consecutive_hits = 0 OR days_since(last_seen_date) > 7)` |
+| `archived` | ⬛ | `status='archived'` |
+
+`is_vacuum=true` 为与主态势正交的叠加标记（🌀强吸引，附 `vacuum_strong` 数值），可叠加在活跃/停滞上。可见口径：保留 `hit_count>=1` 全部（含 emerging 新苗头），仅剔 `hit=0` 纯 orphan——与话题管理 UI 的 `FilterVisibleTopics` 口径故意不同。
+
+Response `data`：
+
+```json
+{
+  "topics": [
+    {
+      "id": 12,
+      "label": "芯片战",
+      "status": "active",
+      "source": "auto",
+      "stance": "active",
+      "is_vacuum": false,
+      "vacuum_strong": 0,
+      "hit_count": 47,
+      "consecutive_hits": 22,
+      "first_seen_date": "2026-05-01",
+      "last_seen_date": "2026-06-22",
+      "days_since_last": 0,
+      "can_activate": false,
+      "lifeline": [
+        { "date": "2026-06-01", "section_count": 2 },
+        { "date": "2026-06-02", "section_count": 0 }
+      ]
+    }
+  ],
+  "vitality": {
+    "days": 30,
+    "article_count": 142,
+    "section_count": 38,
+    "active_topic_count": 6,
+    "feed_active": null,
+    "trend": [3, 1, 2, 5, 7, 6, 4, 3]
+  }
+}
+```
+
+- `lifeline` 为近 N 日按天聚合（identity 轨），空日补 `section_count=0` 保证日期轴连续（`generate_series` LEFT JOIN）；`trend` 为近 N 日每日 section 数（活力顶栏缩略折线用）。
+- `topics=[]` 表示板块无任何持久话题（含未达 `upgrade_threshold` 的 observing candidate，对前端隐藏）；`vitality.trend=[]` 表示窗口内无日报。
+- `feed_active` MVP 可空（跨域 feed 查询，后续补）。
 
 ## GET `/semantic-boards/:id/daily-reports?days=7`
 

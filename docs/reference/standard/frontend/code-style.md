@@ -148,6 +148,19 @@ import ArticleContentView from '~/features/articles/components/ArticleContentVie
 - ❌ Store 间循环依赖
 - ❌ 跨 feature 深 import
 - ❌ 重复通知（同一失败多层 toast）
+- ❌ 组件内手写 echarts / 手写 CSS、SVG 图表（见 §11 图表约定）
+
+## 11. 图表约定（echarts）
+
+**新增数据图表统一走 ECharts 封装，禁止绕开封装手搓：**
+
+- ✅ 统一走 `useEcharts` composable（init/resize/dispose 生命周期）+ `chart-options.ts` 的 option **纯函数**（组件只负责挂载/传参/事件桥接，option 可单测）
+- ❌ 禁止组件内直接手写 `echarts.init` / `setOption` / `dispose` 或直接操作 echarts 实例
+- ❌ 禁止再手写 CSS/SVG 图表（div 小棍、手算坐标 polyline 等）
+- 例外：特殊场景不受此限——3D（侦探墙 three.js）、关系 DAG（`BoardThreadBrowser`）等非数据图表
+- 图表颜色从 CSS 变量读取（`readPalette`）+ `watch(useTheme().theme)` 重建 option，禁止硬编码色板
+
+> 选型与封装细节见 [`architecture/frontend.md`](../../architecture/frontend.md) §图表库选型（首个落地场景 topic-landscape）。
 
 ## 资料来源
 

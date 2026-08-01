@@ -12,7 +12,9 @@
 
 1. **GORM 全局关闭外键迁移**：`backend-go/internal/platform/database/db.go` 设置 `DisableForeignKeyConstraintWhenMigrating: true`。
 2. **迁移 `20260601_0001` 主动 DROP 了历史上 `embedding_queues` / `merge_reembedding_queues` / `topic_tag_embeddings` / `topic_tag_relations` / `topic_tags` 的全部 `fk_*` 约束**（`postgres_migrations.go:472-520`）。
-3. **全库唯一真实存在的 DB 级外键只有 1 条**：`topic_tags_merged_into_id_fkey`（`topic_tags.merged_into_id → topic_tags.id ON DELETE CASCADE`，`postgres_migrations.go:523`）。
+3. **全库真实存在的 DB 级外键共 2 条**：
+   - `topic_tags_merged_into_id_fkey`（`topic_tags.merged_into_id → topic_tags.id ON DELETE CASCADE`，迁移 `20260601_0001`）；
+   - `fk_topic_watch_hits_watch`（`topic_watch_hits.watch_id → board_topic_watches.id ON DELETE CASCADE`，迁移 `20260801_0002`，对齐 GORM model tag 意图——`DisableForeignKeyConstraintWhenMigrating` 致 AutoMigrate 不建 FK，由版本迁移补齐）。
 4. 其余所有「关联」都是 **GORM 应用层逻辑关联**（struct 的 `foreignKey` tag），DB 层**没有**对应的外键约束，`constraint_name` 形如 `fk_feeds_articles`、`fk_categories_feeds` **在数据库里并不存在**。
 5. **级联删除（OnDelete:CASCADE）声明很不一致**：只有部分 GORM tag 声明了 `constraint:OnDelete:CASCADE`，很多关联没有任何级联声明。详见下方 [FK 引用矩阵](#fk-引用矩阵)。
 
@@ -455,7 +457,7 @@ erDiagram
 
 ### Daily Report / Persistent Topic / Watch（日报与持久话题面）
 
-> 7 张表（`topicgraph/repository/daily_report_models.go`，由 `RegisterModels` 注册）。除 `board_topic_watches → topic_watch_hits`（声明 CASCADE）外，其余关联均**无 OnDelete，无 DB FK**。
+> 7 张表（`topicgraph/repository/daily_report_models.go`，由 `RegisterModels` 注册）。其中 `board_topic_watches → topic_watch_hits` 已落地为真实 DB FK（`fk_topic_watch_hits_watch` ON DELETE CASCADE，迁移 `20260801_0002`）；其余关联均**无 OnDelete，无 DB FK**（GORM 逻辑关联）。
 
 ```mermaid
 erDiagram
@@ -524,7 +526,7 @@ erDiagram
     }
 ```
 
-> `board_topic_watches → topic_watch_hits` 是本域**唯一**声明 `OnDelete:CASCADE` 的关联（`daily_report_models.go:413`）。
+> `board_topic_watches → topic_watch_hits` 是本域**唯一** `OnDelete:CASCADE` 关联，且已落地为真实 DB FK `fk_topic_watch_hits_watch`（`daily_report_models.go` model tag 声明意图 + 迁移 `20260801_0002` 补齐，修 `DeleteWatch` 在 PG 不级联的生产 bug）。
 > `daily_report_sections.persistent_topic_id` 刻意无 NOT NULL，容忍回填窗口。
 
 ---

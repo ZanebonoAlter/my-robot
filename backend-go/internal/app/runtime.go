@@ -144,7 +144,7 @@ func StartRuntime() *Runtime {
 		Name:        "Tag Quality Score",
 		Description: "Recompute persistent quality scores for topic tags",
 		Interval:    3600 * time.Second,
-		Job:         admin.TagQualityScoreJob,
+		Job:         scheduler.PauseAware(admin.TagQualityScoreJob),
 		Persistence: admin.NewTaskPersistence("tag_quality_score",
 			"Recompute persistent quality scores for topic tags"),
 	}))
@@ -166,7 +166,7 @@ func StartRuntime() *Runtime {
 		TaskName:    "ai_summary",
 		Aliases:     []string{"ai_summary"},
 		Interval:    60 * time.Second,
-		Job:         admin.ContentCompletionJob(content.GetContentCompletionService()),
+		Job:         scheduler.PauseAware(admin.ContentCompletionJob(content.GetContentCompletionService())),
 		Persistence: admin.NewTaskPersistence("ai_summary",
 			"Complete article content and generate article summaries"),
 	}))
@@ -177,7 +177,7 @@ func StartRuntime() *Runtime {
 		Name:        "Daily Report",
 		Description: "Generate daily reports for all active semantic boards",
 		NextRun:     dailyReportNextRunFn,
-		Job:         admin.DailyReportJob(), // uses current time at each execution
+		Job:         scheduler.PauseAware(admin.DailyReportJob()), // uses current time at each execution
 		Persistence: admin.NewTaskPersistenceWithNextRun("daily_report",
 			"Generate daily reports for all active semantic boards",
 			dailyReportNextRunFn),
@@ -193,7 +193,7 @@ func StartRuntime() *Runtime {
 		Name:        "Board Upgrade Suggest",
 		Description: "每日生成版块升级建议 + 观察池 watch GC",
 		NextRun:     boardUpgradeNextRunFn,
-		Job:         admin.BoardUpgradeSuggestJob(),
+		Job:         scheduler.PauseAware(admin.BoardUpgradeSuggestJob()),
 		Persistence: admin.NewTaskPersistenceWithNextRun("board_upgrade_suggest",
 			"每日生成版块升级建议(discover_new)+观察池GC",
 			boardUpgradeNextRunFn),
@@ -206,7 +206,7 @@ func StartRuntime() *Runtime {
 		Description:  "Auto-crawl full content for articles",
 		Interval:     300 * time.Second,
 		StartupDelay: 0,
-		Job:          admin.FirecrawlJob(firecrawlQueue, "scheduled"),
+		Job:          scheduler.PauseAware(admin.FirecrawlJob(firecrawlQueue, "scheduled")),
 		StatusDetail: admin.FirecrawlStatusEnricher(),
 		Persistence: admin.NewTaskPersistence("firecrawl",
 			"自动爬取文章全文"),
@@ -225,7 +225,7 @@ func StartRuntime() *Runtime {
 		Name:        "Lifeline Weekly Refresh",
 		Description: "每周一刷新所有活跃话题的周度新闻汇总（循环A，含历史回填）",
 		NextRun:     weeklyNextRun,
-		Job:         dataenrichment.WeeklyLifelineJob(lifelineSvc, lister),
+		Job:         scheduler.PauseAware(dataenrichment.WeeklyLifelineJob(lifelineSvc, lister)),
 		Persistence: admin.NewTaskPersistenceWithNextRun("lifeline_weekly",
 			"每周一刷新所有活跃话题的周度新闻汇总上下文", weeklyNextRun),
 	}))
@@ -236,7 +236,7 @@ func StartRuntime() *Runtime {
 		Name:        "Lifeline Monthly Refresh",
 		Description: "每月1号刷新所有活跃话题的月度新闻汇总（循环A，含历史回填）",
 		NextRun:     monthlyNextRun,
-		Job:         dataenrichment.MonthlyLifelineJob(lifelineSvc, lister),
+		Job:         scheduler.PauseAware(dataenrichment.MonthlyLifelineJob(lifelineSvc, lister)),
 		Persistence: admin.NewTaskPersistenceWithNextRun("lifeline_monthly",
 			"每月1号刷新所有活跃话题的月度新闻汇总上下文", monthlyNextRun),
 	}))
@@ -247,7 +247,7 @@ func StartRuntime() *Runtime {
 		Name:        "Lifeline Yearly Refresh",
 		Description: "每年1月1号刷新所有活跃话题的年度新闻汇总（循环A，含历史回填）",
 		NextRun:     yearlyNextRun,
-		Job:         dataenrichment.YearlyLifelineJob(lifelineSvc, lister),
+		Job:         scheduler.PauseAware(dataenrichment.YearlyLifelineJob(lifelineSvc, lister)),
 		Persistence: admin.NewTaskPersistenceWithNextRun("lifeline_yearly",
 			"每年1月1号刷新所有活跃话题的年度新闻汇总上下文", yearlyNextRun),
 	}))

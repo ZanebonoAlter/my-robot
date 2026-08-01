@@ -94,6 +94,11 @@ export interface SchedulerLastRunSummary {
 	total?: number
 }
 
+export interface AnalysisPauseState {
+	paused: boolean
+	paused_at: string
+}
+
 export interface SchedulerTriggerResult {
 	name: string
 	accepted: boolean

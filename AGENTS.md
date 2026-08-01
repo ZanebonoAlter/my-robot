@@ -118,6 +118,8 @@ cd front && pnpm dev
 >
 > change 执行的完整编排（主线程调度 + 子线程派发六步）见 `docs/reference/开发执行规范.md` §0.6。
 
+> 🚦 **额度门禁（quota-gate）**：`.pi/extensions/quota-gate.ts` 会在每次 Agent 派发前自动查目标 provider 剩余额度（GLM/Kimi 查 5h/周窗口——GLM 老套餐仅 5h 窗口，MCP 的 TIME_LIMIT 不参与判定；DeepSeek 查余额；opencode-go 无 API 直接放行）。窗口剩余 <10% 或余额 <¥1 时派发被 **block**，reason 含剩余情况/重置时间/建议。收到阻断 reason 后：按 reason 提示换有额度的 provider 全称重试，或等窗口重置。阈值可用环境变量 `QUOTA_GATE_WINDOW_PCT` / `QUOTA_GATE_MIN_BALANCE` 调整；查询失败一律 fail-open 放行。
+
 ## Browser Automation
 
 Use `agent-browser`: `open <url>` → `snapshot -i` → `click @eX` / `fill @eX "text"` → re-snapshot.

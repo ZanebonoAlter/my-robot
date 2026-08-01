@@ -15,4 +15,11 @@ var (
 	// WithLockTimeout exposes the lock_timeout guard helper so integration tests
 	// can assert its SET LOCAL semantics (GUC applies during fn, resets after).
 	WithLockTimeout = withLockTimeout
+
+	// ExportedPostgresMigrations exposes the production migration list so
+	// integration tests can locate a single migration by Version and drive its
+	// Up closure against a seeded testcontainer (without running the full
+	// ~60-migration path). Used by fix-watch-delete-cascade's historical-orphan
+	// migration test.
+	ExportedPostgresMigrations = postgresMigrations
 )

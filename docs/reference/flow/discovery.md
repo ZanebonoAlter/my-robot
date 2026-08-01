@@ -113,3 +113,4 @@ accept：选定值/输入值走原 accept parameters 路径（直订/填参验�
 | 日期 | 变更 | 摘要 | 归档位置 |
 |------|------|------|----------|
 | 2026-07-25 | preference-vector-feed-discovery | 新增偏好向量画像（替代旧偏好分数）+ RSSHub 路由目录同步 + 订阅源发现（向量粗筛 + LLM 精排 + 卡片状态机）+ 问答冷启动；废弃删除旧 `user_preferences` / `preference_update` / `/api/user-preferences/*` / `ReadingPreferencesPanel` | [`openspec/changes/archive/2026-07-25-preference-vector-feed-discovery`](../../../openspec/changes/archive/2026-07-25-preference-vector-feed-discovery) |
+| 2026-08-01 | feed-param-options | 路由参数可选值字典：`route_param_options` 表（route_id+param_name+value+label+source）；recommendation 响应附 `param_options`；DiscoveryCard 参数区下拉点选/文本输入分流 + 官方文档链接；`rsshub_doc_base` 配置 | [`openspec/changes/archive/2026-08-01-feed-param-options`](../../../openspec/changes/archive/2026-08-01-feed-param-options) |

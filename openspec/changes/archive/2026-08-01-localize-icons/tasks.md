@@ -32,12 +32,14 @@
 
 ## 5. 文档
 
-<!-- doc-impact: flow,api,configuration -->
+<!-- doc-impact: flow,api,configuration,architecture -->
+<!-- doc-impact-excuse: database=另一 change（fix-watch-delete-cascade）脏工作树混入启发式，本 change 无 models/迁移改动 -->
 
 - [x] 5.1 `docs/reference/flow/` feed 相关 flow：更新 icon 获取链路描述（候选管线 + 本地化存储）与业务约束
 - [x] 5.2 `docs/reference/api/`：补充 `/icons` 静态路由说明
 - [x] 5.3 `docs/reference/configuration.md`：补充 `storage.icon_dir` 配置项
 - [x] 5.4 `front/AGENTS.md` 或 standard/frontend：说明新增图标后需 `pnpm generate:icons`
+- [x] 5.5 `docs/reference/architecture/backend.md`：主路由组清单补 `/icons` 静态服务
 
 ## 6. 验证
 

@@ -107,12 +107,13 @@ cd front && pnpm dev
 
 | 任务类型 | model 全称 |
 | --------- | ------------ |
-| 简单/重复劳动、编译修复脏活累活 | `deepseek/deepseek-v4-flash` |
+| 简单/重复劳动、明确的修改任务、编译修复脏活累活 | `deepseek/deepseek-v4-flash` |
 | 实现后端功能较复杂、TDD | `zai-coding-cn/glm-5.2` |
 | 核心逻辑实现、架构级选型、疑难杂症 | `zai-coding-cn/glm-5.2` |
 | 代码审查、审美有要求的前端任务 | `kimi-coding/k3` 或 `zai-coding-cn/glm-5.2` |
 | E2E脚本执行和验证 | `deepseek/deepseek-v4-flash` |
 
+> 额度不够时可以用deepseek/deepseek-v4-flash
 > glm 系列统一走当前默认供应商 `zai-coding-cn`（国内 coding 专用），优于 `zai`（国际站）/ `opencode-go`（聚合网关）。
 >
 > change 执行的完整编排（主线程调度 + 子线程派发六步）见 `docs/reference/开发执行规范.md` §0.6。

@@ -1554,6 +1554,62 @@ func postgresMigrations() []Migration {
 				return nil
 			},
 		},
+
+		// ── feed-param-options: route_param_options 人工字典 seed ───
+		// 可选值源自 RSSHub 源码 description 表格（docs.rsshub.app 不可达绕行 GitHub raw）。
+		// 幂等：ON CONFLICT (route_id, param_name, value) DO NOTHING，服务重启/迁移重跑安全。
+		{
+			Version:     "20260801_0001",
+			Description: "Seed route_param_options manual dictionary (feed-param-options): qbitai/tencent/ithome ranking+tw/36kr param enums from RSSHub source.",
+			Up: func(db *gorm.DB) error {
+				if !tableExists(db, "route_param_options") {
+					return nil
+				}
+				stmts := []string{
+					`INSERT INTO route_param_options (route_id, param_name, value, label, source, created_at, updated_at)
+SELECT r.id, 'category', v.value, v.label, 'manual', now(), now()
+FROM rsshub_routes r CROSS JOIN (VALUES
+	('资讯','资讯'),('ebandeng','数码'),('auto','智能车'),('zhiku','智库'),('huodong','活动')
+) AS v(value,label)
+WHERE r.namespace='qbitai' AND r.path='/category/:category'
+ON CONFLICT (route_id, param_name, value) DO NOTHING`,
+					`INSERT INTO route_param_options (route_id, param_name, value, label, source, created_at, updated_at)
+SELECT r.id, 'type', v.value, v.label, 'manual', now(), now()
+FROM rsshub_routes r CROSS JOIN (VALUES
+	('all','全部'),('rm','热门'),('xw','新闻'),('gg','公告'),('hd','活动'),('ss','赛事'),('yh','优化')
+) AS v(value,label)
+WHERE r.namespace='tencent' AND r.path='/pvp/newsindex/:type'
+ON CONFLICT (route_id, param_name, value) DO NOTHING`,
+					`INSERT INTO route_param_options (route_id, param_name, value, label, source, created_at, updated_at)
+SELECT r.id, 'type', v.value, v.label, 'manual', now(), now()
+FROM rsshub_routes r CROSS JOIN (VALUES
+	('24h','24小时阅读榜'),('7days','7天最热'),('monthly','月榜')
+) AS v(value,label)
+WHERE r.namespace='ithome' AND r.path='/ranking/:type'
+ON CONFLICT (route_id, param_name, value) DO NOTHING`,
+					`INSERT INTO route_param_options (route_id, param_name, value, label, source, created_at, updated_at)
+SELECT r.id, 'category', v.value, v.label, 'manual', now(), now()
+FROM rsshub_routes r CROSS JOIN (VALUES
+	('news','新聞'),('big-data','AI'),('cloud','Cloud'),('devops','DevOps'),('security','資安')
+) AS v(value,label)
+WHERE r.namespace='ithome' AND r.path='/tw/feeds/:category'
+ON CONFLICT (route_id, param_name, value) DO NOTHING`,
+					`INSERT INTO route_param_options (route_id, param_name, value, label, source, created_at, updated_at)
+SELECT r.id, 'category', v.value, v.label, 'manual', now(), now()
+FROM rsshub_routes r CROSS JOIN (VALUES
+	('news','最新资讯频道'),('newsflashes','快讯'),('recommend','推荐资讯'),('life','生活'),('estate','房产'),('workplace','职场')
+) AS v(value,label)
+WHERE r.namespace='36kr' AND r.path='/:category/:subCategory?/:keyword?'
+ON CONFLICT (route_id, param_name, value) DO NOTHING`,
+				}
+				for _, s := range stmts {
+					if err := db.Exec(s).Error; err != nil {
+						return fmt.Errorf("seed route_param_options: %w", err)
+					}
+				}
+				return nil
+			},
+		},
 	}
 }
 

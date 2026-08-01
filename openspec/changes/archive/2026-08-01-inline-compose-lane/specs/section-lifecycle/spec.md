@@ -161,7 +161,9 @@ board 无 candidate 话题时，侧边栏该区 SHALL 隐藏（不占位）。
 - **GIVEN** 侧边栏候选话题区存在「已中断·近期未命中」组
 - **THEN** 该组 SHALL 默认折叠（内容不渲染），标题 SHALL 显示计数（如「已中断·近期未命中（3）」）并带展开控件（aria-expanded=false）；用户点击标题 SHALL 切换展开/收起
 
-### Requirement: 编排态相似 section 推荐向导（按已选聚合向量的勾选辅助）
+## ADDED Requirements
+
+### Requirement: 编排态相似 section 推荐向导
 
 编排态 SHALL 在右侧侧边栏提供「相似 section 推荐」区，作为比在散点图逐个扫视更聚焦的勾选向导：根据当前主信号（已选聚合锚点 `anchor` 优先，否则冷启动搜索词向量 `queryVec`，即 `activeSignal`），从候选池中推荐语义最相近的**未勾选** section，辅助用户快速扩充选中集。推荐 SHALL 与主视图 nodeInfo 同信号源——主视图标注的 good(贴合, d≤threshold) 节点必然入选。
 

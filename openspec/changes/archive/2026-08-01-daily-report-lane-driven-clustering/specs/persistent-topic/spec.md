@@ -48,7 +48,7 @@ embedding 为空时 confidence=unmatched、lane_tier 允许为空、persistent_t
 - **WHEN** 用户在编排态将 section #123 串联进手动新建的 topic #20
 - **THEN** 系统 SHALL 将 persistent_topic_id 改写为 20，topic_match_confidence=manual，lane_tier 保持 l1_direct，topic_match_distance=该 section embedding 到 #20 质心的距离
 
-### Requirement: ClusterTags 注入历史叙事框架（职责收窄）
+### Requirement: ClusterTags 注入历史叙事框架
 
 `ClusterTags` SHALL 仅处理 L2 弱区 tag 与 L3 新叙事 tag，不再对全部当天 tag 做自由聚类。
 

@@ -1,6 +1,6 @@
 ## MODIFIED Requirements
 
-### Requirement: 聚类数限制（聚类流程反转）
+### Requirement: 聚类数限制
 
 日报聚类 SHALL 采用「embedding 质心先分桶 → LLM 弱区裁决/兜底」流程，取代 LLM 对全部当天 tag 自由聚类：
 

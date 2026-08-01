@@ -1,9 +1,7 @@
 ## Purpose
 
 日报系统替代旧叙事系统，为每个 SemanticBoard 每日生成结构化日报，包含今日重点、板块动态和聚类叙事线索。
-
 ## Requirements
-
 ### Requirement: 日报数据模型
 系统 SHALL 新建 `board_daily_reports` 和 `daily_report_sections` 两张表，独立于旧 `narrative_boards`/`narrative_summaries`。每个 SemanticBoard 每天至多一条 `BoardDailyReport` 记录。
 
@@ -49,7 +47,7 @@
 - **THEN** `topic_tags` 表中的原始标签记录 SHALL 保持不变，去重仅在内存中进行
 
 ### Requirement: 日报质量筛选
-`collectBoardTags` 查询携带 `match_reason` 和 `score`（包括 fallback 路径产生的标签）。生成管线在聚类前增加筛选层：
+`collectBoardTags` 查询携带 `match_reason` 和 `score`（包括 fallback 路径产生的标签）。生成管线 SHALL 在聚类前按以下规则筛选标签：
 
 1. 过滤 `direction_mismatch = true`
 2. 保留 `match_reason ∈ {direct_hit, hit_rate, max_sim}`（含 downgraded）
@@ -73,24 +71,27 @@ Fallback 标签同等对待：fallback 路径产生的标签也携带 `match_rea
 
 ### Requirement: 聚类数限制
 
-`ClusterTags` prompt 按标签数量条件分支：
-- 标签数 ≤ 15：不限制组数
-- 标签数 16-25：分成 6-12 组
-- 标签数 > 25：分成 8-15 组
+日报聚类 SHALL 采用「embedding 质心先分桶 → LLM 弱区裁决/兜底」流程，取代 LLM 对全部当天 tag 自由聚类：
 
-在 `clusterSystemPrompt` 构建时根据 `len(tags)` 动态插入对应约束。
+1. 对去重 + 质量筛选后的当天 event tag，按 PersistentTopic 质心做最近邻分桶：L1（< `lane_l1_threshold`）/ L2（[`lane_l1_threshold`, `lane_l2_threshold`]）/ L3（> `lane_l2_threshold`）。
+2. L1 tag 按 topic 直接成组（同 topic 的 L1 tag 合并为该 topic 当日 section 候选），不调用 LLM。
+3. L2 tag 交 `ClusterTags` 在 embedding 预筛的 top-K 候选 topic 上做「留/换/新」三选一。
+4. L3 tag 交 `ClusterTags` 起新叙事成组。
+5. section 天生挂 topic（L1 直挂 / L2 LLM 挂 / L3 新建），无事后 section 标题↔topic 匹配环节。
 
-#### Scenario: 小量标签不限组数
-- **WHEN** 去重后有 14 个标签
-- **THEN** LLM 分组不限制组数，自然分组即可
+`len(去重后 tags) <= 2` 或 L2+L3 tag 合计不足以成组时，SHALL 跳过 LLM，每个 tag 独立成组（沿用现有兜底）。
 
-#### Scenario: 中量标签约束分组
-- **WHEN** 去重后有 20 个标签
-- **THEN** prompt SHALL 约束为 6-12 组
+#### Scenario: 三层分桶聚类
 
-#### Scenario: 大量标签约束分组
-- **WHEN** 去重后有 30 个标签
-- **THEN** prompt SHALL 约束为 8-15 组
+- **GIVEN** board 当天 40 个 event tag，质心分桶后 L1=18 / L2=20 / L3=2
+- **WHEN** 系统执行聚类
+- **THEN** L1 的 18 个 tag 按 topic 直接成组（不调 LLM），L2 的 20 个交 LLM 三选一，L3 的 2 个交 LLM 起新叙事
+
+#### Scenario: 极少 tag 跳过 LLM
+
+- **GIVEN** board 当天去重后仅 2 个 event tag
+- **WHEN** 系统聚类
+- **THEN** 系统 SHALL 跳过 LLM，每个 tag 独立成组（沿用 `len<=2` 兜底）
 
 ### Requirement: 聚类排序字段
 
@@ -147,8 +148,6 @@ prompt version 升级为 "3.0"。
 #### Scenario: 昨日日报不存在
 - **WHEN** 某板某日为首次生成日报
 - **THEN** Call A 的"昨日日报"输入 SHALL 为空，Call C 不传入任何历史线索上下文（已移除 getPrevThreadSummaries 调用）
-
-
 
 ### Requirement: 日报生成编排流水线
 系统 SHALL 提供 `GenerateDailyReport(ctx, boardID, date)` 编排函数，按顺序执行：收集板内事件标签 → 质量筛选 → 去重 → LLM 分组(带组数限制) → 查询昨日日报 → 并行生成(Call A + C×K) → section embedding 生成 → **同日 section 两阶段合并** → section embedding 匹配写入关系表 → 组装 BoardDailyReport + DailyReportSection(含 best_tier/avg_score) → 存储。生成 SHALL 通过 goroutine 异步执行。
@@ -367,3 +366,14 @@ TagsPage 选中 board 时 SHALL 显示三个 Tab：板块内容(composition)、�
 #### Scenario: 日报独立配置 provider
 - **WHEN** 用户在能力路由面板为 `digest_polish` 配置了与 `topic_tagging` 不同的 provider
 - **THEN** 日报生成 SHALL 使用 `digest_polish` 配置的 provider，标签提取 SHALL NOT 受影响
+
+### Requirement: section lane 归属标记
+
+`daily_report_sections` SHALL 新增 `lane_tier` 列（取值 l1_direct / l2_llm / l3_new），标识该 section 的分桶来源，供前端展示与下游分析。lane_tier SHALL 在 section 生成时与 `topic_match_confidence` 一同确定并持久化。
+
+#### Scenario: section 记录 lane 来源
+
+- **GIVEN** 某 section 由 L1 直挂产生
+- **WHEN** section 持久化
+- **THEN** lane_tier SHALL 为 l1_direct，topic_match_confidence 为 anchor_hit
+

@@ -70,6 +70,18 @@ func TestSomethingUnit(t *testing.T) {
 
 ## 集成测试常见陷阱
 
+### 🛑 数据访问层（`*/repository/` 包）测试禁用内存 SQLite
+
+**硬约束**：`backend-go` 下所有 `*/repository/` 包（数据访问层，直接发 SQL）的测试 **SHALL** 用 `testutil.SetupTestDB`（隔离 pgvector testcontainer），**SHALL NOT** 用内存 SQLite（`glebarez/sqlite` / `sqlite.Open`）测数据访问逻辑。
+
+**根因**：本节下文记录的多起「SQLite 全绿、生产 PG 炸」事故（GROUP BY 缺列、vector/JSONB 空串、迁移 NOT NULL），温床都是 repository 层用 SQLite 测 DB 行为——SQLite 对 GROUP BY 语义、JSONB/vector 类型、约束宽松放过，PostgreSQL 严格拒绝，数据访问层用 SQLite 等于把生产 SQL 的运行时错误挡在测试之外。本约束把下文「改了发往真实 DB 的 SQL 时才补 testcontainer PG 用例」**前置**为「repository 包常驻禁 SQLite」，从源头消除假绿。
+
+**判定法**：测试在 `*/repository/` 包 + 需要操作数据库（CRUD / 查询 / 级联 / 约束）→ 必须用 `testutil.SetupTestDB`，禁止 SQLite。
+
+**例外**：不依赖数据库的纯算法/纯函数测试（距离计算、匈牙利分配、向量聚合等）SHALL 归入 `*_unit_test.go`（见「测试分层」），不受本约束——因其本就不产生 SQLite 与 PostgreSQL 的语义漂移。
+
+**回归守卫**：迁移或新增 `*/repository/` 包测试时，验收必含 `grep -rnE 'glebarez/sqlite|sqlite\.Open' backend-go/internal/<pkg>/repository/` → 零命中。spec 化见 `openspec/specs/test-infrastructure/`「数据访问层（repository）测试禁用内存 SQLite」requirement。
+
 ### ⚠️ vector 列 seed 必须填合法值，不能依赖零值
 
 部分 vector 列的 Go 字段是**非指针 `string`**（零值 `""`），pgvector 会拒绝空串：

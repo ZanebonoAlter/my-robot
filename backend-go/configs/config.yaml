@@ -39,3 +39,7 @@ log:
     max_backups: 30
     max_age_days: 30
     compress: true
+
+storage:
+  # Root directory for locally downloaded feed icons (served at /icons).
+  icon_dir: "data/icons"

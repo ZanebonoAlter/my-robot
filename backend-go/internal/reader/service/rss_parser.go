@@ -11,6 +11,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/mmcdole/gofeed"
+	"golang.org/x/net/html"
 
 	"syntopica-backend/internal/models"
 	"syntopica-backend/internal/platform/httpclient"
@@ -218,6 +219,109 @@ func (p *RSSParser) FetchFaviconURL(siteURL string) string {
 		return ""
 	}
 	return fmt.Sprintf("%s://%s/favicon.ico", parsedURL.Scheme, parsedURL.Host)
+}
+
+const (
+	// maxHomepageBytes caps how much of a site homepage is read for icon link
+	// discovery (spec: ≤512KB).
+	maxHomepageBytes = 512 * 1024
+	// homepageTimeout bounds the homepage fetch (spec: ≤5s).
+	homepageTimeout = 5 * time.Second
+)
+
+// ProbeFaviconCandidates returns favicon candidate URLs for a content site in
+// priority order: homepage <link rel="icon"> href (resolved to absolute) then
+// {scheme}://{host}/favicon.ico. Returns nil when siteURL is empty or
+// unparseable so the caller keeps the feed in fallback state. The homepage
+// fetch is bounded (512KB / 5s) and failures only drop the HTML tier — the
+// /favicon.ico guess is always the last candidate.
+func (p *RSSParser) ProbeFaviconCandidates(siteURL string) []string {
+	guess := p.FetchFaviconURL(siteURL)
+	if guess == "" {
+		return nil
+	}
+	base, _ := url.Parse(siteURL)
+	if href := p.fetchIconLinkHref(siteURL); href != "" {
+		if abs := resolveIconURL(base, href); abs != "" {
+			// The <link> href resolved to the same URL the /favicon.ico guess
+			// produces — list it once to avoid a duplicate download.
+			if abs == guess {
+				return []string{guess}
+			}
+			return []string{abs, guess}
+		}
+	}
+	return []string{guess}
+}
+
+// fetchIconLinkHref fetches the site homepage and returns the first
+// <link rel="icon|shortcut icon|apple-touch-icon" href="..."> value, or "".
+// Non-200 responses, oversized bodies and parse errors all yield "" — the
+// caller falls back to the /favicon.ico guess.
+func (p *RSSParser) fetchIconLinkHref(homepageURL string) string {
+	client := httpclient.New(httpclient.WithTimeout(homepageTimeout))
+	resp, err := client.Get(homepageURL)
+	if err != nil {
+		return ""
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		return ""
+	}
+
+	tz := html.NewTokenizer(io.LimitReader(resp.Body, maxHomepageBytes+1))
+	for {
+		tt := tz.Next()
+		switch tt {
+		case html.ErrorToken:
+			return ""
+		case html.StartTagToken, html.SelfClosingTagToken:
+			name, _ := tz.TagName()
+			if string(name) != "link" {
+				continue
+			}
+			if rel, href := linkAttrs(tz); isIconRel(rel) && href != "" {
+				return href
+			}
+		}
+	}
+}
+
+// linkAttrs reads the attributes of the current <link> start tag.
+func linkAttrs(tz *html.Tokenizer) (rel, href string) {
+	for {
+		key, val, more := tz.TagAttr()
+		switch strings.ToLower(string(key)) {
+		case "rel":
+			rel = strings.ToLower(string(val))
+		case "href":
+			href = string(val)
+		}
+		if !more {
+			return rel, href
+		}
+	}
+}
+
+// isIconRel reports whether a link rel attribute declares a favicon relation
+// (icon, shortcut icon, apple-touch-icon, ...).
+func isIconRel(rel string) bool {
+	for _, token := range strings.Fields(rel) {
+		if token == "icon" || token == "apple-touch-icon" || token == "shortcut" {
+			return true
+		}
+	}
+	return false
+}
+
+// resolveIconURL resolves an href against a site base URL, returning the
+// absolute URL (href may be absolute or relative).
+func resolveIconURL(base *url.URL, href string) string {
+	ref, err := url.Parse(href)
+	if err != nil {
+		return ""
+	}
+	return base.ResolveReference(ref).String()
 }
 
 func (p *RSSParser) FetchFeedMetadata(feedURL string) (title, description string, err error) {

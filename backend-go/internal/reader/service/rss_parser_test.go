@@ -1,6 +1,8 @@
 package service
 
 import (
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/mmcdole/gofeed"
@@ -138,6 +140,101 @@ func TestFetchFaviconURL(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			if got := p.FetchFaviconURL(tt.siteURL); got != tt.want {
 				t.Errorf("FetchFaviconURL(%q) = %q, want %q", tt.siteURL, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestProbeFaviconCandidates covers the two-tier favicon probe: homepage HTML
+// <link rel="icon"> parsing (relative hrefs resolved to absolute) with the
+// {scheme}://{host}/favicon.ico guess as the always-present final candidate.
+func TestProbeFaviconCandidates(t *testing.T) {
+	p := NewRSSParser()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html")
+		switch r.URL.Path {
+		case "/relative-link":
+			_, _ = w.Write([]byte(`<html><head><link rel="icon" href="/static/icon.png"></head></html>`))
+		case "/shortcut-link":
+			_, _ = w.Write([]byte(`<html><head><link rel="shortcut icon" href="favicon.ico"></head></html>`))
+		case "/apple-link":
+			_, _ = w.Write([]byte(`<html><head><link rel="apple-touch-icon" href="/apple.png"></head></html>`))
+		case "/absolute-link":
+			_, _ = w.Write([]byte(`<html><head><link rel="icon" href="https://cdn.example.com/icon.png"></head></html>`))
+		case "/no-link":
+			_, _ = w.Write([]byte(`<html><head><title>plain</title></head></html>`))
+		case "/rss-xml":
+			w.Header().Set("Content-Type", "application/rss+xml")
+			_, _ = w.Write([]byte(`<rss><channel><link>https://example.com</link></channel></rss>`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	tests := []struct {
+		name    string
+		siteURL string
+		want    []string
+	}{
+		{
+			name:    "relative link href resolved to absolute, guess last",
+			siteURL: srv.URL + "/relative-link",
+			want:    []string{srv.URL + "/static/icon.png", srv.URL + "/favicon.ico"},
+		},
+		{
+			name:    "shortcut icon resolving to the guess is deduped",
+			siteURL: srv.URL + "/shortcut-link",
+			want:    []string{srv.URL + "/favicon.ico"},
+		},
+		{
+			name:    "apple-touch-icon accepted",
+			siteURL: srv.URL + "/apple-link",
+			want:    []string{srv.URL + "/apple.png", srv.URL + "/favicon.ico"},
+		},
+		{
+			name:    "absolute link href kept as-is",
+			siteURL: srv.URL + "/absolute-link",
+			want:    []string{"https://cdn.example.com/icon.png", srv.URL + "/favicon.ico"},
+		},
+		{
+			name:    "no icon link -> guess only",
+			siteURL: srv.URL + "/no-link",
+			want:    []string{srv.URL + "/favicon.ico"},
+		},
+		{
+			name:    "homepage fetch fails -> guess only",
+			siteURL: srv.URL + "/missing-page",
+			want:    []string{srv.URL + "/favicon.ico"},
+		},
+		{
+			name:    "non-HTML homepage (e.g. RSS at root) -> guess only",
+			siteURL: srv.URL + "/rss-xml",
+			want:    []string{srv.URL + "/favicon.ico"},
+		},
+		{
+			name:    "empty site URL -> nil (keep fallback state)",
+			siteURL: "",
+			want:    nil,
+		},
+		{
+			name:    "unparseable site URL -> nil",
+			siteURL: "://not-a-url",
+			want:    nil,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := p.ProbeFaviconCandidates(tt.siteURL)
+			if len(got) != len(tt.want) {
+				t.Fatalf("ProbeFaviconCandidates(%q) = %v, want %v", tt.siteURL, got, tt.want)
+			}
+			for i := range got {
+				if got[i] != tt.want[i] {
+					t.Errorf("candidate[%d] = %q, want %q", i, got[i], tt.want[i])
+				}
 			}
 		})
 	}

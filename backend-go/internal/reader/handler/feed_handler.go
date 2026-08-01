@@ -432,6 +432,10 @@ func DeleteFeed(c *gin.Context) {
 		return
 	}
 
+	// Clean up the feed's locally stored icon files (best effort; failures are
+	// logged inside and must not block or fail the deletion).
+	service.DeleteFeedIconFiles(feed.ID)
+
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"message": "Feed deleted successfully",

@@ -36,7 +36,7 @@
 | `title` | string | 否 | 默认 `Untitled Feed` |
 | `description` | string | 否 | 描述 |
 | `category_id` | uint* | 否 | 分类 ID |
-| `icon` | string | 否 | 图标值（iconify id 或图片 URL）。传入非空值时 `icon_source` 置为 `custom`；不传则默认 `mdi:rss` + `icon_source=fallback` |
+| `icon` | string | 否 | 图标值（iconify id、图片 URL，或系统本地化后的 `/icons/feeds/<id>.<ext>` 同源路径——由 RefreshFeed 自动管理，不建议手填）。传入非空值时 `icon_source` 置为 `custom`；不传则默认 `mdi:rss` + `icon_source=fallback` |
 | `color` | string | 否 | 默认 `#8b5cf6` |
 | `max_articles` | int | 否 | 默认 `100` |
 | `refresh_interval` | int | 否 | 刷新间隔（分钟），默认 `60` |
@@ -56,7 +56,11 @@
 
 ### DELETE /api/feeds/:feed_id
 
-删除订阅及其关联文章。
+删除订阅及其关联文章；本地化图标文件（`data/icons/feeds/<feed_id>.*`，若存在）一并清理，清理失败不阻断删除。
+
+### GET /icons/*
+
+静态路由，直接服务 `storage.icon_dir` 目录（默认 `data/icons`），提供本地化后的 feed 图标（如 `/icons/feeds/42.png`）。独立于前端产物托管，dev 与生产模式均可用；文件不存在返回 `404`。
 
 ### POST /api/feeds/:feed_id/refresh
 

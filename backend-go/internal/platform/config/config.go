@@ -15,6 +15,7 @@ type Config struct {
 	CORS     CORSConfig
 	Log      LogConfig
 	Tracing  TracingConfig
+	Storage  StorageConfig
 }
 
 type LogConfig struct {
@@ -67,6 +68,13 @@ type TracingConfig struct {
 	InstrumentHTTP bool    `mapstructure:"instrument_http"`
 }
 
+// StorageConfig holds filesystem storage locations.
+type StorageConfig struct {
+	// IconDir is the root directory for locally downloaded feed icons (the
+	// feeds/ subdirectory lives inside it). Defaults to data/icons.
+	IconDir string `mapstructure:"icon_dir"`
+}
+
 var AppConfig *Config
 
 func LoadConfig(configPath string) error {
@@ -100,6 +108,8 @@ func LoadConfig(configPath string) error {
 	viper.SetDefault("tracing.sample_ratio", 1.0)
 	viper.SetDefault("tracing.instrument_gorm", true)
 	viper.SetDefault("tracing.instrument_http", true)
+
+	viper.SetDefault("storage.icon_dir", "data/icons")
 
 	if err := viper.ReadInConfig(); err != nil {
 		if _, ok := err.(viper.ConfigFileNotFoundError); !ok {
@@ -159,6 +169,9 @@ func applyEnvOverrides(cfg *Config) {
 	}
 	if v := os.Getenv("TRACE_INSTRUMENT_HTTP"); v != "" {
 		cfg.Tracing.InstrumentHTTP = v != "0"
+	}
+	if value := strings.TrimSpace(os.Getenv("STORAGE_ICON_DIR")); value != "" {
+		cfg.Storage.IconDir = value
 	}
 }
 

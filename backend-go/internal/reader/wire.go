@@ -49,6 +49,9 @@ type FeedService = service.FeedService
 // NewFeedService is a re-export.
 var NewFeedService = service.NewFeedService
 
+// IconStorageDir is a re-export.
+var IconStorageDir = service.IconStorageDir
+
 // FirecrawlConfig is a re-export.
 type FirecrawlConfig = service.FirecrawlConfig
 

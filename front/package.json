@@ -6,6 +6,7 @@
     "build": "nuxt build",
     "dev": "nuxt dev",
     "generate": "nuxt generate",
+    "generate:icons": "node scripts/generate-icon-subset.mjs",
     "preview": "nuxt preview",
     "postinstall": "nuxt prepare",
     "test:unit": "vitest run",

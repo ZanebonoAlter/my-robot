@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"go.opentelemetry.io/otel"
@@ -17,11 +18,13 @@ import (
 
 type FeedService struct {
 	rssParser *RSSParser
+	iconStore *IconStore
 }
 
 func NewFeedService() *FeedService {
 	return &FeedService{
 		rssParser: NewRSSParser(),
+		iconStore: DefaultIconStore(),
 	}
 }
 
@@ -56,7 +59,7 @@ func (s *FeedService) RefreshFeed(ctx context.Context, feedID uint) (err error) 
 	feed.RefreshStatus = "success"
 	feed.RefreshError = ""
 
-	if newIcon, newSource, ok := resolveFeedIcon(feed.IconSource, parsed.Image, s.rssParser.FetchFaviconURL(parsed.Link)); ok {
+	if newIcon, newSource, ok := s.resolveFeedIcon(feed.ID, feed.Icon, feed.IconSource, parsed.Image, parsed.Link); ok {
 		feed.Icon = newIcon
 		feed.IconSource = newSource
 	}
@@ -234,25 +237,52 @@ func (s *FeedService) buildArticleFromEntry(feed models.Feed, entry ParsedEntry)
 	return article
 }
 
-// resolveFeedIcon applies the icon source state machine to decide whether and
-// how to recompute a feed's icon during RefreshFeed.
+// resolveFeedIcon applies the icon source state machine and the candidate
+// download pipeline to decide whether and how to recompute a feed's icon.
 //
-// Returns (icon, iconSource, ok): ok=false means the source is `custom` (or
-// any non-empty non-auto/fallback value) and the icon must be left untouched.
+// Skip rules:
+//   - custom (or any non-empty non-auto/fallback source) → frozen, never touched;
+//   - auto + icon already a local /icons/ path → frozen (a good downloaded icon
+//     must not be clobbered by a transient remote failure: no download, no
+//     homepage probe);
+//   - auto + still-remote icon (legacy unlocalized data) → pipeline runs to
+//     complete localization;
+//   - fallback / empty (legacy rows) → pipeline runs.
 //
-// Priority when recompute runs: parsed.Image (RSS <image>) → siteFavicon
-// (site /favicon.ico) → fallback mdi:rss. Article cover images are intentionally
-// NOT used — they are article-level resources, not site logos.
-func resolveFeedIcon(currentSource, parsedImage, siteFavicon string) (icon, source string, ok bool) {
+// Candidate order (each verified by actually downloading): parsed.Image (RSS
+// <image>) → homepage <link rel="icon"> href → {host}/favicon.ico guess. The
+// homepage probe only runs when the RSS image is absent or failed to download.
+// The first candidate that downloads successfully is stored locally and
+// returned as icon=/icons/feeds/<id>.<ext>, icon_source=auto. When every
+// candidate fails the feed stays fallback (mdi:rss) — icon failures never fail
+// the refresh.
+//
+// Returns (icon, iconSource, ok): ok=false means the icon must be left
+// untouched (custom, or auto with an already-localized icon).
+func (s *FeedService) resolveFeedIcon(feedID uint, currentIcon, currentSource, parsedImage, siteLink string) (icon, source string, ok bool) {
 	if currentSource != "auto" && currentSource != "fallback" && currentSource != "" {
 		return "", "", false // custom (or unknown): do not touch
 	}
-	switch {
-	case parsedImage != "":
-		return parsedImage, "auto", true
-	case siteFavicon != "":
-		return siteFavicon, "auto", true
-	default:
-		return "mdi:rss", "fallback", true
+	if currentSource == "auto" && strings.HasPrefix(currentIcon, "/icons/") {
+		return "", "", false // auto + already-localized: skip the whole pipeline
 	}
+	if parsedImage != "" {
+		if local, err := s.iconStore.SaveFeedIcon(feedID, parsedImage); err == nil {
+			return local, "auto", true
+		} else {
+			logging.Infof("icon: RSS image download failed for feed %d, trying next candidate: %v", feedID, err)
+		}
+	}
+	// RSS image absent or failed: probe the site homepage once, then guess.
+	for _, candidate := range s.rssParser.ProbeFaviconCandidates(siteLink) {
+		if candidate == "" {
+			continue
+		}
+		if local, err := s.iconStore.SaveFeedIcon(feedID, candidate); err == nil {
+			return local, "auto", true
+		} else {
+			logging.Infof("icon: candidate %q download failed for feed %d: %v", candidate, feedID, err)
+		}
+	}
+	return "mdi:rss", "fallback", true
 }

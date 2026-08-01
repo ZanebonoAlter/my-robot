@@ -140,7 +140,7 @@ async function handleAdd() {
               </p>
               <div class="flex items-center gap-2">
                 <span class="inline-flex items-center px-3 py-1.5 rounded-lg bg-[var(--color-bg-elevated)] text-[var(--color-text-primary)] text-xs font-semibold">
-                  <Icon icon="mdi:article" width="14" height="14" class="mr-1.5" />
+                  <Icon icon="mdi:file-document" width="14" height="14" class="mr-1.5" />
                   {{ preview.article_count || 0 }} 篇文章
                 </span>
               </div>

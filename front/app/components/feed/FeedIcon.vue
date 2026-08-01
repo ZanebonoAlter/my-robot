@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import { Icon } from '@iconify/vue'
+import { getApiOrigin } from '~/utils/api'
 
 const props = defineProps<{
   icon?: string
@@ -20,6 +21,16 @@ const isUrl = computed(() =>
   Boolean(props.icon && (props.icon.startsWith('http://') || props.icon.startsWith('https://'))),
 )
 
+// Same-origin relative path served by the backend (e.g. /icons/feeds/42.png).
+// Resolve it against the API origin (dev: http://localhost:5000, prod: same
+// origin as the page).
+const isLocalPath = computed(() => Boolean(props.icon?.startsWith('/')))
+
+const imgSrc = computed(() => {
+  if (!props.icon) return ''
+  return isLocalPath.value ? `${getApiOrigin()}${props.icon}` : props.icon
+})
+
 const iconSize = computed(() => props.size || 20)
 
 // Reset the failure flag when the icon prop changes (e.g. feed switched).
@@ -30,8 +41,8 @@ watch(() => props.icon, () => {
 
 <template>
   <img
-    v-if="isUrl && !imgFailed"
-    :src="icon"
+    v-if="(isUrl || isLocalPath) && !imgFailed"
+    :src="imgSrc"
     :width="iconSize"
     :height="iconSize"
     class="object-contain"

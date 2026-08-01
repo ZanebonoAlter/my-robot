@@ -19,6 +19,7 @@ Syntopica 使用分层配置系统：后端 YAML 配置文件、覆盖文件值�
 | `TRACE_SAMPLE_RATIO` | 否 | `1.0` | OTel root span 采样比例（`ParentBased(TraceIDRatioBased)`）。`1.0`=全采；`<1.0` 按比例降采样；被采 root 的所有子 span（DB/出站 HTTP/业务）完整保留。 |
 | `TRACE_INSTRUMENT_GORM` | 否 | *(未设置，等效启用)* | 设为 `"0"` 关闭 GORM DB 操作自动埋点（自写 `GORMTracePlugin`）。非 `"0"` 均视为启用。 |
 | `TRACE_INSTRUMENT_HTTP` | 否 | *(未设置，等效启用)* | 设为 `"0"` 关闭出站 HTTP 自动埋点（`httpclient` 工厂的 otelhttp 包装）。非 `"0"` 均视为启用。 |
+| `STORAGE_ICON_DIR` | 否 | `"data/icons"` | feed 图标本地化存储根目录（实际文件在 `feeds/` 子目录），由后端 `/icons` 静态路由对外服务 |
 
 ### 前端（Nuxt）
 

@@ -130,7 +130,7 @@ function formatStatus(feed: RssFeed): string {
         {{ formatMaxArticles(feed.maxArticles ?? 100) }}
       </span>
       <span class="feed-detail__status-item">
-        <Icon icon="mdi:article" width="14" height="14" />
+        <Icon icon="mdi:file-document" width="14" height="14" />
         {{ feed.articleCount }} 篇
       </span>
       <span class="feed-detail__status-item" :class="{ 'feed-detail__status-item--error': feed.refreshStatus === 'error' }">

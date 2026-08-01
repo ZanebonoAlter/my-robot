@@ -38,6 +38,7 @@ pnpm test:unit  &&  pnpm test:e2e
 - HTTP 走 `ApiClient`（`app/api/client.ts`）；返回 `{ success, data, error, message }`
 - 双主题：三层 Token（Primitive → Semantic → Component），`data-theme="editorial|dark"`，`useTheme()`；组件只引用 Layer 2；editorial/magazine 风格不回退 SaaS
 - 统一组件：`AppDialog` / `AppButton` / `AppToggle` / `AppInput` / `AppSectionHeader`
+- **UI 图标本地化**：`<Icon icon="mdi:*">` 运行时零联网——启动时 `app/plugins/iconify-local.ts` 注册本地子集 `app/assets/iconify-subset.json`；**新增图标后必须 `pnpm generate:icons` 并提交产物**（一致性单测 `iconify-subset.test.ts` 会拦漏）
 - 大组件超 500 行 / ~15KB 拆分
 
 → 组件/API/Store/事件流/通知/Feature 共享：`docs/reference/standard/frontend/code-style.md`

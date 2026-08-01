@@ -1,10 +1,13 @@
 package app
 
 import (
+	"os"
+
 	"github.com/gin-gonic/gin"
 	"syntopica-backend/internal/admin"
 	"syntopica-backend/internal/dataenrichment"
 	"syntopica-backend/internal/platform/database"
+	"syntopica-backend/internal/platform/logging"
 	"syntopica-backend/internal/platform/middleware"
 	"syntopica-backend/internal/platform/tracing"
 	"syntopica-backend/internal/platform/ws"
@@ -14,6 +17,17 @@ import (
 )
 
 func SetupRoutes(r *gin.Engine) {
+	// Serve locally downloaded feed icons at /icons — independent of the
+	// frontend build output (static.go) so dev and production both reach them
+	// through the backend origin (port 5000).
+	iconDir := reader.IconStorageDir()
+	if err := os.MkdirAll(iconDir, 0o750); err != nil {
+		logging.Warnf("Failed to create icon storage dir %q: %v", iconDir, err)
+	}
+	// Serve /icons through a wrapped FileServer (not r.Static) so every
+	// response carries the security headers that neutralize stored SVG XSS.
+	r.GET("/icons/*filepath", iconsFileHandler(iconDir))
+
 	r.GET("/health", func(c *gin.Context) {
 		c.JSON(200, gin.H{
 			"status":   "healthy",

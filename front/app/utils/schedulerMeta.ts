@@ -72,7 +72,7 @@ export function getSchedulerIcon(name: string): string {
 		aux_label_cleanup: "mdi:tag-minus-outline",
 		preference_profile_update: "mdi:account-heart-outline",
 		rsshub_catalog_sync: "mdi:radar",
-		tag_quality_score: "mdi:tag-star-outline",
+		tag_quality_score: "mdi:tag-outline",
 		log_cleanup: "mdi:broom",
 		daily_report: "mdi:newspaper-variant-outline",
 		blocked_article_recovery: "mdi:file-restore-outline",

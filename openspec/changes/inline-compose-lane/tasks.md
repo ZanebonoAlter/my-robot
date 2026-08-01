@@ -78,3 +78,16 @@
 - [x] 11.3 基础行高加大：`LANE_BASE` 52→76、`LANE_NODE_GAP` 24→34（100% 时也不挤，选中节点 label 不再溢出邻道）✅
 - [x] 11.4 浮层可折叠 + 让位：`ComposeSidebar` 加一键折叠（`composeSidebarCollapsed` ref + toggle 按钮，收起成 36px 窄条）；`.btb-svg-scroll` 编排态动态 `paddingRight`（展开 324 / 折叠 52），泳道内容物理避让、不再被侧边栏遮挡 ✅
 - [x] 11.5 验证：lint 0 error（本文件 0 问题）/ typecheck exit 0 / build `✨ Build complete!` exit 0 ✅
+
+## 12. 侧边栏信息架构打磨（用户反馈驱动 · 收尾补丁②）
+
+> 用户反馈侧边栏陈列式候选信息密度高、与当前编排关联弱。①「已中断·近期未命中」候选组默认折叠让位；②新增「相似 section 推荐」区——按已选聚合向量推荐未勾选 section（section 维度勾选向导），成为侧边栏主信息。本期延续收尾，不立新 change；③「编辑现有泳道」属新能力（后端零支撑），另开新 change。
+
+- [x] 12.1 composable 新增 `recommendations` computed：按已选聚合锚点（anchor）匹配未勾选 pool 节点，distance≤matchThreshold 入选，分两组（unassigned 主组 top5 / active 次组 top3）各按距离升序；anchor=null（未勾选）→ 两组皆空。附 `Recommendations`/`RecommendedSection` 类型 ✅ useInlineCompose.ts
+- [x] 12.2 `ComposeSidebar.vue` 新增「相似 section 推荐」区（搜索框下、候选区上）：主组（待确认来源）+ 次组（现有泳道来源·弱化·显 originLabel）；清单项点击 emit('recommend', id)；两组皆空 v-if 隐藏 ✅
+- [x] 12.3 「已中断·近期未命中」候选组默认折叠（`brokenCollapsed` ref 默认 true）：标题改可点 button 带计数 + chevron + aria-expanded；内容用 `<template v-if>` 折叠即卸载 ✅
+- [x] 12.4 host 装配：`BoardThreadBrowser.vue` 传 `:recommendations` + 接 `@recommend` → `compose.toggle`（active 项复用现有移出提示/二次确认）✅
+- [x] 12.5 测试：useInlineCompose recommendations 5 例（空态/分组升序门槛/已勾排除/top-N 截断/originLabel 兜底）+ ComposeSidebar 推荐区 3 例（空隐藏/点击 emit/active 来源标签）+ 已中断折叠 2 例（默认收起/点击展开）✅
+- [x] 12.6 验证：lint 0 error / typecheck exit 0 / test:unit 454 全过（含新增 10 例）/ build `✨ Build complete!` ✅
+- [x] 12.7 修复（用户反馈）：① 推荐区信号源与主视图统一（`anchor` → `activeSignal = anchor ?? queryVal`），消除"搜索冷启动时主视图标 good 却不进推荐"的不一致——主组现在能正确展示；标题动态（已选「与你已选最相近」/ 搜索「与搜索词最相近」），补搜索冷启动单测 1 例。② 侧边栏容器 `.compose-sidebar` 缺 `width:100%`（父级 `align-items:flex-end` 不拉伸→塌缩）导致推荐项被截断，已补 `width:100%;min-width:0` ✅
+- [x] 12.8 修复（用户反馈·根因）：compose 池"移出/归属"判断对齐 lanes 视图 `sectionLaneKey` 口径——只认 `persistentTopic.status === 'active'`。此前误用 `persistentTopicId != null`，导致归属 candidate topic 的 section（lanes 显示为未分类）被误判"移出"且误分到推荐次组（主组因此空）。改动：`CandidateTopicBrief` 补 `status`（normalize 保留后端本就返回的字段）；`nodeInfo.moveOut` / `counts` / `moveOutItems`（不再借 crashReport，直接遍历）/ `recommendations` 分组 全部改用 `status===active`。补「candidate 不算移出」+「无对象归主组」2 例测试 ✅

@@ -15,12 +15,16 @@
  * 状态标记左对齐（interaction-conventions §1）：色点 + 状态文案置于标题左侧。
  * 无候选（items 空）时整个候选区隐藏（spec「无候选时侧边栏该区隐藏」）。
  *
+ * 相似 section 推荐（recommendations）：按已选聚合向量匹配未勾选 pool 节点，分主组（待确认来源）
+ *   与次组（现有泳道来源·弱化）；两组皆空时整区隐藏。点击清单项即 toggle 勾选。
+ * 「已中断·近期未命中」组默认折叠（brokenCollapsed），标题带计数，点击展开。
+ *
  * 设计依据：section-lifecycle spec「编排态候选池语义搜索」「候选话题引导」Requirement。
  */
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import AppInput from '~/components/ui/AppInput.vue'
 import AppButton from '~/components/ui/AppButton.vue'
-import type { SidebarCandidateItem } from '~/features/tags/composables/useInlineCompose'
+import type { Recommendations, SidebarCandidateItem } from '~/features/tags/composables/useInlineCompose'
 
 interface Props {
   /** 候选话题列表（来自 composable.sidebarItems，已 activatable 置顶）。 */
@@ -31,6 +35,10 @@ interface Props {
   searchError: string | null
   /** 搜索进行中（debounce / embedQuery 进行中）。 */
   searching: boolean
+  /** 相似 section 推荐（按主信号；两组皆空=无信号或无匹配，整区隐藏）。 */
+  recommendations: Recommendations
+  /** 推荐区标题（已选/搜索词），由 composable 按 activeSignal 来源定。 */
+  recommendationTitle: string
 }
 
 const props = defineProps<Props>()
@@ -39,6 +47,7 @@ const emit = defineEmits<{
   'update:queryText': [value: string]
   'activate': [topicId: number]
   'adopt': [item: SidebarCandidateItem]
+  'recommend': [sectionId: string]
 }>()
 
 /** 正在连续命中（brokenStreak===false），composable 已保证 activatable 在前。 */
@@ -46,6 +55,14 @@ const mainGroup = computed(() => props.items.filter(i => !i.brokenStreak))
 
 /** 已中断·近期未命中（consecutive_hits===0）。 */
 const brokenGroup = computed(() => props.items.filter(i => i.brokenStreak))
+
+/** 「已中断」组默认折叠（让位主组 + section 推荐），点标题展开。 */
+const brokenCollapsed = ref(true)
+
+/** 推荐区可见性：两组皆空（无勾选/无匹配）→ 隐藏。 */
+const hasRecommendations = computed(() =>
+  props.recommendations.unassigned.length > 0 || props.recommendations.active.length > 0,
+)
 
 function onQuery(value: string | number): void {
   emit('update:queryText', String(value))
@@ -84,6 +101,44 @@ function onQuery(value: string | number): void {
     <p v-if="searchError" class="cs-search__error" role="status">
       {{ searchError }}
     </p>
+
+    <!-- 相似 section 推荐（按已选聚合向量；无勾选或无匹配→整区隐藏） -->
+    <section v-if="hasRecommendations" class="cs-recommend" aria-label="相似 section 推荐">
+      <h4 class="cs-section__title">{{ recommendationTitle }}</h4>
+      <!-- 待确认来源（主组） -->
+      <div v-if="recommendations.unassigned.length > 0" class="cs-rec-group">
+        <span class="cs-rec-group__sub">待确认来源</span>
+        <button
+          v-for="r in recommendations.unassigned"
+          :key="r.id"
+          type="button"
+          class="cs-rec"
+          @click="emit('recommend', r.id)"
+        >
+          <span class="cs-rec__row">
+            <span class="cs-rec__label">{{ r.clusterLabel }}</span>
+            <span class="cs-rec__dist">{{ r.distance.toFixed(2) }}</span>
+          </span>
+        </button>
+      </div>
+      <!-- 现有泳道来源（次组·弱化；点击即勾走移出，复用现有移出提示/保存二次确认） -->
+      <div v-if="recommendations.active.length > 0" class="cs-rec-group cs-rec-group--muted">
+        <span class="cs-rec-group__sub">现有泳道来源</span>
+        <button
+          v-for="r in recommendations.active"
+          :key="r.id"
+          type="button"
+          class="cs-rec cs-rec--muted"
+          @click="emit('recommend', r.id)"
+        >
+          <span class="cs-rec__row">
+            <span class="cs-rec__label">{{ r.clusterLabel }}</span>
+            <span class="cs-rec__dist">{{ r.distance.toFixed(2) }}</span>
+          </span>
+          <span class="cs-rec__origin">从「{{ r.originLabel }}」移出</span>
+        </button>
+      </div>
+    </section>
 
     <!-- 候选话题区（无候选整体隐藏） -->
     <section v-if="items.length > 0" class="cs-candidates">
@@ -125,29 +180,53 @@ function onQuery(value: string | number): void {
         </article>
       </div>
 
-      <!-- 已中断·近期未命中 -->
+      <!-- 已中断·近期未命中（默认折叠，标题带计数） -->
       <div v-if="brokenGroup.length > 0" class="cs-group cs-group--broken">
-        <h4 class="cs-group__title">已中断·近期未命中</h4>
-        <article
-          v-for="item in brokenGroup"
-          :key="item.topic.id"
-          class="cs-card is-broken"
+        <button
+          type="button"
+          class="cs-group__title cs-group__title--btn"
+          :aria-expanded="!brokenCollapsed"
+          @click="brokenCollapsed = !brokenCollapsed"
         >
-          <div class="cs-card__head">
-            <span
-              class="cs-card__flag cs-card__flag--broken"
-              aria-label="近期未命中"
-            >○</span>
-            <span class="cs-card__label">{{ item.topic.label }}</span>
-            <span class="cs-card__streak">近期未命中</span>
-          </div>
-          <p class="cs-card__meta">含 {{ item.topic.section_count }} 条 section</p>
-          <div class="cs-card__actions">
-            <AppButton size="sm" variant="secondary" @click="emit('adopt', item)">
-              采纳
-            </AppButton>
-          </div>
-        </article>
+          <svg
+            class="cs-group__chevron"
+            :class="{ 'is-open': !brokenCollapsed }"
+            viewBox="0 0 24 24"
+            width="12"
+            height="12"
+            aria-hidden="true"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2.5"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          >
+            <polyline points="9 6 15 12 9 18" />
+          </svg>
+          已中断·近期未命中（{{ brokenGroup.length }}）
+        </button>
+        <template v-if="!brokenCollapsed">
+          <article
+            v-for="item in brokenGroup"
+            :key="item.topic.id"
+            class="cs-card is-broken"
+          >
+            <div class="cs-card__head">
+              <span
+                class="cs-card__flag cs-card__flag--broken"
+                aria-label="近期未命中"
+              >○</span>
+              <span class="cs-card__label">{{ item.topic.label }}</span>
+              <span class="cs-card__streak">近期未命中</span>
+            </div>
+            <p class="cs-card__meta">含 {{ item.topic.section_count }} 条 section</p>
+            <div class="cs-card__actions">
+              <AppButton size="sm" variant="secondary" @click="emit('adopt', item)">
+                采纳
+              </AppButton>
+            </div>
+          </article>
+        </template>
       </div>
     </section>
   </aside>
@@ -158,6 +237,8 @@ function onQuery(value: string | number): void {
   display: flex;
   flex-direction: column;
   gap: 14px;
+  width: 100%;
+  min-width: 0;
   padding: 14px;
   background: var(--color-bg-elevated);
   border: 1px solid var(--color-border-subtle);
@@ -283,6 +364,103 @@ function onQuery(value: string | number): void {
   gap: 6px;
 }
 .cs-card__hint {
+  font-size: 11px;
+  color: var(--color-text-muted);
+}
+
+/* ── 已中断组折叠标题（button 复位 + chevron） ─────────────────────────── */
+.cs-group__title--btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  background: none;
+  border: none;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--color-text-muted);
+  text-align: left;
+  cursor: pointer;
+}
+.cs-group__chevron {
+  flex: 0 0 auto;
+  transition: transform 0.15s ease;
+}
+.cs-group__chevron.is-open {
+  transform: rotate(90deg);
+}
+
+/* ── 相似 section 推荐区 ───────────────────────────────────────────────── */
+.cs-recommend {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.cs-section__title {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--color-text-muted);
+}
+.cs-rec-group {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.cs-rec-group__sub {
+  font-size: 11px;
+  color: var(--color-text-muted);
+}
+.cs-rec-group--muted {
+  opacity: 0.75;
+}
+.cs-rec {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+  padding: 6px 10px;
+  background: var(--color-bg-hover);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: 8px;
+  text-align: left;
+  cursor: pointer;
+  font: inherit;
+  color: var(--color-text-primary);
+  transition: background 0.12s ease, border-color 0.12s ease;
+}
+.cs-rec:hover {
+  background: var(--color-accent-subtle);
+  border-color: var(--color-accent);
+}
+.cs-rec--muted {
+  background: var(--color-bg-sunken);
+}
+.cs-rec__row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.cs-rec__label {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cs-rec__dist {
+  flex: 0 0 auto;
+  font-size: 11px;
+  color: var(--color-text-muted);
+  font-variant-numeric: tabular-nums;
+}
+.cs-rec__origin {
   font-size: 11px;
   color: var(--color-text-muted);
 }

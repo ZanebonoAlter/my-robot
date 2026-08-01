@@ -531,6 +531,11 @@ function onSidebarActivate(topicId: number) {
   if (item) void compose.activate(item)
 }
 
+// 侧边栏「相似 section 推荐」点击：直接 toggle 勾选（active 项等同勾走移出，复用现有移出提示/保存二次确认）。
+function onSidebarRecommend(sectionId: string) {
+  compose.toggle(sectionId)
+}
+
 // 语义搜索桥接：侧边栏文本 → composable.runSearch（debounce + embedQuery 冷启动）。
 function onComposeQuery(text: string) {
   composeSearching.value = true
@@ -1155,9 +1160,12 @@ watch(viewMode, () => {
             :query-text="compose.queryText.value"
             :search-error="compose.searchError.value"
             :searching="composeSearching"
+            :recommendations="compose.recommendations.value"
+            :recommendation-title="compose.recommendationTitle.value"
             @update:query-text="onComposeQuery"
             @activate="onSidebarActivate"
             @adopt="compose.adopt"
+            @recommend="onSidebarRecommend"
           />
         </div>
       </template>

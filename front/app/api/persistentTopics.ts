@@ -13,10 +13,11 @@ import type { ApiResponse } from '~/types'
  * topicWatches 约定一致）。embedding 数组原样透传（number[]）。
  */
 
-/** 候选 section 现有归属的轻量话题摘要（编排态只需 id + label）。 */
+/** 候选 section 现有归属的轻量话题摘要（编排态判断移出/分组用 status）。 */
 export interface CandidateTopicBrief {
   id: string
   label: string
+  status: string
 }
 
 /** 编排态候选 section（embedding 已展开为 number[]，供前端实时计算）。 */
@@ -102,7 +103,7 @@ function normalizeCandidate(p: ComposeCandidatePayload): ComposeCandidate {
   }
   if (p.persistent_topic_id != null) out.persistentTopicId = String(p.persistent_topic_id)
   if (p.topic_match_confidence) out.topicMatchConfidence = p.topic_match_confidence
-  if (p.persistent_topic) out.persistentTopic = { id: String(p.persistent_topic.id), label: p.persistent_topic.label }
+  if (p.persistent_topic) out.persistentTopic = { id: String(p.persistent_topic.id), label: p.persistent_topic.label, status: p.persistent_topic.status }
   return out
 }
 

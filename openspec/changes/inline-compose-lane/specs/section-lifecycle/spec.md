@@ -8,7 +8,7 @@
 
 **主战场就地勾选**：unassigned 泳道 SHALL 为编排主战场，其每个 section 节点 SHALL 渲染 checkbox 支持就地勾选。勾选/取消勾选 SHALL 实时重算聚合锚点（`aggregatePreview`，mean pooling）并重算全员 `cosineDistance`：节点 SHALL 标注 distance 数字 + 边框分层（`distanceTier`：good / boundary / outlier）+ 离群标黄（`outlierFlags`，distance > match_threshold × 1.3，标黄但 SHALL 保持勾选状态由用户决定，不自动移除）。同一天多节点 SHALL 维持纵向堆叠。
 
-**active 泳道可勾走（成员移出）**：淡显 active 泳道中的 section 节点 SHALL 亦可勾选，勾选语义为「从原 active 泳道移出到新泳道」。勾选 active section 时节点 SHALL 实时标注「将从【原泳道名】移出」，原泳道名 SHALL 取自候选数据的 `persistentTopic.label`。
+**active 泳道可勾走（成员移出）**：淡显 active 泳道中的 section 节点 SHALL 亦可勾选，勾选语义为「从原 active 泳道移出到新泳道」。勾选 active section 时节点 SHALL 实时标注「将从【原泳道名】移出」，原泳道名 SHALL 取自候选数据的 `persistentTopic.label`。**移出口径 SHALL 只认 `persistentTopic.status === 'active'`**（与 lanes 视图 `sectionLaneKey` 同口径）——归属 candidate/archived topic 的 section 在 lanes 显示为「未分类」，SHALL NOT 判为移出（不计入 moveOut 计数 / 不进保存二次确认 / 不进推荐次组），SHALL 与无归属 section 同等对待（归推荐主组、可自由勾选建新泳道）。
 
 **聚类质量单卡**：顶部浮工具条 SHALL 提供单张「聚类质量」卡（取代原三卡），实时展示成员数 / 平均距离 / 离群数。数据计算：`aggregatePreview` 取 mean → 各选中向量 `cosineDistance(v, mean)` 求平均 → `outlierFlags(distances, threshold)` 计离群数。原「撞车检查」卡与「未来预期」卡 SHALL NOT 保留（未来预期 v1 本就未实现；撞车改为保存时动作提示，见下）。
 
@@ -41,6 +41,12 @@
 - **GIVEN** 编排态淡显背景含 active 泳道「中东局势」，其中 1 条 section 被勾选
 - **WHEN** 该节点被勾选
 - **THEN** 节点 SHALL 实时标注「将从【中东局势】移出」，顶部计数 SHALL 反映「N 个来自现有泳道，将移出」
+
+#### Scenario: candidate 归属不判移出（对齐 lanes 未分类口径）
+
+- **GIVEN** 某 section 归属一个 status=candidate 的 topic（在 lanes 视图显示为「未分类」）
+- **WHEN** 用户在编排态勾选该 section
+- **THEN** 节点 SHALL NOT 标注移出、SHALL NOT 计入 moveOut 计数、保存时 SHALL NOT 进移出二次确认；该 section SHALL 视同未归属（可自由并入新泳道，归推荐主组）
 
 #### Scenario: 聚类质量单卡实时
 
@@ -149,3 +155,65 @@ board 无 candidate 话题时，侧边栏该区 SHALL 隐藏（不占位）。
 - **GIVEN** 候选话题「断连续」consecutive_hits=0（近期未命中），「美伊博弈」consecutive_hits=1
 - **WHEN** 渲染侧边栏候选区
 - **THEN** SHALL 分两组：「正在连续命中」（含「美伊博弈」）与「已中断·近期未命中」（含「断连续」）；已中断组 SHALL 显示「近期未命中」而非「连续 0 天」，且 SHALL NOT 提供「确认启用」按钮（仅「采纳」），视觉弱化
+
+#### Scenario: 已中断候选组默认折叠
+
+- **GIVEN** 侧边栏候选话题区存在「已中断·近期未命中」组
+- **THEN** 该组 SHALL 默认折叠（内容不渲染），标题 SHALL 显示计数（如「已中断·近期未命中（3）」）并带展开控件（aria-expanded=false）；用户点击标题 SHALL 切换展开/收起
+
+### Requirement: 编排态相似 section 推荐向导（按已选聚合向量的勾选辅助）
+
+编排态 SHALL 在右侧侧边栏提供「相似 section 推荐」区，作为比在散点图逐个扫视更聚焦的勾选向导：根据当前主信号（已选聚合锚点 `anchor` 优先，否则冷启动搜索词向量 `queryVec`，即 `activeSignal`），从候选池中推荐语义最相近的**未勾选** section，辅助用户快速扩充选中集。推荐 SHALL 与主视图 nodeInfo 同信号源——主视图标注的 good(贴合, d≤threshold) 节点必然入选。
+
+**信号与匹配**：推荐 SHALL 复用主视图同一主信号 `activeSignal`（已选聚合锚点 `anchor` 优先，否则搜索词向量 `queryVec`）。对候选池中每个未勾选 section，SHALL 计算 `cosineDistance(embedding, activeSignal)`；distance ≤ `matchThreshold` 的入选。已勾选的 section SHALL NOT 出现在推荐中。
+
+**标题**：推荐区标题 SHALL 随信号源动态——已选聚合为主时「与你已选最相近」，搜索词为主时「与搜索词最相近」。
+
+**分组与排序**：推荐 SHALL 分两组——
+1. **待确认来源（主组）**：`persistentTopicId` 为空（unassigned）的未勾选 section，按 distance 升序取 top 5。
+2. **现有泳道来源（次组·弱化）**：`persistentTopic.status === 'active'`（归属 active 泳道，对齐 lanes `sectionLaneKey`）的未勾选 section，按 distance 升序取 top 3；SHALL 视觉弱化（降低不透明度 / sunken 背景），置于主组之下。归属 candidate/archived topic 或无归属的 section SHALL 归主组。
+
+**来源标注**：次组每条 SHALL 显示来源泳道名（取自 `persistentTopic.label`，对象缺失兜底「现有泳道」），表明点击即「从该泳道移出」。
+
+**交互**：每条推荐 SHALL 可点击；点击 SHALL 立即 toggle 勾选该 section（加入选中集）。勾选后推荐 SHALL 实时重算（已勾项移出、聚合锚点更新带动全员分层重算）。次组项的点击等同「勾走移出」，SHALL 复用现有移出提示与保存前二次确认。
+
+**空态**：无任何主信号（既未勾选 section 且未输入搜索词）或两组皆空（无匹配）时，该区 SHALL 整体隐藏，不占布局空间。
+
+**覆盖范围**：推荐仅覆盖当前时间窗候选池（`getComposeCandidates`，带 embedding 的 section）内有 section 的范围——与现有「采纳」同口径，属既有限制。
+
+#### Scenario: 无信号时推荐区隐藏
+
+- **GIVEN** 编排态既未勾选任何 section、也未输入搜索词
+- **THEN** 侧边栏「相似 section 推荐」区 SHALL 不渲染
+
+#### Scenario: 搜索冷启动也推荐
+
+- **GIVEN** 编排态未勾选任何 section，用户在侧边栏搜索框输入关键词得到查询向量（queryVec）
+- **THEN** 推荐区 SHALL 以查询向量为主信号，列出 unassigned 中 good(d≤threshold) 的未勾选 section；标题 SHALL 显示「与搜索词最相近」
+
+#### Scenario: 勾选后分组升序并按阈值过滤
+
+- **GIVEN** 已勾选 1 条 unassigned section，池内另有 3 条 unassigned（距离 0.05 / 0.20 / 0.50）与 2 条 active（距离 0 / 0.10）在 matchThreshold(0.3) 内
+- **THEN** 主组 SHALL 列 2 条 unassigned（0.05、0.20 升序；0.50 超阈值排除）；次组 SHALL 列 2 条 active（0、0.10 升序）
+
+#### Scenario: 点击推荐即勾选并重算
+
+- **GIVEN** 推荐主组列出 section「半导体管制」(distance 0.18)
+- **WHEN** 用户点击该推荐
+- **THEN** 「半导体管制」SHALL 被勾选加入选中集并从推荐移除；聚合锚点 SHALL 用新选中集重算并带动全员分层更新
+
+#### Scenario: 次组项点击走移出路径
+
+- **GIVEN** 推荐次组列出 active 来源 section「中东战报A」(从「中东局势」移出)
+- **WHEN** 用户点击该推荐
+- **THEN** 该 section SHALL 被勾选（计入移出），节点 SHALL 标注「将从【中东局势】移出」；保存时 SHALL 走现有移出二次确认
+
+#### Scenario: top-N 截断
+
+- **GIVEN** matchThreshold 内有 7 条 unassigned 与 5 条 active 未勾选 section
+- **THEN** 主组 SHALL 最多列 5 条、次组 SHALL 最多列 3 条（各按距离升序取最近者）
+
+#### Scenario: 次组来源名兜底
+
+- **GIVEN** active 来源 section 的 persistentTopic 对象缺失
+- **THEN** 该推荐项来源标签 SHALL 显示「现有泳道」

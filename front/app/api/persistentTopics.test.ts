@@ -64,7 +64,7 @@ describe('usePersistentTopicsApi — 手动建泳道编排态（切片③）', (
       })
       // numeric id → string
       expect(typeof data.sections[0]!.id).toBe('string')
-      expect(data.sections[0]!.persistentTopic).toEqual({ id: '7', label: '中东局势' })
+      expect(data.sections[0]!.persistentTopic).toEqual({ id: '7', label: '中东局势', status: 'active' })
       // embedding 原样透传（number[]）
       expect(data.sections[0]!.embedding).toEqual([0.12, 0.34, 0.56])
       // 无归属 section 不带 persistent* 字段

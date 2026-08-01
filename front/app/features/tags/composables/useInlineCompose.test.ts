@@ -86,8 +86,8 @@ function defaultPool(): ComposeCandidate[] {
     cand('u2', { embedding: [0.95, 0.31], clusterLabel: '美伊博弈2' }),
     cand('u3', { embedding: [0.8, 0.6], clusterLabel: '油价波动' }),
     cand('u4', { embedding: [0.5, 0.866], clusterLabel: '半导体管制' }),
-    cand('m1', { embedding: [1, 0], clusterLabel: '中东战报A', persistentTopicId: '7', persistentTopic: { id: '7', label: '中东局势' } }),
-    cand('m2', { embedding: [0.9, 0.4359], clusterLabel: '中东战报B', persistentTopicId: '7', persistentTopic: { id: '7', label: '中东局势' } }),
+    cand('m1', { embedding: [1, 0], clusterLabel: '中东战报A', persistentTopicId: '7', persistentTopic: { id: '7', label: '中东局势', status: 'active' } }),
+    cand('m2', { embedding: [0.9, 0.4359], clusterLabel: '中东战报B', persistentTopicId: '7', persistentTopic: { id: '7', label: '中东局势', status: 'active' } }),
   ]
 }
 
@@ -264,15 +264,17 @@ describe('moveOut 分类（勾走 active section 标移出提示）', () => {
     ])
   })
 
-  it('persistentTopic 对象缺失时 originLabel 兜底「现有泳道」', async () => {
+  it('归属 candidate（非 active）topic 的 section 不算移出，归 unassigned（对齐 lanes 未分类口径）', async () => {
     const pool = [
-      cand('m9', { embedding: [1, 0], clusterLabel: '孤儿', persistentTopicId: '9' /* 无 persistentTopic 对象 */ }),
+      cand('c1', { embedding: [1, 0], clusterLabel: '候选归属', persistentTopicId: '8', persistentTopic: { id: '8', label: '候选话题', status: 'candidate' } }),
     ]
     const { c } = await setup(pool)
-    c.toggle('m9')
+    c.toggle('c1')
     await nextTick()
-    expect(c.nodeInfo.value.m9!.moveOut).toBe(true)
-    expect(c.nodeInfo.value.m9!.originLabel).toBe('现有泳道')
+    expect(c.nodeInfo.value.c1!.moveOut).toBe(false)
+    expect(c.nodeInfo.value.c1!.originLabel).toBeNull()
+    expect(c.counts.value).toEqual({ unassigned: 1, moveOut: 0 })
+    expect(c.moveOutItems.value).toEqual([])
   })
 })
 
@@ -315,8 +317,8 @@ describe('聚类质量单卡实时', () => {
 describe('adopt（采纳预填名并预勾相关 section）', () => {
   it('预填 laneName + 按 centroid 预勾 matchThreshold 内 unassigned（升序），纯前端无 API', async () => {
     const pool = [
-      cand('o1', { embedding: [1, 0], persistentTopicId: '20', persistentTopic: { id: '20', label: '美伊博弈' } }),
-      cand('o2', { embedding: [0.95, 0.31], persistentTopicId: '20', persistentTopic: { id: '20', label: '美伊博弈' } }),
+      cand('o1', { embedding: [1, 0], persistentTopicId: '20', persistentTopic: { id: '20', label: '美伊博弈', status: 'active' } }),
+      cand('o2', { embedding: [0.95, 0.31], persistentTopicId: '20', persistentTopic: { id: '20', label: '美伊博弈', status: 'active' } }),
       cand('p1', { embedding: [1, 0] }),
       cand('p2', { embedding: [0.9, 0.4359] }),
       cand('p3', { embedding: [0, 1] }),
@@ -344,7 +346,7 @@ describe('adopt（采纳预填名并预勾相关 section）', () => {
 
   it('截断到 adoptPreselectCap（取最近者）', async () => {
     const pool = [
-      cand('o1', { embedding: [1, 0], persistentTopicId: '20', persistentTopic: { id: '20', label: '美伊博弈' } }),
+      cand('o1', { embedding: [1, 0], persistentTopicId: '20', persistentTopic: { id: '20', label: '美伊博弈', status: 'active' } }),
       cand('p1', { embedding: [1, 0] }),       // 距 centroid 0
       cand('p2', { embedding: [0.95, 0.31] }), // 距 centroid ~0.043
     ]
@@ -369,7 +371,7 @@ describe('adopt（采纳预填名并预勾相关 section）', () => {
 
   it('在已有勾选基础上追加（不替换）', async () => {
     const pool = [
-      cand('o1', { embedding: [1, 0], persistentTopicId: '20', persistentTopic: { id: '20', label: '美伊博弈' } }),
+      cand('o1', { embedding: [1, 0], persistentTopicId: '20', persistentTopic: { id: '20', label: '美伊博弈', status: 'active' } }),
       cand('p1', { embedding: [1, 0] }),
       cand('p2', { embedding: [0.95, 0.31] }),
       cand('p3', { embedding: [0, 1] }),
@@ -506,6 +508,83 @@ describe('rankedPool（渐进收敛排序）', () => {
 })
 
 // ── save 流程（移出二次确认） ────────────────────────────────────────────────
+
+describe('recommendations（相似 section 推荐）', () => {
+  it('未勾选且未搜索 → 两组皆空（空态，侧边栏该区隐藏）', async () => {
+    const { c } = await setup()
+    expect(c.recommendations.value).toEqual({ unassigned: [], active: [] })
+  })
+
+  it('搜索冷启动（未勾选）也能推荐：activeSignal=queryVec，主组列 good 的 unassigned', async () => {
+    vi.useFakeTimers()
+    const pool = [
+      cand('u1', { embedding: [1, 0], clusterLabel: '半导体1' }),
+      cand('u2', { embedding: [0.95, 0.31], clusterLabel: '半导体2' }),
+      cand('u3', { embedding: [-0.7, 0.7], clusterLabel: '无关' }),
+    ]
+    const { c } = await setup(pool)
+    c.runSearch('半导体')
+    vi.advanceTimersByTime(300)
+    await flushPromises()
+    // activeSignal=queryVec=[1,0]；u1(0)/u2(≈0.05) good 入主组升序，u3 far 排除
+    expect(c.recommendations.value.unassigned.map(r => r.id)).toEqual(['u1', 'u2'])
+    expect(c.recommendationTitle.value).toBe('与搜索词最相近')
+    vi.useRealTimers()
+  })
+
+  it('勾选后按 anchor 推荐 ≤ threshold 的未勾选 section，分两组并按距离升序', async () => {
+    const { c } = await setup()
+    c.toggle('u1') // anchor = [1,0]
+    await nextTick()
+    const anchor = aggregatePreview([[1, 0]]).mean!
+    expect(c.recommendations.value).toEqual({
+      // u2(≈0.05) u3(0.20) ≤0.3 升序；u4(0.50) 超阈值排除
+      unassigned: [
+        { id: 'u2', clusterLabel: '美伊博弈2', originLabel: null, distance: cosineDistance([0.95, 0.31], anchor) },
+        { id: 'u3', clusterLabel: '油价波动', originLabel: null, distance: cosineDistance([0.8, 0.6], anchor) },
+      ],
+      // m1(0) m2(0.10) ≤0.3 升序
+      active: [
+        { id: 'm1', clusterLabel: '中东战报A', originLabel: '中东局势', distance: cosineDistance([1, 0], anchor) },
+        { id: 'm2', clusterLabel: '中东战报B', originLabel: '中东局势', distance: cosineDistance([0.9, 0.4359], anchor) },
+      ],
+    })
+  })
+
+  it('已勾选的 section 不出现在推荐里', async () => {
+    const { c } = await setup()
+    c.toggle('u1')
+    c.toggle('u2')
+    await nextTick()
+    const ids = c.recommendations.value.unassigned.map(r => r.id)
+    expect(ids).not.toContain('u1')
+    expect(ids).not.toContain('u2')
+  })
+
+  it('top-N 截断：unassigned 取 5、active 取 3', async () => {
+    const pool = [
+      ...['s1', 's2', 's3', 's4', 's5', 's6', 's7'].map(id => cand(id, { embedding: [1, 0] })),
+      ...['a1', 'a2', 'a3', 'a4', 'a5'].map(id => cand(id, { embedding: [1, 0], persistentTopicId: '7', persistentTopic: { id: '7', label: '中东局势', status: 'active' } })),
+    ]
+    const { c } = await setup(pool)
+    c.toggle('s1') // anchor=[1,0]，其余全 dist=0 入选
+    await nextTick()
+    expect(c.recommendations.value.unassigned).toHaveLength(5)
+    expect(c.recommendations.value.active).toHaveLength(3)
+  })
+
+  it('有 persistentTopicId 但无对象（无法确认 active）→ 归主组、originLabel null', async () => {
+    const pool = [
+      cand('u1', { embedding: [1, 0] }),
+      cand('a1', { embedding: [1, 0], persistentTopicId: '7' }), // 无对象 → 非 active → 主组
+    ]
+    const { c } = await setup(pool)
+    c.toggle('u1')
+    await nextTick()
+    expect(c.recommendations.value.unassigned.map(r => r.id)).toContain('a1')
+    expect(c.recommendations.value.active).toEqual([])
+  })
+})
 
 describe('save 流程（保存前移出二次确认）', () => {
   it('无 moveOut → 直接保存，不弹确认', async () => {

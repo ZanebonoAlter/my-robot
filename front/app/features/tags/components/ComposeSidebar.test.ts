@@ -7,13 +7,15 @@
  *  - 已中断组：标「近期未命中」、不渲染确认启用按钮、视觉弱化
  *  - 点确认启用 emit("activate", topicId)；点采纳 emit("adopt", item)
  *  - 搜索框输入 emit("update:queryText")；searchError 显提示条
+ *  - 相似 section 推荐：两组皆空隐藏、点击 emit("recommend", id)、active 项显来源
+ *  - 已中断组默认折叠（标题计数 + aria-expanded），点标题展开
  */
 import { describe, expect, it } from 'vitest'
 import { mount, type VueWrapper } from '@vue/test-utils'
 import ComposeSidebar from './ComposeSidebar.vue'
 import AppButton from '~/components/ui/AppButton.vue'
 import type { BoardTopicListItem } from '~/api/dailyReports'
-import type { SidebarCandidateItem } from '~/features/tags/composables/useInlineCompose'
+import type { RecommendedSection, SidebarCandidateItem } from '~/features/tags/composables/useInlineCompose'
 
 function makeTopic(over: Partial<BoardTopicListItem> = {}): BoardTopicListItem {
   return {
@@ -53,6 +55,8 @@ function mountSidebar(over: Record<string, unknown> = {}) {
       queryText: '',
       searchError: null,
       searching: false,
+      recommendations: { unassigned: [], active: [] },
+      recommendationTitle: '与你已选最相近',
       ...over,
     },
   })
@@ -143,5 +147,60 @@ describe('ComposeSidebar — 搜索框', () => {
   it('searching 时显示搜索中态', () => {
     const wrapper = mountSidebar({ searching: true })
     expect(wrapper.find('.cs-search__loading').exists()).toBe(true)
+  })
+})
+
+function makeRec(over: Partial<RecommendedSection> = {}): RecommendedSection {
+  return {
+    id: 'r1',
+    clusterLabel: '相似条目',
+    originLabel: null,
+    distance: 0.12,
+    ...over,
+  }
+}
+
+describe('ComposeSidebar — 相似 section 推荐', () => {
+  it('两组皆空时推荐区不渲染', () => {
+    const wrapper = mountSidebar()
+    expect(wrapper.find('.cs-recommend').exists()).toBe(false)
+  })
+
+  it('unassigned 推荐渲染 label+distance，点击 emit("recommend", id)', async () => {
+    const rec = makeRec({ id: 'u9', clusterLabel: '半导体管制', distance: 0.18 })
+    const wrapper = mountSidebar({ recommendations: { unassigned: [rec], active: [] } })
+    const items = wrapper.findAll('.cs-rec')
+    expect(items).toHaveLength(1)
+    expect(items[0]!.text()).toContain('半导体管制')
+    expect(items[0]!.text()).toContain('0.18')
+    await items[0]!.trigger('click')
+    expect(wrapper.emitted('recommend')).toEqual([['u9']])
+  })
+
+  it('active 推荐显示「从「泳道」移出」来源标签', () => {
+    const rec = makeRec({ id: 'm3', clusterLabel: '中东战报C', originLabel: '中东局势', distance: 0.1 })
+    const wrapper = mountSidebar({ recommendations: { unassigned: [], active: [rec] } })
+    expect(wrapper.find('.cs-rec').text()).toContain('从「中东局势」移出')
+  })
+})
+
+describe('ComposeSidebar — 已中断组默认折叠', () => {
+  const broken = makeItem({ id: 9, consecutive_hits: 0, can_activate: false, label: '断连续' })
+
+  it('默认折叠：标题带计数、aria-expanded=false、内容隐藏', () => {
+    const wrapper = mountSidebar({ items: [broken] })
+    const title = wrapper.find('.cs-group__title--btn')
+    expect(title.exists()).toBe(true)
+    expect(title.text()).toContain('已中断·近期未命中（1）')
+    expect(title.attributes('aria-expanded')).toBe('false')
+    expect(wrapper.find('.cs-card.is-broken').exists()).toBe(false)
+  })
+
+  it('点标题展开 → aria-expanded=true、内容可见', async () => {
+    const wrapper = mountSidebar({ items: [broken] })
+    const title = wrapper.find('.cs-group__title--btn')
+    await title.trigger('click')
+    expect(title.attributes('aria-expanded')).toBe('true')
+    expect(wrapper.find('.cs-card.is-broken').exists()).toBe(true)
   })
 })

@@ -11,10 +11,11 @@
  *  - 聚类质量单卡（成员数 / 平均距离 / 离群数）
  *  - 语义搜索冷启动（embedQuery → queryVec），勾选后 anchor 接管主信号
  *  - 候选话题侧边栏（采纳预填名+预勾 / 一键激活）
+ *  - 相似 section 推荐（按已选聚合向量推荐未勾选 section，分 unassigned/active 两组）
  *  - 保存（createManualLane，含移出二次确认）
  *
  * 纯逻辑全部复用 composeReport.ts（cosineDistance / aggregatePreview / outlierFlags
- * / distanceTier / crashReport / rankCandidates），禁止重复实现。后端零改动，API 全复用。
+ * / distanceTier / rankCandidates），禁止重复实现。后端零改动，API 全复用。
  *
  * 设计依据：section-lifecycle spec 三 Requirement + design §4.2/§4.3/§4.4。
  */
@@ -24,7 +25,6 @@ import { usePersistentTopicsApi } from '~/api/persistentTopics'
 import {
   aggregatePreview,
   cosineDistance,
-  crashReport,
   distanceTier,
   outlierFlags,
   rankCandidates,
@@ -71,6 +71,22 @@ export interface SidebarCandidateItem {
   brokenStreak: boolean
 }
 
+/** 相似 section 推荐单条（按已选聚合向量匹配未勾选 pool 节点）。 */
+export interface RecommendedSection {
+  id: string
+  clusterLabel: string
+  /** active 来源项的原泳道名；unassigned 项为 null。 */
+  originLabel: string | null
+  /** 到已选聚合向量的 cosineDistance（≤ matchThreshold 才入推荐）。 */
+  distance: number
+}
+
+/** 相似 section 推荐分组（主组=待确认来源，次组=现有泳道来源，弱化）。 */
+export interface Recommendations {
+  unassigned: RecommendedSection[]
+  active: RecommendedSection[]
+}
+
 export interface UseInlineComposeOptions {
   boardId: Ref<number | string>
   /** host 传入的 candidate 话题（已 status==='candidate'）。 */
@@ -87,6 +103,8 @@ export interface UseInlineComposeOptions {
 
 const DEFAULT_EMBED_DAYS = 30
 const DEFAULT_ADOPT_CAP = 20
+const RECOMMEND_UNASSIGNED_CAP = 5
+const RECOMMEND_ACTIVE_CAP = 3
 const SEARCH_DEBOUNCE_MS = 300
 const FALLBACK_ORIGIN = '现有泳道'
 
@@ -136,13 +154,14 @@ export function useInlineCompose(opts: UseInlineComposeOptions) {
     const out: Record<string, NodeTierInfo> = {}
     for (const c of pool.value) {
       const distance = ref1 ? cosineDistance(c.embedding, ref1) : Number.POSITIVE_INFINITY
+      const isMoveOut = c.persistentTopic?.status === 'active'
       out[c.id] = {
         distance,
         tier: distanceTier(distance, matchThreshold.value),
         isOutlier: distance > matchThreshold.value * 1.3,
         selected: selectedIds.value.has(c.id),
-        moveOut: c.persistentTopicId != null,
-        originLabel: c.persistentTopicId != null
+        moveOut: isMoveOut,
+        originLabel: isMoveOut
           ? (c.persistentTopic?.label ?? FALLBACK_ORIGIN)
           : null,
       }
@@ -165,30 +184,14 @@ export function useInlineCompose(opts: UseInlineComposeOptions) {
   })
 
   /**
-   * crashReport(selectedCandidates, existingTopics) 的 moveOutByTopic 展开成
-   * 每条被选 section：{label=clusterLabel, origin=原话题 label}。
-   * existingTopics 从 pool 各 candidate.persistentTopic 收集去重。
+   * 保存前移出二次确认用的移出项：仅 active 归属（与 lanes 视图 sectionLaneKey 同口径——
+   * candidate/archived 归属在 lanes 显示为未分类，不算移出）。originLabel 取原 active 泳道名。
    */
   const moveOutItems: ComputedRef<MoveOutItem[]> = computed(() => {
-    const sel = selectedCandidates.value
-    const existingTopics: { id: string, label: string }[] = []
-    const seen = new Set<string>()
-    for (const c of pool.value) {
-      if (c.persistentTopic && !seen.has(c.persistentTopic.id)) {
-        seen.add(c.persistentTopic.id)
-        existingTopics.push({ id: c.persistentTopic.id, label: c.persistentTopic.label })
-      }
-    }
-    const report = crashReport(sel, existingTopics)
-    const originByTopic = new Map<string, string>()
-    for (const m of report.moveOutByTopic) originByTopic.set(m.topicId, m.label)
     const items: MoveOutItem[] = []
-    for (const c of sel) {
-      if (c.persistentTopicId == null) continue
-      const origin = originByTopic.get(c.persistentTopicId)
-        ?? c.persistentTopic?.label
-        ?? FALLBACK_ORIGIN
-      items.push({ label: c.clusterLabel, origin })
+    for (const c of selectedCandidates.value) {
+      if (c.persistentTopic?.status !== 'active') continue
+      items.push({ label: c.clusterLabel, origin: c.persistentTopic.label ?? FALLBACK_ORIGIN })
     }
     return items
   })
@@ -198,7 +201,7 @@ export function useInlineCompose(opts: UseInlineComposeOptions) {
     let unassigned = 0
     let moveOut = 0
     for (const c of selectedCandidates.value) {
-      if (c.persistentTopicId != null) moveOut++
+      if (c.persistentTopic?.status === 'active') moveOut++
       else unassigned++
     }
     return { unassigned, moveOut }
@@ -215,6 +218,48 @@ export function useInlineCompose(opts: UseInlineComposeOptions) {
         brokenStreak: topic.consecutive_hits === 0,
       })),
   )
+
+  /**
+   * 相似 section 推荐：按当前主信号（activeSignal = anchor ?? queryVec）匹配未勾选 pool 节点，
+   * 与主视图 nodeInfo 同信号源——主视图标注的 good(贴合,d≤threshold) 节点必然入选推荐。
+   * distance≤matchThreshold 入选；分两组——unassigned 主组(top5) / active 次组(top3)，各按距离升序。
+   * activeSignal=null（未勾选且未搜索）→ 两组皆空（侧边栏该区隐藏）。
+   * active 项 originLabel 取原泳道名；点击即 toggle（active 项等同勾走移出，复用现有移出提示）。
+   */
+  const recommendations: ComputedRef<Recommendations> = computed(() => {
+    const center = activeSignal.value
+    if (!center) return { unassigned: [], active: [] }
+    const threshold = matchThreshold.value
+    const unassigned: RecommendedSection[] = []
+    const active: RecommendedSection[] = []
+    for (const c of pool.value) {
+      if (selectedIds.value.has(c.id)) continue
+      const d = cosineDistance(c.embedding, center)
+      if (d > threshold) continue
+      const isMoveOut = c.persistentTopic?.status === 'active'
+      const item: RecommendedSection = {
+        id: c.id,
+        clusterLabel: c.clusterLabel,
+        originLabel: isMoveOut ? (c.persistentTopic?.label ?? FALLBACK_ORIGIN) : null,
+        distance: d,
+      }
+      if (isMoveOut) active.push(item)
+      else unassigned.push(item)
+    }
+    unassigned.sort((a, b) => a.distance - b.distance)
+    active.sort((a, b) => a.distance - b.distance)
+    return {
+      unassigned: unassigned.slice(0, RECOMMEND_UNASSIGNED_CAP),
+      active: active.slice(0, RECOMMEND_ACTIVE_CAP),
+    }
+  })
+
+  /** 推荐区标题：已选优先（anchor），否则搜索词（queryVec）；都无则空（区隐藏时不显示）。 */
+  const recommendationTitle: ComputedRef<string> = computed(() => {
+    if (anchor.value) return '与你已选最相近'
+    if (queryVec.value) return '与搜索词最相近'
+    return ''
+  })
 
   /** 候选池语义排序：anchor 优先，否则 queryVec，都无则原序。 */
   const rankedPool: ComputedRef<ComposeCandidate[]> = computed(() =>
@@ -433,6 +478,8 @@ export function useInlineCompose(opts: UseInlineComposeOptions) {
     moveOutItems,
     counts,
     sidebarItems,
+    recommendations,
+    recommendationTitle,
     rankedPool,
     enter,
     exit,

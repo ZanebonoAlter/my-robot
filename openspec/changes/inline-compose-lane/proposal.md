@@ -26,7 +26,7 @@
 
 - **前端**
   - `BoardThreadBrowser.vue`: 新增 `composeMode` 叠加态；section 节点 checkbox + distance/tier 标注；active 泳道淡显 + 可勾走逻辑；unassigned 泳道头部「新建泳道」按钮。
-  - 新增 `ComposeInlineToolbar.vue`（顶部浮工具条：名/计数/聚类质量卡/取消/保存）、`ComposeSidebar.vue`（候选 topic 侧边栏 + 采纳）。
+  - 新增 `ComposeInlineToolbar.vue`（顶部浮工具条：名/计数/聚类质量卡/取消/保存）、`ComposeSidebar.vue`（候选 topic 侧边栏 + 采纳 + 相似 section 推荐区；已中断候选组默认折叠）。
   - **废弃** `ComposePanel.vue` + `viewMode='compose'` 入口。
   - 复用 `composeReport.ts`（纯逻辑：`cosineDistance`/`aggregatePreview`/`distanceTier`/`outlierFlags`）、`persistentTopics.ts` API（`getComposeCandidates`/`createManualLane`/`embedQuery`）。
 - **后端**：无改动。API 与数据模型完全复用；`createManualLane(label, sectionIds)` 已支持 section 重指新 topic 实现移出，无需额外端点。

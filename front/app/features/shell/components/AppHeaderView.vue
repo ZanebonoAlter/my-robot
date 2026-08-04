@@ -49,10 +49,6 @@ defineEmits<{
   toggleSidebar: []
   refresh: []
   markAllRead: []
-  addFeed: []
-  addCategory: []
-  importOpml: []
-  exportOpml: []
   settings: []
   closeRefreshMessage: []
 }>()
@@ -95,18 +91,6 @@ import '~/components/layout/AppHeader.css'
       </button>
       <button class="header-btn" title="全部标为已读" @click="$emit('markAllRead')">
         <Icon icon="mdi:email-open-multiple" width="20" height="20" class="text-gray-600" />
-      </button>
-      <button class="header-btn" title="添加订阅" @click="$emit('addFeed')">
-        <Icon icon="mdi:plus" width="20" height="20" class="text-gray-600" />
-      </button>
-      <button class="header-btn" title="添加分类" @click="$emit('addCategory')">
-        <Icon icon="mdi:folder-plus" width="20" height="20" class="text-gray-600" />
-      </button>
-      <button class="header-btn" title="导入" @click="$emit('importOpml')">
-        <Icon icon="mdi:import" width="20" height="20" class="text-gray-600" />
-      </button>
-      <button class="header-btn" title="导出" @click="$emit('exportOpml')">
-        <Icon icon="mdi:export" width="20" height="20" class="text-gray-600" />
       </button>
       <div class="header-divider" />
       <button class="header-btn" title="设置" @click="$emit('settings')">

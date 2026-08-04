@@ -32,7 +32,7 @@
 
 2. **深度层字段 = 7 分析基因的直接映射**：`system_reframe`(②) / `mechanism_layers`(④) / `historical_analogy`(③) / `regime_shift`(⑥, 可选) / `boundary`(⑤) / `evidence_chain`(⑦)。`evidence_chain` 从 `source_type ∈ news|tool` 升级为 `source_type ∈ news|web|page`，`web`/`page` 带 `url`+`quote`+`institution`+`date`，落地可核查原文。
 
-3. **博查作为 web_search 唯一实现**：连通性实测（2026-08-04）博查 `api.bochaai.com` 221ms 国内最快且中文检索优；`WebSearcher` 接口（`Search(ctx,query)→[]WebSearchResult`）不变，新增 `BochaWebSearcher` 实现。key 照 airouter provider 模式（`configs/config.yaml` + 环境变量 `BOCHA_API_KEY`），`wire.go` 中 `key==""` 时回退 `NoopWebSearcher` 优雅降级。
+3. **博查作为 web_search 唯一实现（通搜原始结果模式，非 AI 总结）**：连通性实测（2026-08-04）博查 `open.bocha.cn` 221ms 国内最快且中文检索优。博查 API 有两套——Web Search（通搜，返回带 url 的原始网页结果）与 AI Search（AI 总结）；本 change **只用通搜原始结果模式，禁用 AI 总结模式**（AI summary 有失真与幻觉风险，不可作可核查证据）。`WebSearcher` 接口（`Search(ctx,query)→[]WebSearchResult{Title,URL,Snippet}`）不变，新增 `BochaWebSearcher` 实现（调通搜 endpoint）。真正的原始文档正文由 `fetch_page` 二跳抓取（不是靠 AI 转述）。key 照 airouter provider 模式（`configs/config.yaml` + 环境变量 `BOCHA_API_KEY`），`wire.go` 中 `key==""` 时回退 `NoopWebSearcher` 优雅降级。
 
 4. **fetch_page 复用 reader readability**：新增 `fetch_page` 工具调 `internal/reader/service/readability_crawler`，返回 `{title,url,main_text(截断 N 字符)}`，喂深度层 `evidence_chain`。不新造爬虫。超时/反爬失败时返回错误 JSON 让 agent 自降级（沿用 registry 约定）。
 

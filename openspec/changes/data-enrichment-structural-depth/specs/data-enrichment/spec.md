@@ -138,12 +138,17 @@
 
 ### Requirement: web 搜索与正文抓取数据源
 
-系统 SHALL 提供真实的 web 检索与正文抓取能力作为数据增强的通用外部数据源：`web_search` 工具 SHALL 接入真实搜索后端（首个实现为博查 Bocha，`api.bochaai.com`），返回 `[{title,url,snippet}]`；`fetch_page` 工具 SHALL 复用 `reader` 域 `readability_crawler` 抓取网页正文，返回 `{title,url,main_text}`。`web_search` SHALL 通过 `WebSearcher` 接口注入实现，便于未来替换/增加服务商而不动编排。搜索后端 API key SHALL 通过配置（`configs/config.yaml` + 环境变量 `BOCHA_API_KEY`）注入，SHALL NOT 硬编码。当 key 未配置或后端不可达时，`web_search` / `fetch_page` SHALL 返回错误 JSON 让 agent 自降级（沿用 registry 单工具失败约定），SHALL NOT 阻断 agent loop。
+系统 SHALL 提供真实的 web 检索与正文抓取能力作为数据增强的通用外部数据源。`web_search` 工具 SHALL 接入真实搜索后端（首个实现为博查 Bocha，`open.bocha.cn`），**SHALL 使用原始网页结果模式（通搜 / raw web results），返回带 `url` 的原始网页清单 `[{title,url,snippet,site_name}]`；SHALL NOT 使用 AI 总结模式**（AI summary 有失真与幻觉风险，不可作可核查证据）。`fetch_page` 工具 SHALL 复用 `reader` 域 `readability_crawler` 抓取网页正文，返回 `{title,url,main_text}`。深度层 `evidence_chain` 引用的外部原始正文 SHALL 经 `fetch_page` 抓取自真实文档，SHALL NOT 来自 AI 转述。`web_search` SHALL 通过 `WebSearcher` 接口注入实现，便于未来替换/增加服务商而不动编排。搜索后端 API key SHALL 通过配置（`configs/config.yaml` + 环境变量 `BOCHA_API_KEY`）注入，SHALL NOT 硬编码。当 key 未配置或后端不可达时，`web_search` / `fetch_page` SHALL 返回错误 JSON 让 agent 自降级（沿用 registry 单工具失败约定），SHALL NOT 阻断 agent loop。
 
 #### Scenario: web_search 返回真实结果
 
 - **WHEN** agent 调 `web_search(query="1973 石油危机 资本回流")` 且博查 key 已配置
 - **THEN** SHALL 返回真实搜索命中 `[{title,url,snippet}]`，SHALL NOT 返回"not configured"
+
+#### Scenario: 原始结果模式非 AI 总结
+
+- **WHEN** agent 调 `web_search` 为深度层取证
+- **THEN** SHALL 返回原始网页结果（通搜模式，带 url），SHALL NOT 返回 AI 总结/转述；深度层引用的外部正文 SHALL 经 `fetch_page` 取自真实文档，SHALL NOT 来自 AI summary
 
 #### Scenario: fetch_page 抓正文
 

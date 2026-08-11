@@ -1,3 +1,5 @@
+
+
 <p align="center">
   <img src="front/public/favicon.png" width="300" alt="Syntopica">
 </p>
@@ -73,13 +75,13 @@ RSS 阅读器能把不同网站收进一个列表，热点聚合器能告诉你�
 阅读行为（收藏、深读、普通打开）会按版块聚合成**兴趣画像**：每个版块一个偏好向量，外加全局兜底，定期由向量算术重算，不消耗 LLM。兴趣画像不只是展示，而是「发现订阅源」的推荐基础。
 
 <p align="center">
-  <img src="img/1.4.0/settings-preference-profile.png" width="100%" alt="按版块聚合的兴趣画像">
+  <img src="img/1.4.0/settings-preference-profile.png" alt="按版块聚合的兴趣画像">
 </p>
 
 发现页从你接入的 RSSHub 实例同步全量路由目录，为每条路由生成向量，再与兴趣画像做余弦粗筛、LLM 精排，得到一组带理由的推荐卡片。每张卡片标注相似度、匹配版块，并区分「直订」「需填参数」「未验证」。接受后自动建源；不感兴趣可以 dismiss，30 天内不再重复推送。
 
 <p align="center">
-  <img src="img/1.4.0/discovery.png" width="100%" alt="RSSHub 订阅源发现">
+  <img src="img/1.4.0/discovery.png" alt="RSSHub 订阅源发现">
 </p>
 
 如果你有更具体的想法，也可以直接用自然语言提问：模型即时从路由目录检索匹配源，同时把你的兴趣表达写回画像，冷启动时尤其有用。
@@ -104,13 +106,13 @@ RSS 阅读器能把不同网站收进一个列表，热点聚合器能告诉你�
 它不是自动替用户决定信息架构，而是把一堆散落标签整理成可审阅、可回溯的候选方案。
 
 <p align="center">
-  <img src="img/1.4.0/board-upgrade-suggestions.png" width="100%" alt="持久化的板块升级建议">
+  <img src="img/1.4.0/board-upgrade-suggestions.png" alt="持久化的板块升级建议">
 </p>
 
 如果你已经知道自己要追踪什么，也可以直接创建板块。输入名称和描述后，系统会推荐相关标签；确认后执行历史回填，过去的文章也会重新归位。
 
 <p align="center">
-  <img src="img/1.4.0/expand-board.png" width="100%" alt="持久化的板块升级建议">
+  <img src="img/1.4.0/expand-board.png" alt="持久化的板块升级建议">
 </p>
 
 ### 5. 文章进入板块，但匹配不是黑盒
@@ -138,11 +140,11 @@ RSS 阅读器能把不同网站收进一个列表，热点聚合器能告诉你�
 日报先去重和筛选标签，再以持久话题为锚聚类成事件分组（同一话题的内容归到同一条叙事线），生成今日重点和叙事线索，并按匹配质量区分核心事件、相关事件和其他动态。每条线索保留关联文章，可以继续展开阅读。
 
 <p align="center">
-  <img src="img/1.3.3/daily-report.png" width="100%" alt="语义板块日报详情">
+  <img src="img/1.3.3/daily-report.png" alt="语义板块日报详情">
 </p>
 
 <p align="center">
-  <img src="img/1.4.0/daily-report.png" width="100%" alt="语义板块日报详情">
+  <img src="img/1.4.0/daily-report.png" alt="语义板块日报详情">
 </p>
 
 这不是把若干单篇摘要拼在一起，而是尝试回答：“这个板块今天主要发生了哪些事，它们分别由哪些文章支撑？”
@@ -154,11 +156,11 @@ RSS 阅读器能把不同网站收进一个列表，热点聚合器能告诉你�
 话题总览把连续多天的叙事分组排列在时间轴上，并根据语义关系连接相邻节点。节点状态区分新兴、持续、分化、合并和结束。点击节点后，可以查看当天的叙事摘要和关联文章。除了系统自动识别的话题，你也可以手动新增持久话题，把零散的叙事线索主动归并到长期主题上。
 
 <p align="center">
-  <img src="img/1.4.0/overview.png" width="100%" alt="跨日话题演进时间线">
+  <img src="img/1.4.0/overview.png" alt="跨日话题演进时间线">
 </p>
 
 <p align="center">
-  <img src="img/1.4.0/overview-add.png" width="100%" alt="话题时间线节点详情">
+  <img src="img/1.4.0/overview-add.png" alt="话题时间线节点详情">
 </p>
 
 ### 8. 数据增强：给话题叠加认知层
@@ -169,10 +171,10 @@ RSS 阅读器能把不同网站收进一个列表，热点聚合器能告诉你�
 
 **分析认知（手动）** 当你对某个话题发起“重新分析”，三角色 Agent（解读员 → 查询员 → 分析员）会调用外部数据源工具自主探索，产出一份带事实层、时间线和推演见解的判断快照；并与上一次判断对比反思，让认知随每次分析迭代修正。
 <p align="center">
-  <img src="img/1.4.0/data-enrichment-causal-report-2.png" width="100%" alt="持久话题的因果分析报告">
+  <img src="img/1.4.0/data-enrichment-causal-report-2.png" alt="持久话题的因果分析报告">
 </p>
 <p align="center">
-  <img src="img/1.4.0/data-enrichment-causal-report.png" width="100%" alt="持久话题的因果分析报告">
+  <img src="img/1.4.0/data-enrichment-causal-report.png" alt="持久话题的因果分析报告">
 </p>
 
 两者的隔离是有意为之：新闻事实保持客观，分析认知允许主观并自我修正，分析结论永远不会回写污染新闻记忆。每条事实都带回链来源，重要判断仍需回到原文复核。
@@ -331,14 +333,14 @@ Syntopica 仍在持续迭代。下面这些不是隐藏条件：
 - Feed 刷新、正文补全、日报等定时任务；
 - Firecrawl 地址、Key、抓取模式、超时和内容限制；
 - 全局出站代理（Feed 抓取、RSSHub 等外部请求统一走代理）；
-- OpenTelemetry 自动埋点与可观测性（DB、出站 HTTP、方法级 span）。
+- OpenTelemetry 自动埋点与可观测性（DB、出站 HTTP、方法级 span，ParentBased 采样）。
 
 ## 快速开始
 
 ### 前置条件
 
 - Docker 与 Docker Compose；
-- 本地开发需要 Go、Node.js、Corepack 和 `pnpm`；
+- 本地开发需要 Go、Node.js、Corepack 和 `pnpm`（请确保已执行 `corepack enable` 以使用 `package.json` 中指定的 `pnpm` 版本）；
 - 可选：OpenAI 兼容 API、Ollama 或 llama.cpp；
 - 可选：Firecrawl，用于网页正文抓取；
 - 可选：RSSHub，用于扩展可订阅来源。

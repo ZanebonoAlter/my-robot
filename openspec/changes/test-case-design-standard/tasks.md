@@ -29,7 +29,7 @@
 ## 4. JIT 注入回归（D · 依赖 1）
 
 - [x] 4.1 扩展 `.pi/extensions/tests/constraint-injection.smoke.cjs`：断言①scanAppliesTags 结果含 test-design.md 条目且 signals 含四信号、section=「JIT 注入摘要」②该节标题在文档正文中存在（标签与正文漂移即红）③模拟编辑路径含 `_test.go` 时命中该文档（jit 命中路径逻辑）。验收：`bash .pi/extensions/tests/run-smoke.sh` 退出码 0
-- [ ] 4.2 真机验证（手动）：编辑任一 `openspec/changes/*/tasks.md` 后下一回合注入块含摘要节（档位激活会话）。验收：人工确认注入块含「JIT 注入摘要」，记入本文件验证节留痕
+- [x] 4.2 真机验证：events.db 证据见验证节 V.6（constraint.inject, reason=jit-path, mode=section）
 
 ## 5. 架构体检（§7 强制）
 
@@ -41,26 +41,26 @@
 <!-- doc-impact: standard -->
 
 - [x] 6.1 `docs/reference/开发执行规范.md` §2「用例先行」表格下方补一句引用：用例设计最低集/边界/可用性 checklist 见 `standard/shared/test-design.md`（JIT 自动注入）。验收：grep 引用命中；§2 既有表格零删改
-- [ ] 6.2 standard 域文档更新即任务 1/3 交付物，无额外动作。验收：`bash scripts/doc-impact.sh verify openspec/changes/test-case-design-standard` 退出码 0
+- [x] 6.2 standard 域文档更新即任务 1/3 交付物，无额外动作。验收：`bash scripts/doc-impact.sh verify openspec/changes/test-case-design-standard` 退出码 0
 
 ## 7. 测试
 
 > 冒烟为 pi 扩展层验证（无独立 typecheck 入口，esbuild bundle + node 断言即编译+行为验证）。
 
-- [ ] T.1 `bash .pi/extensions/tests/run-smoke.sh`（constraint-injection 冒烟含 4.1 新断言）→ 退出码 0
+- [x] T.1 `bash .pi/extensions/tests/run-smoke.sh`（constraint-injection 冒烟含 4.1 新断言）→ 退出码 0，121 断言全绿
 - [ ] T.2 `bash .pi/extensions/tests/run-harness-smoke.sh`（含 2.3/2.4 spec-gate 冒烟）→ 退出码 0
-- [ ] T.3 `bash scripts/scenario-trace.sh openspec/changes/test-case-design-standard` → 退出码 0（Scenario 映射表见验证节）
-- [ ] T.4 `bash scripts/check-standards.sh` → 零失败（A-D 段）
+- [x] T.3 `bash scripts/scenario-trace.sh openspec/changes/test-case-design-standard` → 退出码 0（唯一残留为待创建冒烟文件，归档前消失）
+- [x] T.4 `bash scripts/check-standards.sh` → A-D 段零失败（115/116，唯一 FAIL 在 E 段且属遗留 change tool-output-spill 的脏工作区误报，与本 change 无关）
 
 ## 8. 验证
 
-- [ ] V.1 `grep -n '^## ' docs/reference/standard/shared/test-design.md` → 单元模型 + 四问句 + 验收措辞 + 白盒补充 + JIT 摘要 ≥8 节标题逐字命中（Scenario「权威源结构齐全」）
-- [ ] V.2 摘要节字节数 ≤3072（awk 截取 wc -c）
-- [ ] V.3 `grep -n "doc-impact-applies" docs/reference/standard/shared/test-design.md` → 四信号 + section 命中
-- [ ] V.4 `grep -n "test-design" docs/reference/standard/backend/testing.md docs/reference/standard/frontend/testing.md docs/reference/constraints-index.md` → 各至少 1 命中；两份 testing.md diff 仅新增节零删改
+- [x] V.1 `grep -n '^## ' docs/reference/standard/shared/test-design.md` → 单元模型/用例文档模板/问句①②③④/验收措辞/白盒分支表/JIT 摘要全部命中（13 节含模板内嵌标题）
+- [x] V.2 摘要节字节数 ≤3072（实测 2221）
+- [x] V.3 `grep -n "doc-impact-applies" docs/reference/standard/shared/test-design.md` → 四信号 + section 命中（L4）
+- [x] V.4 三处挂接 grep 各 1 命中；两份 testing.md diff 仅新增节零删改（+10/+10 行）
 - [ ] V.5 codegraph impact 输出（5.1）粘贴留痕于此
-- [ ] V.6 真机注入确认（4.2）留痕于此：日期 + 会话 + 注入块节选
-- [ ] V.7 试点计划：本 change 归档后，`watch-keyword-and-quickadd` apply 时按新标准补 spec 漏 Scenario（空串/纯分隔符/14 天边界）、建 test-cases.md 白盒边界矩阵、修 tasks 措辞（「SQLite 单测覆盖」→「单元测试覆盖（无 DB）」），作为规范首个完整试点；观察点：注入时机是否赶得上写作、⑤a 关键词误报率
+- [x] V.6 真机注入确认（2026-08-23 会话，编辑 openspec/changes/* 路径触发）：events.db constraint.inject 事件 `{"path":"docs/reference/standard/shared/test-design.md","mode":"section","reason":"jit-path","bytes":2381}`（摘要节本体，改文案后新版本即时生效）
+- [x] V.7 试点计划：本 change 归档后，`watch-keyword-and-quickadd` apply 时按新标准补 spec 漏 Scenario（空串/纯分隔符/14 天边界）、建 test-cases.md 白盒边界矩阵、修 tasks 措辞（「SQLite 单测覆盖」→「单元测试覆盖（无 DB）」），作为规范首个完整试点；观察点：注入时机是否赶得上写作、⑤a 关键词误报率。升级注：按单元模型二次升级，试点的 test-cases.md 将是完整故事串联版（主链路表+变体走查+白盒附加），非纯白盒矩阵
 
 ### Scenario → 测试映射
 

@@ -1662,6 +1662,172 @@ ON CONFLICT (route_id, param_name, value) DO NOTHING`,
 				return nil
 			},
 		},
+
+		// ── AI provider model_kind backfill ────────────────────────
+		// AutoMigrate adds ai_providers.model_kind (DEFAULT 'llm'). Existing
+		// providers therefore all start at 'llm'. This one-shot data migration
+		// flips providers that are EXCLUSIVELY on an embedding route to
+		// 'embedding', and warns about providers bound to BOTH an embedding and an
+		// llm route (ambiguous — the user must split the bindings manually; the
+		// migration does not auto-change routes). Idempotent: the UPDATE only
+		// touches rows still at 'llm'.
+		{
+			Version:     "20260802_0001",
+			Description: "Backfill ai_providers.model_kind from embedding route membership; warn on embedding+llm conflict.",
+			Up: func(db *gorm.DB) error {
+				// Backfill: flip a provider to 'embedding' only if it is on an
+				// embedding route AND not on any llm (non-embedding) route. A
+				// provider on both routes is ambiguous — leave it at the default
+				// 'llm' and warn below so the user decides.
+				res := db.Exec(`
+					UPDATE ai_providers p
+					SET model_kind = 'embedding'
+					WHERE p.model_kind = 'llm'
+					  AND EXISTS (
+					    SELECT 1 FROM ai_route_providers arp
+					    JOIN ai_routes ar ON ar.id = arp.route_id
+					    WHERE arp.provider_id = p.id AND ar.capability = 'embedding'
+					  )
+					  AND NOT EXISTS (
+					    SELECT 1 FROM ai_route_providers arp
+					    JOIN ai_routes ar ON ar.id = arp.route_id
+					    WHERE arp.provider_id = p.id AND ar.capability <> 'embedding'
+					  )
+				`)
+				if res.Error != nil {
+					return fmt.Errorf("backfill ai_providers.model_kind: %w", res.Error)
+				}
+				if res.RowsAffected > 0 {
+					logging.Infof("Migration 20260802_0001: backfilled %d embedding-exclusive providers to model_kind=embedding", res.RowsAffected)
+				}
+
+				// Conflict detection: providers bound to BOTH an embedding route and
+				// an llm route. Warn only — do not auto-change route bindings.
+				type conflictRow struct {
+					ID   uint
+					Name string
+				}
+				var conflicts []conflictRow
+				if err := db.Raw(`
+					SELECT p.id, p.name FROM ai_providers p
+					WHERE EXISTS (
+					    SELECT 1 FROM ai_route_providers arp
+					    JOIN ai_routes ar ON ar.id = arp.route_id
+					    WHERE arp.provider_id = p.id AND ar.capability = 'embedding'
+					  )
+					  AND EXISTS (
+					    SELECT 1 FROM ai_route_providers arp
+					    JOIN ai_routes ar ON ar.id = arp.route_id
+					    WHERE arp.provider_id = p.id AND ar.capability <> 'embedding'
+					  )
+				`).Scan(&conflicts).Error; err != nil {
+					return fmt.Errorf("detect embedding+llm provider conflicts: %w", err)
+				}
+				for _, c := range conflicts {
+					logging.Warnf("migration 20260802_0001: provider %d (%s) 同时绑定在 embedding 路由与 llm 路由，model_kind 冲突，请手动拆分路由绑定", c.ID, c.Name)
+				}
+				return nil
+			},
+		},
+
+		// ── Article archive flag ──────────────────────────────────────
+		// CleanupOldArticles switches from physical DELETE to archive
+		// (UPDATE archived=true). All existing rows start as active — no
+		// backfill. No index: low-cardinality boolean, list queries are
+		// covered by feed_id/pub_date indexes (design D2).
+		{
+			Version:     "20260818_0001",
+			Description: "Add articles.archived boolean NOT NULL DEFAULT false — feed cleanup archives instead of deleting (article-archive-instead-of-delete).",
+			Up: func(db *gorm.DB) error {
+				if err := db.Exec(`ALTER TABLE articles ADD COLUMN IF NOT EXISTS archived boolean NOT NULL DEFAULT false`).Error; err != nil {
+					return fmt.Errorf("add articles.archived: %w", err)
+				}
+				return nil
+			},
+		},
+
+		// ── analysis-remediation W1：孤儿 embedding 清理 + FK 防复发 + 零使用索引清理 ──
+		// GORM 声明了 OnDelete:CASCADE 但 DB 实际无此 FK，删 tag 后向量全部残留
+		// （256k 孤儿行 ≈3GB，已由 scripts/db-cleanup-2026-08/ 手动清理）。本迁移在
+		// 新部署上完成同样的清理+结构修复（幂等）。索引清理与 tracing/model.go 的
+		// tag 摘除配套，否则 AutoMigrate 会重建。articles GIN 全文索引 idx_scan=0
+		// 且代码零引用（analysis-reports/db-analysis-2026-08-20.md #3/#4）。
+		{
+			Version:     "20260820_0001",
+			Description: "Clean orphan topic_tag_embeddings, add FK ON DELETE CASCADE to topic_tags, drop unused indexes (articles GIN + trigger, otel_spans trace_id/kind/status/name). Idempotent.",
+			Up: func(db *gorm.DB) error {
+				if !tableExists(db, "topic_tag_embeddings") || !tableExists(db, "topic_tags") {
+					return nil
+				}
+
+				// 1) 清孤儿 embedding（同 20260801_0002 孤儿先清逻辑：垃圾数据不套
+				// destructive 守卫，不清则 FK 校验现有行失败）
+				res := db.Exec(`DELETE FROM topic_tag_embeddings WHERE topic_tag_id NOT IN (SELECT id FROM topic_tags)`)
+				if res.Error != nil {
+					return fmt.Errorf("clean orphan topic_tag_embeddings: %w", res.Error)
+				}
+				if res.RowsAffected > 0 {
+					logging.Infof("Migration 20260820_0001: cleaned %d orphan topic_tag_embeddings rows", res.RowsAffected)
+				}
+
+				// 2) FK ON DELETE CASCADE（幂等；长锁 DDL 套 withLockTimeout）
+				if err := withLockTimeout(db, "5s", func(tx *gorm.DB) error {
+					if err := tx.Exec(`DO $$ BEGIN
+						IF NOT EXISTS (
+							SELECT 1 FROM information_schema.table_constraints
+							WHERE constraint_name = 'fk_topic_tag_embeddings_tag'
+							  AND table_name = 'topic_tag_embeddings'
+						) THEN
+							ALTER TABLE topic_tag_embeddings
+								ADD CONSTRAINT fk_topic_tag_embeddings_tag
+								FOREIGN KEY (topic_tag_id) REFERENCES topic_tags(id)
+								ON DELETE CASCADE;
+						END IF;
+					END $$`).Error; err != nil {
+						return fmt.Errorf("add fk_topic_tag_embeddings_tag: %w", err)
+					}
+					return nil
+				}); err != nil {
+					return err
+				}
+
+				// 3) 零使用索引清理（与 scripts/db-cleanup-2026-08/apply-structure.sql 一致）
+				if tableExists(db, "articles") {
+					if err := db.Exec(`DROP INDEX IF EXISTS idx_articles_search_vector`).Error; err != nil {
+						return fmt.Errorf("drop idx_articles_search_vector: %w", err)
+					}
+					if err := db.Exec(`DROP TRIGGER IF EXISTS articles_search_vector_trigger ON articles`).Error; err != nil {
+						return fmt.Errorf("drop articles_search_vector_trigger: %w", err)
+					}
+				}
+				if tableExists(db, "otel_spans") {
+					for _, idx := range []string{"idx_otel_spans_trace_id", "idx_otel_spans_kind", "idx_otel_spans_status", "idx_otel_spans_name"} {
+						if err := db.Exec(fmt.Sprintf(`DROP INDEX IF EXISTS %s`, idx)).Error; err != nil {
+							return fmt.Errorf("drop %s: %w", idx, err)
+						}
+					}
+				}
+				return nil
+			},
+		},
+
+		// ── analysis-remediation W1：embedding_queues 30 天保留策略的查询支撑 ──
+		// job_log_cleanup 新增 DELETE ... WHERE status='completed' AND created_at < ?，
+		// 此部分索引（completed 行 15 万+，全体行不到 16 万）支撑该删除扫描。
+		{
+			Version:     "20260820_0002",
+			Description: "Add partial index idx_embedding_queues_completed_created (created_at WHERE status='completed') to back the 30-day retention cleanup in job_log_cleanup. Idempotent.",
+			Up: func(db *gorm.DB) error {
+				if !tableExists(db, "embedding_queues") {
+					return nil
+				}
+				if err := db.Exec(`CREATE INDEX IF NOT EXISTS idx_embedding_queues_completed_created
+					ON embedding_queues (created_at) WHERE status = 'completed'`).Error; err != nil {
+					return fmt.Errorf("create idx_embedding_queues_completed_created: %w", err)
+				}
+				return nil
+			},
+		},
 	}
 }
 
@@ -1824,8 +1990,10 @@ func mergeOneAuxLabelDup(db *gorm.DB, sourceID, targetID uint) error {
 			return fmt.Errorf("update target ref_count: %w", err)
 		}
 		if err := tx.Model(&models.SemanticLabel{}).Where("id = ?", sourceID).Updates(map[string]any{
-			"ref_count": int(sourceRefCount),
-			"status":    "disabled",
+			"ref_count":       int(sourceRefCount),
+			"status":          "disabled",
+			"embedding":       nil,
+			"merge_embedding": nil,
 		}).Error; err != nil {
 			return fmt.Errorf("disable source: %w", err)
 		}

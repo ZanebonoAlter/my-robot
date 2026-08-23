@@ -1,5 +1,6 @@
 # 主阅读页流程（Reading）
 
+<!-- doc-impact-applies: backend-go/internal/reader/, backend-go/internal/admin/service/, backend-go/internal/admin/handler/ | section=业务约束与不变量 -->
 > 大功能：应用启动 → 切分类 → 切 feed → 打开文章 → 记录阅读行为。
 > 阅读行为是「偏好向量画像」的权重源（画像与订阅源发现见 [discovery.md](discovery.md)）。
 > 跨端。互补：`architecture/frontend.md` §页面骨架、§数据映射规则。
@@ -102,17 +103,24 @@ UI 图标（mdi:*）同为本地化机制：启动时 `app/plugins/iconify-local
 
 ## 业务约束与不变量
 
-> 本节同时是 `scripts/doc-impact.sh context` 的数据源——改 `internal/reader/` 或 `internal/admin/`（偏好/行为）代码前会被自动 dump，必读。
+> 本节同时是 constraint-injection extension 的注入数据源——改 `internal/reader/` 或 `internal/admin/`（偏好/行为） 代码前会被自动注入 system prompt，必读。
 
 1. **前端 `id` 统一字符串化、字段统一 camelCase**：后端 `snake_case` + 数值 id 到前端必须转 `string`，转换只发生在 API 模块 / `useApiStore`，组件层不得散落映射。违反会触发比较/路由参数类型错配。
 2. **偏好向量画像（替代旧偏好分数）**：旧 `user_preferences` 表 + `preference_score` + `preference_update` 调度器已整体废弃删除（preference-vector-feed-discovery）；`reading_behaviors` 采集链路本身**保留不动**，改为作为偏好**向量画像**的行为权重源（按 SemanticBoard 聚合的 embedding），画像/调度/约束见 [discovery.md](discovery.md) §业务约束与不变量。
 3. **Article 打标签时机（与 feed 开关耦合）**：
    - 普通 refresh 新文章：入库后立即打标签（feed 未开启 Firecrawl 时）。
    - feed 开启 Firecrawl：refresh 阶段**先不打标签**；Firecrawl 抓完写入 `tag_jobs` 队列，由 `TagQueue` worker 异步打标签；同时开启 `article_summary_enabled` 时，等 ContentCompletion 生成 `ai_content_summary` 后再 enqueue `tag_jobs`（打标签依赖整理后的正文）。
-   - 手动打标签 `POST /api/articles/:article_id/tags`：只 enqueue 返回 `job_id`，`TagQueue` 完成后经 WebSocket 广播 `tag_completed`；LLM 提示词最多返回 **8 个**标签并按优先级排序，后端写 `article_topic_tags` 前也只保留前 8 作兜底。
+   - 手动打标签 `POST /api/articles/:article_id/tags`：只 enqueue 返回 `job_id`，`TagQueue` 完成后经 WebSocket 广播 `tag_completed`；mono 路径 LLM 提示词按优先级排序返回，后端写 `article_topic_tags` 前截断到文章级上限（6）作兜底。
+   - **按 `content_form` 分流（aggregate-article-tagging）**：`tagArticle` 编排层读 `articles.content_form`——`aggregate`（聚合型文章，由摘要链路形态标记产生，见 [content-enrichment.md](content-enrichment.md) 约束 #10）走切片 map-reduce 路径：纯代码按 `## ` 栏目切片（跳导读、短栏目向后合并、超长按 `###` 细分、上限 8 片，无 `##` 结构回落 mono）→ 每片 1 次融合 prompt LLM 调用（event/person/keyword 三分类合一，每片上限 4 标签，单片失败重试 3 次后跳过不阻断）→ 跨片 `Slugify` 去重（保留首栏目出现者）→ 文章级上限 15、score 按片位置分层（首片 0.9/中间 0.7/尾片 0.5）；`mono` 与空值走原双分支提取路径，输入截断 4000 runes、文章级上限 6、score 一律 0.7。两条路径共用同一入库链（`findOrCreateTag` → aux labels → `createArticleTopicTagLink` → event 标签 enqueue embedding）。
+   - **提取容错（aggregate-tagging-resilience）**：JSON 解析入口（`parseRawTagObjects`，经 `jsonutil.SanitizeLLMJSON`）对尾逗号做无损修复；单标签校验失败降级不连坐——event/person 的 aux labels 校验失败时丢 aux 保标签（记 warning），融合路径 keyword 缺 description 跳过该标签（记 warning），mono 双分支同步降级；JSON 整体解析失败仍重试 3 次。聚合路径全部片处理完后标签数为 0（全片失败或全部空产出）时回落 mono 双分支提取（含 heuristic 兜底），聚合文章不以 0 标签结束。
    - `TagQueue.Start()` 首次启动失败不阻塞应用，后台按 30 秒间隔重试最多 10 次。
 4. **Feed 图标状态机与本地化**：`icon_source` ∈ `auto`（系统抓取，可刷新覆盖）/ `custom`（用户设定，RefreshFeed 不碰）/ `fallback`（占位，可刷新重算）。重算走候选管线（RSS image → 首页 HTML link → favicon.ico 猜测），**后端下载落盘 `data/icons/feeds/`、DB 存 `/icons/...` 同源路径**；不用文章封面图当 feed icon；icon 下载失败不影响 refresh 成功状态。删除 feed 时清理其 icon 文件（失败不阻断）。favicon 探测以 RSS channel link（站点首页）为基准，不用 feed URL（聚合器域名）或 Google s2 等第三方服务。
 5. **UI 图标本地子集、运行时零联网**：`mdi:*` 图标全部来自构建产物 `app/assets/iconify-subset.json`（`pnpm generate:icons` 生成并纳 git），运行时不访问 iconify API；源码新增图标名必须是子集的超集（一致性单测强制）。
+6. **文章超限归档而非删除（article-archive-instead-of-delete）**：`CleanupOldArticles` 对超出 `max_articles` 的最旧非 favorite 文章执行**归档降级**（`archived=true`），不物理删除——行与全部文本字段永久保留（日报线索按 ID 反查依赖此语义）；归档同时清除衍生数据（`article_topic_tags` 边 + 孤儿 tag 清理、`reading_behaviors`、`search_vector` 置 NULL）。不变量：
+   - 活跃窗口计数与归档候选集**仅统计 `archived=false`**（归档行不得侵蚀窗口，否则每次刷新会误归档新文章）；
+   - RSS 去重（title dedupe）**含归档文章**（防老条目重复入库）；
+   - reader 列表/全局统计/feed 统计默认过滤 `archived=false`，`GET /api/articles?archived=true` 显式查归档集；按文章 ID 的详情查询豁免过滤。
+   - `max_articles=0` 或 `9999` 仍为无限制；favorite 永不归档。
 
 ## 代码入口
 
@@ -127,6 +135,11 @@ UI 图标（mdi:*）同为本地化机制：启动时 `app/plugins/iconify-local
 
 | 日期 | 变更 | 摘要 | 归档位置 |
 |------|------|------|----------|
+| 2026-08-23 | fix-quality-audit-p0 | 修复前端 AI 摘要开关字段错读：stores/api.ts 改读后端真实返回的 `article_summary_enabled`（缺省按 gorm default:false），清理 `aiSummaryEnabled`/`ai_summary_enabled` 死字段与死 key；开关展示从「恒开启」变为真实值 | [`openspec/changes/archive/2026-08-23-fix-quality-audit-p0`](../../../openspec/changes/archive/2026-08-23-fix-quality-audit-p0) |
 | 2026-05-13 | backend-package-restructure | 后端按域拆包：`feeds/articles/categories` → `reader/` 域，`preferences`/reading-behavior → `admin/` 域；本 flow「代码入口」的包路径即来自此次重组（旧 user-guide 的 `internal/domain/*`、`internal/jobs/` 路径已失效） | [`openspec/changes/archive/2026-05-13-backend-package-restructure`](../../../openspec/changes/archive/2026-05-13-backend-package-restructure) |
 | 2026-07-25 | preference-vector-feed-discovery | 旧「偏好分数」(`user_preferences` 表 / `preference_update` 调度器 / `/api/user-preferences/*` / `usePreferencesStore` / `ReadingPreferencesPanel`) 整体废弃删除；`reading_behaviors` 采集保留并改为偏好**向量画像**权重源；约束迁至 [discovery.md](discovery.md) | [`openspec/changes/archive/2026-07-25-preference-vector-feed-discovery`](../../../openspec/changes/archive/2026-07-25-preference-vector-feed-discovery) |
+| 2026-08-04 | slim-header-feed-actions | feed 管理入口迁移（BREAKING 用户习惯）：首页顶栏移除 4 个 feed 管理按钮（添加订阅/添加分类/导入 OPML/导出 OPML，11→7 按钮），聚合到设置页「订阅源」管理区（`/settings?section=feeds` 工具条）；业务链路无变化，仅 UI 入口路径 | [`openspec/changes/archive/2026-08-04-slim-header-feed-actions`](../../../openspec/changes/archive/2026-08-04-slim-header-feed-actions) |
+| 2026-08-19 | article-archive-instead-of-delete | feed 超限文章从物理删除改为归档降级（`articles.archived` 字段）：行与原文永久保留、衍生数据清除（tags 边/行为/search_vector）；列表统计默认过滤归档、日报按 ID 反查豁免；旧死链（已删文章）无法复活 | [`openspec/changes/archive/2026-08-19-article-archive-instead-of-delete`](../../../openspec/changes/archive/2026-08-19-article-archive-instead-of-delete) |
+| 2026-08-20 | aggregate-article-tagging | 打标链路按 `articles.content_form` 分流：aggregate 走栏目切片 map-reduce（每片融合提取、跨片去重、上限 15、score 0.9/0.7/0.5 分层）；mono/空值走原路径（截断 2000→4000 runes、上限 5→6）；形态标记由摘要链路产出（见 content-enrichment.md） | [`archive/2026-08-22-aggregate-article-tagging`](../../../openspec/changes/archive/2026-08-22-aggregate-article-tagging) |
+| 2026-08-22 | aggregate-tagging-resilience | 提取链路容错：JSON 尾逗号无损修复（jsonutil）；单标签 aux/description 校验失败降级保留不再整片报废（mono+聚合同步）；聚合零产出回落 mono 双分支（含 heuristic 兜底）；修复后实测 event 存活（派早报 0→15 标签含 5 event、周刊首栏目 0.9 落地） | [`archive/2026-08-22-aggregate-tagging-resilience`](../../../openspec/changes/archive/2026-08-22-aggregate-tagging-resilience) |
 | 2026-08-01 | localize-icons | Feed 图标从「存远程 URL 前端直连」改为「后端下载落盘 `data/icons/feeds/` + DB 存 `/icons/...` 同源路径」；favicon 探测增强（首页 HTML `<link rel="icon">` 解析 + `/favicon.ico` 猜测 + 下载验证）；UI 图标（mdi）改本地子集注册、运行时零联网 | [`openspec/changes/archive/2026-08-01-localize-icons`](../../../openspec/changes/archive/2026-08-01-localize-icons) |

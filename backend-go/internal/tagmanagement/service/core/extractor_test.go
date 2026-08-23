@@ -93,7 +93,7 @@ func TestParseKeywordTagsRequiresDescriptionAndIgnoresAuxiliaryLabels(t *testing
 	require.Error(t, err)
 }
 
-func TestParseExtractedTagsRejectsInvalidAuxiliaryLabels(t *testing.T) {
+func TestParseExtractedTagsDegradesOnInvalidAuxiliaryLabels(t *testing.T) {
 	tests := []struct {
 		name  string
 		input string
@@ -130,17 +130,22 @@ func TestParseExtractedTagsRejectsInvalidAuxiliaryLabels(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := parseEventPersonTags(tt.input)
-			require.Error(t, err)
+			parsed, err := parseEventPersonTags(tt.input)
+			require.NoError(t, err)
+			require.Len(t, parsed, 1)
+			require.Equal(t, "OpenAI发布GPT-5", parsed[0].Label)
+			require.Equal(t, "event", parsed[0].Category)
+			require.Empty(t, parsed[0].AuxiliaryLabels, "invalid aux should degrade to empty, tag kept")
 		})
 	}
 }
 
-func TestParseExtractedTagsRejectsOldAuxiliaryLabelStringArrayViaDescriptionValidation(t *testing.T) {
-	_, err := parseEventPersonTags(`{"tags":[{"label":"OpenAI发布GPT-5","category":"event","auxiliary_labels":["OpenAI","GPT-5","模型发布"]}]}`)
+func TestParseExtractedTagsDegradesOldAuxiliaryLabelStringArrayToEmpty(t *testing.T) {
+	parsed, err := parseEventPersonTags(`{"tags":[{"label":"OpenAI发布GPT-5","category":"event","auxiliary_labels":["OpenAI","GPT-5","模型发布"]}]}`)
 
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "description must not only repeat label")
+	require.NoError(t, err)
+	require.Len(t, parsed, 1)
+	require.Empty(t, parsed[0].AuxiliaryLabels, "old-format aux should degrade to empty, tag kept")
 }
 
 func TestParseExtractedTagsAcceptsSurroundingText(t *testing.T) {
@@ -403,4 +408,21 @@ func (f *fakeTagChatRouter) callCount(operation string) int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.calls[operation]
+}
+
+func TestParseEventPersonTagsToleratesTrailingCommas(t *testing.T) {
+	parsed, err := parseEventPersonTags(`{"tags":[{"label":"伊朗袭击以色列","category":"event","auxiliary_labels":[{"label":"伊朗","description":"中东地区国家"},{"label":"以色列","description":"中东国家"},{"label":"导弹袭击","description":"军事打击行动"},],},],}`)
+
+	require.NoError(t, err)
+	require.Len(t, parsed, 1)
+	require.Equal(t, "伊朗袭击以色列", parsed[0].Label)
+	require.Len(t, parsed[0].AuxiliaryLabels, 3)
+}
+
+func TestParseKeywordTagsToleratesTrailingCommas(t *testing.T) {
+	parsed, err := parseKeywordTags(`{"tags":[{"label":"PostgreSQL","category":"keyword","description":"开源关系型数据库",},],}`)
+
+	require.NoError(t, err)
+	require.Len(t, parsed, 1)
+	require.Equal(t, "PostgreSQL", parsed[0].Label)
 }

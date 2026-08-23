@@ -21,7 +21,7 @@ Syntopica 全部文档入口。
 |------|------|
 | [reference/flow/](reference/flow/) | flow 索引：每个文档含「需求说明 / 链路设计 / 业务约束与不变量 / 代码入口 / 变更溯源」五段 |
 
-> flow 文档**替代原 `user-guide/`** 承接"系统能做什么、怎么用"（面向使用视角的「需求说明」节）。apply 改代码前 `doc-impact.sh context` 自动注入相关 flow 的业务约束。
+> flow 文档**替代原 `user-guide/`** 承接"系统能做什么、怎么用"（面向使用视角的「需求说明」节）。apply 改代码前 constraint-injection extension 自动注入相关 flow 的业务约束节。
 
 ### 架构
 

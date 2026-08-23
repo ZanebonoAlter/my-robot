@@ -16,7 +16,7 @@ func setupAIRouterTestDB(t *testing.T) *gorm.DB {
 	dsn := fmt.Sprintf("file:%s?mode=memory&cache=shared", t.Name())
 	db, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{})
 	require.NoError(t, err)
-	require.NoError(t, db.AutoMigrate(&models.AISettings{}, &models.AIProvider{}, &models.AIRoute{}, &models.AIRouteProvider{}, &models.AICallLog{}))
+	require.NoError(t, db.AutoMigrate(&models.AISettings{}, &models.AIProvider{}, &models.AIRoute{}, &models.AIRouteProvider{}, &models.AICallLog{}, &models.AIEmbeddingCache{}))
 	database.DB = db
 	return db
 }
@@ -72,3 +72,116 @@ func TestUpsertProviderOpenAICompatibleEmptyKeyAllowed(t *testing.T) {
 	require.NoError(t, db.First(&loaded, provider.ID).Error)
 	require.Equal(t, "", loaded.APIKey)
 }
+
+func TestUpsertProviderModelKindDefaultsToLLM(t *testing.T) {
+	db := setupAIRouterTestDB(t)
+	store := NewStore(db)
+
+	provider := &models.AIProvider{
+		Name:         "default-kind",
+		ProviderType: ProviderTypeOpenAICompatible,
+		BaseURL:      "http://localhost:8080/v1",
+		Model:        "qwen3-8b",
+		Enabled:      true,
+	}
+	require.NoError(t, store.UpsertProvider(provider))
+
+	var loaded models.AIProvider
+	require.NoError(t, db.First(&loaded, provider.ID).Error)
+	require.Equal(t, "llm", loaded.ModelKind, "empty model_kind must normalize to llm")
+}
+
+func TestUpsertProviderModelKindAcceptsEmbedding(t *testing.T) {
+	db := setupAIRouterTestDB(t)
+	store := NewStore(db)
+
+	provider := &models.AIProvider{
+		Name:         "emb-kind",
+		ProviderType: ProviderTypeOpenAICompatible,
+		BaseURL:      "http://localhost:8080/v1",
+		Model:        "bge-m3",
+		ModelKind:    "embedding",
+		Enabled:      true,
+	}
+	require.NoError(t, store.UpsertProvider(provider))
+
+	var loaded models.AIProvider
+	require.NoError(t, db.First(&loaded, provider.ID).Error)
+	require.Equal(t, "embedding", loaded.ModelKind)
+}
+
+func TestUpsertProviderModelKindRejectsInvalid(t *testing.T) {
+	db := setupAIRouterTestDB(t)
+	store := NewStore(db)
+
+	provider := &models.AIProvider{
+		Name:         "bad-kind",
+		ProviderType: ProviderTypeOpenAICompatible,
+		BaseURL:      "http://localhost:8080/v1",
+		Model:        "m",
+		ModelKind:    "vision",
+		Enabled:      true,
+	}
+	err := store.UpsertProvider(provider)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "invalid model_kind")
+	require.Contains(t, err.Error(), "vision")
+}
+
+func TestUpsertProviderRenameUpdatesInPlace(t *testing.T) {
+	db := setupAIRouterTestDB(t)
+	store := NewStore(db)
+
+	created := &models.AIProvider{
+		Name: "alpha", ProviderType: ProviderTypeOpenAICompatible,
+		BaseURL: "https://alpha.example/v1", Model: "m1", Enabled: true,
+	}
+	require.NoError(t, store.UpsertProvider(created))
+	require.NotZero(t, created.ID)
+
+	created.Name = "beta"
+	created.BaseURL = "https://beta.example/v1"
+	require.NoError(t, store.UpsertProvider(created))
+
+	var count int64
+	require.NoError(t, db.Model(&models.AIProvider{}).Count(&count).Error)
+	require.EqualValues(t, 1, count, "rename must not create a second row")
+
+	var loaded models.AIProvider
+	require.NoError(t, db.First(&loaded, created.ID).Error)
+	require.Equal(t, "beta", loaded.Name)
+	require.Equal(t, "https://beta.example/v1", loaded.BaseURL)
+}
+
+func TestUpsertProviderRenameToExistingNameRejected(t *testing.T) {
+	db := setupAIRouterTestDB(t)
+	store := NewStore(db)
+
+	alpha := &models.AIProvider{Name: "alpha", ProviderType: ProviderTypeOpenAICompatible, BaseURL: "https://alpha.example/v1", Model: "m1", Enabled: true}
+	beta := &models.AIProvider{Name: "beta", ProviderType: ProviderTypeOpenAICompatible, BaseURL: "https://beta.example/v1", Model: "m2", Enabled: true}
+	require.NoError(t, store.UpsertProvider(alpha))
+	require.NoError(t, store.UpsertProvider(beta))
+
+	alpha.Name = "beta"
+	err := store.UpsertProvider(alpha)
+	require.Error(t, err, "renaming onto another provider's name must be rejected, not silently overwrite it")
+	require.Contains(t, err.Error(), "beta")
+
+	var loaded models.AIProvider
+	require.NoError(t, db.First(&loaded, beta.ID).Error)
+	require.Equal(t, "https://beta.example/v1", loaded.BaseURL, "the conflicting provider must stay untouched")
+}
+
+func TestUpsertProviderCreateDuplicateNameRejected(t *testing.T) {
+	db := setupAIRouterTestDB(t)
+	store := NewStore(db)
+
+	first := &models.AIProvider{Name: "alpha", ProviderType: ProviderTypeOpenAICompatible, BaseURL: "https://alpha.example/v1", Model: "m1", Enabled: true}
+	require.NoError(t, store.UpsertProvider(first))
+
+	dup := &models.AIProvider{Name: "alpha", ProviderType: ProviderTypeOpenAICompatible, BaseURL: "https://other.example/v1", Model: "m2", Enabled: true}
+	err := store.UpsertProvider(dup)
+	require.Error(t, err, "creating a provider with an existing name must be rejected, not silently overwrite it")
+	require.Contains(t, err.Error(), "alpha")
+}
+

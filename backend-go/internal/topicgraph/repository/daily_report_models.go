@@ -30,7 +30,8 @@ type BoardDailyReport struct {
 	CreatedAt               time.Time `json:"created_at"`
 	UpdatedAt               time.Time `json:"updated_at"`
 
-	Sections []DailyReportSection `gorm:"foreignKey:ReportID" json:"sections,omitempty"`
+	// Sections must always serialize as an array (see Threads note above).
+	Sections []DailyReportSection `gorm:"foreignKey:ReportID" json:"sections"`
 }
 
 func (BoardDailyReport) TableName() string {
@@ -112,12 +113,17 @@ func (BoardPersistentTopic) TableName() string {
 
 // DailyReportSection — one section per cluster
 type DailyReportSection struct {
-	ID               uint                `gorm:"primarykey" json:"id"`
-	ReportID         uint                `gorm:"index;not null" json:"report_id"`
-	ClusterIndex     int                 `json:"cluster_index"`
-	ClusterLabel     string              `gorm:"size:200" json:"cluster_label"`
-	ClusterTagIDs    JSON                `gorm:"type:jsonb" json:"cluster_tag_ids"`
-	Threads          []DailyReportThread `gorm:"foreignKey:SectionID" json:"threads,omitempty"`
+	ID            uint   `gorm:"primarykey" json:"id"`
+	ReportID      uint   `gorm:"index;not null" json:"report_id"`
+	ClusterIndex  int    `json:"cluster_index"`
+	ClusterLabel  string `gorm:"size:200" json:"cluster_label"`
+	ClusterTagIDs JSON   `gorm:"type:jsonb" json:"cluster_tag_ids"`
+	// Threads must always serialize as an array (never omitted/null): GORM
+	// Preload yields a nil slice when the section has no thread rows (a legal
+	// degradation path when the per-cluster threads LLM call fails), and the
+	// frontend reader calls section.threads.filter directly. GetReportByID
+	// normalizes nil to an empty slice before serializing.
+	Threads          []DailyReportThread `gorm:"foreignKey:SectionID" json:"threads"`
 	ArticleCount     int                 `json:"article_count"`
 	BestTier         int                 `gorm:"default:0" json:"best_tier"`
 	AvgScore         float64             `gorm:"default:0" json:"avg_score"`

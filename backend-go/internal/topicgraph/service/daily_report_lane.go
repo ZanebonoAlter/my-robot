@@ -457,18 +457,9 @@ func buildL2Prompt(l2 []LaneTagAssign, topicByID map[uint]repository.BoardPersis
 			fmt.Fprintf(&sb, "- [topic:%d] %s（状态:%s，最近命中:%s，累计%d天，距离%.3f）\n",
 				t.ID, t.Label, statusLabel, t.LastSeenDate.Format("2006-01-02"), t.HitCount, c.Distance)
 			if items := briefs[t.ID]; len(items) > 0 {
-				sb.WriteString("  近期内容:")
+				sb.WriteString("  近期 section 框架:")
 				for _, item := range items {
 					fmt.Fprintf(&sb, "\n  - section \"%s\" (%s)", item.SectionLabel, item.PeriodDate.Format("2006-01-02"))
-					if len(item.ThreadTitles) > 0 {
-						sb.WriteString(": ")
-						for j, tt := range item.ThreadTitles {
-							if j > 0 {
-								sb.WriteString(", ")
-							}
-							fmt.Fprintf(&sb, "thread \"%s\"", tt)
-						}
-					}
 				}
 				sb.WriteString("\n")
 			}

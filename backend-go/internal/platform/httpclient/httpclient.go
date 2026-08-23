@@ -7,6 +7,7 @@ package httpclient
 
 import (
 	"fmt"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -64,11 +65,40 @@ func SetProxy(rawURL string) error {
 		return fmt.Errorf("http.DefaultTransport is not *http.Transport, cannot install proxy")
 	}
 	tr := base.Clone()
-	tr.Proxy = http.ProxyURL(u)
+	tr.Proxy = proxyWithLoopbackBypass(u)
 	proxyMu.Lock()
 	proxyTransport = tr
 	proxyMu.Unlock()
 	return nil
+}
+
+// proxyWithLoopbackBypass returns a Proxy function that routes every request
+// through the configured proxy except loopback destinations (localhost,
+// 127.0.0.0/8, ::1, empty host), which are connected directly. Local model
+// servers (llama-server on localhost) must never be proxied: an outbound
+// proxy (e.g. Clash) typically answers 502 for local addresses, which would
+// make health probes and LLM calls fail even though the model is up.
+func proxyWithLoopbackBypass(proxyURL *url.URL) func(*http.Request) (*url.URL, error) {
+	return func(req *http.Request) (*url.URL, error) {
+		if isLoopbackHost(req.URL.Hostname()) {
+			return nil, nil
+		}
+		return proxyURL, nil
+	}
+}
+
+// isLoopbackHost reports whether host is a loopback destination: "localhost",
+// any 127.0.0.0/8 address, "::1", or empty (same-host). IP parsing handles
+// both plain and bracketed IPv6 forms.
+func isLoopbackHost(host string) bool {
+	if host == "" {
+		return true
+	}
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	ip := net.ParseIP(strings.Trim(host, "[]"))
+	return ip != nil && ip.IsLoopback()
 }
 
 // currentProxyTransport returns the active proxy transport under a read lock.

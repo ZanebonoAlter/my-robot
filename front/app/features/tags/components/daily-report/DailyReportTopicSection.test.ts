@@ -166,6 +166,16 @@ describe('DailyReportTopicSection — thread-fit soft-degrade (current loop)', (
     expect(wrapper.find('.drm-thread__hint').exists()).toBe(false)
   })
 
+  it('tolerates a section payload missing the threads field (degraded backend data)', () => {
+    // Regression: sections saved without thread rows used to arrive with the
+    // threads field omitted entirely; demotedCount must not throw.
+    const wrapper = mountSection({
+      zone: activeZone([makeSection(100, [], { threads: undefined as unknown as DailyReportThread[] })]),
+    })
+    expect(wrapper.find('.drm-thread__hint').exists()).toBe(false)
+    expect(wrapper.text()).toContain('板块100')
+  })
+
   it('renders the hint row as a non-interactive status note (clicking it does not expand threads)', async () => {
     const wrapper = mountSection({
       zone: activeZone([makeSection(100, [

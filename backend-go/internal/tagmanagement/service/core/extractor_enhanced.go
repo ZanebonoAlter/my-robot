@@ -9,6 +9,7 @@ import (
 	"strings"
 	"syntopica-backend/internal/platform/airouter"
 	"syntopica-backend/internal/platform/jsonutil"
+	"syntopica-backend/internal/platform/logging"
 	"syntopica-backend/internal/platform/tracing"
 )
 
@@ -339,7 +340,7 @@ keyword（关键词）：专业术语、技术概念、产品名称、组织机�
 
 提取规则：
 - 只输出 keyword，不要输出 event 或 person
-- 最多返回 3 个 keyword，合并后系统总标签数最多 5 个
+- 最多返回 3 个 keyword，合并后系统总标签数最多 6 个
 - keyword 必须具有长期可复用的辨识度，不接受只在单篇文章出现的临时性描述词
 - 优先提取专业术语、技术概念、产品、组织机构，而非泛化描述词
 - 拒绝纯年份/日期/时间词、过于宽泛的通用词、文章中未展开讨论的附带提及词
@@ -428,7 +429,8 @@ func parseEventPersonTags(content string) ([]ExtractedTag, error) {
 		}
 		auxiliaryLabels, err := parseAuxiliaryLabels(t.AuxiliaryLabels, cat)
 		if err != nil {
-			return nil, fmt.Errorf("invalid auxiliary labels for %q: %w", t.Label, err)
+			logging.Warnf("event/person extraction: dropping invalid auxiliary labels for %q (category=%s): %v", t.Label, cat, err)
+			auxiliaryLabels = nil
 		}
 		result = append(result, ExtractedTag{
 			Label:           strings.TrimSpace(t.Label),

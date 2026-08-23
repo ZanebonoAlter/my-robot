@@ -14,7 +14,7 @@
 
 ## 3. 文档
 
-<!-- doc-impact: none(纯死代码删除；docs/reference 无任何文档描述这两个组件) -->
+<!-- doc-impact: none(纯死代码删除；docs/reference 无任何文档描述这两个组件；无 flow 影响) -->
 
 （无文档更新）
 

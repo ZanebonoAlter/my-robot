@@ -1,3 +1,5 @@
+<!-- constraint-domains: topic-graph, daily-report -->
+
 ## Why
 
 关注标记（topic-watch，topic-watchlist-observability 建立）上线后，暴露两个体验缺口：

@@ -19,6 +19,9 @@ func RegisterRoutes(rg *gin.RouterGroup) {
 		ai.POST("/test", TestConnection)
 		ai.GET("/call-logs", ListCallLogs)
 		ai.GET("/sessions/:session_id", GetSession)
+		ai.GET("/health", GetAIHealth)
+		ai.PUT("/health/auto-start-models", SetAutoStartModels)
+		ai.POST("/health/reprobe", ReprobeAIHealth)
 	}
 
 	schedulers := rg.Group("/schedulers")
@@ -67,6 +70,8 @@ func RegisterRoutes(rg *gin.RouterGroup) {
 		settings.POST("/rsshub", SaveRSSHubSettings)
 		settings.GET("/proxy", GetProxySettings)
 		settings.POST("/proxy", SaveProxySettings)
+		settings.GET("/bocha", GetBochaSettings)
+		settings.POST("/bocha", SaveBochaSettings)
 	}
 
 	// 路由参数可选值字典 CRUD（feed-param-options）

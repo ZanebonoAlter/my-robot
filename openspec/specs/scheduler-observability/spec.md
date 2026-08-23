@@ -1,9 +1,7 @@
 ## Purpose
 
 调度器的执行结果必须端到端可见：每个调度器的执行产物（如「清理了 N 条日志」「恢复 N 篇文章」）SHALL 持久化到数据库、SHALL 通过 API 可读、SHALL 在前端展示。本能力修复当前「结果只在内存、重启即丢」「前端不展示详情」「部分调度器在 API 不可见」的问题。
-
 ## Requirements
-
 ### Requirement: 所有调度器持久化执行结果
 全部 9 个调度器（auto_refresh, preference_update, content_completion, firecrawl, tag_quality_score, log_cleanup, daily_report, aux_label_cleanup, blocked_article_recovery）SHALL 在执行后将 `JobResult`（含 `Data` 计数与 `Summary`）写入 `scheduler_tasks.last_execution_result` 字段。SHALL NOT 有任何调度器在注册时缺少持久化配置。
 
@@ -67,3 +65,15 @@
 #### Scenario: 未识别的结果字段回退
 - **WHEN** `last_run_summary` 含未识别的字段
 - **THEN** 回退显示原始 `Summary` 文案（SHALL NOT 显示空白）
+
+### Requirement: 调度器状态体现分析暂停语义
+当 analysis_paused 为 true 时，受影响的分析类调度器在 GET /api/schedulers 返回中 SHALL 体现"暂停"状态语义（如 status 含 paused 标记或暂停说明），使暂停态在调度器可观测面板端到端可见。
+
+#### Scenario: 暂停时调度器状态可见
+- **WHEN** analysis_paused 为 true 且调用 GET /api/schedulers
+- **THEN** content_completion 等受影响调度器的状态条目体现暂停语义（如显示 paused 标记）
+
+#### Scenario: 恢复后调度器状态复原
+- **WHEN** analysis_paused 切回 false
+- **THEN** 受影响调度器状态恢复正常 idle/running 语义
+

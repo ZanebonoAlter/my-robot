@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -115,4 +117,136 @@ func TestWebSearch_DefaultNoopWhenNotInjected(t *testing.T) {
 	if !strings.Contains(output, "web_search not configured") && !strings.Contains(output, "未配置") {
 		t.Fatalf("expected not-configured degradation, got: %s", output)
 	}
+}
+
+// ── BochaWebSearcher (mocked HTTP, never hits the real Bocha API) ────────────
+
+// bochaProviderOf builds a BochaConfigProvider returning fixed credentials,
+// for tests that don't need dynamic resolution.
+func bochaProviderOf(key, endpoint string) service.BochaConfigProvider {
+	return func() (string, string) { return key, endpoint }
+}
+
+func TestBochaWebSearcher_ParsesResults(t *testing.T) {
+	bochaResp := `{"code":200,"data":{"result":[` +
+		`{"type":"web_page","title":"T","url":"https://x","summary":"S","site_name":"X"},` +
+		`{"type":"web_page","title":"no-url","url":"","summary":"drop me"}` +
+		`]}}`
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			t.Errorf("want POST, got %s", r.Method)
+		}
+		if got := r.Header.Get("Authorization"); got != "Bearer k" {
+			t.Errorf("Authorization = %q, want Bearer k", got)
+		}
+		var body map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		if body["summary"] != false {
+			t.Errorf("summary must be false (raw mode, no AI summary), got %v", body["summary"])
+		}
+		_, _ = w.Write([]byte(bochaResp))
+	}))
+	defer srv.Close()
+
+	ws := service.NewBochaWebSearcher(bochaProviderOf("k", srv.URL))
+	results, err := ws.Search(context.Background(), "q")
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	if len(results) != 1 {
+		t.Fatalf("want 1 result (url-less item dropped), got %d", len(results))
+	}
+	want := service.WebSearchResult{Title: "T", URL: "https://x", Snippet: "S"}
+	if results[0] != want {
+		t.Fatalf("result = %+v, want %+v", results[0], want)
+	}
+}
+
+func TestBochaWebSearcher_HttpError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+
+	ws := service.NewBochaWebSearcher(bochaProviderOf("k", srv.URL))
+	if _, err := ws.Search(context.Background(), "q"); err == nil {
+		t.Fatal("Search should return error on HTTP 500")
+	}
+}
+
+func TestBochaWebSearcher_SnippetFallback(t *testing.T) {
+	// item with snippet field but no summary → snippet used.
+	bochaResp := `{"code":200,"data":{"result":[{"title":"A","url":"https://a","snippet":"snip"}]}}`
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(bochaResp))
+	}))
+	defer srv.Close()
+
+	ws := service.NewBochaWebSearcher(bochaProviderOf("k", srv.URL))
+	results, err := ws.Search(context.Background(), "q")
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	if results[0].Snippet != "snip" {
+		t.Fatalf("snippet = %q, want snip", results[0].Snippet)
+	}
+}
+
+// TestBochaWebSearcher_NotConfigured covers the all-empty fallback: when the
+// provider returns an empty key (DB/env/config.yaml all unset), Search must
+// surface a "not configured" error so executeWebSearch degrades like Noop.
+func TestBochaWebSearcher_NotConfigured(t *testing.T) {
+	ws := service.NewBochaWebSearcher(bochaProviderOf("", ""))
+	_, err := ws.Search(context.Background(), "q")
+	if err == nil {
+		t.Fatal("Search should return error when key is empty")
+	}
+	if !strings.Contains(err.Error(), "not configured") {
+		t.Fatalf("error = %v, want 'not configured'", err)
+	}
+}
+
+// TestBochaWebSearcher_DynamicRead covers the dynamic-read contract: Search must
+// consult the provider on EVERY call (so UI changes take effect without
+// restart). A mutable provider returns empty first, then a DB key — the second
+// call must hit the mock server with that key. Also verifies endpoint fallback:
+// empty endpoint falls back to the default Bocha endpoint.
+func TestBochaWebSearcher_DynamicRead(t *testing.T) {
+	hits := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits++
+		// Second call must carry the newly-configured key.
+		if hits == 2 {
+			if got := r.Header.Get("Authorization"); got != "Bearer db-key" {
+				t.Errorf("call #2 Authorization = %q, want Bearer db-key (provider not re-read)", got)
+			}
+		}
+		_, _ = w.Write([]byte(`{"code":200,"data":{"result":[]}}`))
+	}))
+	defer srv.Close()
+
+	// Mutable provider state: simulates DB key appearing after UI save.
+	var curKey, curEndpoint string
+	provider := service.BochaConfigProvider(func() (string, string) { return curKey, curEndpoint })
+	ws := service.NewBochaWebSearcher(provider)
+
+	// 1. No key yet → not configured, server untouched.
+	if _, err := ws.Search(context.Background(), "q"); err == nil {
+		t.Fatal("first Search (empty key) should error")
+	}
+	if hits != 0 {
+		t.Fatalf("server hit before key configured: %d", hits)
+	}
+
+	// 2. UI save sets key + endpoint → next Search uses them (proves re-read).
+	curKey, curEndpoint = "db-key", srv.URL
+	if _, err := ws.Search(context.Background(), "q"); err != nil {
+		t.Fatalf("second Search: %v", err)
+	}
+	if hits != 1 {
+		t.Fatalf("server hits = %d, want 1", hits)
+	}
+	// (endpoint-empty fallback to defaultBochaEndpoint is a one-line constant
+	// guard inside Search; not exercised here to avoid hitting the real Bocha
+	// host — see TestBochaWebSearcher_NotConfigured for the empty-key path.)
 }

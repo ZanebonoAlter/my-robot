@@ -38,7 +38,7 @@ TBD
 - **THEN** 所有分类恢复为展开状态
 
 ### Requirement: 最大文章数"无限制"语义正确
-最大文章数选项 SHALL 使用 `0` 表示无限制。后端 `CleanupOldArticles` SHALL 将 `maxArticles <= 0` 视为不限制。
+最大文章数选项 SHALL 使用 `0` 表示无限制。后端 `CleanupOldArticles` SHALL 将 `maxArticles <= 0` 视为不限制。超出上限的行为语义为归档降级（保留原文、清除衍生数据），而非物理删除，详见 `article-retention` capability。
 
 #### Scenario: 选择无限制
 - **WHEN** 用户选择"无限制"选项
@@ -46,11 +46,11 @@ TBD
 
 #### Scenario: 后端不清理 max_articles=0 的 feed
 - **WHEN** feed.MaxArticles = 0 且文章数超过任意值
-- **THEN** CleanupOldArticles 不删除任何文章
+- **THEN** CleanupOldArticles 不归档任何文章
 
 #### Scenario: 兼容旧的 9999 值
 - **WHEN** feed.MaxArticles = 9999
-- **THEN** 前端显示"无限制"，后端行为与 max_articles=0 一致（不删除）
+- **THEN** 前端显示"无限制"，后端行为与 max_articles=0 一致（不归档）
 
 ### Requirement: Feed 卡片展示 firecrawl 和补全 toggle
 Firecrawl toggle SHALL 控制 `firecrawl_enabled` 字段，内容补全 toggle SHALL 控制 `completion_on_refresh` 字段。
@@ -95,4 +95,26 @@ Firecrawl toggle SHALL 控制 `firecrawl_enabled` 字段，内容补全 toggle S
 - **GIVEN** 用户没有任何订阅源和分类
 - **WHEN** 用户打开首页 `/`
 - **THEN** `FeedEmptyGuide` 空状态引导仍提供「添加订阅」按钮并可正常打开 `AddFeedDialog`
+
+### Requirement: 最大文章数控件文案反映归档语义
+Feed 设置中最大文章数控件的辅助说明 SHALL 表达"超出后归档保留原文"语义，MUST NOT 出现"删除"措辞。
+
+#### Scenario: 文案展示归档语义
+- **WHEN** 用户查看 feed 卡片的最大文章数控件
+- **THEN** 辅助说明表述为超出上限的文章将被归档（原文保留、不再出现在列表中）
+
+### Requirement: AI 摘要开关状态字段名契约
+前端读取 feed AI 摘要开关时 SHALL 使用后端 `ToDict` 返回的 `article_summary_enabled` 字段（snake_case），不得使用 `ai_summary_enabled`（后端从不返回该键）。字段缺省（undefined/null）时前端 SHALL 按后端 gorm 默认值 `false` 处理，不得回退为 `true`。`aiSummaryEnabled`/`ai_summary_enabled` 相关死字段与死 key SHALL 从前端类型定义中移除。
+
+#### Scenario: feed 开关状态真实反映后端值
+- **WHEN** 后端返回 feed 的 `article_summary_enabled: false`
+- **THEN** 前端该 feed 的 AI 摘要开关状态为关闭（旧行为因读错键恒为 true）
+
+#### Scenario: 字段缺省时按后端默认处理
+- **WHEN** 后端返回的 feed 数据中 `article_summary_enabled` 缺失或为 null
+- **THEN** 前端该 feed 的 AI 摘要开关状态为关闭（false），与 gorm default:false 一致
+
+#### Scenario: 死字段不再存在于类型定义
+- **WHEN** 检查 `front/app/types/feed.ts` 与 `front/app/stores/api.ts` 的响应/更新接口
+- **THEN** 不存在 `aiSummaryEnabled` / `ai_summary_enabled` 字段定义
 

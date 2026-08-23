@@ -28,16 +28,17 @@ type LensSource interface {
 
 // lensProposePrompt is the LLM prompt for proposing analysis viewpoints.
 // Enforces concrete problem-style lenses and rejects abstract tags.
-const lensProposePrompt = `你是一位资深产业分析师。下面是一个持久话题的演进脉络，话题形态已判断为「%s」。
+const lensProposePrompt = `你是一位结构化分析编辑。下面是一个持久话题的演进脉络，话题形态已判断为「%s」。
 
 你的任务：针对这个话题，提出【具体可讨论的视角候选】——必须是【问题式、具体】的视角，不是抽象标签。
-- 好的视角示例："美国为何在对华芯片政策上反复横跳"、"油价这轮上涨能不能持续"、"欧盟AI法案会否引发中美监管竞赛"
-- 禁止的视角（抽象标签）："博弈论"、"宏观经济"、"地缘政治"
+- 好的视角示例：“X 为何反复发生”、“X 背后底层结构”、“人民币国际化走到哪一步了”、“美元霸权这次会不会真的动摇”、“美国为何在对华芯片政策上反复横跳”
+- 禁止的视角（抽象标签）：“博弈论”、“宏观经济”、“地缘政治”
 
 要求：
 - 至少 2 个视角候选
 - 每个视角给出视角名（问题式）+ 一句话说明（为什么值得从这个视角看）
 - 视角之间要有差异化，覆盖不同维度
+- 视角可以是“结构/系统级”问题（长时段机制），不必局限于单一事件
 
 输出严格 JSON：
 {"lens_candidates": [{"name": "具体问题式视角", "description": "为什么值得从这个视角看"}]}`

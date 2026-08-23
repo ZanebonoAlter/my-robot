@@ -276,6 +276,12 @@ func (h *semanticBoardHandler) updateSemanticBoard(c *gin.Context) {
 		board.Protected = *req.Protected
 	}
 	if req.Status == "active" || req.Status == "disabled" {
+		if req.Status == "disabled" && board.Status != "disabled" {
+			// Disabled labels drop their vectors (~2×2560-dim per row); re-enable
+			// regenerates via backfill-board-embeddings (llm_extract for aux labels).
+			board.Embedding = nil
+			board.MergeEmbedding = nil
+		}
 		board.Status = req.Status
 	}
 	if req.EnrichmentEnabled != nil {
@@ -299,7 +305,7 @@ func (h *semanticBoardHandler) deleteSemanticBoard(c *gin.Context) {
 	if !ok {
 		return
 	}
-	result := h.db.WithContext(c.Request.Context()).Model(&models.SemanticLabel{}).Where("id = ? AND label_type = ?", id, "board").Update("status", "disabled")
+	result := h.db.WithContext(c.Request.Context()).Model(&models.SemanticLabel{}).Where("id = ? AND label_type = ?", id, "board").Updates(map[string]any{"status": "disabled", "embedding": nil, "merge_embedding": nil})
 	if result.Error != nil {
 		respondError(c, http.StatusInternalServerError, result.Error)
 		return

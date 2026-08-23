@@ -13,7 +13,7 @@ import (
 	"syntopica-backend/internal/topicgraph/repository"
 )
 
-const promptVersion = "3.0"
+const promptVersion = "4.0"
 
 // ---------------------------------------------------------------------------
 // LLM Call A: GenerateHighlights
@@ -25,6 +25,8 @@ const highlightsSystemPrompt = `你是一名专业的新闻分析师。你收到
 1. 有一个简洁有力的标题（中文，不超过20字）
 2. 有一个简短的理由说明（中文，50-100字）
 3. 关联到相关的标签ID
+
+事实锚约束：title / reason 必须仅基于所列标签（label / description / 代表文章）中的事实。禁止编造未在标签中出现的：具体事件、具体数字（涨跌幅 / 金额 / 连板数 / 百分比 / 跌停涨停）、市场情绪判断（恐慌 / 狂热 / 崩盘 / 抛售）、因果推断（“引发”“导致”“因此”）。若所列标签信息不足以支撑某条要闻，宁可不写，也不要补全。
 
 输出要求：
 1. 顶层 JSON 对象，只包含 highlights 字段
@@ -64,7 +66,7 @@ func GenerateHighlights(ctx context.Context, tags []repository.TagInput, cluster
 						Type: "object",
 						Properties: map[string]airouter.SchemaProperty{
 							"title":   {Type: "string", Description: "要闻标题，不超过20字"},
-							"reason":  {Type: "string", Description: "要闻理由，50-100字"},
+							"reason":  {Type: "string", Description: "要闻理由，50-100字；须基于所列标签事实，禁止编造"},
 							"tag_ids": {Type: "array", Items: &airouter.SchemaProperty{Type: "integer"}},
 						},
 						Required: []string{"title", "reason", "tag_ids"},
@@ -144,6 +146,8 @@ const threadsSystemPrompt = `你是一名专业的新闻叙事分析师。你收
 3. 关联到相关的标签ID
 4. 给出置信度分数（0-1）
 
+事实锚约束：title / summary 必须仅基于所列标签（label / description / 代表文章）中的事实。禁止编造未在标签中出现的：具体事件、具体数字（涨跌幅 / 金额 / 连板数 / 百分比 / 跌停涨停）、市场情绪判断（恐慌 / 狂热 / 崩盘 / 抛售）、因果推断（“引发”“导致”“因此”）。若所列标签信息不足以支撑某条叙事，宁可不写（返回空 threads），也不要补全。
+
 输出要求：
 1. 顶层 JSON 对象，只包含 threads 字段
 2. threads 是数组；没有时返回 {"threads":[]}
@@ -184,7 +188,7 @@ func GenerateClusterThreads(ctx context.Context, cluster repository.ClusterGroup
 						Type: "object",
 						Properties: map[string]airouter.SchemaProperty{
 							"title":      {Type: "string", Description: "叙事标题"},
-							"summary":    {Type: "string", Description: "叙事摘要，100-200字"},
+							"summary":    {Type: "string", Description: "叙事摘要，100-200字；须基于所列标签事实，禁止编造"},
 							"tag_ids":    {Type: "array", Items: &airouter.SchemaProperty{Type: "integer"}},
 							"confidence": {Type: "number", Description: "0-1 置信度"},
 						},
@@ -206,6 +210,43 @@ func GenerateClusterThreads(ctx context.Context, cluster repository.ClusterGroup
 
 	logging.Infof("daily-report: threads LLM response for cluster '%s' length=%d", cluster.GroupName, len(result.Content))
 	return parseThreadsResponse(result.Content, clusterTags)
+}
+
+// fallbackThreadConfidence marks synthesized fallback threads as lower-trust
+// than LLM-authored ones (LLM threads are typically >= 0.9).
+const fallbackThreadConfidence = 0.5
+
+// synthesizeFallbackThreads guarantees every section keeps at least one
+// narrative thread. The threads prompt's fact-anchor rule ("宁可不写也不要补全"")
+// legitimately yields {"threads":[]} when the listed tags feel too thin to the
+// model; without this fallback the section persists as an empty shell under a
+// live persistent topic (hit_count keeps growing). The fallback anchors on the
+// top-scoring tag's label/description — pure transcription, no fabrication —
+// and links ALL cluster tag IDs so article rollups stay complete.
+func synthesizeFallbackThreads(cluster repository.ClusterGroup, tags []repository.TagInput) []repository.Thread {
+	if len(tags) == 0 {
+		return nil
+	}
+	top := tags[0]
+	for _, t := range tags[1:] {
+		if t.Score > top.Score {
+			top = t
+		}
+	}
+	summary := strings.TrimSpace(top.Description)
+	if summary == "" {
+		summary = fmt.Sprintf("「%s」相关动态今日暂未提炼出叙事线索，以下为标签原文留痕。", top.Label)
+	}
+	tagIDs := make([]uint, len(tags))
+	for i, t := range tags {
+		tagIDs[i] = t.ID
+	}
+	return []repository.Thread{{
+		Title:      top.Label,
+		Summary:    summary,
+		TagIDs:     tagIDs,
+		Confidence: fallbackThreadConfidence,
+	}}
 }
 func buildThreadsPrompt(cluster repository.ClusterGroup, tags []repository.TagInput) string {
 	var sb strings.Builder

@@ -12,13 +12,13 @@ const ServiceName = "syntopica"
 
 type OtelSpan struct {
 	ID                 uint   `gorm:"primaryKey;autoIncrement"`
-	TraceID            string `gorm:"type:char(32);not null;index:idx_otel_spans_trace_id"`
+	TraceID            string `gorm:"type:char(32);not null"`
 	SpanID             string `gorm:"type:char(16);not null"`
 	ParentSpanID       string `gorm:"type:char(16);default:''"`
 	TraceState         string `gorm:"type:text;default:''"`
-	Name               string `gorm:"type:varchar(255);not null;index:idx_otel_spans_name"`
-	Kind               int    `gorm:"default:1;index:idx_otel_spans_kind"`
-	StatusCode         int    `gorm:"default:0;index:idx_otel_spans_status"`
+	Name               string `gorm:"type:varchar(255);not null"`
+	Kind               int    `gorm:"default:1"`
+	StatusCode         int    `gorm:"default:0"`
 	StatusMessage      string `gorm:"type:text;default:''"`
 	StartTimeUnixNano  int64  `gorm:"not null;index:idx_otel_spans_start_time"`
 	EndTimeUnixNano    int64  `gorm:"not null"`
@@ -44,12 +44,12 @@ func EnsureTracingTable(db *gorm.DB) error {
 	}
 
 	indexes := []string{
-		"CREATE INDEX IF NOT EXISTS idx_otel_spans_trace_id ON otel_spans(trace_id)",
-		"CREATE INDEX IF NOT EXISTS idx_otel_spans_name ON otel_spans(name)",
 		"CREATE INDEX IF NOT EXISTS idx_otel_spans_start_time ON otel_spans(start_time_unix_nano)",
-		"CREATE INDEX IF NOT EXISTS idx_otel_spans_kind ON otel_spans(kind)",
-		"CREATE INDEX IF NOT EXISTS idx_otel_spans_status ON otel_spans(status_code)",
 	}
+	// analysis-remediation: trace_id/name/kind/status indexes dropped — zero idx_scan
+	// (analysis-reports/db-analysis-2026-08-20.md #4). Only start_time is queried
+	// (retention cleanup + recency ordering); ad-hoc trace_id lookups degrade to a
+	// sequential scan (~seconds on 2.3M rows) which is acceptable for rare debugging.
 	for _, idx := range indexes {
 		if err := db.Exec(idx).Error; err != nil {
 			return fmt.Errorf("failed to create index: %w", err)

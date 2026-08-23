@@ -202,6 +202,7 @@ func (r *ReaderRepository) GetArticleStats() (total, unread, favorite int64, err
 	var s Stats
 	err = r.db.Model(&models.Article{}).
 		Select("COUNT(*) as total, SUM(CASE WHEN NOT read THEN 1 ELSE 0 END) as unread, SUM(CASE WHEN favorite THEN 1 ELSE 0 END) as favorite").
+		Where("archived = ?", false).
 		Scan(&s).Error
 	return s.Total, s.Unread, s.Favorite, err
 }

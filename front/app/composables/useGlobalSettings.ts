@@ -51,7 +51,7 @@ export function useGlobalSettings() {
   // ---- Feed operations ----
   async function updateFeedSetting(
     feedId: string,
-    setting: 'refresh_interval' | 'max_articles' | 'ai_summary_enabled' | 'tagging_enabled' | 'firecrawl_enabled' | 'completion_on_refresh' | 'category_id',
+    setting: 'refresh_interval' | 'max_articles' | 'tagging_enabled' | 'firecrawl_enabled' | 'completion_on_refresh' | 'category_id',
     value: number | boolean | null
   ) {
     loading.value = true
@@ -124,7 +124,6 @@ export function useGlobalSettings() {
   }
 
   // ---- AI summary / podcast settings (legacy — persisted but unused by panels) ----
-  const aiSummaryEnabled = ref(false)
   const aiBaseURL = ref('')
   const aiAPIKey = ref('')
   const aiModel = ref('')
@@ -133,7 +132,6 @@ export function useGlobalSettings() {
   const aiPodcastEnabled = ref(false)
 
   function loadAISettings() {
-    aiSummaryEnabled.value = false
     aiBaseURL.value = ''
     aiAPIKey.value = ''
     aiModel.value = ''
@@ -159,7 +157,7 @@ export function useGlobalSettings() {
     updateFeedSetting, refreshFeed, createCategoryAndAssign, deleteFeed,
 
     // Legacy AI settings (unused by panels, kept for back-compat)
-    aiSummaryEnabled, aiBaseURL, aiAPIKey, aiModel, showApiKey, autoSummaryEnabled,
+    aiBaseURL, aiAPIKey, aiModel, showApiKey, autoSummaryEnabled,
     aiPodcastEnabled,
 
     // Stub

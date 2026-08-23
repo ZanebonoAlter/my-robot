@@ -214,22 +214,24 @@ export interface StockDebateResult {
 // TS 镜像；3b 已把 ResultDetailRow/ResultSummaryRow/TriggerEnrichmentResponse.sectors
 // 与 ReviewRow.verdict 迁移到 AnalyzeOutput / ReviewVerdict，旧 Evolution* 类型已移除。
 
-/** 因果叙事形态：event_chain=事件链 / theme_vein=主题脉络 / single_point=单点深入 / sparse=稀疏。 */
+/** 因果叙事形态：event_chain=事件链 / theme_vein=主题脉络 / single_point=单点深入 / structural=结构演化 / sparse=稀疏。 */
 export type AnalyzeForm =
 	| "event_chain"
 	| "theme_vein"
 	| "single_point"
+	| "structural"
 	| "sparse";
 
 /** 确定性档位：high=高 / medium=中 / low=低 / question=存疑。 */
 export type AnalyzeCert = "high" | "medium" | "low" | "question";
 
 /**
- * 双类引用：news=订阅源新闻报道 / tool=agent 工具查证。
+ * 引用来源：news=订阅源新闻报道 / tool=agent 工具查证 / web=web_search 网页 / page=fetch_page 正文。
+ * （web/page 为深度层 evidence_chain 的可核查外部证据；既有事实层仍只用 news/tool。）
  * 加 Analyze 前缀避免与 Vue 的 Ref<T>（本文件大量使用）混淆。
  */
 export interface AnalyzeRef {
-	source_type: "news" | "tool";
+	source_type: "news" | "tool" | "web" | "page";
 	ref: string;
 	quote?: string;
 	[key: string]: unknown;
@@ -245,8 +247,60 @@ export interface AnalyzeInsight {
 	[key: string]: unknown;
 }
 
+// ── 深度层 depth（data-enrichment-structural-depth：非 sparse 形态强制产出）──
+/** 多层机制拆解的单层（子机制名 + 深层逻辑 + 依据）。 */
+export interface MechanismLayer {
+	layer: string;
+	deep_logic: string;
+	basis: string;
+	[key: string]: unknown;
+}
+
+/** 历史类比（案例 + 机制类比 + 何处不同）。 */
+export interface HistoricalAnalogy {
+	case: string;
+	mechanism: string;
+	diff: string;
+	[key: string]: unknown;
+}
+
+/** 范式转折判断（无迹象则 depth.regime_shift 为 null）。 */
+export interface RegimeShift {
+	judgment: string;
+	evidence: string;
+	[key: string]: unknown;
+}
+
+/** 可核查证据链条目：news=分层新闻 / web=web_search 网页 / page=fetch_page 正文。web/page 带 url+quote+institution+date。 */
+export interface EvidenceChainItem {
+	source_type: "news" | "web" | "page" | string;
+	ref?: string;
+	url?: string;
+	/** 原文摘录（非 AI 转述）。 */
+	quote?: string;
+	institution?: string;
+	date?: string;
+	[key: string]: unknown;
+}
+
+/**
+ * 分析深度层（"内部看美国"分析基因映射）。
+ * 非 sparse 形态由后端强制产出；前端按可选消费——旧结果无 depth 则降级不渲染、不报错。
+ */
+export interface AnalyzeDepth {
+	/** 系统重定位：一句话把话题放进哪个大系统讲。 */
+	system_reframe: string;
+	mechanism_layers: MechanismLayer[];
+	historical_analogy: HistoricalAnalogy[];
+	regime_shift?: RegimeShift | null;
+	/** 反过度解读边界：明确"目前还不能下结论"的范围（后端校验非空）。 */
+	boundary: string;
+	evidence_chain: EvidenceChainItem[];
+	[key: string]: unknown;
+}
+
 // ── analysis body（按 form 多态：每个 variant 形状不同）────────────────────
-/** event_chain 的 analysis 体：事实层 + 时间线 + 洞察层。 */
+/** event_chain 的 analysis 体：事实层 + 时间线 + 洞察层（+ 可选深度层）。 */
 export interface AnalysisEventChain {
 	fact_layer: Array<{
 		claim: string;
@@ -259,9 +313,11 @@ export interface AnalysisEventChain {
 		ref?: AnalyzeRef;
 	}>;
 	insight_layer: AnalyzeInsight[];
+	/** 深度层（可选：旧结果无此字段，前端降级不渲染）。 */
+	depth?: AnalyzeDepth;
 }
 
-/** theme_vein 的 analysis 体：脉络切片 + 跨脉络洞察。 */
+/** theme_vein 的 analysis 体：脉络切片 + 跨脉络洞察（+ 可选深度层）。 */
 export interface AnalysisThemeVein {
 	veins: Array<{
 		name: string;
@@ -269,9 +325,11 @@ export interface AnalysisThemeVein {
 		evidence: AnalyzeRef[];
 	}>;
 	cross_insight: AnalyzeInsight[];
+	/** 深度层（可选：旧结果无此字段，前端降级不渲染）。 */
+	depth?: AnalyzeDepth;
 }
 
-/** single_point 的 analysis 体：单点深入（影响 + 证据）。 */
+/** single_point 的 analysis 体：单点深入（影响 + 证据，+ 可选深度层）。 */
 export interface AnalysisSinglePoint {
 	impact: {
 		implication: string;
@@ -279,6 +337,20 @@ export interface AnalysisSinglePoint {
 		benchmark: string;
 	};
 	evidence: AnalyzeRef[];
+	/** 深度层（可选：旧结果无此字段，前端降级不渲染）。 */
+	depth?: AnalyzeDepth;
+}
+
+/** structural 的 analysis 体：结构演化叙述 + 关键阶段（+ 可选深度层）。 */
+export interface AnalysisStructural {
+	evolution_narrative: string;
+	phases: Array<{
+		period: string;
+		event: string;
+		ref?: AnalyzeRef;
+	}>;
+	/** 深度层（可选：旧结果无此字段，前端降级不渲染）。 */
+	depth?: AnalyzeDepth;
 }
 
 /** sparse 的 analysis 体：稀疏（提示 + 摘要）。 */
@@ -295,6 +367,7 @@ export type AnalysisBody =
 	| AnalysisEventChain
 	| AnalysisThemeVein
 	| AnalysisSinglePoint
+	| AnalysisStructural
 	| AnalysisSparse;
 
 /**
@@ -320,6 +393,12 @@ export interface AnalyzeSinglePointOutput {
 	analysis: AnalysisSinglePoint;
 }
 
+export interface AnalyzeStructuralOutput {
+	form: "structural";
+	lens: string;
+	analysis: AnalysisStructural;
+}
+
 export interface AnalyzeSparseOutput {
 	form: "sparse";
 	lens: string;
@@ -330,6 +409,7 @@ export type AnalyzeOutput =
 	| AnalyzeEventChainOutput
 	| AnalyzeThemeVeinOutput
 	| AnalyzeSinglePointOutput
+	| AnalyzeStructuralOutput
 	| AnalyzeSparseOutput;
 
 /**

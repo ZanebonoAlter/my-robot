@@ -184,7 +184,7 @@ func GetFeed(c *gin.Context) {
 	var stats models.FeedStats
 	repository.Repo.DB().Model(&models.Article{}).
 		Select("COUNT(*) as article_count, SUM(CASE WHEN NOT read THEN 1 ELSE 0 END) as unread_count").
-		Where("feed_id = ?", feed.ID).
+		Where("feed_id = ? AND archived = ?", feed.ID, false).
 		Group("feed_id").
 		Scan(&stats)
 
@@ -380,7 +380,7 @@ func UpdateFeed(c *gin.Context) {
 	var stats models.FeedStats
 	repository.Repo.DB().Model(&models.Article{}).
 		Select("COUNT(*) as article_count, SUM(CASE WHEN NOT read THEN 1 ELSE 0 END) as unread_count").
-		Where("feed_id = ?", feed.ID).
+		Where("feed_id = ? AND archived = ?", feed.ID, false).
 		Group("feed_id").
 		Scan(&stats)
 

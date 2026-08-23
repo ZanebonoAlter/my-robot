@@ -15,6 +15,7 @@
 | 后端包结构 / domain 白名单 | `backend/package-layout.md` |
 | AI 调用记录（LLM 调用必须记什么、编排 session 串联） | `backend/ai-logging.md` |
 | 提交前检查、Branch/PR | `shared/commit-pr.md` |
+| reference 文档新增/修订标准（目录职责、头部注释语法、注册点 checklist） | `shared/doc-authoring.md` |
 
 **不装什么**：业务流程链路 → 去 `flow/`；架构骨架 → 去 `architecture/`；执行流程/门禁/归档 → 去 `开发执行规范.md`。
 

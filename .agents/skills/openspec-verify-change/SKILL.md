@@ -1,29 +1,35 @@
 ---
 name: openspec-verify-change
 description: Verify implementation matches change artifacts. Use when the user wants to validate that implementation is complete, correct, and coherent before archiving.
+allowed-tools: Bash(openspec:*)
 license: MIT
 compatibility: Requires openspec CLI.
 metadata:
   author: openspec
   version: "1.0"
-  generatedBy: "1.3.1"
+  generatedBy: "1.10.0"
 ---
 
 Verify that an implementation matches the change artifacts (specs, tasks, design).
+
+**Store selection:** If the user names a store (a store is a standalone OpenSpec repo registered on this machine) or the work lives in one, run `openspec store list --json` to discover registered store ids, then pass `--store <id>` on the commands that read or write specs and changes (`new change`, `status`, `instructions`, `list`, `show`, `validate`, `archive`, `doctor`, `context`, `schemas`, `view`). Once selected, treat `--store <id>` as sticky for the rest of the workflow. Every unscoped example of those commands below is shorthand: before running it, append the flag. For example, run `openspec status --change "<name>" --json --store "<id>"`, not the unscoped form shown below. Other commands do not take the flag. Hints printed by commands already carry the flag; keep it on follow-ups. Without a store, commands act on the nearest local `openspec/` root.
 
 **Input**: Optionally specify a change name. If omitted, check if it can be inferred from conversation context. If vague or ambiguous you MUST prompt for available changes.
 
 **Steps**
 
-1. **If no change name provided, prompt for selection**
+1. **Select the change**
 
-   Run `openspec list --json` to get available changes. Use the **AskUserQuestion tool** to let the user select.
+   If a name is provided, use it. Otherwise:
+   - Infer from conversation context if the user mentioned a change
+   - Auto-select if only one active change exists
+   - If ambiguous, run `openspec list --json` to get available changes and ask the user to select one
 
-   Show changes that have implementation tasks (tasks artifact exists).
+   When prompting, show changes that have implementation tasks (tasks artifact exists).
    Include the schema used for each change if available.
    Mark changes with incomplete tasks as "(In Progress)".
 
-   **IMPORTANT**: Do NOT guess or auto-select a change. Always let the user choose.
+   Always announce: "Using change: <name>" and how to override (e.g., `/openspec-verify-change <other>`).
 
 2. **Check status to understand the schema**
    ```bash
@@ -31,9 +37,10 @@ Verify that an implementation matches the change artifacts (specs, tasks, design
    ```
    Parse the JSON to understand:
    - `schemaName`: The workflow being used (e.g., "spec-driven")
+   - `planningHome`, `changeRoot`, `artifactPaths`, and `actionContext`: path and scope context
    - Which artifacts exist for this change
 
-3. **Get the change directory and load artifacts**
+3. **Get planning context and load artifacts**
 
    ```bash
    openspec instructions apply --change "<name>" --json
@@ -61,7 +68,7 @@ Verify that an implementation matches the change artifacts (specs, tasks, design
      - Recommendation: "Complete task: <description>" or "Mark as done if already implemented"
 
    **Spec Coverage**:
-   - If delta specs exist in `openspec/changes/<name>/specs/`:
+   - If delta specs exist in `contextFiles.specs`:
      - Extract all requirements (marked with "### Requirement:")
      - For each requirement:
        - Search codebase for keywords related to the requirement
@@ -107,35 +114,10 @@ Verify that an implementation matches the change artifacts (specs, tasks, design
      - Add SUGGESTION: "Code pattern deviation: <details>"
      - Recommendation: "Consider following project pattern: <example>"
 
-8. **执行 tasks.md 验证节命令（强制）**
-
-   《开发执行规范》§11.2 要求每个 change 的 tasks.md 以「测试 / 文档 / 验证」三固定尾节收尾，验证节每条是"可执行命令 + 期望结果"。本步骤**实际执行这些命令**，不是静态推断。
-
-   **提取验证条目**：
-   - 读取 tasks.md，定位最后一个 `## N. 验证` 节（`##` + 数字 + `验证`）
-   - 逐行扫描，提取含 `→` 的断言行，拆成「命令」+「期望」：
-     - 断言锚点识别（期望侧）：`PASS` / `零命中` / `0 issues` / `全绿` / `通过` / `exit 0` / 计数（如 `3 个`）
-     - 命令侧：`→` 左侧或右侧出现的 shell 命令（含 `go test` / `golangci-lint` / `grep` / `findstr` / `pnpm` / `cmd.exe` 等）
-   - 无法自动拆解的行标记 `需人工确认`，不强行猜测
-
-   **执行**：
-   - 对每条提取出的命令，用 Bash 工具实际执行（注意：前端 typecheck/test/build 走 `cmd.exe /C`，见 AGENTS.md）
-   - 按断言锚点判定：
-     - `PASS` / `通过` → 检查 exit code == 0
-     - `零命中` → 检查命令 stdout 为空
-     - `0 issues` → 检查 stdout 不含 issue 行
-     - `全绿` → exit code == 0
-   - 每条记录结果：`✅ <命令> → <期望>（实测：<实际摘要）` 或 `❌ <命令> → 期望<期望>，实测<实际>`
-
-   **结果纳入报告**：
-   - 任一验证条目 `❌` → 记 CRITICAL issue："验证节命令失败：<命令>"，阻止 archive
-   - `需人工确认` 条目 → 记 WARNING，提醒人工复核
-   - 全部 `✅` → 记入步骤 9 报告的 Scorecard
-
-9. **Generate Verification Report**
+8. **Generate Verification Report**
 
    **Summary Scorecard**:
-   ```
+   ```markdown
    ## Verification Report: <change-name>
 
    ### Summary
@@ -144,7 +126,6 @@ Verify that an implementation matches the change artifacts (specs, tasks, design
    | Completeness | X/Y tasks, N reqs|
    | Correctness  | M/N reqs covered |
    | Coherence    | Followed/Issues  |
-   | Gate Exec    | P/Q 验证节命令通过（R 条需人工确认）|
    ```
 
    **Issues by Priority**:
@@ -152,7 +133,6 @@ Verify that an implementation matches the change artifacts (specs, tasks, design
    1. **CRITICAL** (Must fix before archive):
       - Incomplete tasks
       - Missing requirement implementations
-      - **验证节命令执行失败（步骤 8）**
       - Each with specific, actionable recommendation
 
    2. **WARNING** (Should fix):

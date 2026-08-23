@@ -3,28 +3,39 @@ package repository
 import (
 	"encoding/json"
 	"errors"
+	"sync"
 	"time"
 
 	"syntopica-backend/internal/platform/database"
 )
 
-// SourceType enumerates valid data source types.
+// SourceType enumerates valid data source types. The type + CHECK mechanism
+// is retained as an extension point for future structured external sources,
+// but after the financial-direction removal there are NO built-in source types
+// (etf_quote/exchange_rate/gdelt_event have been removed). ValidateSourceType
+// therefore rejects every value until a new source type is registered here.
 type SourceType string
 
-const (
-	SourceTypeETFQuote     SourceType = "etf_quote"
-	SourceTypeExchangeRate SourceType = "exchange_rate"
-	SourceTypeGDELTEvent   SourceType = "gdelt_event"
+var (
+	sourceTypeMu     sync.RWMutex
+	validSourceTypes = map[SourceType]bool{}
 )
 
-var validSourceTypes = map[SourceType]bool{
-	SourceTypeETFQuote:     true,
-	SourceTypeExchangeRate: true,
-	SourceTypeGDELTEvent:   true,
+// RegisterSourceType adds st to the set of valid source types. The source_type
+// enum is intentionally extensible (spec "板块数据源绑定"): future structured
+// external sources register their type at wiring time rather than hard-coding a
+// constant here. The removed built-in financial types (etf_quote /
+// exchange_rate / gdelt_event) are NOT registered and stay rejected.
+func RegisterSourceType(st SourceType) {
+	sourceTypeMu.Lock()
+	defer sourceTypeMu.Unlock()
+	validSourceTypes[st] = true
 }
 
 // ValidateSourceType returns an error if sourceType is not a known value.
 func ValidateSourceType(sourceType string) error {
+	sourceTypeMu.RLock()
+	defer sourceTypeMu.RUnlock()
 	if validSourceTypes[SourceType(sourceType)] {
 		return nil
 	}

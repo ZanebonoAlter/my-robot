@@ -1,5 +1,6 @@
 # 日报 / Digest 流程（Daily Report）
 
+<!-- doc-impact-applies: backend-go/internal/topicgraph/, backend-go/internal/admin/scheduler/ | section=业务约束与不变量 -->
 > 大功能：每日叙事生成（后端）+ Digest 预览/查看（前端）+ Section 可视化。
 > 跨端。互补：`flow/topic-graph.md`（持久话题生命周期、关系双轨）、`flow/semantic-board.md`（版块）、`architecture/tracing.md`。
 
@@ -48,7 +49,7 @@ flowchart TD
   STEP2 --> STEP2_5[Step2.5 质量过滤]
   STEP2_5 --> STEP3[Step3 加载可锚定 topic<br/>ListAnchorableTopicsByBoard<br/>返回 centroid + is_vacuum]
   STEP3 --> LANE[Lane 泳道分桶 ClusterTagsLane<br/>tag embedding ↔ topic 质心 余弦距离<br/>L1<0.18 直挂 / L2∈[0.18,0.30] LLM / L3>0.30 新建<br/>吸尘器 topic 的 tag 降级 L2]
-  LANE --> STEP4[Step4 取昨日报告做连贯性参考]
+  LANE --> STEP4[Step4 存前日报告引用 PrevReportID<br/>findPreviousReportBrief 仅写引用 ID<br/>未进任何 LLM prompt]
   STEP4 --> STEP5[Step5 并行生成<br/>A: GenerateHighlights 全局<br/>C×K: GenerateClusterThreads 每簇线程]
   STEP5 --> STEP6[Step6 组装 section<br/>天生挂 topic（LaneTier+MatchedTopicID）<br/>标题 cluster_label → 算 embedding]
   STEP6 --> STEP7[Step7 合并同日相似 section<br/>embedding + LLM 两阶段]
@@ -60,6 +61,8 @@ flowchart TD
 ```
 
 > **Lane 分桶决定归属（取代旧 Step3 LLM 自由聚类）**：当天 tag 按到各 topic **质心**的余弦距离分三桶——L1<`lane_l1_threshold`(0.18) 直挂该 topic（不调 LLM）；L2∈[0.18, 0.30] 交 LLM 在 top-K(`l2_candidate_k`)候选上做「留/换/新」；L3>0.30 起新叙事 candidate。吸尘器 topic（`is_vacuum=true`，质心过宽）的 tag 从 L1 降级 L2。section 天生挂 topic，**消除旧「LLM 自由聚类 → 事后 section 标题向量匹配 topic」两段式**（形态4错锚根源）。
+>
+> **L2 裁决 prompt 注入内容（prompt 卫生）**：`buildL2Prompt` 只注入**非叙事**信号——候选 topic 的 label、状态（正式/观察中）、最近命中日期、累计天数、质心距离、近期 section 框架名（`section_label`+日期，弱信号）；**不注入**历史 thread 的 title / summary 文案，切断「昨天幻觉 thread → 今天作为 briefs 喂回 → LLM 延续叙事」的渗透闭环。L2 system 裁决依据同步为「基于标签语义与近期 section 框架」
 >
 > **ANCHOR 同步写入报告时快照**：lane-driven 归属完成后，每条 section 的 `topic_status_at_report` 与 `persistent_topic_id`、`topic_match_distance`、`topic_match_confidence`、`lane_tier` 在同一事务内写入。快照值为当时 PersistentTopic 的 `candidate|active`；未归属写 NULL。历史快照不随后续 topic 状态变化回填。
 >
@@ -180,17 +183,21 @@ CRUD：POST/GET /api/semantic-boards/:id/topic-watches、PATCH/DELETE /api/topic
 
 ## 业务约束与不变量
 
-> 本节同时是 `scripts/doc-impact.sh context` 的数据源——改 `internal/topicgraph/`（日报生成 / 锚定）或 `internal/admin/scheduler/job_daily_report.go` 代码前会被自动 dump，必读。
+> 本节同时是 constraint-injection extension 的注入数据源——改 `internal/topicgraph/`（日报生成 / 锚定）或 `internal/admin/scheduler/job_daily_report.go` 代码前会被自动注入 system prompt，必读。
 
 1. **同 board + 同日覆盖式重建（幂等）**：`SaveReport` 按 `(semantic_board_id, period_date)` upsert——命中已有报告则**更新并删除其旧 section / thread 后重建**，不产生重复报告。手动 `runNow` / 调度器重跑同一天都是「整份重建」，不是新建。
 2. **归属：泳道分桶（lane-driven，旧 AND-gate 已移除）**：当天 tag 按到 topic **质心**（`centroid`）的余弦距离分桶——L1<`lane_l1_threshold`(0.18) 直挂（不调 LLM）/ L2∈[0.18,0.30] 交 LLM 在 top-K(`l2_candidate_k`)候选上做留/换/新 / L3>`lane_l2_threshold`(0.30) 新建；吸尘器 topic（`is_vacuum=true`，质心过宽）的 tag 从 L1 降级 L2。归属由 section 的 `LaneTier`+`MatchedTopicID` 路由：L1/L2 命中既有 topic → `anchor_hit`；L3 或 topic 不在候选集 → `auto_new`（新开 candidate）；section 无 embedding → `unmatched`。
 3. **锚定三态落地为 `topic_match_confidence`**：`anchor_hit`（L1 直挂或 L2 LLM 留/换命中既有 topic，distance = section 向量↔topic 质心）/ `auto_new`（L3 新建或 L2 换/新，distance = 到最近邻距离，一般 ≥0.30）/ `unmatched`（无 embedding，无法分桶，distance=0）；手动建泳道另有第四态 `manual`（非算法三态）。
-4. **section / 持久话题 embedding 来源固定**：section 的 embedding = 其标题 `cluster_label` 文本的语义向量；持久话题的**匹配锚点** = `centroid`（近 `centroid_window` 默认 30 条 section embedding 均权平均；退化首义向量 `embedding`），手动建泳道则 = 选中 section embedding 的 mean pooling 聚合向量。改 embedding 算法会影响所有锚定距离，属跨域语义变更。
+4. **section / 持久话题 embedding 来源固定**：section 的 embedding = **内容化文本**（所聚 tag 的 label+description+代表文章摘录拼接，100 runes/tag、总长 480 runes（按 embedding 网关单条 512 token 输入上限校准）；兜底链 无 tags→thread 标题→`cluster_label`）的语义向量，不再取标题文本——标题嵌入会把 L1/L2 命中 section 冻结在 topic label 上，`topic_match_distance` 恒为 ≈0 回声、质心永不漂移，形成同域 tag 无限吸附黑洞；持久话题的**匹配锚点** = `centroid`（近 `centroid_window` 默认 30 条 section embedding 均权平均；退化首义向量 `embedding`，首义向量亦为内容向量），手动建泳道则 = 选中 section embedding 的 mean pooling 聚合向量。质心随 section 实际内容漂移：错挂内容会把质心拉离标题语义，后续无关 tag 距离自然出带。改 embedding 算法会影响所有锚定距离，属跨域语义变更（历史数据可用 `POST /daily-reports/backfill-embeddings?recompute=true` 回刷）。
 5. **topic_status_at_report 快照同事务写入、不回填**：lane 归属完成后，section 的 `topic_status_at_report` / `persistent_topic_id` / `topic_match_distance` / `topic_match_confidence` / `lane_tier` 在同一事务内写入，快照值为当时 PersistentTopic 的 `candidate|active`，未归属写 NULL；历史快照不随后续 topic 状态变化回填。
 6. **可锚定话题选择器两侧共享且严格筛选**：lane 分桶（Step3）与归属判定共享 `ListAnchorableTopicsByBoard`（返回 centroid + is_vacuum）——active 无条件入选；candidate 需 `last_seen_date` 在 `CandidateDecayWindow`（默认 7 天）内、按 `last_seen_date DESC, hit_count DESC, id ASC` 排序、最多保留 `CandidatePromptLimit`（默认 20）条；窗口外 / 被截断的 candidate 不出现在任何一侧。
 7. **默认参数可被 `ai_settings` 覆盖**：`MatchThreshold` 0.30、`UpgradeThreshold` 3（兼管理 UI 可见门槛）、`CandidateDecayWindow` 7 天（仅 prompt 卫生过滤，不触发归档）、`CandidatePromptLimit` 20、**lane 分桶 6 阈值**：`LaneL1Threshold` 0.18 / `LaneL2Threshold` 0.30 / `VacuumRatio` 0.20 / `CentroidWindow` 30 / `VacuumWindow` 7 / `L2CandidateK` 5（`PersistentTopicConfig`）。注意 `CandidateDecayWindow` 只过滤 prompt，不触发 candidate 归档。
 8. **手动建泳道是用户主权声明、跳过算法门禁**：`POST /semantic-boards/:id/persistent-topics/manual`（body：`label` + `section_ids[]`）在**独立事务**（不在 `SaveReport` 管线内）聚合选中 section embedding（mean pooling）→ `CreateTopic(status=active, source='manual')`（跳过 candidate 阶段与 `upgrade_threshold` 连续命中门禁）→ 批量改写选中 section 的 `persistent_topic_id`（覆盖原值，单值外键）+ `topic_match_confidence='manual'` → `RebuildBoardRelations`（幂等重建）。建好的 active topic 立即被纳入可锚定集合（`source='manual'` 仅标记来源、不影响入选）；**下一期日报**生成时与自动 active topic 一样参与 lane 分桶（锚点 = 其 centroid，初期退化聚合向量）。
 9. **持久话题生命周期为全人工归档**：candidate→active→archived 状态流转靠人工归档，不自动转正 / 归档；连续命中门禁（`UpgradeThreshold`）与关系双轨（相似度 + 身份）见 `flow/topic-graph.md`。
+10. **线索引用文章永久可读（归档豁免，article-archive-instead-of-delete）**：thread 的 `related_article_ids` 按 ID 反查文章（`daily_report_repository.go` 反查查询）**不过滤 `archived`**——feed 超限文章自 2026-08-19 起归档而非删除（见 `flow/reading.md` §业务约束 6），新引用零死链；按 ID 详情接口同样豁免。改动前被物理删除的历史文章（当时约 94% 引用）无法复活，前端按"文章不存在"降级展示。
+10. **L2 裁决 prompt 历史隔离**：`buildL2Prompt`（operation `daily_report.decide_l2_tags`）SHALL NOT 注入候选话题的历史叙事文案（`daily_report_threads` 的 title / summary）；仅可注入非叙事信号——topic label、状态、最近命中日期、累计天数、质心距离、近期 section 框架名（`section_label`）。system 裁决依据措辞须与实际注入内容一致（「标签语义与近期 section 框架」）。随 `promptVersion` "4.0" 生效。
+11. **日报文案事实锚约束**：highlights（`daily_report.highlights`）与 thread（`daily_report.threads`）的 system prompt SHALL 含事实锚——title / reason / summary 仅基于所列标签事实（label / description / 代表文章），禁止编造未列举的事件、具体数字（涨跌幅/金额/连板数/百分比/跌停涨停）、市场情绪（恐慌/狂热/崩盘/抛售）、因果推断（引发/导致/因此）；信息不足宁可不生成（可返回空 threads）。JSON schema 的 `summary` / `reason` 字段 description 同步追加「须基于所列标签事实，禁止编造」。随 `promptVersion` "4.0" 生效。
+12. **同日 section 合并受开关控制且默认关闭，不得跨越锚定边界**：同日两阶段合并（确定性 <0.20 + 灰区 [0.20,0.25) LLM 仲裁 + union-find 传递闭包）受 `ai_settings` 键 `daily_report_section_merge_enabled`（`PersistentTopicConfig.SectionMergeEnabled`）控制，**默认 false**——开关关闭时 section 按 lane 管线原始分组落库，不产生任何合并。开关开启时，合并候选对（确定性 + 灰区）SHALL 先过锚定边界校验：仅「双方 `MatchedTopicID` 相等且非 NULL」或「双方均 NULL（同 L3 新叙事池）」可合并，不同 topic 或 NULL↔非 NULL 跨界一律拒绝（不建边、不进 LLM 仲裁）；边界过滤在建边前执行，union-find 闭包分量内锚定必然一致。背景：内容化 embedding（约束 4）把无关叙事间距压到 0.11~0.25，0.20/0.25 阈值在新几何下无判别力（2026-08-22 全部 11 板塌缩为 1~2 个 mega-section、当日 0 新话题）；lane 归属（约束 2）是系统记录，展示层合并不得跨越。确定性合并候选对逐对记审计日志（双方 label/锚/lane/距离/结果），与灰区 `ai_call_logs` 共同构成可回放审计面。
 
 ## 代码入口
 
@@ -211,3 +218,7 @@ CRUD：POST/GET /api/semantic-boards/:id/topic-watches、PATCH/DELETE /api/topic
 | 2026-07-05 | manual-topic-lane | 手动建泳道：用户主动建 active topic（`source=manual`），次期接入 AND-gate；新增 `board_persistent_topics.source` 列 + `topic_match_confidence=manual` 第四态；前端工作台化（弃 `TopicManageDialog`） | [`openspec/changes/archive/2026-07-05-manual-topic-lane`](../../../openspec/changes/archive/2026-07-05-manual-topic-lane) |
 | 2026-07-28 | daily-report-lane-driven-clustering | 日报归属反转：旧「LLM 自由聚类 → 事后 section 标题向量匹配 topic」改为「embedding 质心分桶（L1/L2/L3）→ LLM 弱区裁决/兜底」；topic 匹配锚点首义向量→历史 section 质心（`centroid`）；新增吸尘器 topic 检测（`is_vacuum`）；section 新增 `lane_tier`；新增 6 阈值 | [`openspec/changes/archive/2026-08-01-daily-report-lane-driven-clustering`](../../../openspec/changes/archive/2026-08-01-daily-report-lane-driven-clustering) |
 | 2026-07-23 | topic-watchlist-observability | 持久话题可观测性：话题关注（watch）+ 命中追踪 + 赋值推理（topic_watch_hits / board_topic_watches 表）；§1 Step3 注入 active 话题近期 section/thread 内容（不止 label） | [`openspec/changes/archive/2026-07-23-topic-watchlist-observability`](../../../openspec/changes/archive/2026-07-23-topic-watchlist-observability) |
+| 2026-08-19 | daily-report-prompt-hygiene | prompt 卫生：L2 裁决 prompt 去历史 thread 注入（仅留 label+命中元数据+section 框架名）；highlights/thread system prompt 加事实锚（禁止编造事件/数字/情绪/因果）；`promptVersion` 3.0→4.0；修正 mermaid Step4（PrevReportID 仅引用、不进 prompt） | [`openspec/changes/archive/2026-08-19-daily-report-prompt-hygiene`](../../../openspec/changes/archive/2026-08-19-daily-report-prompt-hygiene) |
+| 2026-08-19 | article-archive-instead-of-delete | 线索引用文章永久可读：feed 超限文章归档替代删除，`related_article_ids` 按 ID 反查豁免 archived 过滤；新引用零死链（历史死链不可复活） | [`openspec/changes/archive/2026-08-19-article-archive-instead-of-delete`](../../../openspec/changes/archive/2026-08-19-article-archive-instead-of-delete) |
+| 2026-08-22 | fix-section-embedding-content-based | section embedding 内容化：embedding 输入从 cluster_label 标题文本改为所聚 tag 事实文本（label+description+代表文章，480 runes 截断），打破 lane 命中标题回声闭环（topic_match_distance ≈0 / 质心冻结 / 同域吸附黑洞）；backfill-embeddings 端点扩展 recompute/board_id/since_days 三参 + 质心重算 + 关系重建；回修 context 取消泄漏 | [`openspec/changes/archive/2026-08-22-fix-section-embedding-content-based`](../../../openspec/changes/archive/2026-08-22-fix-section-embedding-content-based) |
+| 2026-08-22 | fix-section-merge-blackhole | 同日合并黑洞修复：内容化 embedding 新几何下 0.20/0.25 阈值失效，union-find 闭包把跨叙事 section 链式熔断成 mega-section 且伪装 l1_direct 归因、吞噬 L3 新叙事（当日 0 新话题）；引入锚定边界（不同 `MatchedTopicID` / 新叙事↔锚定跨界禁止合并，建边前过滤）+ kill switch `daily_report_section_merge_enabled`（默认 false）+ Stage 1 逐对审计日志 | [`openspec/changes/archive/2026-08-23-fix-section-merge-blackhole`](../../../openspec/changes/archive/2026-08-23-fix-section-merge-blackhole) |

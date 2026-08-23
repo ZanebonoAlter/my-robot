@@ -148,8 +148,18 @@ func GenerateDailyReport(ctx context.Context, boardID uint, date time.Time) (*re
 	threadsByCluster := make(map[int][]repository.Thread, len(clusters))
 	for i := 0; i < len(clusters); i++ {
 		tr := <-threadsCh
+		cluster := clusters[tr.clusterIdx]
 		if tr.err != nil {
-			logging.Warnf("daily-report: threads failed for cluster %d: %v", tr.clusterIdx, tr.err)
+			logging.Warnf("daily-report: threads failed for cluster %d: %v (falling back to tag-anchored synthesis)", tr.clusterIdx, tr.err)
+			threadsByCluster[tr.clusterIdx] = synthesizeFallbackThreads(cluster, filterTagsByIDs(tags, cluster.TagIDs))
+			continue
+		}
+		if len(tr.data) == 0 {
+			// Fact-anchor empty response is legal ("宁可不写"), but never persist an
+			// empty-shell section under a live persistent topic — synthesize one
+			// tag-anchored thread so the section stays readable.
+			logging.Warnf("daily-report: threads LLM returned empty for cluster '%s' (synthesizing tag-anchored fallback)", cluster.GroupName)
+			threadsByCluster[tr.clusterIdx] = synthesizeFallbackThreads(cluster, filterTagsByIDs(tags, cluster.TagIDs))
 			continue
 		}
 		threadsByCluster[tr.clusterIdx] = tr.data
@@ -280,12 +290,21 @@ func GenerateDailyReport(ctx context.Context, boardID uint, date time.Time) (*re
 		threadBatches = append(threadBatches, batch)
 	}
 
-	// Generate section embeddings from cluster_label texts
+	// Generate section embeddings from content-assembled texts (tags'
+	// label/description/article excerpts; see buildSectionEmbedText). The
+	// old cluster_label-text embedding froze lane-hit sections onto the topic
+	// label and pinned centroids to the first-day title forever.
 	var embedTexts []string
 	var embedIndices []int
-	for i, sec := range sections {
-		if strings.TrimSpace(sec.ClusterLabel) != "" {
-			embedTexts = append(embedTexts, sec.ClusterLabel)
+	for i := range sections {
+		clusterTags := filterTagsByIDs(tags, mustUnmarshalTagIDs(sections[i].ClusterTagIDs))
+		var threads []repository.DailyReportThread
+		if i < len(threadBatches) {
+			threads = threadBatches[i]
+		}
+		text := buildSectionEmbedText(clusterTags, threads, sections[i].ClusterLabel)
+		if strings.TrimSpace(text) != "" {
+			embedTexts = append(embedTexts, text)
 			embedIndices = append(embedIndices, i)
 		}
 	}
@@ -314,8 +333,10 @@ func GenerateDailyReport(ctx context.Context, boardID uint, date time.Time) (*re
 	// Non-fatal: threads without fit signal render as normal on the frontend.
 	computeThreadFitDistances(ctx, sections, threadBatches, boardID, airouter.NewRouter().Embed)
 
-	// Step 7: Merge similar same-day sections (two-stage: embedding + LLM)
-	sections, threadBatches, mergeErr := MergeSimilarSections(ctx, sections, threadBatches, tags)
+	// Step 7: Merge similar same-day sections (two-stage: embedding + LLM).
+	// Gated by daily_report_section_merge_enabled (default off; see
+	// fix-section-merge-blackhole) and constrained by the anchor boundary.
+	sections, threadBatches, mergeErr := MergeSimilarSections(ctx, sections, threadBatches, tags, topicCfg.SectionMergeEnabled)
 	if mergeErr != nil {
 		logging.Warnf("daily-report: section merge failed for board %d: %v", boardID, mergeErr)
 		// Non-fatal: continue with unmerged sections

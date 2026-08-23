@@ -83,7 +83,9 @@ function toggleThread(prefix: string, thread: DailyReportThread) {
 // ("可能跑题的线索 N 条"). No batch toggle: the note is informational, not an
 // action; per-thread articles still open via each thread's own header.
 function demotedThreads(section: DailyReportSection): DailyReportThread[] {
-  return section.threads.filter(thread => isThreadFitDemoted(thread.fit_distance))
+  // Defensive: legacy/abnormal payloads may omit threads (the backend now
+  // always emits "threads": [], but guard the reader against stale caches).
+  return (section.threads ?? []).filter(thread => isThreadFitDemoted(thread.fit_distance))
 }
 
 function demotedCount(section: DailyReportSection): number {

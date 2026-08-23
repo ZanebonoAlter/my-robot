@@ -9,7 +9,7 @@ import { useNotify } from '~/composables/useNotify'
 
 const { toggleTheme, isDark } = useTheme()
 const { startTour } = useOnboarding()
-const { analysisPaused, loadSchedulersStatus, setAnalysisPaused } = useSchedulerStatus()
+const { analysisPaused, aiHealthy, loadSchedulersStatus, setAnalysisPaused } = useSchedulerStatus()
 useAnalysisPauseFavicon()
 const notify = useNotify()
 const analysisPauseToggling = ref(false)
@@ -27,6 +27,10 @@ async function toggleAnalysisPause() {
   } finally {
     analysisPauseToggling.value = false
   }
+}
+
+function goToAiHealthSettings() {
+  return navigateTo('/settings?section=ai-health')
 }
 
 onMounted(() => {
@@ -56,6 +60,16 @@ defineEmits<{
 import '~/components/layout/AppHeader.css'
 </script>
 
+<style scoped>
+.ai-health-icon--ok {
+  color: var(--color-success);
+}
+
+.ai-health-icon--down {
+  color: var(--color-warning);
+}
+</style>
+
 <template>
   <header class="app-header">
     <div class="header-left">
@@ -84,6 +98,18 @@ import '~/components/layout/AppHeader.css'
           width="20"
           height="20"
           :class="analysisPaused ? 'text-amber-500' : 'text-gray-600'"
+        />
+      </button>
+      <button
+        class="header-btn ai-health-btn"
+        :title="aiHealthy ? 'AI 模型健康' : 'AI 模型未就绪（LLM/Embedding 未连通）'"
+        @click="goToAiHealthSettings"
+      >
+        <Icon
+          icon="mdi:heart-pulse"
+          width="20"
+          height="20"
+          :class="aiHealthy ? 'ai-health-icon--ok' : 'ai-health-icon--down'"
         />
       </button>
       <button class="header-btn" title="刷新" @click="$emit('refresh')">

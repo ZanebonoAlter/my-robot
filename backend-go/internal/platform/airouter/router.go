@@ -2,6 +2,8 @@ package airouter
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -15,11 +17,13 @@ import (
 	otelCodes "go.opentelemetry.io/otel/codes"
 	"syntopica-backend/internal/models"
 	"syntopica-backend/internal/platform/database"
+	"syntopica-backend/internal/platform/logging"
 	"syntopica-backend/internal/platform/tracing"
 )
 
 const maxResponseSnippet = 10000
 const maxPromptRunes = 20000
+const maxCachePreviewRunes = 200
 
 var defaultConcurrency = map[Capability]int{
 	CapabilityTopicTagging: 3,
@@ -244,8 +248,72 @@ func (r *Router) Chat(ctx context.Context, req ChatRequest) (result *ChatResult,
 	return nil, finalErr
 }
 
+// saveEmbeddingCache persists a successful embedding result. Best-effort:
+// failures are logged and swallowed so the provider result still returns.
+func (r *Router) saveEmbeddingCache(req EmbeddingRequest, model string, res *EmbeddingResult) {
+	if !embeddingCacheable(req.Operation) {
+		return
+	}
+	payload, err := json.Marshal(res.Embeddings)
+	if err != nil {
+		logging.Warnf("airouter: embedding cache marshal failed: %v", err)
+		return
+	}
+	rec := &models.AIEmbeddingCache{
+		CacheKey:     embeddingCacheKey(model, req.Input),
+		Model:        model,
+		Operation:    req.Operation,
+		Embedding:    string(payload),
+		Dimensions:   res.Dimensions,
+		InputPreview: truncateRunes(strings.Join(req.Input, " "), maxCachePreviewRunes),
+		CreatedAt:    time.Now(),
+	}
+	if err := r.store.SaveEmbeddingCache(context.Background(), rec); err != nil {
+		logging.Warnf("airouter: embedding cache write failed (key=%s): %v", rec.CacheKey, err)
+	}
+}
+
 func (r *Router) ResolvePrimaryProvider(capability Capability) (*models.AIProvider, *models.AIRoute, error) {
 	return r.store.ResolvePrimaryProvider(capability)
+}
+
+// embeddingCacheOperations is the allowlist of operations whose results are
+// persisted to ai_embedding_cache. Only operations with recurring identical
+// inputs benefit from caching. One-shot content embeddings (article section
+// text, aux-label "label + article context" combos, route backfill) are
+// effectively write-only: production data showed ~0-10% hit rates while each
+// row costs ~30KB, so they are excluded.
+var embeddingCacheOperations = map[string]struct{}{
+	"tagmanagement.embedding": {},
+}
+
+// embeddingCacheable reports whether an operation participates in the
+// embedding cache (both lookup and save sides).
+func embeddingCacheable(operation string) bool {
+	_, ok := embeddingCacheOperations[operation]
+	return ok
+}
+
+// embeddingCacheKey derives the ai_embedding_cache primary key for an
+// embedding request. The route's effective model participates in the key so
+// different models (or fallback providers with different models) never share
+// vectors across incompatible spaces. NUL-separated inputs make the join
+// unambiguous.
+func embeddingCacheKey(model string, inputs []string) string {
+	h := sha256.New()
+	h.Write([]byte(model))
+	h.Write([]byte{0})
+	h.Write([]byte(strings.Join(inputs, "\x00")))
+	return hex.EncodeToString(h.Sum(nil))
+}
+
+// truncateRunes keeps at most max runes of s.
+func truncateRunes(s string, max int) string {
+	runes := []rune(s)
+	if len(runes) > max {
+		return string(runes[:max])
+	}
+	return s
 }
 
 func (r *Router) Embed(ctx context.Context, req EmbeddingRequest, capability Capability) (result *EmbeddingResult, err error) {
@@ -264,6 +332,61 @@ func (r *Router) Embed(ctx context.Context, req EmbeddingRequest, capability Cap
 	route, providers, err := r.store.LoadRouteWithProviders(capability)
 	if err != nil {
 		return nil, err
+	}
+
+	// Cache lookup happens BEFORE the semaphore: a hit is a local DB read and
+	// must neither queue behind real provider calls nor consume a slot.
+	// Operations outside embeddingCacheOperations skip the lookup entirely
+	// (their rows are never written, so lookup would always miss) and go
+	// straight to the provider below.
+	// The cache key intentionally uses the route provider's Model, not
+	// req.Model: no call site sets req.Model today, and the client layer
+	// falls back to provider.Model when req.Model is empty. If a future call
+	// site starts setting req.Model, normalize the effective model before it
+	// participates in the key, otherwise the cached Model field observability
+	// becomes inaccurate.
+	var lookupStart time.Time
+	var cacheKey string
+	var cached *models.AIEmbeddingCache
+	var lookupErr error
+	if embeddingCacheable(req.Operation) {
+		lookupStart = time.Now()
+		cacheKey = embeddingCacheKey(providers[0].Model, req.Input)
+		cached, lookupErr = r.store.LookupEmbeddingCache(ctx, cacheKey)
+	}
+	if lookupErr != nil {
+		// A broken cache (e.g. table missing) must never block real calls.
+		logging.Warnf("airouter: embedding cache lookup failed (key=%s): %v", cacheKey, lookupErr)
+	} else if cached != nil {
+		var vectors [][]float64
+		if err := json.Unmarshal([]byte(cached.Embedding), &vectors); err != nil {
+			logging.Warnf("airouter: embedding cache decode failed (key=%s): %v", cacheKey, err)
+		} else {
+			hitMeta := map[string]any{}
+			for k, v := range req.Metadata {
+				hitMeta[k] = v
+			}
+			// Set after copying so upstream metadata can never shadow the marker.
+			hitMeta["cache_hit"] = true
+			r.store.LogCall(ctx, &models.AICallLog{
+				Operation:    req.Operation,
+				Capability:   string(capability),
+				RouteName:    route.Name,
+				ProviderName: providers[0].Name,
+				Model:        cached.Model,
+				Success:      true,
+				IsFallback:   false,
+				LatencyMs:    int(time.Since(lookupStart).Milliseconds()),
+				RequestMeta:  encodeMeta(hitMeta),
+				SessionID:    req.SessionID,
+			})
+			return &EmbeddingResult{
+				Embeddings: vectors,
+				Model:      cached.Model,
+				Dimensions: cached.Dimensions,
+				Provider:   providers[0].Name,
+			}, nil
+		}
 	}
 
 	sem := r.getSemaphore(capability, route)
@@ -296,6 +419,7 @@ func (r *Router) Embed(ctx context.Context, req EmbeddingRequest, capability Cap
 				RequestMeta:  encodeMeta(req.Metadata),
 				SessionID:    req.SessionID,
 			})
+			r.saveEmbeddingCache(req, provider.Model, res)
 			return res, nil
 		}
 

@@ -266,7 +266,7 @@ func (s *AuxiliaryLabelService) DisableAuxiliaryLabel(ctx context.Context, label
 	if err := s.db.WithContext(ctx).Where("id = ? AND label_type = ?", labelID, "auxiliary").First(&label).Error; err != nil {
 		return err
 	}
-	if err := s.db.WithContext(ctx).Model(&label).Update("status", "disabled").Error; err != nil {
+	if err := s.db.WithContext(ctx).Model(&label).Updates(map[string]any{"status": "disabled", "embedding": nil, "merge_embedding": nil}).Error; err != nil {
 		return err
 	}
 	s.invalidateOnDisable()
@@ -325,7 +325,7 @@ func (s *AuxiliaryLabelService) MergeAuxiliaryLabelAlias(ctx context.Context, so
 		if err := tx.Model(&models.SemanticLabel{}).Where("id = ?", targetID).Update("ref_count", int(targetRefCount)).Error; err != nil {
 			return err
 		}
-		return tx.Model(&models.SemanticLabel{}).Where("id = ?", sourceID).Updates(map[string]any{"ref_count": int(sourceRefCount), "status": "disabled"}).Error
+		return tx.Model(&models.SemanticLabel{}).Where("id = ?", sourceID).Updates(map[string]any{"ref_count": int(sourceRefCount), "status": "disabled", "embedding": nil, "merge_embedding": nil}).Error
 	})
 }
 
@@ -494,10 +494,10 @@ func (s *AuxiliaryLabelService) gcCleanup(ctx context.Context, req AuxLabelGCReq
 			Delete(&models.BoardComposition{}).Error; err != nil {
 			return nil, fmt.Errorf("delete board_composition: %w", err)
 		}
-		// Soft-delete: update status to disabled
+		// Soft-delete: update status to disabled (vectors dropped — re-enable regenerates)
 		if err := s.db.WithContext(ctx).Model(&models.SemanticLabel{}).
 			Where("id IN ?", ids).
-			Update("status", "disabled").Error; err != nil {
+			Updates(map[string]any{"status": "disabled", "embedding": nil, "merge_embedding": nil}).Error; err != nil {
 			return nil, fmt.Errorf("disable labels: %w", err)
 		}
 		result.AffectedCount = len(ids)

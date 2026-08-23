@@ -20,6 +20,8 @@ Syntopica 使用分层配置系统：后端 YAML 配置文件、覆盖文件值�
 | `TRACE_INSTRUMENT_GORM` | 否 | *(未设置，等效启用)* | 设为 `"0"` 关闭 GORM DB 操作自动埋点（自写 `GORMTracePlugin`）。非 `"0"` 均视为启用。 |
 | `TRACE_INSTRUMENT_HTTP` | 否 | *(未设置，等效启用)* | 设为 `"0"` 关闭出站 HTTP 自动埋点（`httpclient` 工厂的 otelhttp 包装）。非 `"0"` 均视为启用。 |
 | `STORAGE_ICON_DIR` | 否 | `"data/icons"` | feed 图标本地化存储根目录（实际文件在 `feeds/` 子目录），由后端 `/icons` 静态路由对外服务 |
+| `BOCHA_API_KEY` | 否 | *(空)* | **部署兜底**——博查 key 首选在设置界面「博查搜索」配（存 `ai_settings` 表，动态生效）。此 env 仅用于无界面/CI/容器部署，与 `configs/config.yaml` 的 `bocha.api_key` 同为兜底（优先级：界面 DB > env > config.yaml）。全空→`web_search` 降级 Noop（返回错误 JSON，agent 自降级、不阻断） |
+| `BOCHA_ENDPOINT` | 否 | `"https://api.bochaai.com/v1/web-search"` | 博查通搜 endpoint（原始网页结果模式）的**兜底**值；界面可覆盖。仅在需要切换 endpoint（如代理/镜像）时设 |
 
 ### 前端（Nuxt）
 
@@ -171,6 +173,7 @@ AI 相关配置不存储在文件或环境变量中 — 通过 Web UI 管理并�
 | `rsshub_config` | RSSHub 实例配置（订阅源发现用，见下「订阅源发现」节；`rsshub_base_url` 缺省回落 `http://rsshub.app`） |
 | `http_proxy_config` | 全局出站代理配置（feed 抓取 / Firecrawl / LLM 等所有外部请求；见下「出站代理」节；`http_proxy_url` 空=直连） |
 | `daily_report_time` | 日报生成时刻（HH:MM 格式，默认 `21:00`） |
+| `auto_start_models` | 本地模型自动拉起总开关（默认 `false`）：后端启动时，对「探测不通且配了 `start_command`」的 provider 自动执行启动命令拉起本地模型进程。见下「本地模型自动拉起」节 |
 | `persistent_topic_match_threshold` | 新 section 锚定已有话题的余弦距离阈值（默认 `0.30`） |
 | `persistent_topic_upgrade_threshold` | candidate 允许人工确认所需、同时为管理 UI 可见门槛的连续命中天数（默认 `3`；不会自动转 active） |
 | `persistent_topic_candidate_decay_window` | candidate 被注入聚类 prompt 的观察窗口天数（默认 `7`）；仅用于 prompt 卫生过滤，不触发状态变更 |
@@ -182,7 +185,7 @@ AI 相关配置不存储在文件或环境变量中 — 通过 Web UI 管理并�
 | `persistent_topic_centroid_window` | 质心计算取最近 N 条 section embedding 做均权平均；section<2 退化首义向量。默认 `30` |
 | `persistent_topic_vacuum_window` | 吸尘器吸引统计窗口（天）：按近 N 天归属该 topic 的 section 统计 strong/mid。默认 `7` |
 | `persistent_topic_l2_candidate_k` | L2 LLM prompt 注入的 top-K 候选 topic 数（按质心距离排序）。默认 `5` |
-
+| `daily_report_section_merge_enabled` | 同日 section 两阶段合并（确定性 <0.20 + 灰区 LLM 仲裁）总开关。默认 `false`（关）——关闭时 section 按lane 管线原始分组落库；开启时合并仍受锚定边界约束（不同 `persistent_topic_id` / 新叙事↔锚定跨界禁止合并）。见 `flow/daily-report.md` 业务约束 12 |
 这些设置通过 `aisettings.LoadSummaryConfig()`、`aisettings.LoadFirecrawlConfig()` 等函数加载，在前端设置页面中配置。
 
 文章手动总结会在每次请求时重新读取 AI Provider 配置：优先使用 `summary` capability 的启用路由；未配置该路由时，回退到任一启用且具有 Base URL 和 Model 的 Provider。因此服务启动后新增 Provider 无需重启。API Key 对本地 Ollama、llama.cpp 或无需鉴权的 OpenAI-compatible 服务是可选项。
@@ -197,6 +200,12 @@ AI 相关配置不存储在文件或环境变量中 — 通过 Web UI 管理并�
 2. 后台新建 provider `qwythos-think`：同样的 `base_url` 和 `model`、`enable_thinking=true`。挂到 `digest_polish` route（日报走它，思考后质量更高）。
 
 > 历史语义提示：该字段曾表示「事后剥离 `<think>` 标签」，migration `20260626_0001` 已将所有 provider 的该字段重置为 `false` 以兜底语义反转。升级后请按需手动开启日报 provider 的思考。
+
+### 本地模型自动拉起（`auto_start_models`）
+
+存 `ai_settings`（默认 `false`），经 `GET /api/ai/health` 读取、`PUT /api/ai/health/auto-start-models` 更新（前端设置页「AI 健康」面板开关）。开启时，后端启动健康检测（`internal/platform/aihealth`）对「探测不通 **且** 配了 `start_command`」的 provider 自动执行启动命令拉起本地模型进程（fire-and-forget 脱离执行 + 轮询复探 ≤45s），拉起后健康翻绿、分析类任务恢复运行。
+
+> **安全提示**：开启后会执行 provider 的 `start_command`（任意本地命令），对单用户本地工具可接受，但命令需可信；不建议在多人/不可信环境开启。
 
 ### 数据增强（Data Enrichment）
 
@@ -220,11 +229,20 @@ AI 相关配置不存储在文件或环境变量中 — 通过 Web UI 管理并�
 #### 3. 板块编辑需开 `enrichment_enabled=true`
 
 循环B增强仅对 `enrichment_enabled=true` 的板块（SemanticLabel）允许触发。用户需先在板块详情页的「分析」tab 中：
-1. 绑定至少一个数据源（`board_data_sources`）
-2. 开启 `enrichment_enabled` 开关（默认 false）
-3. （可选）调整 `window_days`（默认 14）和 `context_layers`（默认 `["week","month","year","all"]`）
+1. 开启 `enrichment_enabled` 开关（默认 false）
+2. （可选）调整 `window_days`（默认 14）和 `context_layers`（默认 `["week","month","year","all"]`）
+3. （可选）绑定数据源（`board_data_sources`）——**金融 source_type（`etf_quote`/`exchange_rate`/`gdelt_event`）已移除**，`web_search`/`fetch_page`/内部导航为 always-on 工具（无需绑定即可用）；该绑定机制保留为未来接入结构化外部源的扩展点
 
 管理员无需额外配置；以上操作均可通过 Web UI 完成。
+
+#### 4. 博查 web_search（可选，影响深度层证据质量）
+
+循环B 的 `web_search` 工具默认降级（未配 key 时返回错误 JSON，agent 自判降级、不阻断）。配博查 key 后启用真实联网检索，分析员的深度层 `evidence_chain` 才能产出可核查的 web/page 证据。
+
+- **只用通搜原始结果模式**（`summary:false`），**禁用 AI 总结模式**——AI summary 有幻觉风险，不可作可核查证据。深度层引用的外部正文经 `fetch_page` 抓自真实文档，不来自 AI 转述。
+- **配 key（首选·设置界面）**：设置页「博查搜索」section（`GET/POST /api/settings/bocha`，存 `ai_settings` 表 `bocha_config`，照 Firecrawl）。界面改**即时生效、无需重启**（`BochaWebSearcher` 每次 `Search` 动态读 DB）。GET 返回脱敏 key（不回显完整值）；保存时 api_key 留空=不改、输入新值才覆盖。
+- **配 key（兜底·无界面/部署）**：`configs/config.yaml` 的 `bocha.api_key` 或环境变量 `BOCHA_API_KEY`。优先级 **界面 DB > env > config.yaml > 空**。
+- 无 key 时：`web_search`/`fetch_page` 降级，深度层仍产出但证据链弱（仅靠分层新闻 context）。
 
 ### 出站代理（`http_proxy_config`）
 
@@ -232,11 +250,13 @@ AI 相关配置不存储在文件或环境变量中 — 通过 Web UI 管理并�
 
 | 字段 | 默认值 | 说明 |
 |------|--------|------|
-| `http_proxy_url` | *(空)* | 全局出站代理地址；feed 抓取、Firecrawl、LLM 等所有外部请求经此转发。支持 `http`/`https`/`socks5`。空=直连 |
+| `http_proxy_url` | *(空)* | 全局出站代理地址；feed 抓取、Firecrawl、LLM 等**外部**请求经此转发。支持 `http`/`https`/`socks5`。空=直连 |
+
+- **回环地址自动直连**：即使配置了代理，目标为回环地址（`localhost` / `127.0.0.0/8` / `::1` / 空 host）的请求一律绕过代理直连（NO_PROXY 惯例）——本地托管模型（llama-server）的探测/推理不被代理 502 拦截（2026-08-19 修复，见 ai-health-reprobe）。
 
 - 保存即时生效（`httpclient.SetProxy` 运行时替换全局 transport），重启后由 `cmd/server/main.go` 从该配置注入，无需重设。
 - 与 `HTTP_PROXY`/`HTTPS_PROXY` 环境变量的关系：本配置优先；当 `http_proxy_url` 为空时，`httpclient` 回落 `http.DefaultTransport`，仍遵循标准库 `ProxyFromEnvironment`（即环境变量作兜底）。
-- 实现入口：`internal/platform/httpclient/httpclient.go`（`SetProxy` + 包级 `proxyTransport`）；复用 `aisettings` 通用配置存储，与 RSSHub/Firecrawl 配置同机制。
+- 实现入口：`internal/platform/httpclient/httpclient.go`（`SetProxy` + 包级 `proxyTransport`，Proxy 函数含回环直连 `isLoopbackHost`）；复用 `aisettings` 通用配置存储，与 RSSHub/Firecrawl 配置同机制。
 
 ### 订阅源发现（Feed Discovery）
 

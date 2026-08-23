@@ -17,6 +17,7 @@ import (
 
 const openNotebookConfigKey = "open_notebook_config"
 const firecrawlConfigKey = "firecrawl_config"
+const bochaConfigKey = "bocha_config"
 const rsshubConfigKey = "rsshub_config"
 const proxyConfigKey = "http_proxy_config"
 const dailyReportTimeKey = "daily_report_time"
@@ -26,6 +27,7 @@ const defaultBoardUpgradeSuggestTime = "06:30"
 const rsshubDocBaseKey = "rsshub_doc_base"
 const defaultRSSHubDocBase = "https://docs.rsshub.app"
 const analysisPausedKey = "analysis_paused"
+const autoStartModelsKey = "auto_start_models"
 
 // DefaultRSSHubDocBase 返回 rsshub_doc_base 的默认值（design D4），供 handler 透传给前端。
 func DefaultRSSHubDocBase() string { return defaultRSSHubDocBase }
@@ -90,6 +92,17 @@ func LoadFirecrawlConfig() (map[string]interface{}, *models.AISettings, error) {
 
 func SaveFirecrawlConfig(config map[string]interface{}, description string) error {
 	return saveConfigByKey(firecrawlConfigKey, config, description)
+}
+
+// LoadBochaConfig 读取 bocha_config（数据增强 web_search 后端的 key + endpoint + enabled）。
+// 动态读取：BochaWebSearcher 每次 Search 现读，界面改即时生效（对齐 Firecrawl 每次 job 读 DB）。
+func LoadBochaConfig() (map[string]interface{}, *models.AISettings, error) {
+	return loadConfigByKey(bochaConfigKey)
+}
+
+// SaveBochaConfig 写入 bocha_config。
+func SaveBochaConfig(config map[string]interface{}, description string) error {
+	return saveConfigByKey(bochaConfigKey, config, description)
 }
 
 func LoadOpenNotebookConfig() (map[string]interface{}, *models.AISettings, error) {
@@ -297,4 +310,26 @@ func SaveAnalysisPausedConfig(paused bool) error {
 		config["paused_at"] = time.Now().UTC().Format(time.RFC3339)
 	}
 	return saveConfigByKey(analysisPausedKey, config, "分析暂停总闸开关（paused + paused_at）")
+}
+
+// LoadAutoStartModelsConfig reads the auto_start_models flag from ai_settings.
+// Returns false when the key is missing or the value cannot be parsed so the
+// default is "do not auto-launch local model processes" (safe default). The
+// value is stored as a JSON object {"enabled":bool}.
+func LoadAutoStartModelsConfig() (bool, error) {
+	config, _, err := loadConfigByKey(autoStartModelsKey)
+	if err != nil {
+		return false, err
+	}
+	if v, ok := config["enabled"].(bool); ok {
+		return v, nil
+	}
+	return false, nil
+}
+
+// SaveAutoStartModelsConfig writes the auto_start_models flag (the local-model
+// auto-launch master switch for aihealth.RunStartupProbe).
+func SaveAutoStartModelsConfig(enabled bool) error {
+	config := map[string]interface{}{"enabled": enabled}
+	return saveConfigByKey(autoStartModelsKey, config, "本地模型自动拉起总开关（enabled）")
 }

@@ -48,6 +48,7 @@ func GetArticlesStats(c *gin.Context) {
 	var result StatsResult
 	repository.Repo.DB().Model(&models.Article{}).
 		Select("COUNT(*) as total, COALESCE(SUM(CASE WHEN NOT read THEN 1 ELSE 0 END), 0) as unread, COALESCE(SUM(CASE WHEN favorite THEN 1 ELSE 0 END), 0) as favorite").
+		Where("archived = ?", false).
 		Scan(&result)
 
 	c.JSON(http.StatusOK, gin.H{
@@ -75,6 +76,7 @@ func GetArticles(c *gin.Context) {
 	endDate := c.Query("end_date")
 	watchedTagIDsStr := c.Query("watched_tag_ids")
 	watchedTagsMode := c.Query("watched_tags") == "true"
+	archived := c.Query("archived") == "true"
 	sortBy := c.Query("sort_by")
 
 	maxPerPage := 100
@@ -112,9 +114,11 @@ func GetArticles(c *gin.Context) {
 		}
 	}
 
-	// Build base query with standard joins
+	// Build base query with standard joins. Archived articles are hidden by
+	// default; `archived=true` returns only the archive (article-retention spec).
 	query := repository.Repo.DB().Model(&models.Article{}).
-		Joins("LEFT JOIN feeds ON articles.feed_id = feeds.id")
+		Joins("LEFT JOIN feeds ON articles.feed_id = feeds.id").
+		Where("articles.archived = ?", archived)
 
 	// Apply watched tag filter via JOIN
 	if usingWatchedTags {
@@ -201,7 +205,8 @@ func GetArticles(c *gin.Context) {
 	var total int64
 	if usingWatchedTags {
 		countQuery := repository.Repo.DB().Table("articles").
-			Joins("JOIN article_topic_tags att ON att.article_id = articles.id AND att.topic_tag_id IN ?", expandedTagIDs)
+			Joins("JOIN article_topic_tags att ON att.article_id = articles.id AND att.topic_tag_id IN ?", expandedTagIDs).
+			Where("articles.archived = ?", archived)
 		if feedID > 0 {
 			countQuery = countQuery.Where("articles.feed_id = ?", feedID)
 		}
@@ -241,7 +246,8 @@ func GetArticles(c *gin.Context) {
 	} else {
 		if conceptID > 0 || auxiliaryLabelID > 0 {
 			cq := repository.Repo.DB().Model(&models.Article{}).
-				Select("COUNT(DISTINCT articles.id)")
+				Select("COUNT(DISTINCT articles.id)").
+				Where("articles.archived = ?", archived)
 			if conceptID > 0 {
 				cq = cq.
 					Joins("JOIN article_topic_tags att_concept ON att_concept.article_id = articles.id").

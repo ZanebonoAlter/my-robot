@@ -1,6 +1,7 @@
 package repository
 
 import (
+	"encoding/json"
 	"fmt"
 	"testing"
 	"time"
@@ -115,6 +116,31 @@ func TestGetReportByID_AttachesTopicBriefs(t *testing.T) {
 	require.Equal(t, topic.ID, report.Sections[0].PersistentTopic.ID)
 	require.Equal(t, topic.Label, report.Sections[0].PersistentTopic.Label)
 	require.Equal(t, TopicStatusActive, report.Sections[0].PersistentTopic.Status)
+}
+
+func TestGetReportByID_SectionWithoutThreadsMarshalsEmptyArray(t *testing.T) {
+	db := testutil.SetupTestDB(t)
+	repo := NewTopicGraphRepository(db)
+
+	boardID := seedTestBoard(t, db)
+	now := NormalizeReportDate(time.Now())
+	reportID := seedTestReport(t, db, boardID, now)
+	// Section with zero thread rows — mirrors the production data where the
+	// per-cluster threads LLM call failed and the orchestrator degraded to
+	// saving the section without threads.
+	seedTestSection(t, db, reportID, "no-thread section")
+
+	report, err := repo.GetReportByID(reportID)
+	require.NoError(t, err)
+	require.Len(t, report.Sections, 1)
+
+	data, err := json.Marshal(report)
+	require.NoError(t, err)
+	// threads must serialize as [] (never omitted / null): the frontend reader
+	// calls section.threads.filter directly (DailyReportTopicSection.vue).
+	require.Contains(t, string(data), `"threads":[]`)
+	require.NotNil(t, report.Sections[0].Threads)
+	require.Empty(t, report.Sections[0].Threads)
 }
 
 func seedTestBoard(t *testing.T, db *gorm.DB) uint {

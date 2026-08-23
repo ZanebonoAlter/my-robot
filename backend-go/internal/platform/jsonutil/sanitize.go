@@ -29,6 +29,10 @@ func SanitizeLLMJSON(content string) string {
 		content = fixTruncatedJSONArray(content)
 	}
 
+	if !json.Valid([]byte(content)) {
+		content = fixTrailingCommas(content)
+	}
+
 	return content
 }
 
@@ -194,4 +198,55 @@ func fixTruncatedJSONArray(content string) string {
 	}
 
 	return truncated
+}
+
+// fixTrailingCommas removes trailing commas that appear immediately before a
+// closing bracket or brace (outside string literals), which LLMs sometimes
+// emit. Content inside string literals is preserved verbatim, so a description
+// containing ",}" is never touched. Valid JSON never contains trailing commas,
+// so this stage is a strict no-op for already-valid input.
+func fixTrailingCommas(content string) string {
+	var sb strings.Builder
+	sb.Grow(len(content))
+
+	inString := false
+	i := 0
+	for i < len(content) {
+		c := content[i]
+
+		if inString {
+			sb.WriteByte(c)
+			if c == '\\' && i+1 < len(content) {
+				sb.WriteByte(content[i+1])
+				i += 2
+				continue
+			}
+			if c == '"' {
+				inString = false
+			}
+			i++
+			continue
+		}
+
+		if c == '"' {
+			inString = true
+			sb.WriteByte(c)
+			i++
+			continue
+		}
+
+		if c == ',' {
+			rest := strings.TrimLeft(content[i+1:], " \t\n\r")
+			if len(rest) > 0 && (rest[0] == '}' || rest[0] == ']') {
+				// Trailing comma before a closer: drop the comma, keep the
+				// following whitespace (copied on subsequent iterations).
+				i++
+				continue
+			}
+		}
+
+		sb.WriteByte(c)
+		i++
+	}
+	return sb.String()
 }

@@ -152,10 +152,12 @@ func (o *OrchestratorService) EnrichTopic(ctx context.Context, topicID uint) (*E
 	selectedLens := lenses[0]
 
 	// 8. Step 2: Agent loop per topic (selected lens focuses research).
-	// Exploration entry points (list_boards/list_lanes/get_lane_detail) and
-	// web_search are ALWAYS available; financial (source-typed) tools are only
-	// added when the board's source_types include them (cfg.AllowedTools already
-	// reflects ToolsForSourceType, see board_config_impl.go).
+	// Exploration entry points (list_boards/list_lanes/get_lane_detail),
+	// web_search and (once wired) fetch_page are ALWAYS available (always-on).
+	// cfg.AllowedTools carries board source-typed tools; with the financial
+	// direction removed ToolsForSourceType always returns nil, so this is
+	// effectively always empty now (the mechanism is retained as an extension
+	// point). See board_config_impl.go.
 	allowedTools := o.buildAgentAllowedTools(cfg.AllowedTools)
 	agentResults := make([]*AgentLoopResult, 0, len(interp.Topics))
 	topicsData := make([]map[string]any, 0, len(interp.Topics))
@@ -294,6 +296,7 @@ const (
 	FormEventChain  = "event_chain"
 	FormThemeVein   = "theme_vein"
 	FormSinglePoint = "single_point"
+	FormStructural  = "structural"
 	FormSparse      = "sparse"
 )
 
@@ -307,7 +310,7 @@ const (
 
 func isValidForm(f string) bool {
 	switch f {
-	case FormEventChain, FormThemeVein, FormSinglePoint, FormSparse:
+	case FormEventChain, FormThemeVein, FormSinglePoint, FormStructural, FormSparse:
 		return true
 	}
 	return false
@@ -316,23 +319,24 @@ func isValidForm(f string) bool {
 // interpretPrompt is the LLM prompt for the interpreter role.
 // Performs form classification (first) + research topic extraction (second).
 // Spec "话题形态判断".
-const interpretPrompt = `你是一位资深产业分析师。下面是一个持久话题的演进脉络（跨多天的事件演进）与分层新闻上下文。
+const interpretPrompt = `你是一位结构化分析编辑。下面是一个持久话题的演进脉络（跨多天的事件演进）与分层新闻上下文。
 
-第一步·形态判断：先判断这个话题的【形态】，四选一：
+第一步·形态判断：先判断这个话题的【形态】，五选一：
 - event_chain（事件链）：高密度、时序呈线性因果演进（如“官宣→否认→条款”），有清晰的因果链条
 - theme_vein（主题脉络）：线索高度发散、多线并行（如“产业范式转移”下多个 AI 线索），无线性因果
 - single_point（单点影响）：单一事件/单一时点，影响评估本身即见解
+- structural（结构演化）：持续性结构命题、无单一离散事件驱动（如“人民币国际化进程”“美元霸权演变”），长时段结构演化
 - sparse（骨感）：料严重不足（命中极少、脉络单薄），无法支撑推演
 
 判据（基于语义综合判断，无需精确数字）：
 - 丰满度：事件/线索总量是否足够
 - 聚合度：能否聚成时间线/板块结构
-- 线性 vs 平行：是“A→B→C”的因果，还是多线并行的脉络
+- 线性 vs 平行 vs 结构：是“A→B→C”的因果，还是多线并行的脉络，还是长时段的结构命题
 
-第二步·提炼研究主题：基于形态，提炼出需要查询的【产业/板块】实时数据方向（A 股有对应 ETF 的方向，如石油/能源、军工、半导体等），每个给“为什么要查它”的理由，聚焦 3-5 个。
+第二步·提炼研究方向：基于形态，提炼需要补数据的【研究方向】——领域自适应，不限于金融产业。常见方向包括：历史机制（曾发生过什么、机制如何）、关键数据（可量化的指标/阈值）、可比案例（他国/他行业的同类过程）。每个方向给“为什么要查它”的理由，聚焦 3-5 个。
 
 输出严格 JSON（不要其他内容）：
-{"form": "event_chain|theme_vein|single_point|sparse", "form_reason": "为什么是这个形态（一两句）", "topics": [{"topic": "产业主题词", "reason": "关联演进:...所以需要查它"}]}`
+{"form": "event_chain|theme_vein|single_point|structural|sparse", "form_reason": "为什么是这个形态（一两句）", "topics": [{"topic": "研究方向词", "reason": "关联演进:...所以需要查它"}]}`
 
 func (o *OrchestratorService) interpret(ctx context.Context, ictx interpretContext) (*interpretResult, error) {
 	prompt := interpretPrompt + "\n\n---\n"
@@ -401,29 +405,29 @@ const maxAgentLoops = 6
 // The selected lens focuses what the data should help analyze.
 // Ported from PoC roles_evolved.py:research_topic_evolved, lens slot added by
 // causal-analysis-agent (spec "分析视角候选与选择").
-const agentLoopSystemPrompt = `你是一位 A 股数据查询员。背景:有一个持久话题正在演进(见下方脉络),本次分析视角是「%s」。你需要针对给定的产业主题,查到相关的 ETF 实时行情数据,帮助分析"最新进展在这个演进里、从该视角看意味着什么"。
+const agentLoopSystemPrompt = `你是一位研究助理 / 事实核查员。背景：有一个持久话题正在演进（见下方脉络），本次分析视角是「%s」。你需要为结构化分析师搜集背景事实、历史 precedents 与一手原文，支撑深度层（系统重定位 / 多层机制 / 历史类比 / 可核查证据链）。
 
-可用工具:
+可用工具：
 %s
 
-工作流程(重要):
-1. 先用 list_etf_by_keyword 用主题词查有没有对应 ETF
-2. 如果命中很少(0-1 个),换更宽泛或相关的产业词重查(例如"光刻机"→"半导体"/"芯片")。最多换 2-3 个词
-3. 拿到 ETF 代码后,用 get_etf_quote 查实时行情,取 3-5 只代表性 ETF 即可
-4. 拿到行情数据后,立即宣布完成
+工作流程（重要）：
+1. 先用 web_search 检索该话题的背景、历史 precedents 与专家分析（换 2-3 个角度/关键词）
+2. 对关键命中（权威机构、一手数据源），用 fetch_page 抓取正文，取可核查原文摘录（不是 AI 转述）
+3. 必要时用 list_boards / list_lanes / get_lane_detail 下钻内部脉络，看本系统里已有的演进
+4. 拿到足以支撑深度层的素材后，立即宣布完成
 
-关键纪律(违反会导致死循环):
-- 工具返回的数据是完整的。total_count 就是真实命中数,不要因为"看起来不全"重查同一个关键词
-- 查行情取 3-5 只代表性 ETF 即可,不需要全部代码
+关键纪律（违反会导致死循环）：
+- 工具返回的数据是完整的。hit_count 就是真实命中数，不要因为“看起来不全”重查同一个查询
+- 取代表性的几条原文即可，不必把每个 URL 都 fetch_page
 - 绝对不要用相同参数重复调用同一个工具
 
-每一轮输出严格 JSON,二选一:
-- 继续调工具:{"action": "call_tool", "thought": "...", "tool": "工具名", "args": {...}}
-- 宣布完成:{"action": "finish", "thought": "...", "summary": "给分析师的简明数据汇总"}
+每一轮输出严格 JSON，二选一：
+- 继续调工具：{"action": "call_tool", "thought": "...", "tool": "工具名", "args": {...}}
+- 宣布完成：{"action": "finish", "thought": "...", "summary": "给分析师的简明素材汇总（含可核查 URL 与原文摘录）"}
 
 不要输出 JSON 以外的任何内容。
 
-话题演进脉络(背景):
+话题演进脉络（背景）：
 %s`
 
 // runAgentLoop executes the agent loop for a single research topic.
@@ -654,11 +658,54 @@ func (in Insight) hasEvidence() bool {
 	return len(in.Evidence) > 0 || len(in.WebVerified) > 0
 }
 
+// Depth is the structured depth layer (mapping the "内部看美国" analysis genes).
+// Required for every non-sparse form; SparseAnalysis carries no Depth by design.
+type Depth struct {
+	SystemReframe     string              `json:"system_reframe"`     // ②系统重定位：一句话放进哪个大系统讲
+	MechanismLayers   []MechanismLayer    `json:"mechanism_layers"`   // ④多层机制拆解
+	HistoricalAnalogy []HistoricalAnalogy `json:"historical_analogy"` // ③历史类比
+	RegimeShift       *RegimeShift        `json:"regime_shift"`       // ⑥范式转折（可空）
+	Boundary          string              `json:"boundary"`           // ⑤反过度解读边界（非空！）
+	EvidenceChain     []EvidenceChainItem `json:"evidence_chain"`     // ⑦可核查证据链
+}
+
+// MechanismLayer is one sub-mechanism in the multi-layer mechanism breakdown.
+type MechanismLayer struct {
+	Layer     string `json:"layer"`      // 子机制名
+	DeepLogic string `json:"deep_logic"` // 深层逻辑
+	Basis     string `json:"basis"`      // 依据
+}
+
+// HistoricalAnalogy is a historical precedent comparison.
+type HistoricalAnalogy struct {
+	Case      string `json:"case"`      // 历史案例
+	Mechanism string `json:"mechanism"` // 机制类比
+	Diff      string `json:"diff"`      // 何处不同
+}
+
+// RegimeShift is an optional paradigm-shift judgment (null when none is warranted).
+type RegimeShift struct {
+	Judgment string `json:"judgment"` // 范式转折判断
+	Evidence string `json:"evidence"` // 依据
+}
+
+// EvidenceChainItem is one verifiable-evidence entry. source_type ∈ news|web|page;
+// web/page entries must carry a clickable url + a direct quote (not an AI paraphrase).
+type EvidenceChainItem struct {
+	SourceType  string `json:"source_type"`           // news|web|page
+	Ref         string `json:"ref,omitempty"`         // news 引用 id
+	URL         string `json:"url,omitempty"`         // web/page 可核查 URL
+	Quote       string `json:"quote,omitempty"`       // 原文摘录（非转述）
+	Institution string `json:"institution,omitempty"` // 来源机构
+	Date        string `json:"date,omitempty"`        // 日期
+}
+
 // EventChainAnalysis is the body for form=event_chain.
 type EventChainAnalysis struct {
 	FactLayer    []FactClaim    `json:"fact_layer"`
 	Timeline     []TimelineNode `json:"timeline"`
 	InsightLayer []Insight      `json:"insight_layer"`
+	Depth        Depth          `json:"depth"`
 }
 
 func (EventChainAnalysis) isAnalysisBody() {}
@@ -674,6 +721,7 @@ type Vein struct {
 type ThemeVeinAnalysis struct {
 	Veins        []Vein    `json:"veins"`
 	CrossInsight []Insight `json:"cross_insight"`
+	Depth        Depth     `json:"depth"`
 }
 
 func (ThemeVeinAnalysis) isAnalysisBody() {}
@@ -689,18 +737,37 @@ type ImpactAssessment struct {
 type SinglePointAnalysis struct {
 	Impact   ImpactAssessment `json:"impact"`
 	Evidence []Ref            `json:"evidence"`
+	Depth    Depth            `json:"depth"`
 }
 
 func (SinglePointAnalysis) isAnalysisBody() {}
 
 // SparseAnalysis is the body for form=sparse — honestly marks information
-// insufficiency. By design it has NO insight_layer (spec "骨感型不硬推演").
+// insufficiency. By design it has NO insight_layer and NO Depth (spec "骨感型
+// 不硬推演" / "sparse 不产深度层").
 type SparseAnalysis struct {
 	Notice  string `json:"notice"`
 	Summary string `json:"summary"`
 }
 
 func (SparseAnalysis) isAnalysisBody() {}
+
+// StructuralAnalysis is the body for form=structural — long-horizon structural
+// evolution with no single discrete event driver (e.g. "人民币国际化进程").
+type StructuralAnalysis struct {
+	EvolutionNarrative string  `json:"evolution_narrative"` // 结构演化叙述
+	Phases             []Phase `json:"phases"`              // 关键阶段
+	Depth              Depth   `json:"depth"`
+}
+
+// Phase is one dated milestone in the structural evolution narrative.
+type Phase struct {
+	Period string `json:"period"`
+	Event  string `json:"event"`
+	Ref    *Ref   `json:"ref,omitempty"`
+}
+
+func (StructuralAnalysis) isAnalysisBody() {}
 
 // UnmarshalJSON dispatches the analysis body by the form field, enabling JSON
 // round-trip of analyzeOutput (e.g. reading a stored Sectors snapshot back).
@@ -734,6 +801,12 @@ func (a *analyzeOutput) UnmarshalJSON(data []byte) error {
 			return fmt.Errorf("single_point analysis: %w", err)
 		}
 		a.Analysis = body
+	case FormStructural:
+		var body StructuralAnalysis
+		if err := json.Unmarshal(raw.Analysis, &body); err != nil {
+			return fmt.Errorf("structural analysis: %w", err)
+		}
+		a.Analysis = body
 	case FormSparse:
 		var body SparseAnalysis
 		if err := json.Unmarshal(raw.Analysis, &body); err != nil {
@@ -749,25 +822,28 @@ func (a *analyzeOutput) UnmarshalJSON(data []byte) error {
 // analyzePrompt is the LLM prompt for the analyst role.
 // Produces layered output (fact_layer + insight_layer) shaped by form + lens.
 // Spec "分层见解产出" / "见解依据与确定性分级" / "骨感型诚实标注".
-const analyzePrompt = `你是一位产业探索判断分析师。话题形态已判断为「%s」，本次分析视角是「%s」。
+const analyzePrompt = `你是一位结构化分析师。话题形态已判断为「%s」，本次分析视角是「%s」。
 
 下面提供：
 1) 话题演进脉络 (lifeline)
 2) 分层新闻上下文
-3) 各主题实时数据（agent 查到的信息）
+3) 各主题素材（agent 检索到的背景/历史/原文）
 
-你的任务：按形态 + 视角，产出【分层分析】——事实层（梳理+验证，铺垫）+ 见解层（推演/假设/提问，★产出主体）。发挥 AI 多层推演 + 跨领域联想 + 假设性提问的优势。
+你的任务：按形态 + 视角，产出【分层分析】——事实层（梳理+验证，铺垫）+ 见解层（推演/假设/提问，★产出主体）+ 深度层（非 sparse 形态强制，见下方铁律）。发挥 AI 多层推演 + 跨领域联想 + 假设性提问的优势。
 
-【按形态产出结构（严格按本形态二选一）】
+【按形态产出结构（严格按本形态选一）】
 
 ▶ event_chain（事件链）：
-{"fact_layer":[{"claim":"已验证的事实陈述","evidence":[{"source_type":"news|tool","ref":"引用id","quote":"原话"}],"verified":true}],"timeline":[{"date":"2026-07-01","event":"事件","ref":{"source_type":"news","ref":"..."}}],"insight_layer":[{"cert":"high|medium|low|question","title":"见解标题","logic":"凭什么 A→B 的推演逻辑","evidence":[{"source_type":"news","ref":"...","quote":"..."}],"web_verified":[{"source_type":"tool","ref":"..."}]}]}
+{"fact_layer":[{"claim":"已验证的事实陈述","evidence":[{"source_type":"news|web|page","ref":"引用 id 或 url","quote":"原话"}],"verified":true}],"timeline":[{"date":"2026-07-01","event":"事件","ref":{"source_type":"news","ref":"..."}}],"insight_layer":[{"cert":"high|medium|low|question","title":"见解标题","logic":"凭什么 A→B 的推演逻辑","evidence":[{"source_type":"news","ref":"...","quote":"..."}],"web_verified":[{"source_type":"web|page","ref":"..."}]}],"depth":{...见深度层铁律...}}
 
 ▶ theme_vein（主题脉络）：
-{"veins":[{"name":"线索名","desc":"线索描述","evidence":[{"source_type":"news","ref":"..."}]}],"cross_insight":[{"cert":"...","title":"...","logic":"...","evidence":[...]}]}
+{"veins":[{"name":"线索名","desc":"线索描述","evidence":[{"source_type":"news","ref":"..."}]}],"cross_insight":[{"cert":"...","title":"...","logic":"...","evidence":[...]}],"depth":{...}}
 
 ▶ single_point（单点影响）：
-{"impact":{"implication":"直接影响","ripple":"连锁涟漪","benchmark":"可比历史基准"},"evidence":[{"source_type":"news","ref":"..."}]}
+{"impact":{"implication":"直接影响","ripple":"连锁涟漪","benchmark":"可比历史基准"},"evidence":[{"source_type":"news","ref":"..."}],"depth":{...}}
+
+▶ structural（结构演化）：
+{"evolution_narrative":"结构演化叙述","phases":[{"period":"...","event":"...","ref":{...}}],"depth":{...}}
 
 ▶ sparse（骨感）：
 {"notice":"信息不足的诚实说明（命中少/脉络薄，哪些还说不准）","summary":"能确定的轻量摘要"}
@@ -780,9 +856,18 @@ const analyzePrompt = `你是一位产业探索判断分析师。话题形态已
    - low：假设·情景（条件成立才会如此）
    - question：提问·指出决定成败的条件，不要预言成败结果
 3. 见解要给 logic（凭什么 A→B），关键中间环节尽量有 evidence/web_verified 支撑
-4. sparse 形态【不产出】 insight_layer/cross_insight，只给 notice + summary
+4. sparse 形态【不产出】 insight_layer/cross_insight/depth，只给 notice + summary
 
-【引用格式】source_type ∈ news（来自分层新闻上下文）| tool（agent 查到的数据）；ref 指向具体 id；quote 直接摘录原话
+【深度层（非 sparse 形态强制，sparse 不产出）】
+depth 块字段（映射结构化深度分析基因）：
+- system_reframe：一句话——这个话题该放进哪个更大的系统来讲（系统重定位）
+- mechanism_layers：多层子机制拆解，每层给 layer(子机制名)+deep_logic(深层逻辑)+basis(依据)
+- historical_analogy：历史类比，给 case(案例)+mechanism(机制类比)+diff(何处不同)
+- regime_shift：范式转折判断（确实有才填，无则 null）
+- boundary：★反过度解读边界——明确写出“目前还不能下结论的边界”，不可空泛，不可省略
+- evidence_chain：可核查证据链，source_type ∈ news(分层新闻)|web(web_search 网页)|page(fetch_page 正文)；web/page 必须带 url + quote(原文摘录，非转述) + institution(来源机构) + date
+
+【引用格式】source_type ∈ news（来自分层新闻上下文）| web（web_search 网页结果）| page（fetch_page 正文）；news 的 ref 指向具体 id，web/page 带 url；quote 直接摘录原话/原文
 
 输出严格 JSON（不要 markdown 包裹）：
 {"form":"%s","lens":"%s","analysis":{...按形态...}}`
@@ -804,6 +889,24 @@ func (o *OrchestratorService) analyze(ctx context.Context, sessionID, form, lens
 	}
 	prompt += "\n\n话题演进脉络:\n" + lifelineText + "\n\n各主题实时数据:\n" + topicsBlock
 
+	out, perr := o.callAndParseAnalyze(ctx, sessionID, prompt)
+	if perr != nil {
+		// Retry once: feed the parse/depth error back so the LLM can correct a
+		// malformed or depth-less output (spec: "解析失败重试一次").
+		retryPrompt := prompt + "\n\n---\n上次输出解析失败：" + perr.Error() +
+			"。请按上述 schema 重新输出完整 JSON（非 sparse 形态必须含完整 depth 块：system_reframe 非空、mechanism_layers≥1、boundary 非空、evidence_chain≥1），不要输出 markdown 包裹。"
+		out2, perr2 := o.callAndParseAnalyze(ctx, sessionID, retryPrompt)
+		if perr2 != nil {
+			return nil, fmt.Errorf("analyze (after retry): %w", perr2)
+		}
+		return out2, nil
+	}
+	return out, nil
+}
+
+// callAndParseAnalyze runs a single analyze LLM call and parses the result,
+// enforcing the per-form schema + depth contract via parseAnalyzeOutput.
+func (o *OrchestratorService) callAndParseAnalyze(ctx context.Context, sessionID, prompt string) (*analyzeOutput, error) {
 	resp, err := o.airouter.Chat(ctx, airouter.ChatRequest{
 		Capability:  o.capability,
 		Operation:   "data_enrichment.analyze",
@@ -815,7 +918,6 @@ func (o *OrchestratorService) analyze(ctx context.Context, sessionID, form, lens
 	if err != nil {
 		return nil, fmt.Errorf("analyze chat: %w", err)
 	}
-
 	parsed, err := ParseJSONResponse(resp.Content)
 	if err != nil {
 		return nil, fmt.Errorf("analyze parse: %w", err)
@@ -845,10 +947,57 @@ func parseAnalyzeOutput(parsed map[string]any) (*analyzeOutput, error) {
 		body = parseThemeVeinAnalysis(analysisRaw)
 	case FormSinglePoint:
 		body = parseSinglePointAnalysis(analysisRaw)
+	case FormStructural:
+		body = parseStructuralAnalysis(analysisRaw)
 	case FormSparse:
 		body = parseSparseAnalysis(analysisRaw)
 	}
+
+	// Depth layer (spec "分析深度层产出"): every non-sparse form MUST carry a
+	// complete depth block; sparse forbids it (depth is ignored if present).
+	if form != FormSparse {
+		if d, ok := depthOf(body); ok {
+			if err := validateDepth(form, d); err != nil {
+				return nil, err
+			}
+		}
+	}
 	return &analyzeOutput{Form: form, Lens: lens, Analysis: body}, nil
+}
+
+// depthOf extracts the Depth block from any non-sparse analysis body. Returns
+// ok=false for SparseAnalysis (which carries no Depth by construction).
+func depthOf(body AnalysisBody) (Depth, bool) {
+	switch b := body.(type) {
+	case EventChainAnalysis:
+		return b.Depth, true
+	case ThemeVeinAnalysis:
+		return b.Depth, true
+	case SinglePointAnalysis:
+		return b.Depth, true
+	case StructuralAnalysis:
+		return b.Depth, true
+	}
+	return Depth{}, false
+}
+
+// validateDepth enforces the non-sparse depth contract: system_reframe and
+// boundary must be non-empty, mechanism_layers ≥ 1, evidence_chain ≥ 1. A
+// missing/empty field returns an error so analyze can retry once.
+func validateDepth(form string, d Depth) error {
+	if strings.TrimSpace(d.SystemReframe) == "" {
+		return fmt.Errorf("analyze: depth.system_reframe required for %s (系统重定位)", form)
+	}
+	if len(d.MechanismLayers) < 1 {
+		return fmt.Errorf("analyze: depth.mechanism_layers require >=1 for %s", form)
+	}
+	if strings.TrimSpace(d.Boundary) == "" {
+		return fmt.Errorf("analyze: depth.boundary required for %s (反过度解读边界)", form)
+	}
+	if len(d.EvidenceChain) < 1 {
+		return fmt.Errorf("analyze: depth.evidence_chain require >=1 for %s", form)
+	}
+	return nil
 }
 
 func parseEventChainAnalysis(m map[string]any) EventChainAnalysis {
@@ -889,6 +1038,7 @@ func parseEventChainAnalysis(m map[string]any) EventChainAnalysis {
 			body.InsightLayer = append(body.InsightLayer, ins)
 		}
 	}
+	body.Depth = parseDepth(m)
 	return body
 }
 
@@ -917,6 +1067,7 @@ func parseThemeVeinAnalysis(m map[string]any) ThemeVeinAnalysis {
 			body.CrossInsight = append(body.CrossInsight, ins)
 		}
 	}
+	body.Depth = parseDepth(m)
 	return body
 }
 
@@ -930,6 +1081,7 @@ func parseSinglePointAnalysis(m map[string]any) SinglePointAnalysis {
 		}
 	}
 	body.Evidence = parseRefs(m["evidence"])
+	body.Depth = parseDepth(m)
 	return body
 }
 
@@ -938,6 +1090,92 @@ func parseSparseAnalysis(m map[string]any) SparseAnalysis {
 		Notice:  getString(m, "notice"),
 		Summary: getString(m, "summary"),
 	}
+}
+
+// parseStructuralAnalysis parses the form=structural body: the structural
+// evolution narrative + dated phases (timeline-style) + depth block.
+func parseStructuralAnalysis(m map[string]any) StructuralAnalysis {
+	var body StructuralAnalysis
+	body.EvolutionNarrative = getString(m, "evolution_narrative")
+	if ps, ok := m["phases"].([]any); ok {
+		for _, p := range ps {
+			pm, ok := p.(map[string]any)
+			if !ok {
+				continue
+			}
+			node := Phase{Period: getString(pm, "period"), Event: getString(pm, "event")}
+			if refMap, ok := pm["ref"].(map[string]any); ok {
+				node.Ref = parseRef(refMap)
+			}
+			body.Phases = append(body.Phases, node)
+		}
+	}
+	body.Depth = parseDepth(m)
+	return body
+}
+
+// parseDepth parses the 6-field depth block nested under the analysis map's
+// "depth" key. mechanism_layers / historical_analogy / evidence_chain use
+// sub-parsers; regime_shift is a nullable object (absent or non-object → nil).
+// Returns a zero Depth when the depth field is missing — callers rely on
+// validateDepth to enforce non-emptiness.
+func parseDepth(m map[string]any) Depth {
+	var d Depth
+	dm, ok := m["depth"].(map[string]any)
+	if !ok {
+		return d // no depth block — validateDepth will reject for non-sparse forms
+	}
+	d.SystemReframe = getString(dm, "system_reframe")
+	d.Boundary = getString(dm, "boundary")
+	if ml, ok := dm["mechanism_layers"].([]any); ok {
+		for _, v := range ml {
+			vm, ok := v.(map[string]any)
+			if !ok {
+				continue
+			}
+			d.MechanismLayers = append(d.MechanismLayers, MechanismLayer{
+				Layer:     getString(vm, "layer"),
+				DeepLogic: getString(vm, "deep_logic"),
+				Basis:     getString(vm, "basis"),
+			})
+		}
+	}
+	if ha, ok := dm["historical_analogy"].([]any); ok {
+		for _, v := range ha {
+			vm, ok := v.(map[string]any)
+			if !ok {
+				continue
+			}
+			d.HistoricalAnalogy = append(d.HistoricalAnalogy, HistoricalAnalogy{
+				Case:      getString(vm, "case"),
+				Mechanism: getString(vm, "mechanism"),
+				Diff:      getString(vm, "diff"),
+			})
+		}
+	}
+	if rs, ok := dm["regime_shift"].(map[string]any); ok {
+		d.RegimeShift = &RegimeShift{
+			Judgment: getString(rs, "judgment"),
+			Evidence: getString(rs, "evidence"),
+		}
+	}
+	if ec, ok := dm["evidence_chain"].([]any); ok {
+		for _, v := range ec {
+			vm, ok := v.(map[string]any)
+			if !ok {
+				continue
+			}
+			d.EvidenceChain = append(d.EvidenceChain, EvidenceChainItem{
+				SourceType:  getString(vm, "source_type"),
+				Ref:         getString(vm, "ref"),
+				URL:         getString(vm, "url"),
+				Quote:       getString(vm, "quote"),
+				Institution: getString(vm, "institution"),
+				Date:        getString(vm, "date"),
+			})
+		}
+	}
+	return d
 }
 
 func parseInsight(v any) Insight {
@@ -1099,14 +1337,16 @@ func argsToJSON(args map[string]any) string {
 
 // explorationToolNames are the always-on tools the agent loop gets regardless
 // of board source_type: multi-level board/lane navigation plus the web_search
-// fallback. Financial (source-typed) tools are layered on top conditionally.
-var explorationToolNames = []string{"list_boards", "list_lanes", "get_lane_detail", "web_search"}
+// external-knowledge fallback (fetch_page is added once the readability backend
+// is wired). No per-source_type conditional tools exist anymore — the A-share
+// financial tools were removed when the direction shifted to structured depth.
+var explorationToolNames = []string{"list_boards", "list_lanes", "get_lane_detail", "web_search", "fetch_page"}
 
 // buildAgentAllowedTools returns the effective allowed-tools list for the agent
 // loop: the always-on exploration entry points + web_search, plus the board's
-// configured source-typed tools (e.g. financial ETF tools). Financial tools only
-// appear when the board's source_types include etf_quote — that mapping is done
-// upstream by board_config ToolsForSourceType and arrives in configuredTools.
+// configured source-typed tools (cfg.AllowedTools, currently always empty after
+// the financial removal — ToolsForSourceType always returns nil; the mechanism
+// is retained as an extension point for future structured external sources).
 // Dedup preserves first-seen order.
 func (o *OrchestratorService) buildAgentAllowedTools(configuredTools []string) []string {
 	seen := make(map[string]bool, len(explorationToolNames)+len(configuredTools))

@@ -1,5 +1,6 @@
 # 语义版块流程（Semantic Board）
 
+<!-- doc-impact-applies: backend-go/internal/tagmanagement/, backend-go/internal/topicgraph/ | section=业务约束与不变量 -->
 > 大功能：辅助标签入库、SemanticBoard 匹配/升级/回填、叙事面板。
 > 跨端。互补：`flow/daily-report.md`、`flow/topic-graph.md`。
 
@@ -259,7 +260,7 @@ Event 类标签不随入库立即向量化，而是等描述与关键词生成�
 
 ## 业务约束与不变量
 
-> 本节是 `doc-impact.sh context` 的数据源：apply 改 `internal/tagmanagement/` 或 `internal/topicgraph/` 代码前会自动 dump 给 agent，必须遵守。
+> 本节是 constraint-injection extension 的注入数据源：apply 改 `internal/tagmanagement/` 或 `internal/topicgraph/` 代码前会自动注入 system prompt，必须遵守。
 
 1. **辅助标签三级去重（L1/L2/L3）**：L1 slug/alias 精确匹配复用（`ref_count++`）；L2 embedding ≥ `auxiliary_label_dedupe_sim`（默认 0.95）命中只 `addAlias`（append alias + `ref_count++`）；L3 未命中才新建 `label_type=auxiliary` 的 `semantic_label`。
 2. **L2 不形成合并黑洞**：aux 的 L2 命中**只 `addAlias`，不改 Label、不重算 MergeEmbedding**。`MergeEmbedding` 仅 L3 新建时生成一次，之后恒定——既有 aux 的「吸引力」= 固定 embedding 的 cosine，不随 alias 增多 / ref_count 升高自我放大。（对照主标签 `findOrCreateTag` 的 embedding 黑洞教训。）
@@ -271,6 +272,8 @@ Event 类标签不随入库立即向量化，而是等描述与关键词生成�
 8. **watch 观察池 GC**：单标签簇（decision=watch）不进 LLM，入观察池等成簇；满 `semantic_board_upgrade_watch_gc_days`（默认 30 天）未成簇由 `GCOldWatch` 回收（每轮生成附跑）。
 9. **upgrade-execute 事务联动**：确认执行在同一事务内写 `board_composition` + `MarkConfirmed(suggestion_id)`，建议 → confirmed；`board_composition` 写失败则整体回滚，不留半状态。
 10. **定时生成失败不阻塞兄弟 job**：`job_board_upgrade_suggest` 生成失败仅记日志，返回 nil error（不标 task failed），不阻塞同轮其它 scheduler job（design D4）。
+11. **禁用即弃向量（2026-08-20 起）**：任何将 `semantic_labels.status` 置为 `disabled` 的路径（API 删除 board、`DisableAuxiliaryLabel`、alias 合并源标记、GC disable 模式、更新接口）MUST 同事务同步置 `embedding=NULL, merge_embedding=NULL`（行本体与 aliases 保留）；重新启用由 backfill / llm_extract 重算。存量 disabled 向量已一次性清理。
+12. **tag 删除的向量级联（2026-08-20 起）**：`topic_tag_embeddings.topic_tag_id` 有 DB 层 `FK ON DELETE CASCADE`（迁移 `20260820_0001`）——删 `topic_tags` 行时向量自动级联删除。历史孤儿（GORM 声明 CASCADE 但 DB 无约束期间残留的 25.6 万行）已清理；`hard_merge` 等显式删 embedding 的代码路径保持不变（幂等）。
 
 ## 代码入口
 
@@ -300,7 +303,8 @@ handler 出处：`tagmanagement/handler/{tag_queue,embedding_queue,merge_reembed
 
 | 日期 | 变更 | 摘要 | 归档位置 |
 | ------ | ------ | ------ | ---------- |
-| 2026-08-01 | revamp-landscape-charts | 话题态势版图可视化改 ECharts：新增「话题节奏总览」气泡图（聚合全部话题节奏成主载体）；卡片节奏条改 ECharts 迷你柱图（柱高=数值），emerging 卡片去图；活力折线改面积图；引入 echarts 模块化按需引入 + `useEcharts` 封装 | [`openspec/changes/revamp-landscape-charts`](../../../openspec/changes/revamp-landscape-charts) |
+| 2026-08-22 | analysis-remediation | 存储清理两不变量落地：disabled 标签向量置 NULL（四条禁用路径同步置 NULL，重启用由 llm_extract 重算）+ `topic_tag_embeddings` 孤儿一次性清理并加 DB 层 `FK ON DELETE CASCADE`（迁移 `20260820_0001`，与 GORM 声明对齐） | [`openspec/changes/archive/2026-08-22-analysis-remediation`](../../../openspec/changes/archive/2026-08-22-analysis-remediation) |
+| 2026-08-02 | revamp-landscape-charts | 话题态势版图可视化改 ECharts：新增「话题节奏总览」气泡图（聚合全部话题节奏成主载体）；卡片节奏条改 ECharts 迷你柱图（柱高=数值），emerging 卡片去图；活力折线改面积图；引入 echarts 模块化按需引入 + `useEcharts` 封装 | [`openspec/changes/archive/2026-08-02-revamp-landscape-charts`](../../../openspec/changes/archive/2026-08-02-revamp-landscape-charts) |
 | 2026-08-01 | board-topic-landscape | 板块内容 tab 首屏「话题态势版图」：identity 轨态势派生（🌱emerging/🔴pending/🟢active/⏸️stalled/⬛archived + 🌀强吸引叠加）+ 分区卡片墙 + mini-lifeline + 活力顶栏；新增 `GET /semantic-boards/:id/topic-landscape` 聚合接口；禁 similarity 轨五态，可见口径保留 hit≥1（含 emerging 新苗头） | [`openspec/changes/archive/2026-08-01-board-topic-landscape`](../../../openspec/changes/archive/2026-08-01-board-topic-landscape) |
 | 2026-07-23 | board-discovery-expansion | 升级建议持久化生命周期 + 双签名算法 + 观察池 watch + 定时 06:30 生成；`board_upgrade_suggestions` 表（suggestion_hash 幂等）；dismiss 冷却期 + watch GC；旧 upgrade-suggest 保留兼容期 | [`openspec/changes/archive/2026-07-23-board-discovery-expansion`](../../../openspec/changes/archive/2026-07-23-board-discovery-expansion) |
 | 2026-05-29 | matching-quality-and-daily-report-redesign | hit_rate/weighted 加方向校验；文章按匹配质量排序；日报展示精简 | [`openspec/changes/archive/2026-05-29-matching-quality-and-daily-report-redesign`](../../../openspec/changes/archive/2026-05-29-matching-quality-and-daily-report-redesign) |

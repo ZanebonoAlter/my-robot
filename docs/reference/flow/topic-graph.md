@@ -1,5 +1,6 @@
 # 话题图谱流程（Topic Graph）
 
+<!-- doc-impact-applies: backend-go/internal/topicgraph/, backend-go/internal/tagmanagement/ | section=业务约束与不变量 -->
 > 大功能：PersistentTopic 日报归属、展示，关系双轨。
 > 跨端。互补：`flow/daily-report.md`（叙事生成驱动话题）、`architecture/backend.md`。
 
@@ -100,7 +101,7 @@ identity（同 persistent_topic）
 
 ## 业务约束与不变量
 
-> 本节是 `doc-impact.sh context` 的数据源：apply 改 `internal/topicgraph/` 或 `internal/tagmanagement/` 代码前会自动 dump 给 agent，必须遵守。
+> 本节是 constraint-injection extension 的注入数据源：apply 改 `internal/topicgraph/` 或 `internal/tagmanagement/` 代码前会自动注入 system prompt，必须遵守。
 
 1. **candidate→active→archived 全人工归档**：`planLifecycle`（`repository/daily_report_assignment.go`）只更新命中计数——当天有 section 归属则 `consecutive_hits += 1`、`hit_count += 1`、`last_seen_date = 当天`；无归属则 `consecutive_hits` 归零。**不自动变更任何 status**；任何 status → archived 的转换只能由用户在话题管理界面的显式操作触发。
 2. **`upgrade_threshold`（默认 3）双重含义**：`consecutive_hits` 达阈值的 candidate 仅**获得人工激活资格**（`CanActivate = Status==candidate && HitCount >= UpgradeThreshold`），仍保持 candidate，需用户 PATCH active 才转 active。同时该阈值是**话题管理 UI 的可见门槛**——未达阈值的 "observing" candidate 在 `GET /api/semantic-boards/:id/topics` 中隐藏（仍持久化、参与可锚定集合，保证跨天累积），达阈后自动可见。
@@ -125,3 +126,4 @@ identity（同 persistent_topic）
 | 2026-07-05 | manual-topic-lane | 手动建泳道：用户主动建 active topic（`source=manual`），次期接入 AND-gate；新增 `board_persistent_topics.source` 列 + `topic_match_confidence=manual` 第四态 | [`openspec/changes/archive/2026-07-05-manual-topic-lane`](../../../openspec/changes/archive/2026-07-05-manual-topic-lane) |
 | 2026-05-31 | section-lifecycle-ui | Section 获得独立生命周期（status + prev_section_id），BoardThreadBrowser 从 thread 粒度改为 section 粒度话题总览 | [`openspec/changes/archive/2026-05-31-section-lifecycle-ui`](../../../openspec/changes/archive/2026-05-31-section-lifecycle-ui) |
 | 2026-08-01 | inline-compose-lane | 就地编排新建泳道：composeMode 叠加态（不切 viewMode）+ unassigned 主战场勾选 + 贴合度实时分层 + active 淡显可勾走移出 + 聚类质量单卡 + 候选侧边栏（语义搜索/相似推荐/已中断折叠）+ 废弃 ComposePanel；CandidateTopicBrief 补 status 对齐 lanes 移出口径 | [`openspec/changes/archive/2026-08-01-inline-compose-lane`](../../../openspec/changes/archive/2026-08-01-inline-compose-lane) |
+| 2026-08-22 | analysis-remediation | 分析报告整改四线：W1 存储清理（topic_tag_embeddings 孤儿 3.07GB 清除 + FK CASCADE 防复发、semantic_labels disabled 行向量置 NULL）；W2 pi-sessions 并行编排；W3 openspec 指令副本收敛；W4 规范可观测（spec-gate 归档门禁强制化） | [`openspec/changes/archive/2026-08-22-analysis-remediation`](../../../openspec/changes/archive/2026-08-22-analysis-remediation) |

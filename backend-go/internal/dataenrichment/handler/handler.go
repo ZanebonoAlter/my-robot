@@ -835,7 +835,9 @@ func (h *EnrichmentHandler) listDataSources(c *gin.Context) {
 
 // upsertDataSource creates or updates a data source binding for a board.
 // PUT /semantic-boards/:id/data-sources
-// Body: { "source_type": "etf_quote", "config": {...}, "enabled": true }
+// Body: { "source_type": "<registered source type>", "config": {...}, "enabled": true }
+// Note: built-in financial source types (etf_quote/exchange_rate/gdelt_event)
+// were removed; source_type is an extensible enum (spec "板块数据源绑定").
 func (h *EnrichmentHandler) upsertDataSource(c *gin.Context) {
 	boardID, ok := parseIDParam(c, "id")
 	if !ok {

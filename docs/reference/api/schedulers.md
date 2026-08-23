@@ -43,6 +43,15 @@
 }
 ```
 
+除 `data`（调度器状态数组）外，顶层附全局状态字段：
+
+| 字段 | 类型 | 说明 |
+| ------ | ------ | ------ |
+| `analysis_paused` | bool | **用户意图**的暂停态（`UserPaused`，持久化标志）。只反映用户开关，**不受模型健康影响**——健康未就绪不会让该字段/前端暂停按钮翻转 |
+| `analysis_paused_at` | string | 用户暂停时间（RFC3339），未暂停为 `null` |
+| `ai_healthy` | bool | AI 模型层是否健康（后端启动探活后生效，见 `flow/scheduler.md` §业务约束 #7 健康门） |
+| `ai_health_routes` | array | 各路由主 provider 简明通断明细：`[{route_name, capability, primary_provider, reachable}]`，供前端渲染未就绪 banner |
+
 ### GET /api/schedulers/:name/status
 
 返回单个调度器状态，同上结构。`404` 表示调度器不存在。

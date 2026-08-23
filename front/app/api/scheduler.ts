@@ -1,12 +1,14 @@
 import type { ApiResponse } from '~/types'
-import type { AnalysisPauseState, SchedulerStatus, SchedulerTriggerResult } from '~/types/scheduler'
+import type { AnalysisPauseState, SchedulerAIHealthRoute, SchedulerStatus, SchedulerTriggerResult } from '~/types/scheduler'
 import { apiClient } from './client'
 import { buildQueryString } from '~/utils/api-helpers'
 
-// /schedulers/status 顶层除 data 外还带 analysis_paused / analysis_paused_at
+// /schedulers/status 顶层除 data 外还带 analysis_paused / analysis_paused_at / ai_healthy / ai_health_routes
 export type SchedulersStatusResponse = ApiResponse<SchedulerStatus[]> & {
   analysis_paused?: boolean
   analysis_paused_at?: string
+  ai_healthy?: boolean
+  ai_health_routes?: SchedulerAIHealthRoute[]
 }
 
 async function triggerSchedulerRequest(name: string, params?: Record<string, string>): Promise<ApiResponse<SchedulerTriggerResult>> {

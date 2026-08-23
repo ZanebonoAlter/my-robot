@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"os"
 	"os/signal"
 	"syscall"
@@ -10,6 +11,9 @@ import (
 	"syntopica-backend/internal/admin/scheduler"
 	"syntopica-backend/internal/dataenrichment"
 	"syntopica-backend/internal/models"
+	"syntopica-backend/internal/platform/aihealth"
+	"syntopica-backend/internal/platform/airouter"
+	"syntopica-backend/internal/platform/aisettings"
 	"syntopica-backend/internal/platform/database"
 	"syntopica-backend/internal/platform/logging"
 	content "syntopica-backend/internal/reader"
@@ -80,6 +84,22 @@ func resetStaleStates() {
 
 func StartRuntime() *Runtime {
 	resetStaleStates()
+
+	// Fire the one-shot AI model health probe asynchronously so it never blocks
+	// startup. The in-memory snapshot starts not-ready (Healthy()==false), so
+	// workers/IsPaused treat the startup-race window as paused until the probe
+	// completes and flips the snapshot to its real verdict (spec: 启动竞态期分析不跑).
+	autoStart, _ := aisettings.LoadAutoStartModelsConfig()
+	go aihealth.RunStartupProbe(context.Background(), airouter.NewStore(database.DB), autoStart)
+	// Background self-heal timer: while the snapshot is not healthy it
+	// re-probes at reprobeInterval (default 60s) until the model layer comes up
+	// (slow-loading local models can outlast the startup probe's poll window),
+	// then idles. autoStart is re-read per tick so a mid-run switch change
+	// takes effect without restart.
+	go aihealth.StartPeriodicReprobe(context.Background(), airouter.NewStore(database.DB), func() bool {
+		v, _ := aisettings.LoadAutoStartModelsConfig()
+		return v
+	})
 
 	tagging.StartAllWorkers()
 

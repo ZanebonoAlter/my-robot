@@ -17,14 +17,19 @@ import (
 )
 
 // setupAnalysisPauseTestDB mirrors setupAIAdminTestDB (sqlite in-memory +
-// database.DB swap). Only the ai_settings table is needed because the
-// analysis-pause switch lives there; the handler itself is DB-agnostic and
-// goes through analysispause → aisettings on database.DB.
+// database.DB swap). ai_settings is what the handler itself needs; the AI
+// route tables exist so the resume-triggered RunStartupProbe goroutine sees an
+// empty route list and finishes immediately instead of retrying ListRoutes
+// for ~4s while holding the probe lock (which would make the later
+// resume-probe test's TryLock skip).
 func setupAnalysisPauseTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
 	db, err := gorm.Open(sqlite.Open(fmt.Sprintf("file:%s?mode=memory&cache=shared", t.Name())), &gorm.Config{})
 	require.NoError(t, err)
-	require.NoError(t, db.AutoMigrate(&models.AISettings{}))
+	require.NoError(t, db.AutoMigrate(
+		&models.AISettings{}, &models.AIProvider{}, &models.AIRoute{},
+		&models.AIRouteProvider{}, &models.AICallLog{},
+	))
 	database.DB = db
 	return db
 }

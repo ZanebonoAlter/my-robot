@@ -1,14 +1,22 @@
 package handler
 
 import (
+	"context"
 	"net/http"
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"syntopica-backend/internal/platform/aihealth"
+	"syntopica-backend/internal/platform/airouter"
+	"syntopica-backend/internal/platform/aisettings"
 	"syntopica-backend/internal/platform/analysispause"
+	"syntopica-backend/internal/platform/database"
 )
 
-// GetAnalysisPause reports the current global analysis-pause state.
+// GetAnalysisPause reports the current global analysis-pause state. The
+// reported `paused` reflects the USER intent only (the persisted switch), not
+// the effective pause that also factors in AI model health. The frontend
+// button/favicon must follow user intent so it never flips because of health.
 func GetAnalysisPause(c *gin.Context) {
 	pausedAtStr := ""
 	if pausedAt := analysispause.PausedAt(); pausedAt != nil {
@@ -18,7 +26,7 @@ func GetAnalysisPause(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"data": gin.H{
-			"paused":    analysispause.IsPaused(),
+			"paused":    analysispause.UserPaused(),
 			"paused_at": pausedAtStr,
 		},
 	})
@@ -43,6 +51,16 @@ func SetAnalysisPause(c *gin.Context) {
 		return
 	}
 
+	// On resume (user clicks start), asynchronously re-probe so the health
+	// gate can self-heal: a transient startup-probe failure (or models that
+	// came up after startup) is re-evaluated when the user explicitly resumes.
+	// Pause does not trigger a reprobe. The response still reflects user
+	// intent only. (spec: 恢复时重新探活)
+	if !req.Paused {
+		autoStart, _ := aisettings.LoadAutoStartModelsConfig()
+		go aihealth.RunStartupProbe(context.Background(), airouter.NewStore(database.DB), autoStart)
+	}
+
 	message := "分析已恢复"
 	if req.Paused {
 		message = "分析已暂停"
@@ -57,7 +75,7 @@ func SetAnalysisPause(c *gin.Context) {
 		"success": true,
 		"message": message,
 		"data": gin.H{
-			"paused":    analysispause.IsPaused(),
+			"paused":    analysispause.UserPaused(),
 			"paused_at": pausedAtStr,
 		},
 	})

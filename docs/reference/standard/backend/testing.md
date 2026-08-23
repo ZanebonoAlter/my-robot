@@ -3,6 +3,16 @@
 > **权威源**：本文件是后端测试约定的唯一权威。运行门禁见《开发执行规范》§4.1、集成测试执行纪律见 §6。
 > 含 🛑 **DSN 安全红线（事故教训）**，必须遵守。
 
+## 用例设计（测什么）
+
+> 测什么 / 测到什么程度 / 验收措辞的权威源是 [`standard/shared/test-design.md`](../shared/test-design.md)（故事锚点四问句，跨前后端）。本节只列后端分层判据速查：
+
+| 故事性质 | 层 | 载体 |
+| --- | --- | --- |
+| 纯逻辑（解析/判定/计算） | 函数单测 | `*_unit_test.go`（无 DB，勿提 SQLite） |
+| SQL/迁移/约束/级联 | testcontainer PG | `testutil.SetupTestDB`（repository 禁 SQLite） |
+| HTTP 契约（参数/缺省/状态码） | handler 测试 | 轻量 handler test |
+
 ## 框架
 
 - 标准 `testing` 包 + `github.com/stretchr/testify` 断言（仅当文件已用 testify 时才 import，否则用标准 testing）

@@ -16,9 +16,9 @@
 
 ---
 
-## 完整表清单（47 张业务表 + 5 张废弃表 + 1 张框架表）
+## 完整表清单（48 张业务表 + 5 张废弃表 + 1 张框架表）
 
-### 业务表（44 张，代码权威）
+### 业务表（45 张，代码权威）
 
 | 表名 | 说明 | 对应模型 | 域 |
 | ------ | ------ | ---------- | ------ |
@@ -31,6 +31,7 @@
 | `ai_routes` | AI 路由 | `models.AIRoute` | AI 路由 |
 | `ai_route_providers` | AI 路由-供应商绑定 | `models.AIRouteProvider` | AI 路由 |
 | `ai_call_logs` | AI 调用日志 | `models.AICallLog` | AI 路由 |
+| `ai_embedding_cache` | embedding 结果缓存 | `models.AIEmbeddingCache` | AI 路由 |
 | `topic_tags` | 主题标签主表 | `models.TopicTag` | 主题标签 |
 | `topic_tag_embeddings` | 主题标签向量 | `models.TopicTagEmbedding` | 主题标签 |
 | `topic_tag_analyses` | 主题分析快照 | `models.TopicTagAnalysis` | 主题标签 |
@@ -109,13 +110,15 @@
 | `pub_date` | TIMESTAMP | — | 发布时间 |
 | `author` | VARCHAR(200) | — | 作者 |
 | `read` | BOOLEAN | DEFAULT false | 是否已读（索引 `idx_articles_read`） |
-| `favorite` | BOOLEAN | DEFAULT false | 是否收藏（索引 `idx_articles_favorite`） |
+| `favorite` | BOOLEAN | DEFAULT false | 是否收藏（索引 `idx_articles_favorite`）；归档免死标记 |
+| `archived` | BOOLEAN | DEFAULT false（迁移 `20260818_0001`） | 归档标记：超出 feed `max_articles` 活跃窗口的超限文章置 true。归档行**保留全部文本字段**（日报线索按 ID 反查），但 topic tags 边 / reading_behaviors 已删、`search_vector` 置 NULL；reader 列表与统计默认过滤归档行，按 ID 详情豁免（见 `flow/reading.md` §业务约束 6） |
 | `summary_status` | VARCHAR(20) | DEFAULT 'complete' | AI 总结状态：`incomplete` / `pending` / `complete` / `failed` |
 | `summary_generated_at` | TIMESTAMP | — | AI 总结生成时间 |
 | `summary_processing_started_at` | TIMESTAMP | — | AI 总结开始处理时间 |
 | `completion_attempts` | INTEGER | DEFAULT 0 | AI 总结重试次数 |
 | `completion_error` | TEXT | — | AI 总结错误信息 |
 | `ai_content_summary` | TEXT | — | AI 生成的优化总结内容（Markdown） |
+| `content_form` | VARCHAR(20) | —（可空，AutoMigrate 自动加列） | 内容形态标记：`mono`（单主题）/ `aggregate`（聚合型合集）/ 空（存量文章或模型未输出标记）。由摘要链路解析首行 HTML 注释产出，下游打标按此分流（见 `flow/reading.md` §业务约束 3） |
 | `firecrawl_status` | VARCHAR(20) | DEFAULT 'pending' | Firecrawl 抓取状态：`pending` / `processing` / `completed` / `failed` |
 | `firecrawl_error` | TEXT | — | Firecrawl 抓取错误信息 |
 | `firecrawl_content` | TEXT | — | Firecrawl 抓取的完整网页内容（Markdown） |
@@ -123,7 +126,7 @@
 | `search_vector` | tsvector | — | 全文检索向量（触发器维护，见下） |
 | `created_at` | TIMESTAMP | — | 创建时间 |
 
-**全文检索（迁移 `20260417_0002`）**：`search_vector` 列由触发器 `articles_search_vector_trigger`（BEFORE INSERT OR UPDATE OF title, description）维护，权重 A=title、B=description；GIN 索引 `idx_articles_search_vector`。
+**全文检索（已废弃，2026-08-20）**：`search_vector` 列（tsvector）与触发器 `articles_search_vector_trigger`、GIN 索引 `idx_articles_search_vector` 自迁移 `20260417_0002` 引入，但业务零引用（代码 grep + idx_scan=0 双证据），索引与触发器已删除（列保留，重建分钟级）；归档 cleanup 置 `search_vector = NULL` 的行为保留。
 
 **虚拟字段（`gorm:"->"` 计算列，非持久化）**：`tag_count`（文章标签数）、`relevance_score`（相关度评分）。
 
@@ -237,9 +240,13 @@
 | `max_tokens` | INTEGER | —（`*int`，可空） | 最大 token 数 |
 | `temperature` | FLOAT | —（`*float64`，可空） | 温度参数 |
 | `enable_thinking` | BOOLEAN | NOT NULL DEFAULT false | 是否启用模型推理（传播 `chat_template_kwargs.enable_thinking`） |
+| `model_kind` | VARCHAR(20) | NOT NULL DEFAULT 'llm'; index | 模型类型：`llm`（默认，对话/推理）/ `embedding`（向量嵌入）。与 `provider_type`（协议维度）正交 |
+| `start_command` | TEXT | —（可空） | 本地模型进程启动命令（如 llama.cpp `llama-server ...`）。非空=本地托管进程，启动健康检测可按总开关 `auto_start_models` 自动拉起；空=外部托管服务 |
 | `metadata` | TEXT | — | 扩展元数据 |
 | `created_at` | TIMESTAMP | — | 创建时间 |
 | `updated_at` | TIMESTAMP | — | 更新时间 |
+
+> `model_kind` 列由 AutoMigrate 添加（默认 `'llm'`）；版本化迁移 `20260802_0001` 执行 backfill：将挂在 embedding 路由的 provider 批量置为 `embedding`（幂等，仅更新仍为 `llm` 且确属 embedding 路由者）；同时挂在 embedding + llm 路由的**冲突** provider 不自动改，仅 `logging.Warnf` 告警，需手动拆分路由绑定。
 
 > `enable_thinking` 语义曾从「事后剥离 `<think>` 标签」翻转为「启用模型推理」；迁移 `20260626_0001` 部署时批量 reset 为 false，避免旧 true 值意外拖慢打标签。
 
@@ -297,6 +304,20 @@
 
 `operation` / `prompt` / `token_usage` / `session_id` / `model` 五列由迁移 `20260704_0001` 补齐（R2 必记字段）。
 
+### 3.5 ai_embedding_cache（embedding 结果缓存）
+
+`Router.Embed` 层的持久化缓存（`nightly-throughput-embedding-cache-parallel-crawl` 引入）：仅白名单 operation（`tagmanagement.embedding`，tag 固定属性输入、跨文章重复）参与缓存——白名单外 operation（`section.embedding` / `tagmanagement.auxlabel_embedding` / `discovery.route_embedding` 等一次性内容输入）不查不写（实测命中率 0-10%，纯存储浪费）。命中则跳过 provider HTTP 与信号量，直接返回；由 `job_log_cleanup` 清理 14 天前记录（命中集中在写入后 1-2 天的夜间窗口内）。
+
+| 字段名 | 类型 | 约束/默认/索引 | 用途 |
+| -------- | ------ | ------ | ------ |
+| `cache_key` | VARCHAR(64) | PK | `SHA-256(provider.Model + "\\x00" + join(Input, "\\x00"))` 的 hex |
+| `model` | VARCHAR(100) | index | 落缓存时的模型名（参与 key，防跨模型串向量空间） |
+| `operation` | VARCHAR(80) | — | 业务操作名（仅白名单值会写入） |
+| `embedding` | JSONB | — | `[][]float64` 序列化 |
+| `dimensions` | INTEGER | — | 向量维度 |
+| `input_preview` | VARCHAR(200) | — | 输入预览（前 200 runes） |
+| `created_at` | TIMESTAMP | index | 创建时间（14 天 TTL 依据） |
+
 ---
 
 ## §4 主题标签域
@@ -314,7 +335,7 @@
 | `description` | TEXT | — | LLM 生成的标签描述 |
 | `is_canonical` | BOOLEAN | DEFAULT false | 是否为规范标签 |
 | `source` | VARCHAR(20) | DEFAULT 'llm' | 来源：`llm` / `heuristic` / `manual` |
-| `feed_count` | INTEGER | DEFAULT 0 | 引用此标签的不重复 Feed 数 |
+| `feed_count` | INTEGER | DEFAULT 0 | 引用此标签的不重复 Feed 数；打标路径不增量维护，由 TagQualityScoreJob 周期对账重算 |
 | `status` | VARCHAR(20) | NOT NULL DEFAULT 'active'; index | 状态：`active` / `merged` |
 | `merged_into_id` | INTEGER | index | 合并目标标签 ID（**唯一真实 DB FK**：`topic_tags_merged_into_id_fkey ... ON DELETE CASCADE`） |
 | `is_watched` | BOOLEAN | DEFAULT false | 是否为用户关注标签 |
@@ -333,7 +354,7 @@
 | 字段名 | 类型 | 约束/默认/索引 | 用途 |
 | -------- | ------ | ------ | ------ |
 | `id` | SERIAL | PK | 主键 |
-| `topic_tag_id` | INTEGER | NOT NULL; 复合唯一 `idx_topic_tag_embeddings_tag_type_hash` | 关联标签 ID（逻辑关联，无 DB FK） |
+| `topic_tag_id` | INTEGER | NOT NULL; 复合唯一 `idx_topic_tag_embeddings_tag_type_hash`; **FK `fk_topic_tag_embeddings_tag` → topic_tags.id ON DELETE CASCADE（迁移 `20260820_0001`）** | 关联标签 ID |
 | `embedding_type` | VARCHAR(20) | NOT NULL DEFAULT 'identity'; 复合唯一同上 | 嵌入类型：`identity` / `semantic` / `event_keyword` |
 | `embedding` | **vector(4096)** | — | pgvector 向量列（**迁移 `20260403_0003` 固定 4096 维**；struct 字段名 `embedding_vec`，列名 `embedding`） |
 | `dimension` | INTEGER | NOT NULL | 向量维度 |
@@ -346,7 +367,7 @@
 
 > ⚠️ `topic_tag_embeddings.embedding` 是唯一维度固定的向量列（4096）。旧文档曾写 `vector(1536)`，错误。
 > ⚠️ 旧文档曾列 `vector`（TEXT 旧版 JSON 向量）：迁移 `20260601_0001b` 已 `DROP COLUMN`，请勿引用。
-> `TopicTagEmbedding.TopicTag` 声明了 `constraint:OnDelete:CASCADE`（GORM 层）。
+> `TopicTagEmbedding.TopicTag` 声明了 `constraint:OnDelete:CASCADE`（GORM 层）；DB 层 FK 由迁移 `20260820_0001` 补齐（此前仅 GORM 声明、DB 无约束，删 tag 后向量残留成孤儿，2026-08-20 已清理 25.6 万孤儿行）。
 
 ### 4.3 topic_tag_analyses（主题分析快照）
 
@@ -441,6 +462,8 @@
 ### 5.1 semantic_labels（语义标签统一表）
 
 辅助标签（`label_type=auxiliary`）和 SemanticBoard（`label_type=board`）共存于同一张表，通过 `label_type` 区分。
+
+> 向量保留策略（2026-08-20 起）：`status='disabled'` 的行 `embedding` / `merge_embedding` 置 NULL（行本体与 aliases 保留），所有禁用路径（API 删除 board / DisableAuxiliaryLabel / 别名合并 / 批量软删 / 更新接口）同步置 NULL；重新启用由 backfill / llm_extract 重算向量。存量 disabled 向量已一次性清理（7.3 万行，~1.7 GB）。
 
 | 字段名 | 类型 | 约束/默认/索引 | 用途 |
 | -------- | ------ | ------ | ------ |
@@ -568,6 +591,7 @@
 | `completed_at` | TIMESTAMP | —（`*time.Time`） | 完成时间 |
 
 > 关联为逻辑关联（无 OnDelete，DB FK 已 drop）。
+> 保留策略（2026-08-20 起）：`status='completed'` 且 `created_at` 早于 30 天的行由 `job_log_cleanup` 周期清理（部分索引 `idx_embedding_queues_completed_created` 支撑，迁移 `20260820_0002`）；`pending`/`processing`/`failed` 不受影响。
 
 ### 6.3 merge_reembedding_queues（合并后重算向量队列）
 
@@ -846,7 +870,7 @@
 | -------- | ------ | ------ | ------ |
 | `id` | BIGSERIAL | PK | 主键 |
 | `semantic_board_id` | BIGINT | NOT NULL; 复合唯一 `idx_board_src` | 所属板块 ID |
-| `source_type` | VARCHAR(40) | NOT NULL; 复合唯一同上 | 数据源类型：`etf_quote` / `exchange_rate` / `gdelt_event` |
+| `source_type` | VARCHAR(40) | NOT NULL; 复合唯一同上 | 数据源类型枚举（受代码 `ValidateSourceType` 校验）。**内置金融源 `etf_quote`/`exchange_rate`/`gdelt_event` 已移除**（data-enrichment-structural-depth），当前无内置枚举值；枚举可扩展（`repository.RegisterSourceType` 运行时注册），保留为未来接入结构化外部源的扩展点。`web_search`/`fetch_page`/内部导航为 always-on 工具，不依赖本表绑定。 |
 | `config` | JSONB | DEFAULT '{}'（serializer:json） | 板块级参数，schema 由 source_type 决定 |
 | `enabled` | BOOLEAN | NOT NULL DEFAULT true | 是否启用 |
 | `created_at` | TIMESTAMPTZ | — | 创建时间 |
@@ -1068,13 +1092,13 @@ UNIQUE(route_id, param_name, value) 复合唯一索引防同参数重复录入�
 | 字段名 | 类型 | 约束/默认/索引 | 用途 |
 | -------- | ------ | ------ | ------ |
 | `id` | BIGSERIAL | PK autoIncrement | 主键 |
-| `trace_id` | CHAR(32) | NOT NULL; index `idx_otel_spans_trace_id` | 追踪 ID |
+| `trace_id` | CHAR(32) | NOT NULL | 追踪 ID（索引 `idx_otel_spans_trace_id` 已删，2026-08-20，零使用；偶发按 trace_id 排障退化为顺序扫） |
 | `span_id` | CHAR(16) | NOT NULL | Span ID |
 | `parent_span_id` | CHAR(16) | DEFAULT '' | 父 Span ID |
 | `trace_state` | TEXT | DEFAULT '' | W3C trace state |
-| `name` | VARCHAR(255) | NOT NULL; index `idx_otel_spans_name` | Span 名称 |
-| `kind` | INTEGER | DEFAULT 1; index `idx_otel_spans_kind` | Span 类型（Internal=1, Server=2, Client=3, Producer=4, Consumer=5） |
-| `status_code` | INTEGER | DEFAULT 0; index `idx_otel_spans_status` | 状态码（0=Unset, 1=Error, 2=OK） |
+| `name` | VARCHAR(255) | NOT NULL | Span 名称（索引已删，2026-08-20） |
+| `kind` | INTEGER | DEFAULT 1 | Span 类型（Internal=1, Server=2, Client=3, Producer=4, Consumer=5）（索引已删，2026-08-20） |
+| `status_code` | INTEGER | DEFAULT 0 | 状态码（0=Unset, 1=Error, 2=OK）（索引已删，2026-08-20） |
 | `status_message` | TEXT | DEFAULT '' | 状态信息 |
 | `start_time_unix_nano` | BIGINT | NOT NULL; index `idx_otel_spans_start_time` | 开始时间（Unix 纳秒） |
 | `end_time_unix_nano` | BIGINT | NOT NULL | 结束时间（Unix 纳秒） |
@@ -1143,7 +1167,7 @@ UNIQUE(route_id, param_name, value) 复合唯一索引防同参数重复录入�
 
 ### 全文检索（迁移 `20260417_0002`）
 
-- `articles.search_vector`（tsvector）+ GIN 索引 `idx_articles_search_vector` + 触发器 `articles_search_vector_trigger`（BEFORE INSERT OR UPDATE OF title, description）。
+- ~~`articles.search_vector`（tsvector）+ GIN 索引 + 触发器~~（已删除，2026-08-20，零使用；列保留）
 
 ### 性能索引（迁移 `20260417_0001`）
 

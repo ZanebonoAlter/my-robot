@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-func TestLimitArticleTagsKeepsTopFiveInOrder(t *testing.T) {
+func TestLimitArticleTagsKeepsTopTagsInOrder(t *testing.T) {
 	tags := make([]TopicTag, 0, 10)
 	for i := 0; i < 10; i++ {
 		tags = append(tags, TopicTag{
@@ -18,8 +18,8 @@ func TestLimitArticleTagsKeepsTopFiveInOrder(t *testing.T) {
 
 	limited := limitArticleTags(tags)
 
-	if len(limited) != 5 {
-		t.Fatalf("limited tag count = %d, want 5", len(limited))
+	if len(limited) != 6 {
+		t.Fatalf("limited tag count = %d, want 6", len(limited))
 	}
 	for i, tag := range limited {
 		want := fmt.Sprintf("Tag %d", i)

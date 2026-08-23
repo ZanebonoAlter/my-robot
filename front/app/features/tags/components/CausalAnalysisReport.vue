@@ -5,6 +5,7 @@ import type {
   AnalyzeOutput,
   AnalyzeForm,
   AnalyzeRef,
+  AnalyzeDepth,
 } from '~/api/boardEnrichment'
 import AnalyzeRefChip from './AnalyzeRefChip.vue'
 import { renderMarkdown, renderMarkdownInline } from '~/utils/markdown'
@@ -18,7 +19,10 @@ import '~/components/article/ArticleContent.css'
  *  - event_chain（事件链）：事实层（已验证 claim）+ 横向时间线依据轴 + 推演见解层
  *  - theme_vein（主题脉络）：平行线索 veins + 跨线索洞察（平行非因果，不画箭头）
  *  - single_point（单点影响）：impact（意味/波及/对标）+ 证据（影响本身即见解）
- *  - sparse（骨感）：信息不足 notice + 轻量 summary（不渲染见解层）
+ *  - structural（结构演化）：演化叙述 + 关键阶段（长时段结构命题，无离散事件）
+ *  - sparse（骨感）：信息不足 notice + 轻量 summary（不渲染见解层与深度层）
+ *  - 深度层 depth（非 sparse 形态）：系统重定位 / 多层机制 / 历史类比 / 范式转折 /
+ *    边界限定 / 可核查证据链。旧结果无 depth 字段 → 不渲染该区块、不报错（降级）。
  *
  * 设计要点：
  *  - 事实层 vs 见解层视觉分区（事实=中性已验证框；见解=确定性着色框），读者可辨真假
@@ -41,6 +45,7 @@ const FORM_LABELS: Record<AnalyzeForm, string> = {
   event_chain: '事件链',
   theme_vein: '主题脉络',
   single_point: '单点影响',
+  structural: '结构演化',
   sparse: '骨感简报',
 }
 
@@ -73,6 +78,22 @@ const spBody = computed(() => {
 const spSparseBody = computed(() => {
   const o = output.value
   return o && o.form === 'sparse' ? o.analysis : null
+})
+/** structural analysis 体。 */
+const stBody = computed(() => {
+  const o = output.value
+  return o && o.form === 'structural' ? o.analysis : null
+})
+
+/**
+ * 深度层（非 sparse 形态；可选消费）。
+ * 旧 topic_enrichment_result 无 depth 字段 → 返回 null → 深度层区块不渲染（降级不崩）。
+ */
+const depthBody = computed<AnalyzeDepth | null>(() => {
+  const o = output.value
+  if (!o || o.form === 'sparse') return null
+  const d = o.analysis.depth
+  return d && typeof d === 'object' ? d : null
 })
 
 const form = computed<AnalyzeForm | null>(() => output.value?.form ?? null)
@@ -112,6 +133,12 @@ const stats = computed<string[]>(() => {
   if (o.form === 'single_point') {
     return [`${o.analysis.evidence?.length ?? 0} 条证据`]
   }
+  if (o.form === 'structural') {
+    return [
+      `${o.analysis.phases?.length ?? 0} 个关键阶段`,
+      `${o.analysis.depth?.evidence_chain?.length ?? 0} 条可核查证据`,
+    ]
+  }
   return [] // sparse：无计数
 })
 
@@ -143,6 +170,13 @@ function certMeta(cert?: string): CertMeta {
 // ── 时间线关键节点：有 ref 的节点视为"关键"（有据可查）──────────────────────
 function isKeyTimelineNode(node: { ref?: AnalyzeRef }): boolean {
   return !!node.ref
+}
+
+// ── 深度层证据链来源图标：news 📰 / web 🌐 / page 📄 ──────────────────────
+function evIcon(sourceType?: string): string {
+  if (sourceType === 'web') return '🌐'
+  if (sourceType === 'page') return '📄'
+  return '📰'
 }
 
 // ── 探索过程 trace（tool_calls，结构未冻结，防御解析）──────────────────────
@@ -372,6 +406,39 @@ function toolName(t: unknown): string {
         </section>
       </template>
 
+      <!-- ═════════════ structural：结构演化（长时段结构命题） ═══════════ -->
+      <template v-else-if="form === 'structural' && stBody">
+        <section v-if="stBody.evolution_narrative" class="layer">
+          <h3 class="layer-h">
+            <span class="layer-tag">结构演化叙述</span>
+            <span class="layer-note">长时段结构命题 · 无单一离散事件驱动</span>
+          </h3>
+          <div class="structural-narrative serif markdown-body" v-html="renderMarkdown(stBody.evolution_narrative)" />
+        </section>
+
+        <!-- 关键阶段（复用时间线依据轴样式，有据节点高亮） -->
+        <section v-if="stBody.phases?.length" class="layer">
+          <h3 class="layer-h">
+            <span class="layer-tag">关键阶段</span>
+            <span class="layer-note">关键节点（有据）高亮</span>
+          </h3>
+          <div class="timeline">
+            <div class="tl-track" />
+            <div
+              v-for="(p, i) in stBody.phases"
+              :key="'p'+i"
+              class="tl-node"
+              :class="{ key: isKeyTimelineNode(p) }"
+            >
+              <span class="tl-dot" />
+              <span class="tl-date">{{ p.period }}</span>
+              <span class="tl-event" v-html="renderMarkdownInline(p.event)" />
+              <AnalyzeRefChip v-if="p.ref" :r="p.ref" compact class="tl-ref" />
+            </div>
+          </div>
+        </section>
+      </template>
+
       <!-- ═════════════ sparse：骨感简报 ═══════════════════════════════ -->
       <template v-else-if="form === 'sparse' && spSparseBody">
         <div class="sparse-notice">
@@ -380,6 +447,97 @@ function toolName(t: unknown): string {
         </div>
         <div v-if="spSparseBody.summary" class="sparse-summary serif markdown-body" v-html="renderMarkdown(spSparseBody.summary)" />
       </template>
+
+      <!-- ═════════════ 深度层（非 sparse 形态；旧结果无 depth 不渲染） ═════════ -->
+      <section v-if="depthBody" class="layer depth-layer">
+        <h3 class="layer-h">
+          <span class="layer-tag depth">深度层</span>
+          <span class="layer-note">结构化剖析 · 系统 / 机制 / 历史 / 边界 / 证据</span>
+        </h3>
+
+        <!-- 系统重定位 -->
+        <div v-if="depthBody.system_reframe" class="dp-reframe">
+          <span class="dp-reframe-label">系统重定位</span>
+          <span class="dp-reframe-text" v-html="renderMarkdownInline(depthBody.system_reframe)" />
+        </div>
+
+        <!-- 多层机制 -->
+        <div v-if="depthBody.mechanism_layers?.length" class="dp-block">
+          <div class="dp-sub-h">多层机制</div>
+          <div
+            v-for="(m, i) in depthBody.mechanism_layers"
+            :key="'m'+i"
+            class="dp-mech"
+          >
+            <div class="dp-mech-name" v-html="renderMarkdownInline(m.layer)" />
+            <div class="dp-mech-logic markdown-body" v-html="renderMarkdown(m.deep_logic)" />
+            <div v-if="m.basis" class="dp-mech-basis">
+              <span class="dp-k">依据</span><span v-html="renderMarkdownInline(m.basis)" />
+            </div>
+          </div>
+        </div>
+
+        <!-- 历史类比 -->
+        <div v-if="depthBody.historical_analogy?.length" class="dp-block">
+          <div class="dp-sub-h">历史类比</div>
+          <div
+            v-for="(h, i) in depthBody.historical_analogy"
+            :key="'h'+i"
+            class="dp-analogy"
+          >
+            <div class="dp-analogy-case" v-html="renderMarkdownInline(h.case)" />
+            <div class="dp-analogy-row">
+              <span class="dp-k">机制类比</span><span v-html="renderMarkdownInline(h.mechanism)" />
+            </div>
+            <div class="dp-analogy-row">
+              <span class="dp-k">何处不同</span><span v-html="renderMarkdownInline(h.diff)" />
+            </div>
+          </div>
+        </div>
+
+        <!-- 范式转折（regime_shift 非 null 才显示） -->
+        <div v-if="depthBody.regime_shift" class="dp-block dp-regime">
+          <div class="dp-sub-h">范式转折</div>
+          <div class="dp-regime-judgment" v-html="renderMarkdownInline(depthBody.regime_shift.judgment)" />
+          <div v-if="depthBody.regime_shift.evidence" class="dp-regime-ev">
+            <span class="dp-k">依据</span><span v-html="renderMarkdownInline(depthBody.regime_shift.evidence)" />
+          </div>
+        </div>
+
+        <!-- 边界限定（高亮「还不能下结论」） -->
+        <div v-if="depthBody.boundary" class="dp-boundary">
+          <span class="dp-b-ic">⚠</span>
+          <div class="dp-b-body">
+            <span class="dp-b-label">边界限定 · 目前还不能下结论</span>
+            <span class="dp-b-text" v-html="renderMarkdownInline(depthBody.boundary)" />
+          </div>
+        </div>
+
+        <!-- 可核查证据链（web/page 类 url 可点击） -->
+        <div v-if="depthBody.evidence_chain?.length" class="dp-block">
+          <div class="dp-sub-h">可核查证据链</div>
+          <ul class="dp-evidence">
+            <li v-for="(ev, i) in depthBody.evidence_chain" :key="'ev'+i">
+              <span class="dp-ev-ic">{{ evIcon(ev.source_type) }}</span>
+              <div class="dp-ev-body">
+                <div class="dp-ev-head">
+                  <a
+                    v-if="ev.url"
+                    :href="ev.url"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    class="dp-ev-link"
+                  >{{ ev.ref || ev.url }}</a>
+                  <span v-else class="dp-ev-ref">{{ ev.ref || '引用' }}</span>
+                  <span v-if="ev.institution" class="dp-ev-inst">{{ ev.institution }}</span>
+                  <span v-if="ev.date" class="dp-ev-date">{{ ev.date }}</span>
+                </div>
+                <div v-if="ev.quote" class="dp-ev-quote">&ldquo;{{ ev.quote }}&rdquo;</div>
+              </div>
+            </li>
+          </ul>
+        </div>
+      </section>
 
       <!-- ── 探索过程 trace（折叠 · 低调） ─────────────────────────────── -->
       <details v-if="toolCalls.length" class="trace">
@@ -394,9 +552,11 @@ function toolName(t: unknown): string {
 
       <div class="editor-note">
         <span class="en-label">关于这份报告</span>
-        因果分析按叙事形态（事件链 / 主题脉络 / 单点影响 / 骨感）多态呈现。
+        因果分析按叙事形态（事件链 / 主题脉络 / 单点影响 / 结构演化 / 骨感）多态呈现。
         <b>事实层</b>为已验证客观陈述，<b>推演见解</b>按确定性（高/中/低/存疑）分级着色，
-        读者可辨哪是真、哪是猜。<b class="en-news">📰 新闻</b>来自订阅源报道，
+        读者可辨哪是真、哪是猜。非骨感形态附<b>深度层</b>：系统重定位 / 多层机制 / 边界限定
+        与可核查证据链（<b class="en-news">📰 新闻</b> / <b>🌐 网页</b> / <b>📄 正文</b>，网页与正文可点击核查原文）。
+        <b class="en-news">📰 新闻</b>来自订阅源报道，
         <b class="en-tool">🔧 工具查证</b>为 agent 自主调用 opencli skill 的结果；hover 引用标记可见出处。
       </div>
     </article>
@@ -806,6 +966,201 @@ function toolName(t: unknown): string {
   margin: 0;
 }
 
+/* ── 深度层（非 sparse 形态；颜色全走 CSS 变量，明暗主题自适应） ────────── */
+.layer-tag.depth { background: var(--color-info-subtle); color: var(--color-info); }
+.dp-reframe {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.6rem;
+  padding: 0.7rem 0.9rem;
+  margin-bottom: 0.8rem;
+  background: var(--color-info-subtle);
+  border-left: 3px solid var(--color-info);
+  border-radius: 0 8px 8px 0;
+}
+.dp-reframe-label {
+  flex: 0 0 auto;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: var(--color-info);
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--color-info) 14%, transparent);
+  margin-top: 2px;
+}
+.dp-reframe-text {
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.65;
+  color: var(--color-text-primary);
+}
+.dp-block { margin-bottom: 0.9rem; }
+.dp-sub-h {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+  margin-bottom: 0.45rem;
+}
+.dp-mech {
+  padding: 0.6rem 0.85rem;
+  margin-bottom: 0.5rem;
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-border-subtle);
+  border-left: 3px solid var(--color-info);
+  border-radius: 0 8px 8px 0;
+}
+.dp-mech-name {
+  font-size: 13.5px;
+  font-weight: 700;
+  color: var(--color-text-primary);
+  margin-bottom: 0.25rem;
+}
+.dp-mech-logic {
+  font-size: 13px;
+  line-height: 1.65;
+  color: var(--color-text-secondary);
+  margin: 0;
+}
+.dp-mech-basis {
+  font-size: 12px;
+  color: var(--color-text-muted);
+  margin-top: 0.35rem;
+}
+.dp-k {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: var(--color-text-muted);
+  background: var(--color-bg-sunken);
+  padding: 1px 7px;
+  border-radius: 4px;
+  margin-right: 0.4rem;
+}
+.dp-analogy {
+  padding: 0.6rem 0.85rem;
+  margin-bottom: 0.5rem;
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: 8px;
+}
+.dp-analogy-case {
+  font-size: 13.5px;
+  font-weight: 700;
+  color: var(--color-text-primary);
+  margin-bottom: 0.3rem;
+}
+.dp-analogy-row {
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--color-text-secondary);
+  margin-top: 0.25rem;
+}
+.dp-regime {
+  padding: 0.6rem 0.85rem;
+  background: var(--color-accent-subtle);
+  border-left: 3px solid var(--color-accent);
+  border-radius: 0 8px 8px 0;
+}
+.dp-regime .dp-sub-h { color: var(--color-accent); }
+.dp-regime-judgment {
+  font-size: 13.5px;
+  font-weight: 700;
+  line-height: 1.6;
+  color: var(--color-text-primary);
+}
+.dp-regime-ev {
+  font-size: 12px;
+  color: var(--color-text-secondary);
+  margin-top: 0.3rem;
+}
+.dp-boundary {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  padding: 0.7rem 0.9rem;
+  margin-bottom: 0.9rem;
+  background: var(--color-warning-subtle);
+  border-left: 3px solid var(--color-warning);
+  border-radius: 0 8px 8px 0;
+}
+.dp-b-ic { flex: 0 0 auto; color: var(--color-warning); font-weight: 700; }
+.dp-b-label {
+  display: block;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: var(--color-warning);
+  margin-bottom: 0.2rem;
+}
+.dp-b-text {
+  font-size: 13px;
+  line-height: 1.65;
+  color: var(--color-text-secondary);
+}
+.dp-evidence {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+.dp-evidence li {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: 8px;
+}
+.dp-ev-ic { flex: 0 0 auto; font-size: 13px; line-height: 1.5; }
+.dp-ev-body { flex: 1 1 auto; min-width: 0; }
+.dp-ev-head {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  font-size: 12px;
+}
+.dp-ev-link {
+  color: var(--color-info);
+  font-weight: 600;
+  text-decoration: none;
+  word-break: break-all;
+}
+.dp-ev-link:hover { text-decoration: underline; }
+.dp-ev-ref {
+  color: var(--color-text-primary);
+  font-weight: 600;
+  font-family: ui-monospace, Menlo, monospace;
+  font-size: 11px;
+}
+.dp-ev-inst { color: var(--color-text-secondary); font-weight: 600; }
+.dp-ev-date {
+  color: var(--color-text-muted);
+  font-family: ui-monospace, Menlo, monospace;
+  font-size: 11px;
+}
+.dp-ev-quote {
+  font-size: 12px;
+  font-style: italic;
+  line-height: 1.6;
+  color: var(--color-text-secondary);
+  margin-top: 0.25rem;
+}
+
+/* ── structural：结构演化叙述 ─────────────────────────────────────────── */
+.structural-narrative {
+  font-size: 15px;
+  line-height: 1.8;
+  color: var(--color-text-primary);
+  margin: 0;
+}
+
 /* ── 探索过程 trace（折叠 · 低调） ──────────────────────────────────── */
 .trace {
   margin-top: 1.4rem;
@@ -913,10 +1268,14 @@ function toolName(t: unknown): string {
   .tl-node { min-width: 0; max-width: none; padding: 0 0 0 1.3rem; }
   .tl-dot { top: 2px; left: 0; transform: none; }
 
-  /* insight 卡片 / 脉络卡 / 影响格 / 编者按：留白收缩，cert 标签+引用 chip 自然换行 */
+  /* insight 卡片 / 脉络卡 / 影响格 / 深度层块 / 编者按：留白收缩，cert 标签+引用 chip 自然换行 */
   .insight-card { padding: 0.6rem 0.75rem; }
   .vein-card { padding: 0.7rem 0.8rem; }
   .impact-cell { padding: 0.7rem 0.8rem; }
+  .dp-mech { padding: 0.5rem 0.7rem; }
+  .dp-analogy { padding: 0.5rem 0.7rem; }
+  .dp-reframe { padding: 0.6rem 0.7rem; flex-wrap: wrap; }
+  .dp-boundary { padding: 0.6rem 0.7rem; }
   .editor-note { padding: 0.75rem 0.85rem; }
 }
 </style>

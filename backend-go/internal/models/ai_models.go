@@ -76,10 +76,18 @@ type AIProvider struct {
 	// EnableThinking controls whether the request propagates
 	// chat_template_kwargs.enable_thinking=true, letting the model reason.
 	// (Previously this flag only stripped <think> tags from responses after-the-fact.)
-	EnableThinking bool      `json:"enable_thinking"`
-	Metadata       string    `gorm:"type:text" json:"metadata"`
-	CreatedAt      time.Time `json:"created_at"`
-	UpdatedAt      time.Time `json:"updated_at"`
+	EnableThinking bool `json:"enable_thinking"`
+	// ModelKind declares the provider's functional model type: "llm" (default,
+	// chat/inference) or "embedding" (vector embedding). It is orthogonal to
+	// ProviderType, which expresses protocol (openai_compatible / ollama).
+	ModelKind string `gorm:"size:20;default:llm;index" json:"model_kind"`
+	// StartCommand, when non-empty, marks this provider as a locally-managed
+	// process (e.g. a llama.cpp llama-server launch line) the runtime MAY attempt
+	// to start. Empty means an externally-managed service.
+	StartCommand string    `gorm:"type:text" json:"start_command"`
+	Metadata     string    `gorm:"type:text" json:"metadata"`
+	CreatedAt    time.Time `json:"created_at"`
+	UpdatedAt    time.Time `json:"updated_at"`
 }
 
 func (AIProvider) TableName() string {
@@ -142,6 +150,24 @@ type AICallLog struct {
 
 func (AICallLog) TableName() string {
 	return "ai_call_logs"
+}
+
+// AIEmbeddingCache persists embedding results keyed by (model, input_hash) so
+// repeated identical embedding requests skip the provider HTTP call entirely.
+// The vector payload is stored as JSON, not pgvector: the hit path only needs
+// byte-roundtrip, never similarity search (that is topic_tag_embeddings' job).
+type AIEmbeddingCache struct {
+	CacheKey     string    `gorm:"primaryKey;size:64" json:"cache_key"`
+	Model        string    `gorm:"size:100;index" json:"model"`
+	Operation    string    `gorm:"type:varchar(80)" json:"operation"`
+	Embedding    string    `gorm:"type:jsonb" json:"embedding"`
+	Dimensions   int       `json:"dimensions"`
+	InputPreview string    `gorm:"size:200" json:"input_preview"`
+	CreatedAt    time.Time `gorm:"index" json:"created_at"`
+}
+
+func (AIEmbeddingCache) TableName() string {
+	return "ai_embedding_cache"
 }
 
 func ToJSONValue(v interface{}) (string, error) {

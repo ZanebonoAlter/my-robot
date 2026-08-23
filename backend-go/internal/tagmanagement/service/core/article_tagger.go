@@ -16,7 +16,11 @@ import (
 	"syntopica-backend/internal/tagmanagement/repository"
 )
 
-const maxArticleTags = 5
+const maxArticleTags = 6
+
+// tagExtractorFactory builds the extractor used by tagArticle. Overridden in
+// tests to inject a fake router.
+var tagExtractorFactory = NewTagExtractor
 
 func FeedCategoryName(feed models.Feed) string {
 	if feed.Category != nil && strings.TrimSpace(feed.Category.Name) != "" {
@@ -86,30 +90,51 @@ func tagArticle(ctx context.Context, article *models.Article, feedName, category
 	}
 
 	// Use the extraction system
-	extractor := NewTagExtractor()
-	result, err := extractor.ExtractTags(context.Background(), input)
+	extractor := tagExtractorFactory()
 
 	var tags []TopicTag
 	var source string
-
-	if err != nil || len(result.Tags) == 0 {
-		// Fall back to legacy heuristic extraction
-		tags = legacyExtractTopics(input)
-		source = "heuristic"
-	} else {
-		tags = result.Tags
-		source = result.Source
+	handled := false
+	if article.ContentForm == "aggregate" {
+		aggTags, aggHandled, aggErr := tagAggregateArticle(ctx, article, input, extractor)
+		if aggErr != nil {
+			logging.Warnf("aggregate tagging failed for article %d, falling back to mono path: %v", article.ID, aggErr)
+		} else if aggHandled {
+			if len(aggTags) > 0 {
+				tags, source, handled = aggTags, "llm", true
+			} else {
+				// All sections failed or returned empty candidates: fall back to
+				// the mono path (dual-branch extraction with heuristic fallback)
+				// so aggregate articles never end up with zero tags.
+				logging.Infof("aggregate tagging yielded no tags for article %d, falling back to mono path", article.ID)
+			}
+		}
+		// handled=false (splitter yielded no sections) falls through to the mono path
+	}
+	if !handled {
+		result, err := extractor.ExtractTags(context.Background(), input)
+		if err != nil || len(result.Tags) == 0 {
+			// Fall back to legacy heuristic extraction
+			tags = legacyExtractTopics(input)
+			source = "heuristic"
+		} else {
+			tags = result.Tags
+			source = result.Source
+		}
+		tags = limitArticleTags(tags)
 	}
 
 	if len(tags) == 0 {
 		return nil
 	}
 
-	tags = limitArticleTags(tags)
-	if len(tags) == 0 {
-		return nil
-	}
+	return persistArticleTags(ctx, article, tags, source)
+}
 
+// persistArticleTags stores the extracted tags for an article: dedupe, then for
+// each tag find-or-create the topic tag, attach auxiliary labels and link it to
+// the article. Shared by the mono and aggregate extraction paths.
+func persistArticleTags(ctx context.Context, article *models.Article, tags []TopicTag, source string) error {
 	// Build article context for description generation
 	articleContext := ""
 	pubDateStr := formatPubDate(article.PubDate)
@@ -215,7 +240,7 @@ func limitArticleTags(tags []TopicTag) []TopicTag {
 	return tags[:maxArticleTags]
 }
 
-const maxSummaryRunesForTagging = 2000
+const maxSummaryRunesForTagging = 4000
 
 func buildArticleSummary(article models.Article) string {
 	var body string

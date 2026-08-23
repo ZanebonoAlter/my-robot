@@ -164,8 +164,20 @@ function collectAnalyzeRefs(out: AnalyzeOutput | null): AnalyzeRef[] {
     case 'single_point':
       pushAll(out.analysis.evidence)
       break
+    case 'structural':
+      for (const p of out.analysis.phases) pushOne(p.ref)
+      break
     case 'sparse':
       break
+  }
+  // 深度层 evidence_chain 的 news 引用也计入（additive；旧结果无 depth 自动跳过）
+  const depth = 'depth' in out.analysis ? out.analysis.depth : undefined
+  if (depth && Array.isArray(depth.evidence_chain)) {
+    for (const ev of depth.evidence_chain) {
+      if (ev && ev.source_type === 'news' && ev.ref) {
+        pushOne({ ...ev, source_type: 'news', ref: ev.ref })
+      }
+    }
   }
   return refs
 }

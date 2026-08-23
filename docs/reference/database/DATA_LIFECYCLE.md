@@ -291,7 +291,7 @@ DATA_LIFECYCLE.md  = "数据怎么变的"（哪些表被写入、状态字段怎
 
 | 调度器 | 间隔 | 清理对象与条件 |
 | ------ | ---- | -------------- |
-| `log_cleanup` | 86400s（每日，启动延迟5min） | `DELETE FROM ai_call_logs WHERE created_at < now()-7天`；`DELETE FROM otel_spans WHERE start_time_unix_nano < now()-7天`。**保留 7 天**。 |
+| `log_cleanup` | 86400s（每日，启动延迟5min） | `DELETE FROM ai_call_logs WHERE created_at < now()-7天`；`DELETE FROM otel_spans WHERE start_time_unix_nano < now()-7天`。**保留 7 天**。另：`DELETE FROM ai_embedding_cache WHERE created_at < now()-14天`（embedding 结果缓存，仅白名单 operation 落行）；`DELETE FROM embedding_queues WHERE status='completed' AND created_at < now()-30天`（已完成队列行，保留 30 天）。 |
 | `aux_label_cleanup` | 3600s（每时，启动延迟10min） | 软禁用「无活跃引用」的辅助标签：`semantic_labels` 中 `label_type='auxiliary' AND status='active' AND protected=false AND created_at < now()-1天` 且无 `topic_tag_semantic_labels` 引用且不在 `board_composition` 中 → `status='disabled'`（并删其 board_composition 行）。**不硬删**，模式为 disable、宽限1天。 |
 | `blocked_article_recovery` | 3600s（每时） | 恢复卡在 `articles.firecrawl_status IN ('waiting_for_firecrawl','blocked')` 且其 `feed.firecrawl_enabled=true` 的文章 → 置回 `pending` 重试。另含 STAT-05 告警（阻塞数>50 时 WARN）。 |
 | `preference_update` | 1800s（每30min） | 聚合 `reading_behaviors`→`user_preferences`；并运行孤儿清理：修复/删除 category_id 指向已删分类的 reading_behaviors，删除 feed_id 指向已删源的 reading_behaviors 与 user_preferences。**仅孤儿清理，无时间型 TTL**。 |
@@ -323,13 +323,13 @@ DATA_LIFECYCLE.md  = "数据怎么变的"（哪些表被写入、状态字段怎
 
 - 状态机：`pending → processing → completed / failed`
 - worker `Start()` 时一次性把残留 `processing → pending`。失败时 `markFailed` 置 `failed`、`retry_count++`，**无自动重试**，仅靠手动 `RetryFailed()` API 重置 failed→pending。
-- **无任何行级清除**：completed/failed 行不被定时删除，无限累积。
+- 行级清除：`embedding_queues` 的 `completed` 行由 `log_cleanup` 保留 30 天后删除（`merge_reembedding_queues` 及 failed 行仍无限累积）。
 
 ### 明确无自动清理的表（累积型）
 
 以下表当前**没有任何基于时间或状态的定时清除**，行会一直增长，需要人工/运维介入：
 
-- 队列表：`firecrawl_jobs` / `tag_jobs` / `embedding_queues` / `merge_reembedding_queues` 的 completed/failed 行
+- 队列表：`firecrawl_jobs` / `tag_jobs` 的 completed/failed 行；`merge_reembedding_queues` 全部行；`embedding_queues` 的 failed 行（completed 行 30 天后由 `log_cleanup` 清除）
 - 叙事与日报：`narrative_summaries` / `narrative_boards` / `board_daily_reports` / `daily_report_sections` / `daily_report_threads` / `daily_report_section_relations`（日报重生成仅删当日同 report 的旧分区，非 TTL 清理）
 - 持久话题与观察：`board_persistent_topics`（仅一次性迁移裁剪 candidate、状态机自驱动 candidate→active→archived，无时间型删除）、`board_topic_watches`、`topic_watch_hits`
 - 升级建议：`board_upgrade_suggestions`（仅 watch 软回收为 dismissed，不删行；confirmed/dismissed 行累积）

@@ -2,6 +2,7 @@ package service
 
 import (
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -249,4 +250,56 @@ func TestClusterLaneToTier(t *testing.T) {
 	assert.Equal(t, laneL2LLM, clusterLaneToTier("l2"))
 	assert.Equal(t, laneL3New, clusterLaneToTier("l3"))
 	assert.Equal(t, "", clusterLaneToTier(""), "unknown lane leaves column NULL")
+}
+
+// ---- buildL2Prompt (prompt hygiene: no historical thread narratives) ----
+
+func l2PromptFixture() ([]LaneTagAssign, map[uint]repository.BoardPersistentTopic, map[uint][]repository.TopicRecentBrief) {
+	l2 := []LaneTagAssign{{
+		Tag:        repository.TagInput{ID: 1, Label: "中芯国际"},
+		Candidates: []LaneCandidate{{TopicID: 10, Distance: 0.22}},
+	}}
+	topics := map[uint]repository.BoardPersistentTopic{
+		10: {
+			ID:           10,
+			Label:        "半导体产业链",
+			Status:       repository.TopicStatusActive,
+			LastSeenDate: time.Date(2026, 3, 7, 0, 0, 0, 0, time.UTC),
+			HitCount:     5,
+		},
+	}
+	briefs := map[uint][]repository.TopicRecentBrief{
+		10: {{
+			TopicID:      10,
+			SectionLabel: "半导体国产替代",
+			PeriodDate:   time.Date(2026, 3, 6, 0, 0, 0, 0, time.UTC),
+			ThreadTitles: []string{"半导体链全线跌停引发市场恐慌"},
+		}},
+	}
+	return l2, topics, briefs
+}
+
+// TestBuildL2Prompt_ExcludesThreadTitles guards the prompt-hygiene invariant:
+// historical thread titles must NOT be injected into the L2 adjudication prompt.
+func TestBuildL2Prompt_ExcludesThreadTitles(t *testing.T) {
+	l2, topics, briefs := l2PromptFixture()
+	_, user := buildL2Prompt(l2, topics, briefs)
+	assert.NotContains(t, user, "半导体链全线跌停引发市场恐慌",
+		"L2 prompt must not contain historical thread title narrative")
+	assert.NotContains(t, user, "thread",
+		"L2 prompt must not render thread entries at all")
+}
+
+// TestBuildL2Prompt_KeepsSectionLabelAndMeta guards that non-narrative signals
+// (label / status / hit meta / distance / section_label) remain injected.
+func TestBuildL2Prompt_KeepsSectionLabelAndMeta(t *testing.T) {
+	l2, topics, briefs := l2PromptFixture()
+	_, user := buildL2Prompt(l2, topics, briefs)
+	assert.Contains(t, user, "半导体产业链", "topic label kept")
+	assert.Contains(t, user, "正式", "active status label kept")
+	assert.Contains(t, user, "2026-03-07", "last-seen date kept")
+	assert.Contains(t, user, "累计5天", "hit count kept")
+	assert.Contains(t, user, "0.220", "distance kept")
+	assert.Contains(t, user, "半导体国产替代", "section_label kept as weak framework signal")
+	assert.Contains(t, user, "2026-03-06", "section period date kept")
 }

@@ -13,6 +13,8 @@ interface AIRouterCtx {
   draggingProviderId: string | null
   routeSummary: (cap: string) => string[]
   providerName: (id: string) => string
+  candidatesForCapability: (cap: string) => any[]
+  primaryAllowedForCapability: (cap: string) => boolean
   saveRoutes: () => void
   addPrimaryToRoute: (cap: string) => void
   addProviderToRoute: (cap: string, id: string) => void
@@ -85,18 +87,20 @@ const ctx = inject<AIRouterCtx>('ai-router-ctx')!
         </div>
 
         <div class="route-section__actions">
-          <button v-if="ctx.primaryProviderId && !ctx.routeSummary(capability).includes(ctx.primaryProviderId)"
+          <button v-if="ctx.primaryProviderId && ctx.primaryAllowedForCapability(capability) && !ctx.routeSummary(capability).includes(ctx.primaryProviderId)"
             class="route-chip"
             @click="ctx.addPrimaryToRoute(capability)">
             + {{ ctx.primaryProviderForm.name || '主模型' }}
           </button>
-          <button v-for="provider in ctx.backupProviders" :key="provider.id"
+          <button v-for="provider in ctx.candidatesForCapability(capability)" :key="provider.id"
             class="route-chip"
             :class="ctx.routeSummary(capability).includes(provider.id) ? 'route-chip--selected' : ''"
             @click="ctx.routeSummary(capability).includes(provider.id) ? ctx.removeProviderFromRoute(capability, provider.id) : ctx.addProviderToRoute(capability, provider.id)">
             {{ ctx.routeSummary(capability).includes(provider.id) ? '✓' : '+' }} {{ provider.name }}
           </button>
-          <span v-if="!ctx.primaryProviderId && ctx.backupProviders.length === 0" class="route-section__hint">先在上方创建 provider</span>
+          <span v-if="ctx.candidatesForCapability(capability).length === 0 && !ctx.primaryAllowedForCapability(capability)" class="route-section__hint">
+            先在「AI 模型」里创建一个 {{ capability === 'embedding' ? 'embedding' : 'llm' }} 类型的 provider
+          </span>
         </div>
       </div>
     </div>

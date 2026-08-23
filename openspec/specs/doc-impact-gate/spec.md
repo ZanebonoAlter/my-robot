@@ -26,27 +26,37 @@ TBD - created by archiving change docs-harness-consolidation. Update Purpose aft
 
 ### Requirement: 业务约束上下文获取（apply 前置）
 
-apply 启动时 SHALL 运行 `bash scripts/doc-impact.sh context` 获取**双源**上下文：
+约束上下文 SHALL 由 `constraint-injection` extension 在 harness 层每 turn 自动注入 system prompt（见 `constraint-injection` capability），替代原 `bash scripts/doc-impact.sh context` 一次性命令。注入保持**双源**语义：
 
-- **业务规范（what，理解任务）**：按 git diff 命中 domain，dump 相关 flow 文档「业务约束与不变量」节。
-- **执行规范（how，写对代码）**：按 git diff 命中代码路径，匹配 standard 文档头 `doc-impact-applies` 标签，dump 命中文档的 `## Requirements` 节；MUST 级条目前缀 🛑。
+- **业务规范（what，理解任务）**：按 change 文本/关键词命中 domain，注入相关 flow 文档**「业务约束与不变量」节**（节级提取，非全文；节尾附全文路径指引）。
+- **执行规范（how，写对代码）**：按 write/edit 路径（JIT）与 change 文本命中 standard 文档头 `doc-impact-applies` 标签，注入命中文档内容（已 spec 化文档可按 `## Requirements` 节提取，未 spec 化全文注入）。
 
-本要求是**前置必读**而非归档断言——context 输出不构成归档门禁 FAIL 条件，但 §0.6 编排强制 apply 阶段执行。
+本要求是**前置必读**而非归档断言——注入内容不构成归档门禁 FAIL 条件。`doc-impact.sh` 的 `suggest`（声明预勾选）与 `verify`（归档对账）子命令职责不变。
 
 #### Scenario: 命中执行规范
 
-- **WHEN** git diff 含 `backend-go/internal/platform/airouter/router.go` 且 `ai-logging.md` 头 `doc-impact-applies` 含 `backend-go/internal/platform/airouter/`
-- **THEN** context 执行规范段输出 ai-logging.md 的 `## Requirements` 节，MUST 条目带 🛑
+- **WHEN** implementation 档激活且 agent edit `backend-go/internal/platform/airouter/router.go`，而 `ai-logging.md` 头 `doc-impact-applies` 含 `backend-go/internal/platform/airouter/`
+- **THEN** 该 standard 文档内容被 extension 会话内追加注入（只增不减），后续每 turn 均可见
+
+#### Scenario: 命中业务规范（节级）
+
+- **WHEN** implementation 档激活且 change 文本含 semantic-board domain 关键词（如「板块」）
+- **THEN** 注入块业务规范段为 semantic-board flow 文档「业务约束与不变量」节内容，附全文路径指引，不含其余四节
 
 #### Scenario: 无执行规范命中
 
-- **WHEN** git diff 未命中任何 standard 文档的 `doc-impact-applies` 标签
-- **THEN** context 执行规范段输出「未识别到相关执行规范」且退出码 0
+- **WHEN** 改动路径与 change 文本未命中任何 standard 文档的 `doc-impact-applies` 标签
+- **THEN** 注入块不含执行规范段，会话正常进行（不注入空占位）
 
 #### Scenario: 双源分列
 
-- **WHEN** context 同时命中业务规范与执行规范
-- **THEN** 输出分「业务规范（what）」「执行规范（how）」两段，各自标头，agent 同时看到任务理解与代码红线
+- **WHEN** 注入同时命中业务规范与执行规范
+- **THEN** 注入块分「业务规范（what）」「执行规范（how）」两段，各自标头，agent 同时看到任务理解与代码红线
+
+#### Scenario: context 子命令退役
+
+- **WHEN** 开发者执行 `bash scripts/doc-impact.sh context`
+- **THEN** 脚本提示该子命令已由 constraint-injection extension 取代（不静默失败），suggest/verify 行为不变
 
 ### Requirement: 归档前对账（verify）
 
@@ -81,4 +91,36 @@ apply 启动时 SHALL 运行 `bash scripts/doc-impact.sh context` 获取**双源
 
 - **WHEN** `docs/README.md` 含相对链接 `](getting-started.md)` 且 `docs/getting-started.md` 不存在
 - **THEN** check-standards.sh G 段输出 FAIL 并列出该链接
+
+### Requirement: 归档命令硬门禁（spec-gate）
+
+pi 扩展 `.pi/extensions/spec-gate.ts` SHALL 拦截 bash 工具中匹配 `openspec archive` 的命令，在放行前强制执行三项检查：① `scripts/doc-impact.sh verify <change-dir>` 退出码为 0；② `scripts/check-standards.sh` 无失败；③ 该 change 的 tasks.md 含「测试/文档/验证」尾三节及 doc-impact 标记。任一失败 MUST block 并输出中文 reason（列失败项 + 修复指引）。豁免通道：命令显式带 `--force` 或环境变量 `SPEC_GATE_BYPASS=1`（MUST 记 warning，不得静默放行）。开关：`SPEC_GATE_ENABLE`（默认开启）。
+
+#### Scenario: 门禁未过时归档被拦截
+- **WHEN** agent 执行 `openspec archive <change>` 且 doc-impact verify 失败
+- **THEN** 命令被 block，reason 列出失败项与修复指引
+
+#### Scenario: 三项全过时放行
+- **WHEN** 三项检查全部通过
+- **THEN** 归档命令正常执行
+
+#### Scenario: 显式豁免留痕
+- **WHEN** 命令带 `--force` 或 `SPEC_GATE_BYPASS=1`
+- **THEN** 归档放行且记录一条 warning（不静默）
+
+### Requirement: quota-gate fail-open 落盘可观测
+
+quota-gate 在额度查询失败而放行（fail-open）时 MUST 追加一条 custom_message 落盘记录（含失败原因），使"查询失败放行"与"未触发"在会话记录中可区分。
+
+#### Scenario: 查询失败放行留痕
+- **WHEN** quota 查询接口失败且按 fail-open 策略放行派发
+- **THEN** 会话记录中出现一条 custom_message 说明"quota 查询失败已放行"及原因
+
+### Requirement: 全量测试软守卫（test-scope-guard）
+
+pi 扩展 `.pi/extensions/test-scope-guard.ts` SHALL 在检测到非归档语境下的全量 `go test ./...` 命令时发出软提醒（notify，不 block）。模式开关 `TEST_SCOPE_GUARD=soft|hard|off`，默认 soft。
+
+#### Scenario: 日常误跑全量测试触发提醒
+- **WHEN** 会话语境非归档且命令命中全量 `go test ./...`
+- **THEN** 收到软提醒（建议只跑影响包），命令不被阻断
 

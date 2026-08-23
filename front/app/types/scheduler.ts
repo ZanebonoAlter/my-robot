@@ -99,6 +99,14 @@ export interface AnalysisPauseState {
 	paused_at: string
 }
 
+/** /schedulers/status 顶层 ai_health_routes 的简明明细（各路由主 provider 通断） */
+export interface SchedulerAIHealthRoute {
+	route_name: string
+	capability: string
+	primary_provider: string
+	reachable: boolean
+}
+
 export interface SchedulerTriggerResult {
 	name: string
 	accepted: boolean

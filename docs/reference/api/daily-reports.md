@@ -338,7 +338,13 @@ Response `data`：
 
 ## POST `/daily-reports/backfill-embeddings`
 
-异步回填缺少 embedding 的 section 向量（最长运行 30 分钟，进度写日志，不广播 WebSocket）。
+异步回填/重算 section 向量（最长运行 30 分钟，进度写日志，不广播 WebSocket）。嵌入文本按内容化规则组装（section 所聚 tag 的 label/description/代表文章摘录，与主流水线一致）。完成后重算受影响 topic 质心并重建相关板块跨日关系。
+
+Query：
+
+- `recompute` 可选，默认 `false`。`true` 时对范围内**全部** section 重算 embedding（含已有值）；`false` 仅补 `embedding IS NULL` 的 section。
+- `board_id` 可选，仅 `recompute=true` 时生效，限定单个板块；缺省全部板块。
+- `since_days` 可选，仅 `recompute=true` 时生效，默认 `30`（回刷最近 30 天），`0` 表示不限。
 
 无需请求体。Response `data`：
 

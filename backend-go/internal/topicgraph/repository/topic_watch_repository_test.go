@@ -29,7 +29,7 @@ func setupWatchTestDB(t *testing.T) *TopicGraphRepository {
 func TestCreateWatch(t *testing.T) {
 	repo := setupWatchTestDB(t)
 
-	watch, err := repo.CreateWatch(42, "美伊会不会真打起来")
+	watch, err := repo.CreateWatch(CreateWatchInput{SemanticBoardID: 42, Label: "美伊会不会真打起来", Type: ""})
 	require.NoError(t, err)
 	require.NotNil(t, watch)
 	assert.Equal(t, uint(42), watch.SemanticBoardID)
@@ -44,13 +44,13 @@ func TestListWatchesByBoard(t *testing.T) {
 	repo := setupWatchTestDB(t)
 
 	// Create watches for board 1
-	_, err := repo.CreateWatch(1, "watch-a")
+	_, err := repo.CreateWatch(CreateWatchInput{SemanticBoardID: 1, Label: "watch-a", Type: ""})
 	require.NoError(t, err)
-	_, err = repo.CreateWatch(1, "watch-b")
+	_, err = repo.CreateWatch(CreateWatchInput{SemanticBoardID: 1, Label: "watch-b", Type: ""})
 	require.NoError(t, err)
 
 	// Create a watch for a different board
-	_, err = repo.CreateWatch(2, "watch-c")
+	_, err = repo.CreateWatch(CreateWatchInput{SemanticBoardID: 2, Label: "watch-c", Type: ""})
 	require.NoError(t, err)
 
 	watches, err := repo.ListWatchesByBoard(1)
@@ -74,19 +74,19 @@ func TestListWatchesByBoard(t *testing.T) {
 func TestUpdateWatch(t *testing.T) {
 	repo := setupWatchTestDB(t)
 
-	watch, err := repo.CreateWatch(1, "original label")
+	watch, err := repo.CreateWatch(CreateWatchInput{SemanticBoardID: 1, Label: "original label", Type: ""})
 	require.NoError(t, err)
 
 	// Update label only
 	newLabel := "updated label"
-	updated, err := repo.UpdateWatch(watch.ID, &newLabel, nil)
+	updated, err := repo.UpdateWatch(watch.ID, &newLabel, nil, nil)
 	require.NoError(t, err)
 	assert.Equal(t, "updated label", updated.Label)
 	assert.Equal(t, WatchStatusActive, updated.Status) // status unchanged
 
 	// Update status only
 	paused := WatchStatusPaused
-	updated, err = repo.UpdateWatch(watch.ID, nil, &paused)
+	updated, err = repo.UpdateWatch(watch.ID, nil, nil, &paused)
 	require.NoError(t, err)
 	assert.Equal(t, "updated label", updated.Label) // label unchanged
 	assert.Equal(t, WatchStatusPaused, updated.Status)
@@ -94,13 +94,13 @@ func TestUpdateWatch(t *testing.T) {
 	// Update both
 	bothLabel := "both updated"
 	active := WatchStatusActive
-	updated, err = repo.UpdateWatch(watch.ID, &bothLabel, &active)
+	updated, err = repo.UpdateWatch(watch.ID, &bothLabel, nil, &active)
 	require.NoError(t, err)
 	assert.Equal(t, "both updated", updated.Label)
 	assert.Equal(t, WatchStatusActive, updated.Status)
 
 	// Update non-existent watch
-	_, err = repo.UpdateWatch(99999, &newLabel, nil)
+	_, err = repo.UpdateWatch(99999, &newLabel, nil, nil)
 	assert.Error(t, err)
 }
 
@@ -115,7 +115,7 @@ func TestDeleteWatchCascadesHits(t *testing.T) {
 	// surfaced it. Fixed by fix-watch-delete-cascade (FK versioned migration).
 	repo := setupWatchTestDB(t)
 
-	watch, err := repo.CreateWatch(1, "watch to delete")
+	watch, err := repo.CreateWatch(CreateWatchInput{SemanticBoardID: 1, Label: "watch to delete", Type: ""})
 	require.NoError(t, err)
 
 	// Create some hits for this watch
@@ -157,9 +157,9 @@ func TestDeleteWatchDoesNotAffectOtherWatchHits(t *testing.T) {
 	// 20260801_0002). See TestDeleteWatchCascadesHits for the SQLite-vs-PG history.
 	repo := setupWatchTestDB(t)
 
-	w1, err := repo.CreateWatch(1, "watch-1")
+	w1, err := repo.CreateWatch(CreateWatchInput{SemanticBoardID: 1, Label: "watch-1", Type: ""})
 	require.NoError(t, err)
-	w2, err := repo.CreateWatch(1, "watch-2")
+	w2, err := repo.CreateWatch(CreateWatchInput{SemanticBoardID: 1, Label: "watch-2", Type: ""})
 	require.NoError(t, err)
 
 	now := time.Now()
@@ -187,16 +187,16 @@ func TestDeleteWatchDoesNotAffectOtherWatchHits(t *testing.T) {
 func TestListActiveWatchesByBoard(t *testing.T) {
 	repo := setupWatchTestDB(t)
 
-	_, err := repo.CreateWatch(1, "active-1") // defaults to active
+	_, err := repo.CreateWatch(CreateWatchInput{SemanticBoardID: 1, Label: "active-1", Type: ""}) // defaults to active
 	require.NoError(t, err)
-	w2, err := repo.CreateWatch(1, "will-be-paused")
+	w2, err := repo.CreateWatch(CreateWatchInput{SemanticBoardID: 1, Label: "will-be-paused", Type: ""})
 	require.NoError(t, err)
-	_, err = repo.CreateWatch(1, "active-2")
+	_, err = repo.CreateWatch(CreateWatchInput{SemanticBoardID: 1, Label: "active-2", Type: ""})
 	require.NoError(t, err)
 
 	// Pause w2
 	paused := WatchStatusPaused
-	_, err = repo.UpdateWatch(w2.ID, nil, &paused)
+	_, err = repo.UpdateWatch(w2.ID, nil, nil, &paused)
 	require.NoError(t, err)
 
 	// ListActiveWatchesByBoard
@@ -217,10 +217,10 @@ func TestListActiveWatchesByBoard(t *testing.T) {
 func TestListActiveWatchesByBoard_AllPaused(t *testing.T) {
 	repo := setupWatchTestDB(t)
 
-	w, err := repo.CreateWatch(1, "paused-only")
+	w, err := repo.CreateWatch(CreateWatchInput{SemanticBoardID: 1, Label: "paused-only", Type: ""})
 	require.NoError(t, err)
 	paused := WatchStatusPaused
-	_, err = repo.UpdateWatch(w.ID, nil, &paused)
+	_, err = repo.UpdateWatch(w.ID, nil, nil, &paused)
 	require.NoError(t, err)
 
 	activeWatches, err := repo.ListActiveWatchesByBoard(1)
@@ -236,7 +236,7 @@ func TestTopicWatchHit_DuplicateRejected(t *testing.T) {
 	now := time.Now().Truncate(24 * time.Hour)
 
 	// Create a watch so the FK on watch_id is satisfied.
-	watch, err := repo.CreateWatch(1, "test watch")
+	watch, err := repo.CreateWatch(CreateWatchInput{SemanticBoardID: 1, Label: "test watch", Type: ""})
 	require.NoError(t, err)
 
 	hit := TopicWatchHit{
@@ -273,7 +273,7 @@ func TestTopicWatchHit_UpsertDedup(t *testing.T) {
 	now := time.Now().Truncate(24 * time.Hour)
 
 	// Create a watch so the FK on watch_id is satisfied.
-	watch, err := repo.CreateWatch(1, "test watch")
+	watch, err := repo.CreateWatch(CreateWatchInput{SemanticBoardID: 1, Label: "test watch", Type: ""})
 	require.NoError(t, err)
 
 	hits := []TopicWatchHit{
@@ -308,7 +308,7 @@ func TestTopicWatchHit_UpsertDedup(t *testing.T) {
 func TestGetWatchHitsByReport(t *testing.T) {
 	repo := setupWatchTestDB(t)
 
-	watch, err := repo.CreateWatch(1, "test watch")
+	watch, err := repo.CreateWatch(CreateWatchInput{SemanticBoardID: 1, Label: "test watch", Type: ""})
 	require.NoError(t, err)
 
 	now := time.Now().Truncate(24 * time.Hour)
@@ -329,3 +329,212 @@ func TestGetWatchHitsByReport(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, hits2)
 }
+
+// ── watch-keyword-and-quickadd: type column ──────────────────────────────────
+
+func TestCreateWatch_TypeVariants(t *testing.T) {
+	repo := setupWatchTestDB(t)
+
+	// Backward-compatible: empty type defaults to label.
+	w1, err := repo.CreateWatch(CreateWatchInput{SemanticBoardID: 1, Label: "legacy style", Type: ""})
+	require.NoError(t, err)
+	assert.Equal(t, WatchTypeLabel, w1.Type)
+
+	// Explicit keyword type.
+	w2, err := repo.CreateWatch(CreateWatchInput{SemanticBoardID: 1, Label: "ASML|镓锗 出口", Type: WatchTypeKeyword})
+	require.NoError(t, err)
+	assert.Equal(t, WatchTypeKeyword, w2.Type)
+
+	// Explicit label type.
+	w3, err := repo.CreateWatch(CreateWatchInput{SemanticBoardID: 1, Label: "explicit", Type: WatchTypeLabel})
+	require.NoError(t, err)
+	assert.Equal(t, WatchTypeLabel, w3.Type)
+}
+
+// 类型约束 scenario: the DB CHECK (migration 20260824_0002) rejects any type
+// outside ('label','keyword').
+func TestWatchTypeConstraint_RejectsInvalidType(t *testing.T) {
+	repo := setupWatchTestDB(t)
+
+	err := repo.db.Exec(`INSERT INTO board_topic_watches (semantic_board_id, label, type, status) VALUES (1, 'bad', 'regex', 'active')`).Error
+	require.Error(t, err, "CHECK chk_board_topic_watches_type must reject invalid type")
+	assert.Contains(t, err.Error(), "chk_board_topic_watches_type")
+}
+
+// GetWatchByID returns the watch (keyword instant-match loader).
+func TestGetWatchByID(t *testing.T) {
+	repo := setupWatchTestDB(t)
+
+	w, err := repo.CreateWatch(CreateWatchInput{SemanticBoardID: 1, Label: "ASML", Type: WatchTypeKeyword})
+	require.NoError(t, err)
+
+	got, err := repo.GetWatchByID(w.ID)
+	require.NoError(t, err)
+	assert.Equal(t, w.ID, got.ID)
+	assert.Equal(t, WatchTypeKeyword, got.Type)
+	assert.Equal(t, "ASML", got.Label)
+
+	_, err = repo.GetWatchByID(99999)
+	assert.Error(t, err)
+}
+
+func TestGetWatchHitsByReport_OnlyActiveWithWatchDescriptor(t *testing.T) {
+	repo := setupWatchTestDB(t)
+	now := NormalizeReportDate(time.Now())
+
+	active, err := repo.CreateWatch(CreateWatchInput{SemanticBoardID: 1, Label: "ASML", Type: WatchTypeKeyword})
+	require.NoError(t, err)
+	paused, err := repo.CreateWatch(CreateWatchInput{SemanticBoardID: 1, Label: "paused", Type: WatchTypeLabel})
+	require.NoError(t, err)
+	pausedStatus := WatchStatusPaused
+	_, err = repo.UpdateWatch(paused.ID, nil, nil, &pausedStatus)
+	require.NoError(t, err)
+	deleted, err := repo.CreateWatch(CreateWatchInput{SemanticBoardID: 1, Label: "deleted", Type: WatchTypeLabel})
+	require.NoError(t, err)
+
+	for _, hit := range []TopicWatchHit{
+		{WatchID: active.ID, SectionID: 1, ReportID: 500, PeriodDate: now, Reason: "active"},
+		{WatchID: paused.ID, SectionID: 2, ReportID: 500, PeriodDate: now, Reason: "paused"},
+		{WatchID: deleted.ID, SectionID: 3, ReportID: 500, PeriodDate: now, Reason: "deleted"},
+	} {
+		require.NoError(t, repo.db.Create(&hit).Error)
+	}
+	require.NoError(t, repo.DeleteWatch(deleted.ID))
+
+	hits, err := repo.GetWatchHitsByReport(500)
+	require.NoError(t, err)
+	require.Len(t, hits, 1)
+	assert.Equal(t, active.ID, hits[0].WatchID)
+	assert.Equal(t, "ASML", hits[0].WatchLabel)
+	assert.Equal(t, WatchTypeKeyword, hits[0].WatchType)
+}
+
+// ── watch-materialized-topic: sentence-track fields & materialized listing ──
+
+// TestCreateWatchSentenceTopicFields verifies the sentence_track creation
+// payload round-trips: type/query/embedding_cache persist and the hint-track
+// defaults stay untouched (query empty, no cache, no topic link).
+func TestCreateWatchSentenceTopicFields(t *testing.T) {
+	repo := setupWatchTestDB(t)
+
+	watch, err := repo.CreateWatch(CreateWatchInput{
+		SemanticBoardID: 42,
+		Label:           "AI 编程工具进展",
+		Type:            WatchTypeSentenceTopic,
+		Query:           "AI coding assistant 的进展和竞争格局",
+		EmbeddingCache:  strPtr("[0.1,0.2,0.3]"),
+	})
+	require.NoError(t, err)
+	assert.Equal(t, WatchTypeSentenceTopic, watch.Type)
+	assert.Equal(t, "AI coding assistant 的进展和竞争格局", watch.Query)
+	require.NotNil(t, watch.EmbeddingCache)
+	assert.Equal(t, "[0.1,0.2,0.3]", *watch.EmbeddingCache)
+	assert.Nil(t, watch.PersistentTopicID, "fresh sentence watch has no topic link yet")
+
+	// Round-trip through a fresh read (GORM serialization included).
+	reread, err := repo.GetWatchByID(watch.ID)
+	require.NoError(t, err)
+	assert.Equal(t, WatchTypeSentenceTopic, reread.Type)
+	assert.Equal(t, "AI coding assistant 的进展和竞争格局", reread.Query)
+	require.NotNil(t, reread.EmbeddingCache)
+	assert.Equal(t, "[0.1,0.2,0.3]", *reread.EmbeddingCache)
+}
+
+// TestUpdateWatchInvalidatesEmbeddingCache verifies the D3 cache lifecycle:
+// updating label OR query must clear embedding_cache; updating only status
+// must leave the cache intact.
+func TestUpdateWatchInvalidatesEmbeddingCache(t *testing.T) {
+	repo := setupWatchTestDB(t)
+
+	watch, err := repo.CreateWatch(CreateWatchInput{
+		SemanticBoardID: 42,
+		Label:           "AI 编程工具进展",
+		Type:            WatchTypeSentenceTopic,
+		Query:           "原检索句",
+		EmbeddingCache:  strPtr("[0.1,0.2,0.3]"),
+	})
+	require.NoError(t, err)
+
+	// status-only update keeps the cache.
+	paused := WatchStatusPaused
+	updated, err := repo.UpdateWatch(watch.ID, nil, nil, &paused)
+	require.NoError(t, err)
+	require.NotNil(t, updated.EmbeddingCache)
+	assert.Equal(t, "[0.1,0.2,0.3]", *updated.EmbeddingCache, "status-only PATCH must not drop the cache")
+
+	// query update invalidates the cache.
+	newQuery := "换了检索句"
+	updated, err = repo.UpdateWatch(watch.ID, nil, &newQuery, nil)
+	require.NoError(t, err)
+	assert.Nil(t, updated.EmbeddingCache, "query PATCH must invalidate embedding_cache")
+	assert.Equal(t, newQuery, updated.Query)
+
+	// label update also invalidates (query falls back to label semantics).
+	updated, err = repo.UpdateWatch(watch.ID, &newQuery, nil, nil)
+	require.NoError(t, err)
+	assert.Nil(t, updated.EmbeddingCache, "label PATCH must invalidate embedding_cache")
+}
+
+// TestListActiveMaterializedWatchesByBoard verifies the materialization-phase
+// input selector: only active keyword_topic/sentence_topic watches return;
+// hint tracks (label/keyword) and paused watches are excluded.
+func TestListActiveMaterializedWatchesByBoard(t *testing.T) {
+	repo := setupWatchTestDB(t)
+
+	_, err := repo.CreateWatch(CreateWatchInput{SemanticBoardID: 7, Label: "hint label", Type: WatchTypeLabel})
+	require.NoError(t, err)
+	_, err = repo.CreateWatch(CreateWatchInput{SemanticBoardID: 7, Label: "hint kw", Type: WatchTypeKeyword})
+	require.NoError(t, err)
+	kw, err := repo.CreateWatch(CreateWatchInput{SemanticBoardID: 7, Label: "harness", Type: WatchTypeKeywordTopic})
+	require.NoError(t, err)
+	st, err := repo.CreateWatch(CreateWatchInput{SemanticBoardID: 7, Label: "AI 进展", Type: WatchTypeSentenceTopic, Query: "AI 进展"})
+	require.NoError(t, err)
+	pausedST, err := repo.CreateWatch(CreateWatchInput{SemanticBoardID: 7, Label: "paused st", Type: WatchTypeSentenceTopic, Query: "x"})
+	require.NoError(t, err)
+	paused := WatchStatusPaused
+	_, err = repo.UpdateWatch(pausedST.ID, nil, nil, &paused)
+	require.NoError(t, err)
+	_, err = repo.CreateWatch(CreateWatchInput{SemanticBoardID: 8, Label: "other board", Type: WatchTypeKeywordTopic})
+	require.NoError(t, err)
+
+	watches, err := repo.ListActiveMaterializedWatchesByBoard(7)
+	require.NoError(t, err)
+	require.Len(t, watches, 2, "only active keyword_topic + sentence_topic of board 7")
+	assert.Equal(t, kw.ID, watches[0].ID)
+	assert.Equal(t, st.ID, watches[1].ID)
+}
+
+// TestUpdateWatchEmbeddingCacheAndTopicLink verifies the lazy-recompute
+// write-back paths: embedding cache refill and first-materialization topic
+// binding round-trip.
+func TestUpdateWatchEmbeddingCacheAndTopicLink(t *testing.T) {
+	repo := setupWatchTestDB(t)
+
+	watch, err := repo.CreateWatch(CreateWatchInput{
+		SemanticBoardID: 42,
+		Label:           "AI 编程工具进展",
+		Type:            WatchTypeSentenceTopic,
+		Query:           "AI coding assistant",
+	})
+	require.NoError(t, err)
+
+	require.NoError(t, repo.UpdateWatchEmbeddingCache(watch.ID, "[0.4,0.5,0.6]"))
+	reread, err := repo.GetWatchByID(watch.ID)
+	require.NoError(t, err)
+	require.NotNil(t, reread.EmbeddingCache)
+	assert.Equal(t, "[0.4,0.5,0.6]", *reread.EmbeddingCache)
+
+	// The migration-created FK requires a real topic row; create one directly.
+	var topicID uint
+	require.NoError(t, repo.db.Raw(`INSERT INTO board_persistent_topics
+		(semantic_board_id, label, status, source, first_seen_date, last_seen_date, hit_count, consecutive_hits, created_at, updated_at)
+		VALUES (42, 'test watch topic', 'active', 'manual', '2026-08-25', '2026-08-25', 1, 1, now(), now()) RETURNING id`).Scan(&topicID).Error)
+	require.NoError(t, repo.SetWatchPersistentTopic(watch.ID, topicID))
+	reread, err = repo.GetWatchByID(watch.ID)
+	require.NoError(t, err)
+	require.NotNil(t, reread.PersistentTopicID)
+	assert.Equal(t, topicID, *reread.PersistentTopicID)
+}
+
+// strPtr is a test helper for optional pointer fields.
+func strPtr(s string) *string { return &s }

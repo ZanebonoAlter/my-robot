@@ -198,6 +198,104 @@ func SaveRSSHubSettings(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"success": true})
 }
 
+// ── bocha settings（数据增强 web_search 后端 key，界面可配 + 动态读）──
+
+// defaultBochaEndpoint 是博查通搜默认 endpoint（与 config.yaml 默认一致）。
+const defaultBochaEndpoint = "https://api.bochaai.com/v1/web-search"
+
+// maskAPIKey 脱敏：返回 key 末 4 位（长度≤4 时返回空，仅标“已配置”）。GET 回显用。
+func maskAPIKey(key string) string {
+	key = strings.TrimSpace(key)
+	if len(key) <= 4 {
+		return ""
+	}
+	return key[len(key)-4:]
+}
+
+// GetBochaSettings GET /api/settings/bocha — 读博查配置（脱敏不回显完整 key）。
+// 返回 {api_key_configured, api_key_hint(末4位), endpoint, enabled}。
+func GetBochaSettings(c *gin.Context) {
+	endpoint := defaultBochaEndpoint
+	enabled := true
+	apiKeyConfigured := false
+	apiKeyHint := ""
+	if cfg, _, err := aisettings.LoadBochaConfig(); err == nil && cfg != nil {
+		if v, ok := cfg["api_key"].(string); ok && strings.TrimSpace(v) != "" {
+			apiKeyConfigured = true
+			apiKeyHint = maskAPIKey(v)
+		}
+		if v, ok := cfg["endpoint"].(string); ok && strings.TrimSpace(v) != "" {
+			endpoint = strings.TrimSpace(v)
+		}
+		if v, ok := cfg["enabled"].(bool); ok {
+			enabled = v
+		}
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data": gin.H{
+			"api_key_configured": apiKeyConfigured,
+			"api_key_hint":       apiKeyHint,
+			"endpoint":           endpoint,
+			"enabled":            enabled,
+		},
+	})
+}
+
+// saveBochaSettingsRequest 保存博查配置请求体。
+// Enabled 用指针：nil（未传）=保留现有值；非 nil=覆盖。避免前端漏传导致被设为 false。
+// APIKey 空串=不改（保留原值）；非空才覆盖，防表单回填空覆盖掉已有 key。
+type saveBochaSettingsRequest struct {
+	APIKey   string `json:"api_key"`
+	Endpoint string `json:"endpoint"`
+	Enabled  *bool  `json:"enabled"`
+}
+
+// SaveBochaSettings POST /api/settings/bocha — 写博查配置。界面改即时生效（动态读）。
+func SaveBochaSettings(c *gin.Context) {
+	var req saveBochaSettingsRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "Invalid request body"})
+		return
+	}
+
+	// 读现有配置，作为“不改”语义的缺省源。
+	existing, _, _ := aisettings.LoadBochaConfig()
+	if existing == nil {
+		existing = map[string]interface{}{}
+	}
+	apiKey, _ := existing["api_key"].(string)
+	endpoint, _ := existing["endpoint"].(string)
+	enabled := true
+	if v, ok := existing["enabled"].(bool); ok {
+		enabled = v
+	}
+
+	// api_key：空串=不改，非空才覆盖。
+	if k := strings.TrimSpace(req.APIKey); k != "" {
+		apiKey = k
+	}
+	// endpoint：空串=不改（保留现有/default）；非空才覆盖。
+	if ep := strings.TrimSpace(req.Endpoint); ep != "" {
+		endpoint = ep
+	}
+	// enabled：指针 nil=不改；非 nil=覆盖。
+	if req.Enabled != nil {
+		enabled = *req.Enabled
+	}
+
+	configJSON := map[string]interface{}{
+		"api_key":  apiKey,
+		"endpoint": endpoint,
+		"enabled":  enabled,
+	}
+	if err := aisettings.SaveBochaConfig(configJSON, "Bocha web-search configuration"); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true})
+}
+
 // ── proxy settings（全局出站代理）──
 
 // GetProxySettings GET /api/settings/proxy — 读全局出站代理地址（feed 抓取等所有外部请求）。

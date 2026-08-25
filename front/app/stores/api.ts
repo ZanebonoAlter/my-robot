@@ -19,7 +19,6 @@ interface FeedPayload {
   refresh_interval: number
   refresh_status: string
   refresh_error?: string
-  ai_summary_enabled?: boolean
   article_summary_enabled?: boolean
   completion_on_refresh?: boolean
   max_completion_retries?: number
@@ -145,8 +144,7 @@ export const useApiStore = defineStore('api', () => {
         refreshStatus: feed.refresh_status as RssFeed['refreshStatus'] || 'idle',
         refreshError: feed.refresh_error,
         lastRefreshAt: feed.last_refresh_at,
-        aiSummaryEnabled: feed.ai_summary_enabled !== undefined ? feed.ai_summary_enabled : true, // Default to true if not set
-        articleSummaryEnabled: feed.article_summary_enabled,
+        articleSummaryEnabled: feed.article_summary_enabled ?? false, // 后端 gorm default:false
         completionOnRefresh: feed.completion_on_refresh,
         maxCompletionRetries: feed.max_completion_retries,
         firecrawlEnabled: feed.firecrawl_enabled,
@@ -206,7 +204,6 @@ export const useApiStore = defineStore('api', () => {
       color?: string
       max_articles?: number
       refresh_interval?: number
-      ai_summary_enabled?: boolean
       article_summary_enabled?: boolean
       completion_on_refresh?: boolean
       max_completion_retries?: number

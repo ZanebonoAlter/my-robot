@@ -1,0 +1,371 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="editorial">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>关注管理面板（版块级）· Mockup</title>
+<style>
+  :root{--raw-teal-500:#2d8a7a}
+  [data-theme="editorial"]{
+    --color-bg-base:#faf7f2;--color-bg-elevated:#f5f0e6;--color-bg-sunken:#e8dfd1;
+    --color-bg-hover:rgba(255,255,255,.85);--color-bg-active:rgba(255,255,255,.6);
+    --color-text-primary:#1a1a1a;--color-text-secondary:#5a5a5a;--color-text-muted:#8a8a8a;
+    --color-border-subtle:rgba(26,26,26,.08);--color-border-medium:rgba(26,26,26,.15);--color-border-strong:rgba(26,26,26,.25);
+    --color-accent:#d94a4a;--color-accent-hover:#c12f2f;--color-accent-subtle:rgba(217,74,74,.08);
+    --shadow-medium:0 2px 8px rgba(26,26,26,.08);--shadow-large:0 8px 28px rgba(26,26,26,.16);
+    --serif:"Noto Serif SC","Source Han Serif SC",Georgia,serif;
+    --sans:system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;
+    --mono:ui-monospace,"SF Mono",Consolas,monospace;
+  }
+  [data-theme="dark"]{
+    --color-bg-base:#080c12;--color-bg-elevated:rgba(17,27,38,.98);--color-bg-sunken:#0e161d;
+    --color-bg-hover:rgba(255,255,255,.06);--color-bg-active:rgba(255,255,255,.08);
+    --color-text-primary:rgba(255,255,255,.9);--color-text-secondary:rgba(255,255,255,.6);--color-text-muted:rgba(255,255,255,.35);
+    --color-border-subtle:rgba(255,255,255,.06);--color-border-medium:rgba(255,255,255,.10);--color-border-strong:rgba(255,255,255,.18);
+    --color-accent:rgba(240,138,75,.85);--color-accent-hover:rgba(240,138,75,1);--color-accent-subtle:rgba(240,138,75,.08);
+    --shadow-medium:0 2px 8px rgba(0,0,0,.4);--shadow-large:0 10px 32px rgba(0,0,0,.6);
+    --serif:"Noto Serif SC","Source Han Serif SC",Georgia,serif;
+    --sans:system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;
+    --mono:ui-monospace,"SF Mono",Consolas,monospace;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;background:var(--color-bg-base);color:var(--color-text-primary);font-family:var(--sans);transition:background .3s}
+  body{padding:0 0 5rem}
+
+  .mock-bar{position:sticky;top:0;z-index:50;display:flex;align-items:center;gap:.75rem;flex-wrap:wrap;
+    padding:.6rem 1.25rem;background:var(--color-bg-sunken);border-bottom:1px solid var(--color-border-medium);
+    font-size:.78rem;color:var(--color-text-secondary)}
+  .mock-bar b{color:var(--color-text-primary)}
+  .mock-bar .spacer{flex:1}
+  .seg{display:inline-flex;border:1px solid var(--color-border-medium);border-radius:6px;overflow:hidden}
+  .seg button{appearance:none;border:0;background:transparent;color:var(--color-text-secondary);
+    padding:.3rem .7rem;font-size:.74rem;cursor:pointer;font-family:var(--sans)}
+  .seg button.on{background:var(--color-accent);color:#fff}
+  [data-theme="dark"] .seg button.on{color:#080c12}
+
+  /* 版块工作台骨架（贴近 TagsPage 真实布局：左侧栏 + 内容区 tab 栏）*/
+  .stage{max-width:72rem;margin:1.5rem auto 0;padding:0 1.25rem;display:grid;grid-template-columns:13rem minmax(0,1fr);gap:1rem}
+  .side{border:1px solid var(--color-border-medium);border-radius:10px;background:var(--color-bg-elevated);overflow:hidden}
+  .side__header{padding:.7rem .9rem;border-bottom:1px solid var(--color-border-subtle);font-family:var(--serif);font-size:.9rem;font-weight:700}
+  .side__body{padding:.6rem .5rem;display:flex;flex-direction:column;gap:.25rem;font-size:.78rem;color:var(--color-text-secondary)}
+  .side__item{padding:.4rem .6rem;border-radius:6px;cursor:pointer}
+  .side__item.on{background:var(--color-bg-active);color:var(--color-text-primary);font-weight:600}
+
+  .content{border:1px solid var(--color-border-medium);border-radius:10px;background:var(--color-bg-elevated);overflow:hidden;display:flex;flex-direction:column;min-height:22rem}
+  /* tab 栏（贴近 tags-content-tabs）*/
+  .tabs{display:flex;align-items:center;gap:.25rem;padding:.55rem .8rem;border-bottom:1px solid var(--color-border-subtle);flex-wrap:wrap}
+  .tab{appearance:none;border:0;background:transparent;cursor:pointer;display:inline-flex;align-items:center;gap:.3rem;
+    padding:.35rem .7rem;border-radius:6px;font-family:var(--sans);font-size:.76rem;color:var(--color-text-muted)}
+  .tab svg{width:13px;height:13px}
+  .tab.on{background:var(--color-bg-active);color:var(--color-text-primary);font-weight:600}
+  .content__body{padding:1rem;display:flex;flex-direction:column;gap:.5rem;font-size:.8rem;color:var(--color-text-secondary);flex:1}
+  .hintline{font-size:.72rem;color:var(--color-text-muted);font-style:italic}
+  .hintline{font-size:.72rem;color:var(--color-text-muted);font-style:italic}
+
+  /* ====== 「我在追踪 (N)」入口 chip：tab 栏右端常驻，五个 tab 都可见 ====== */
+  .watchchip{margin-left:auto;display:inline-flex;align-items:center;gap:.35rem;appearance:none;cursor:pointer;
+    border:1px solid var(--color-border-medium);border-radius:999px;background:transparent;
+    padding:.22rem .6rem;font-family:var(--sans);font-size:.7rem;color:var(--color-text-secondary)}
+  .watchchip svg{width:12px;height:12px;color:var(--color-accent)}
+  .watchchip:hover{border-color:var(--color-accent);color:var(--color-accent)}
+  .watchchip .n{font-family:var(--mono);font-size:.66rem;background:var(--color-accent-subtle);
+    color:var(--color-text-secondary);border-radius:8px;padding:0 .35rem}
+
+  /* ====== 管理面板（弹层抽屉）====== */
+  .overlay{position:fixed;inset:0;background:rgba(10,10,10,.4);display:none;align-items:flex-start;
+    justify-content:center;padding:8vh 1rem 0;z-index:100}
+  .overlay.show{display:flex}
+  .panel{width:100%;max-width:30rem;background:var(--color-bg-elevated);border:1px solid var(--color-border-medium);
+    border-radius:12px;box-shadow:var(--shadow-large);overflow:hidden;font-family:var(--sans);max-height:84vh;display:flex;flex-direction:column}
+  .panel__head{display:flex;align-items:center;gap:.5rem;padding:.9rem 1.1rem;border-bottom:1px solid var(--color-border-subtle)}
+  .panel__title{display:inline-flex;align-items:center;gap:.4rem;font-family:var(--serif);font-size:1.02rem;font-weight:700}
+  .panel__title svg{width:15px;height:15px;color:var(--color-accent)}
+  .panel__sub{font-size:.68rem;color:var(--color-text-muted)}
+  .panel__close{margin-left:auto;appearance:none;border:0;background:transparent;color:var(--color-text-muted);
+    cursor:pointer;width:26px;height:26px;border-radius:4px;display:inline-flex;align-items:center;justify-content:center}
+  .panel__close:hover{background:var(--color-bg-hover);color:var(--color-text-secondary)}
+  .panel__close svg{width:15px;height:15px}
+  .panel__body{overflow-y:auto;padding:.8rem 1.1rem 1.1rem}
+
+  /* 回扫反馈 banner（keyword 建后）*/
+  .scan{display:flex;align-items:flex-start;gap:.5rem;padding:.6rem .8rem;margin-bottom:.8rem;
+    border:1px solid rgba(45,138,122,.35);background:rgba(45,138,122,.07);border-radius:6px;
+    font-size:.76rem;color:var(--color-text-secondary);line-height:1.6}
+  .scan svg{width:15px;height:15px;flex:none;color:#2d8a7a;margin-top:.1rem}
+  .scan b{color:var(--color-text-primary)}
+  .scan a{color:#2d8a7a;text-decoration:underline;cursor:pointer}
+  [data-theme="dark"] .scan{border-color:rgba(94,214,193,.3);background:rgba(94,214,193,.06)}
+  [data-theme="dark"] .scan svg,[data-theme="dark"] .scan a{color:#5ed6c1}
+
+  /* 关注列表行 */
+  .wrow{display:flex;align-items:center;gap:.5rem;padding:.55rem .1rem;border-top:1px dashed var(--color-border-subtle)}
+  .wrow:first-of-type{border-top:0}
+  .wrow__mark{flex:none;font-family:var(--mono);font-size:.64rem;border-radius:4px;padding:.1rem .4rem;font-weight:600}
+  .wrow__mark--label{color:var(--color-accent);background:var(--color-accent-subtle)}
+  .wrow__mark--kw{color:#2d8a7a;background:rgba(45,138,122,.1)}
+  [data-theme="dark"] .wrow__mark--kw{color:#5ed6c1;background:rgba(94,214,193,.12)}
+  .wrow__text{font-size:.82rem;color:var(--color-text-primary);font-family:var(--serif);
+    overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .wrow__text--kw{font-family:var(--mono);font-size:.76rem}
+  .wrow__paused{font-size:.62rem;color:var(--color-text-muted);font-style:italic;flex:none}
+  .wrow__meta{font-family:var(--mono);font-size:.62rem;color:var(--color-text-muted);flex:none}
+  .wrow__ops{margin-left:auto;display:flex;gap:.15rem;flex:none}
+  .wop{appearance:none;border:0;background:transparent;color:var(--color-text-muted);cursor:pointer;
+    width:24px;height:24px;border-radius:4px;display:inline-flex;align-items:center;justify-content:center}
+  .wop:hover{background:var(--color-bg-hover);color:var(--color-text-secondary)}
+  .wop svg{width:13px;height:13px}
+  .wop--resume{color:#2d8a7a}
+
+  .panel__empty{padding:1.4rem;text-align:center;border:1px dashed var(--color-border-medium);border-radius:8px;
+    color:var(--color-text-muted);font-style:italic;font-size:.8rem;line-height:1.8}
+  .panel__empty b{color:var(--color-text-secondary);font-style:normal}
+
+  /* 新建按钮（面板底部主操作）*/
+  .panel__foot{padding:.8rem 1.1rem;border-top:1px solid var(--color-border-subtle)}
+  .btn-new{width:100%;appearance:none;border:1px dashed var(--color-border-strong);border-radius:8px;cursor:pointer;
+    background:transparent;color:var(--color-text-secondary);padding:.6rem;font-family:var(--sans);font-size:.8rem;
+    display:flex;align-items:center;justify-content:center;gap:.35rem}
+  .btn-new:hover{border-color:var(--color-accent);color:var(--color-accent)}
+  .btn-new svg{width:13px;height:13px}
+
+  /* ====== 新建对话框（复用 watch-bar-keyword 同款，简版示意）====== */
+  .dlg{display:none;border-top:1px solid var(--color-border-subtle);padding:.9rem 1rem 1rem;background:var(--color-bg-base)}
+  .dlg.show{display:block}
+  .type-seg{display:flex;border:1px solid var(--color-border-medium);border-radius:8px;overflow:hidden}
+  .type-seg button{flex:1;appearance:none;border:0;background:transparent;cursor:pointer;
+    padding:.5rem .4rem;font-family:var(--sans);font-size:.76rem;color:var(--color-text-secondary);
+    display:flex;flex-direction:column;align-items:center;gap:.1rem}
+  .type-seg button small{font-size:.6rem;color:var(--color-text-muted)}
+  .type-seg button.on{background:var(--color-accent-subtle);color:var(--color-accent)}
+  .type-seg button.on small{color:var(--color-accent)}
+  .dlg__field{margin-top:.7rem}
+  .dlg__field label{display:block;font-size:.7rem;color:var(--color-text-secondary);margin-bottom:.3rem}
+  .dlg input[type=text]{width:100%;appearance:none;border:1px solid var(--color-border-medium);border-radius:6px;
+    background:var(--color-bg-elevated);color:var(--color-text-primary);padding:.5rem .65rem;font-size:.84rem}
+  .dlg input[type=text]:focus{outline:2px solid var(--color-accent-subtle);border-color:var(--color-accent)}
+  .kw-hint{margin-top:.4rem;font-size:.66rem;color:var(--color-text-muted);line-height:1.7}
+  .kw-hint code{font-family:var(--mono);background:var(--color-bg-sunken);border-radius:3px;padding:.05rem .3rem}
+  .parse-preview{margin-top:.5rem;display:flex;align-items:center;flex-wrap:wrap;gap:.3rem;min-height:1.5rem}
+  .pgroup{font-family:var(--mono);font-size:.68rem;border:1px dashed rgba(45,138,122,.5);border-radius:5px;
+    padding:.15rem .45rem;color:#2d8a7a;background:rgba(45,138,122,.05)}
+  .pand{font-size:.64rem;color:var(--color-text-muted)}
+  [data-theme="dark"] .pgroup{color:#5ed6c1;border-color:rgba(94,214,193,.4)}
+  .scan-note{margin-top:.6rem;display:flex;gap:.4rem;font-size:.68rem;color:var(--color-text-secondary);
+    line-height:1.6;background:var(--color-bg-sunken);border-radius:6px;padding:.45rem .6rem}
+  .scan-note svg{width:13px;height:13px;flex:none;margin-top:.15rem;color:var(--raw-teal-500)}
+  .dlg__foot{display:flex;justify-content:flex-end;gap:.5rem;margin-top:.8rem}
+  .btn{appearance:none;border-radius:6px;cursor:pointer;font-family:var(--sans);font-size:.76rem;padding:.45rem .95rem}
+  .btn--ghost{border:1px solid var(--color-border-medium);background:transparent;color:var(--color-text-secondary)}
+  .btn--primary{border:0;background:var(--color-accent);color:#fff}
+  .btn--primary:hover{background:var(--color-accent-hover)}
+  [data-theme="dark"] .btn--primary{color:#080c12}
+
+  .note{max-width:64rem;margin:2rem auto 0;padding:1rem 1.25rem;font-size:.74rem;line-height:1.7;
+    color:var(--color-text-muted);font-family:var(--sans);border-top:1px solid var(--color-border-subtle)}
+  .note b{color:var(--color-text-secondary)}
+</style>
+</head>
+<body>
+
+<div class="mock-bar">
+  <b>关注管理面板（版块级）· Mockup</b>
+  <span>状态：</span>
+  <div class="seg" id="seg-state">
+    <button data-state="closed" class="on">面板关闭</button>
+    <button data-state="open">面板打开·列表</button>
+    <button data-state="create">新建·关键字</button>
+    <button data-state="created">建后·回扫反馈</button>
+  </div>
+  <span class="spacer"></span>
+  <div class="seg" id="seg-theme">
+    <button data-theme="editorial" class="on">Editorial</button>
+    <button data-theme="dark">Dark</button>
+  </div>
+</div>
+
+<div class="stage">
+  <!-- 左栏：版块列表侧栏（BoardListSidebar 示意）-->
+  <div class="side">
+    <div class="side__header">版块</div>
+    <div class="side__body">
+      <span class="side__item on">地缘政治</span>
+      <span class="side__item">半导体</span>
+      <span class="side__item">宏观</span>
+      <span class="side__item">＋ 新建版块</span>
+    </div>
+  </div>
+
+  <!-- 右侧：版块工作台内容区（TagsPage tags-content）-->
+  <div class="content">
+    <!-- tab 栏（tags-content-tabs），五个平级 tab + 右端入口 chip -->
+    <div class="tabs" id="tabs">
+      <button class="tab" data-tab="composition">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="9"/><rect x="14" y="3" width="7" height="5"/><rect x="14" y="12" width="7" height="9"/><rect x="3" y="16" width="7" height="5"/></svg>
+        板块内容
+      </button>
+      <button class="tab on" data-tab="topic-overview">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 17l6-6 4 4 8-8"/><path d="M14 7h7v7"/></svg>
+        话题总览
+      </button>
+      <button class="tab" data-tab="daily-reports">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 2h9l5 5v15H6z"/><path d="M15 2v5h5"/></svg>
+        日报
+      </button>
+      <button class="tab" data-tab="articles">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 22h16l-2-16H6z"/><path d="M9 6V4h6v2"/></svg>
+        文章
+      </button>
+      <button class="tab" data-tab="enrichment">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v12"/><path d="M7 11l5 5 5-5"/><path d="M5 21h14"/></svg>
+        数据增强
+      </button>
+      <!-- ★ 入口 chip：tab 栏右端（margin-left:auto 推到最右），五 tab 常驻 -->
+      <button class="watchchip" id="chip" title="打开关注管理面板">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+        我在追踪 <span class="n">3</span>
+      </button>
+    </div>
+    <div class="content__body" id="tab-content">
+      <span class="hintline" id="tab-hint">（话题总览内容示意：泳道 / 生命线 / 态势版图……切 tab 试试，入口 chip 不消失）</span>
+      <span class="hintline">入口在 tab 栏右端，随版块常驻——创建与管理的唯一入口。</span>
+      <span class="hintline">日报详情内只读 + 跳转（见另一原型 watch-bar-keyword.html）。</span>
+    </div>
+  </div>
+</div>
+
+<!-- ============ 管理面板（抽屉弹层）============ -->
+<div class="overlay" id="overlay">
+  <div class="panel" role="dialog" aria-label="关注管理面板">
+    <div class="panel__head">
+      <span class="panel__title">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+        我在追踪 · 3
+      </span>
+      <span class="panel__sub">本版块</span>
+      <button class="panel__close" id="panel-close" title="关闭">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M18 6L6 18M6 6l12 12"/></svg>
+      </button>
+    </div>
+    <div class="panel__body">
+      <!-- 回扫反馈（建后态）-->
+      <div class="scan" id="scan-banner" style="display:none">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M20 6L9 17l-5-5"/></svg>
+        <div>关键字关注 <b>「ASML|镓锗 出口」</b>已创建，已回扫近 14 天动态——<a>命中 3 条</a>，点击逐条查看。</div>
+      </div>
+
+      <!-- 关注列表 -->
+      <div id="wlist">
+        <div class="wrow">
+          <span class="wrow__mark wrow__mark--label">话题</span>
+          <span class="wrow__text">美伊会不会真打起来</span>
+          <span class="wrow__meta">命中 2</span>
+          <span class="wrow__ops">
+            <button class="wop" title="暂停"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg></button>
+            <button class="wop" title="删除"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6"/></svg></button>
+          </span>
+        </div>
+        <div class="wrow">
+          <span class="wrow__mark wrow__mark--kw">关键字</span>
+          <span class="wrow__text wrow__text--kw">ASML|镓锗 出口</span>
+          <span class="wrow__meta">命中 3</span>
+          <span class="wrow__ops">
+            <button class="wop" title="暂停"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg></button>
+            <button class="wop" title="删除"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6"/></svg></button>
+          </span>
+        </div>
+        <div class="wrow">
+          <span class="wrow__mark wrow__mark--label">话题</span>
+          <span class="wrow__text">AI 监管立法进展</span>
+          <span class="wrow__paused">已暂停</span>
+          <span class="wrow__ops">
+            <button class="wop wop--resume" title="恢复"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 5v14l11-7z"/></svg></button>
+            <button class="wop" title="删除"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6"/></svg></button>
+          </span>
+        </div>
+      </div>
+
+      <!-- 空态（示意，默认隐藏）-->
+      <div class="panel__empty" id="wempty" style="display:none">
+        还没有关注。<br><b>点下方「新建关注」，盯一个话题或一个词。</b>
+      </div>
+    </div>
+    <div class="panel__foot">
+      <button class="btn-new" id="btn-new">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
+        新建关注
+      </button>
+
+      <!-- 内嵌新建区（点新建展开；真实实现为对话框，此处示意同面板展开更顺手）-->
+      <div class="dlg" id="dlg">
+        <div class="type-seg">
+          <button class="on">关注话题<small>一句话关切 · AI 语义匹配</small></button>
+          <button id="btn-kw">关注关键字<small>盯具体词 · 立即回扫命中</small></button>
+        </div>
+        <div class="dlg__field">
+          <label>关键字表达式</label>
+          <input type="text" id="kw-input" value="ASML|镓锗 出口" placeholder="如：ASML|镓锗 出口">
+          <div class="kw-hint"><b>空格</b> = 且 · <code>|</code> = 或 · 大小写不敏感；匹配叙事线标题+摘要。</div>
+          <div class="parse-preview" id="parse-preview"></div>
+          <div class="scan-note">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.35-4.35"/></svg>
+            <span>提交后立即回扫本版块近 14 天，命中马上出现在对应日报的「你在追踪」栏。</span>
+          </div>
+        </div>
+        <div class="dlg__foot">
+          <button class="btn btn--ghost" id="btn-cancel">取消</button>
+          <button class="btn btn--primary" id="btn-submit">创建关注</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<p class="note">
+  <b>设计要点：</b>① 入口 chip 在版块工作台 tab 栏（tags-content-tabs）右端，五个平级 tab（板块内容/话题总览/日报/文章/数据增强）下都常驻——日报与话题总览是平级 tab，入口不随 tab 切换消失，N=关注总数，入口与实体（版块级）同级。② 管理面板 = 创建 + 列表 + 暂停/恢复/删除 + 回扫反馈，一站式；列表行带类型徽标（话题=红系 / 关键字=青绿系，与日报栏命中分组的视觉语言一致）。③ keyword 建后回扫反馈 banner 打在面板顶部，命中数可点。④ 新建区示意为面板内展开（实现可为独立对话框，复用 watch-bar-keyword.html 的完整三件套：语法提示/解析预览/回扫说明）。⑤ 删除走二次确认（防连带命中记录误删）。⑥ 日报详情栏只读化 + 栏头跳转见另一原型 watch-bar-keyword.html。
+</p>
+
+<script>
+  document.querySelectorAll('#seg-theme button').forEach(b=>{
+    b.onclick=()=>{document.documentElement.setAttribute('data-theme',b.dataset.theme);
+      document.querySelectorAll('#seg-theme button').forEach(x=>x.classList.toggle('on',x===b));};
+  });
+  // tab 切换（chip 常驻演示）
+  const tabHint=document.getElementById('tab-hint');
+  const tabTexts={composition:'（板块内容示意：标签构成 / 辅助标签池……）',
+    'topic-overview':'（话题总览内容示意：泳道 / 生命线 / 态势版图……切 tab 试试，入口 chip 不消失）',
+    'daily-reports':'（日报示意：日报列表卡 → 点开进详情，详情内「你在追踪」栏只读 + 跳转）',
+    articles:'（文章时间线示意……）',enrichment:'（数据增强示意……）'};
+  document.querySelectorAll('#tabs .tab').forEach(b=>{
+    b.onclick=()=>{
+      document.querySelectorAll('#tabs .tab').forEach(x=>x.classList.toggle('on',x===b));
+      tabHint.textContent=tabTexts[b.dataset.tab]||'';
+    };
+  });
+  // 状态机
+  const overlay=document.getElementById('overlay'), dlg=document.getElementById('dlg'),
+        scan=document.getElementById('scan-banner'), chip=document.getElementById('chip'),
+        parse=document.getElementById('parse-preview'), kwInput=document.getElementById('kw-input');
+  function parseExpr(s){return s.split('|').map(g=>g.trim().split(/\s+/).filter(Boolean)).filter(g=>g.length>0)}
+  function renderParse(){
+    const g=parseExpr(kwInput.value);parse.innerHTML='';
+    g.forEach((grp,i)=>{if(i>0){const a=document.createElement('span');a.className='pand';a.textContent='且';parse.appendChild(a);}
+      const c=document.createElement('span');c.className='pgroup';c.textContent=grp.join(' ');parse.appendChild(c);});
+  }
+  kwInput.addEventListener('input',renderParse);
+  function setState(s){
+    overlay.classList.toggle('show', s!=='closed');
+    dlg.classList.toggle('show', s==='create');
+    scan.style.display = (s==='created')?'flex':'none';
+    if(s==='create') renderParse();
+  }
+  document.querySelectorAll('#seg-state button').forEach(b=>{
+    b.onclick=()=>{document.querySelectorAll('#seg-state button').forEach(x=>x.classList.toggle('on',x===b));setState(b.dataset.state);};
+  });
+  chip.onclick=()=>{setState('open');document.querySelectorAll('#seg-state button').forEach(x=>x.classList.toggle('on',x.dataset.state==='open'));};
+  document.getElementById('panel-close').onclick=()=>setState('closed');
+  document.getElementById('btn-new').onclick=()=>{setState('create');document.querySelectorAll('#seg-state button').forEach(x=>x.classList.toggle('on',x.dataset.state==='create'));};
+  document.getElementById('btn-cancel').onclick=()=>setState('open');
+  document.getElementById('btn-submit').onclick=()=>{setState('created');document.querySelectorAll('#seg-state button').forEach(x=>x.classList.toggle('on',x.dataset.state==='created'));};
+</script>
+</body>
+</html>

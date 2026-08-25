@@ -16,6 +16,7 @@ type Config struct {
 	Log      LogConfig
 	Tracing  TracingConfig
 	Storage  StorageConfig
+	Bocha    BochaConfig
 }
 
 type LogConfig struct {
@@ -75,6 +76,15 @@ type StorageConfig struct {
 	IconDir string `mapstructure:"icon_dir"`
 }
 
+// BochaConfig configures the Bocha (bochaai.com) web-search backend used by the
+// data-enrichment web_search tool. When APIKey is empty the wiring falls back
+// to NoopWebSearcher (graceful degradation). Endpoint defaults to the Bocha
+// general-search (raw web results) endpoint.
+type BochaConfig struct {
+	APIKey   string `mapstructure:"api_key"`  // empty → degrade to Noop
+	Endpoint string `mapstructure:"endpoint"` // default https://api.bochaai.com/v1/web-search
+}
+
 var AppConfig *Config
 
 func LoadConfig(configPath string) error {
@@ -110,6 +120,9 @@ func LoadConfig(configPath string) error {
 	viper.SetDefault("tracing.instrument_http", true)
 
 	viper.SetDefault("storage.icon_dir", "data/icons")
+
+	viper.SetDefault("bocha.api_key", "")
+	viper.SetDefault("bocha.endpoint", "https://api.bochaai.com/v1/web-search")
 
 	if err := viper.ReadInConfig(); err != nil {
 		if _, ok := err.(viper.ConfigFileNotFoundError); !ok {
@@ -172,6 +185,14 @@ func applyEnvOverrides(cfg *Config) {
 	}
 	if value := strings.TrimSpace(os.Getenv("STORAGE_ICON_DIR")); value != "" {
 		cfg.Storage.IconDir = value
+	}
+
+	// Bocha web-search backend (data-enrichment web_search). Empty key → Noop.
+	if v := strings.TrimSpace(os.Getenv("BOCHA_API_KEY")); v != "" {
+		cfg.Bocha.APIKey = v
+	}
+	if v := strings.TrimSpace(os.Getenv("BOCHA_ENDPOINT")); v != "" {
+		cfg.Bocha.Endpoint = v
 	}
 }
 

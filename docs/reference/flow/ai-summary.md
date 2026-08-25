@@ -1,5 +1,6 @@
 # AI 调用路由流程（AI Router / AI Summary）
 
+<!-- doc-impact-applies: backend-go/internal/platform/airouter/ | section=业务约束与不变量 -->
 > 大功能：统一 AI 调用路由——按 capability 选 provider、失败自动降级、per-capability 并发限流、全量调用审计。
 > 跨端（后端 airouter + 前端 AI Router 配置面板）。互补：`flow/content-enrichment.md`（文章级整理稿走 `CapabilitySummary`）、`flow/daily-report.md`（日报管线走 `CapabilityDigestPolish`）。
 
@@ -64,7 +65,7 @@ AI 页 (front/app/features/ai/)
 
 ## 业务约束与不变量
 
-> 本节同时是 `scripts/doc-impact.sh context` 的数据源——改 `internal/platform/airouter/` 代码前会被自动 dump，必读。
+> 本节同时是 constraint-injection extension 的注入数据源——改 `internal/platform/airouter/` 代码前会被自动注入 system prompt，必读。
 
 1. **请求必须带 `Operation`**：`Chat`/`Embed` 要求 `req.Operation != ""`，空则直接 `errors.New("airouter: Operation is required")` 不发请求。`Capability` 同样必填，决定路由到哪条 `ai_routes` 记录。
 2. **五类能力固定枚举**：`summary` / `topic_tagging` / `digest_polish` / `open_notebook` / `embedding`（`store.go` 常量）。新增能力属于跨域语义变更，不是局部改动。
@@ -74,10 +75,13 @@ AI 页 (front/app/features/ai/)
 6. **prompt / response 截断保护**：`response_snippet` 截到 `maxResponseSnippet=10000` runes；`prompt` 截到 `maxPromptRunes=20000` runes（超长保头 18000 + 尾 2000 + 截断标记），避免长 prompt 撑爆日志列。
 7. **provider 类型受限**：内置仅 `openai_compatible` / `ollama` 两种 client（均走 `OpenAICompatibleClient`）；未知 provider 类型记为 `unsupported` 并跳过该 provider。
 8. **调用日志 7 天清理**：`ai_call_logs` 由 `job_log_cleanup.go` 周期清理（默认 7 天），审计窗口有限，长期分析需另存。
+9. **provider 有 `model_kind`（llm/embedding）类型区分**：与 `provider_type`（协议维度）正交——`model_kind` 表达功能类型（对话/推理 vs 向量嵌入），默认 `llm`。embedding 任务路由硬约束只接 `embedding` 模型、llm 路由只接 `llm` 模型（`UpsertRoute` 保存时校验，违反返回错误）；provider 可选 `start_command`（本地进程启动命令，启动健康检测时按总开关 `auto_start_models` 拉起，见 `flow/scheduler.md` §业务约束 #7 健康门）。
+10. **`Router.Embed` 有持久化结果缓存（仅白名单 operation）**：只有 `embeddingCacheOperations` 白名单内的 operation（当前仅 `tagmanagement.embedding`，输入由 tag 固定属性构成、跨文章重复）参与缓存；白名单外（`section.embedding` 文章正文、`tagmanagement.auxlabel_embedding` 标签+文章上下文一次性组合、`discovery.route_embedding` 路由回填等）不查不写直接走 provider（实测命中率 0-10%，每行 ~30KB 纯存储浪费）。白名单内：route 加载后、**acquireSem 之前**按 `SHA-256(provider.Model + "\x00" + join(Input, "\x00"))` 查 `ai_embedding_cache`（命中不占信号量、不发 HTTP，直接反序列化返回，`ai_call_logs` 记 `Success=true` + `request_meta` 含 `"cache_hit":true`）；provider 调用成功后按成功 provider 的 model `ON CONFLICT DO NOTHING` 幂等落缓存（input_preview 截 200 runes，写失败仅 warn 不阻断）。缓存读写失败均降级为未命中，不得阻断真实调用。缓存记录由 `job_log_cleanup` 顺带清理 14 天前数据（命中集中在写入后 1-2 天的夜间窗口，更长保留无命中率贡献）。注意：缓存 key 的 model 取 route provider 的 Model（当前所有调用点均不设 `req.Model`；client 层 `req.Model` 优先，未来新增调用点若设了 `req.Model` 需先归一 effective model 再参与 key）。
 
 ## 代码入口
 
-- **后端 airouter（核心）**：`backend-go/internal/platform/airouter/router.go`（`Router.Chat` / `Router.Embed` / 信号量 / 降级链）、`store.go`（`Capability` 常量、`Store.LoadRouteWithProviders` / `ResolvePrimaryProvider` / `LogCall`）、`fallback.go`（降级辅助）、`openai_compatible.go`（provider client）、`embedding.go`（embedding client）、`test_connection.go`（连通性自检）。
+- **后端 airouter（核心）**：`backend-go/internal/platform/airouter/router.go`（`Router.Chat` / `Router.Embed` / 信号量 / 降级链）、`store.go`（`Capability` 常量、`Store.LoadRouteWithProviders` / `ResolvePrimaryProvider` / `LogCall`；`UpsertRoute` 按 capability 校验 provider `model_kind`（embedding 路由只接 embedding、llm 路由只接 llm）、`UpsertProvider` 校验 `model_kind` 合法值（llm/embedding））、`fallback.go`（降级辅助）、`openai_compatible.go`（provider client）、`embedding.go`（embedding client）、`test_connection.go`（连通性自检，复用于 `aihealth` 启动健康检测 GET /models 零 token）。
+- **后端 AI 健康（ai-model-health-gate）**：`backend-go/internal/platform/aihealth/`（启动健康检测 + 自动拉起 + 内存快照；`Healthy()`/`GetSnapshot()`/`RunStartupProbe`，快照未就绪 fail-closed），见 `flow/scheduler.md` §业务约束 #7 健康门。
 - **后端配置/审计**：`internal/models/`（`AIProvider` / `AIRoute` / `AICallLog` 模型）、`backend-go/internal/admin/handler/ai_handler.go`（AI 路由/provider 配置与调用日志查询）、`backend-go/internal/admin/handler/ai_call_log_handler.go`、`backend-go/internal/admin/scheduler/job_log_cleanup.go`（日志清理）。
 - **消费方**：`internal/reader/service/content_completion_service.go`（`CapabilitySummary`）、`internal/topicgraph/service/`（`CapabilityDigestPolish` 等日报 LLM）、`internal/tagmanagement/service/`（`CapabilityTopicTagging`）。
 - **前端**：`front/app/features/ai/components/`（AIRouterSettingsPanel / AIRouterBackupProviders / AIRouterCapabilityRoutes / AIProviderManagement / EmbeddingQueuePanel）、`front/app/features/ai/composables/useAIRouterSettings.ts`、`front/app/api/`。
@@ -87,3 +91,5 @@ AI 页 (front/app/features/ai/)
 | 日期 | 变更 | 摘要 | 归档位置 |
 |------|------|------|----------|
 | 2026-07-05 | ai-call-logging-schema | `AICallLog` 补 4 列（`operation` / `prompt` / `token_usage` / `session_id`），把 prompt 真正落库、补查询 API 与前端视图，让 AI 调用可观测/可回放/可审计 | [`openspec/changes/archive/2026-07-05-ai-call-logging-schema`](../../../openspec/changes/archive/2026-07-05-ai-call-logging-schema) |
+| 2026-08-04 | ai-model-health-gate | AI provider 增 `model_kind`（llm/embedding）区分 + `start_command`（本地模型自动拉起配置）；路由绑定按 capability 校验 provider 类型（embedding 路由只接 embedding provider，llm 路由只接 llm），冲突拒绝；启动探针与健康门禁见 scheduler 流程 | [`openspec/changes/archive/2026-08-04-ai-model-health-gate`](../../../openspec/changes/archive/2026-08-04-ai-model-health-gate) |
+| 2026-08-21 | nightly-throughput-embedding-cache-parallel-crawl | `Router.Embed` 增持久化缓存（白名单制，仅 `tagmanagement.embedding`；TTL 14 天，命中不占信号量，`ai_call_logs` 记 cache_hit）；firecrawl 队列串行→3 worker 并行（atomic 计数+500ms 限速），夜间窗口吞吐 ×3 | [`openspec/changes/archive/2026-08-21-nightly-throughput-embedding-cache-parallel-crawl`](../../../openspec/changes/archive/2026-08-21-nightly-throughput-embedding-cache-parallel-crawl) |

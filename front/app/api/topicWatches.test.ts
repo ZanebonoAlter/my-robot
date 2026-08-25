@@ -56,6 +56,68 @@ describe('useTopicWatchesApi — normalizer & signatures', () => {
       // numeric id → string at the API boundary
       expect(res.data!.id).toBe('42')
       expect(typeof res.data!.id).toBe('string')
+      // type 缺省：后端列默认 label，响应无 type 字段时归一化为 label（向后兼容）
+      expect(res.data!.type).toBe('label')
+      expect(res.data!.instantHitCount).toBeUndefined()
+    })
+
+    it('passes type=keyword through in the body and surfaces instant_hit_count', async () => {
+      postMock.mockResolvedValue({
+        success: true,
+        data: {
+          id: 43,
+          semantic_board_id: 1974,
+          label: 'ASML|镓锗 出口',
+          type: 'keyword',
+          status: 'active',
+          instant_hit_count: 3,
+          created_at: '2026-08-24T00:00:00Z',
+          updated_at: '2026-08-24T00:00:00Z',
+        },
+      })
+
+      const api = useTopicWatchesApi()
+      const res = await api.createWatch(1974, 'ASML|镓锗 出口', 'keyword')
+
+      // type 透传到 body
+      expect(postMock).toHaveBeenCalledWith('/semantic-boards/1974/topic-watches', { label: 'ASML|镓锗 出口', type: 'keyword' })
+      expect(res.success).toBe(true)
+      expect(res.data).toMatchObject({
+        id: '43',
+        type: 'keyword',
+        label: 'ASML|镓锗 出口',
+      })
+      // instant_hit_count → instantHitCount（keyword 即时回扫命中数）
+      expect(res.data!.instantHitCount).toBe(3)
+    })
+
+    it('passes type=label through explicitly (body carries type even for label)', async () => {
+      postMock.mockResolvedValue({
+        success: true,
+        data: { id: 44, semantic_board_id: 1974, label: 'x', type: 'label', status: 'active', created_at: 'a', updated_at: 'b' },
+      })
+      const api = useTopicWatchesApi()
+      const res = await api.createWatch(1974, 'x', 'label')
+      expect(postMock).toHaveBeenCalledWith('/semantic-boards/1974/topic-watches', { label: 'x', type: 'label' })
+      expect(res.data!.type).toBe('label')
+      // label 类无即时回扫，响应不带 instant_hit_count
+      expect(res.data!.instantHitCount).toBeUndefined()
+    })
+
+    it('normalizes unexpected type values defensively to label', async () => {
+      getMock.mockResolvedValue({
+        success: true,
+        data: [
+          { id: 1, semantic_board_id: 1974, label: 'legacy', status: 'active', created_at: 'a', updated_at: 'b' },
+          { id: 2, semantic_board_id: 1974, label: 'kw', type: 'keyword', status: 'paused', created_at: 'c', updated_at: 'd' },
+          { id: 3, semantic_board_id: 1974, label: 'weird', type: 'surprise', status: 'active', created_at: 'e', updated_at: 'f' },
+        ],
+      })
+      const api = useTopicWatchesApi()
+      const res = await api.listWatches(1974)
+      expect(res.data![0]!.type).toBe('label') // 历史行无 type → label
+      expect(res.data![1]!.type).toBe('keyword')
+      expect(res.data![2]!.type).toBe('label') // 未知值防御性归 label
     })
 
     it('returns success:false without throwing on backend error', async () => {
@@ -85,6 +147,22 @@ describe('useTopicWatchesApi — normalizer & signatures', () => {
       expect(res.data).toHaveLength(2)
       expect(res.data![0]).toMatchObject({ id: '1', status: 'active' })
       expect(res.data![1]).toMatchObject({ id: '2', status: 'paused', semanticBoardId: '1974' })
+    })
+
+    it('normalizes unexpected type values defensively to label', async () => {
+      getMock.mockResolvedValue({
+        success: true,
+        data: [
+          { id: 1, semantic_board_id: 1974, label: 'legacy', status: 'active', created_at: 'a', updated_at: 'b' },
+          { id: 2, semantic_board_id: 1974, label: 'kw', type: 'keyword', status: 'paused', created_at: 'c', updated_at: 'd' },
+          { id: 3, semantic_board_id: 1974, label: 'weird', type: 'surprise', status: 'active', created_at: 'e', updated_at: 'f' },
+        ],
+      })
+      const api = useTopicWatchesApi()
+      const res = await api.listWatches(1974)
+      expect(res.data![0]!.type).toBe('label') // 历史行无 type → label
+      expect(res.data![1]!.type).toBe('keyword')
+      expect(res.data![2]!.type).toBe('label') // 未知值防御性归 label
     })
 
     it('returns [] when the backend reports failure (never throws)', async () => {
@@ -162,6 +240,46 @@ describe('useTopicWatchesApi — normalizer & signatures', () => {
       const res = await api.getWatchHits(9)
       expect(res.success).toBe(false)
       expect(res.data).toEqual([])
+    })
+  })
+
+  describe('materialized tracks (watch-materialized-topic)', () => {
+    it('createWatch passes query through for sentence_topic', async () => {
+      postMock.mockResolvedValue({ success: true, data: {
+        id: 300, semantic_board_id: 7, label: 'AI 进展', query: 'AI coding 进展',
+        type: 'sentence_topic', persistent_topic_id: 42, status: 'active',
+        created_at: '2026-08-25T10:00:00Z', updated_at: '2026-08-25T10:00:00Z',
+      } })
+      const api = useTopicWatchesApi()
+      const res = await api.createWatch(7, 'AI 进展', 'sentence_topic', 'AI coding 进展')
+      expect(postMock).toHaveBeenCalledWith('/semantic-boards/7/topic-watches', {
+        label: 'AI 进展', type: 'sentence_topic', query: 'AI coding 进展',
+      })
+      expect(res.data).toMatchObject({
+        id: '300', type: 'sentence_topic', query: 'AI coding 进展', persistentTopicId: '42',
+      })
+    })
+
+    it('normalizes keyword_topic type and omits absent query/topic link', async () => {
+      postMock.mockResolvedValue({ success: true, data: {
+        id: 301, semantic_board_id: 7, label: 'harness',
+        type: 'keyword_topic', status: 'active',
+        created_at: '2026-08-25T10:00:00Z', updated_at: '2026-08-25T10:00:00Z',
+      } })
+      const api = useTopicWatchesApi()
+      const res = await api.createWatch(7, 'harness', 'keyword_topic')
+      expect(res.data).toMatchObject({ id: '301', type: 'keyword_topic' })
+      expect(res.data!.query).toBeUndefined()
+      expect(res.data!.persistentTopicId).toBeUndefined()
+    })
+
+    it('deleteWatch appends confirm_archive_topic for sentence deletions', async () => {
+      deleteMock.mockResolvedValue({ success: true, data: null })
+      const api = useTopicWatchesApi()
+      await api.deleteWatch('300', true)
+      expect(deleteMock).toHaveBeenCalledWith('/topic-watches/300?confirm_archive_topic=true')
+      await api.deleteWatch('301')
+      expect(deleteMock).toHaveBeenLastCalledWith('/topic-watches/301')
     })
   })
 

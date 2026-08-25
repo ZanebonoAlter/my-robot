@@ -85,6 +85,7 @@ func RunAutoMigrate(db *gorm.DB) error {
 		&models.AIRoute{},
 		&models.AIRouteProvider{},
 		&models.AICallLog{},
+		&models.AIEmbeddingCache{},
 		&models.ReadingBehavior{},
 		// preference-vector-feed-discovery: 偏好向量 / RSSHub 路由目录 / 订阅源推荐
 		&models.PreferenceVector{},
@@ -94,8 +95,6 @@ func RunAutoMigrate(db *gorm.DB) error {
 		&models.FeedRecommendation{},
 		&models.FirecrawlJob{},
 		&models.TagJob{},
-		&models.NarrativeSummary{},
-		&models.NarrativeBoard{},
 	}
 	allModels = append(allModels, extraModels...)
 	return db.AutoMigrate(allModels...)

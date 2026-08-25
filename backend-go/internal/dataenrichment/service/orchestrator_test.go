@@ -143,7 +143,8 @@ func defaultInterpretLens(ar *mockAirRouter) {
 	))
 }
 
-// defaultAnalyzeEventChain adds a minimal event_chain analyze response.
+// defaultAnalyzeEventChain adds a minimal event_chain analyze response
+// (including the required depth block — non-sparse forms must carry depth).
 func defaultAnalyzeEventChain(ar *mockAirRouter) {
 	ar.addResponse(`{
 		"form": "event_chain",
@@ -151,7 +152,15 @@ func defaultAnalyzeEventChain(ar *mockAirRouter) {
 		"analysis": {
 			"fact_layer": [{"claim": "产油国设施遭袭", "evidence": [{"source_type":"news","ref":"ctx1","quote":"设施遭袭"}], "verified": true}],
 			"timeline": [{"date": "2026-07-01", "event": "遭袭", "ref": {"source_type":"news","ref":"ctx1"}}],
-			"insight_layer": [{"cert": "medium", "title": "油价短期承压", "logic": "供应收紧", "evidence": [{"source_type":"news","ref":"ctx1","quote":"油价飙升"}]}]
+			"insight_layer": [{"cert": "medium", "title": "油价短期承压", "logic": "供应收紧", "evidence": [{"source_type":"news","ref":"ctx1","quote":"油价飙升"}]}],
+			"depth": {
+				"system_reframe": "放进全球能源供应链系统看",
+				"mechanism_layers": [{"layer":"供给冲击","deep_logic":"产能骤降→供需缺口","basis":"遭袭报道"}],
+				"historical_analogy": [{"case":"2019沙特油田遭袭","mechanism":"短期供应中断→油价跳涨","diff":"本次波及范围待证实"}],
+				"regime_shift": null,
+				"boundary": "目前还不能确认补产时序，不宜外推长期趋势",
+				"evidence_chain": [{"source_type":"news","ref":"ctx1","quote":"设施遭袭","date":"2026-07-01"}]
+			}
 		}
 	}`)
 }
@@ -1291,7 +1300,13 @@ func TestAnalyze_LayeredInsightSchema(t *testing.T) {
 				{"cert": "high", "title": "短期供应收紧", "logic": "遭袭→产能下降→供应收紧", "evidence": [{"source_type":"news","ref":"ctx_week_1","quote":"设施遭袭"}]},
 				{"cert": "medium", "title": "能源板块受益", "logic": "油价涨→能源股估值抬升", "evidence": [{"source_type":"tool","ref":"tool_resp_1"}]},
 				{"cert": "question", "title": "下季能否补产", "logic": "取决于其他产油国是否释放储备", "evidence": [{"source_type":"news","ref":"ctx_week_1"}]}
-			]
+			],
+			"depth": {
+				"system_reframe": "放进全球能源供应链系统看",
+				"mechanism_layers": [{"layer":"供给冲击","deep_logic":"产能骤降→供需缺口","basis":"遭袭报道"}],
+				"boundary": "还不能确认补产时序，不宜外推长期趋势",
+				"evidence_chain": [{"source_type":"news","ref":"ctx_week_1","quote":"设施遭袭","date":"2026-07-01"}]
+			}
 		}
 	}`)
 
@@ -1511,25 +1526,13 @@ func TestEnrichTopic_SkipReviewOnOldFormatPrev(t *testing.T) {
 // ── ToolsForSourceType mapping unit test ──────────────────────────────────
 
 func TestToolsForSourceType(t *testing.T) {
-	tools := service.ToolsForSourceType("etf_quote")
-	if len(tools) != 3 {
-		t.Fatalf("etf_quote: want 3 tools, got %d", len(tools))
-	}
-	expected := map[string]bool{"list_etf_by_keyword": true, "get_etf_quote": true, "list_sectors": true}
-	for _, tool := range tools {
-		if !expected[tool] {
-			t.Fatalf("etf_quote: unexpected tool %s", tool)
+	// After the A-share financial removal there are no built-in source types,
+	// so every source_type maps to nil tools (the mechanism is retained as an
+	// extension point for future structured external sources).
+	for _, st := range []string{"etf_quote", "exchange_rate", "gdelt_event", "bogus"} {
+		if tools := service.ToolsForSourceType(st); len(tools) != 0 {
+			t.Fatalf("%s: want 0 tools (no built-in source_type mapping), got %d (%v)", st, len(tools), tools)
 		}
-	}
-
-	if tools := service.ToolsForSourceType("exchange_rate"); len(tools) != 0 {
-		t.Fatalf("exchange_rate: want 0 tools, got %d", len(tools))
-	}
-	if tools := service.ToolsForSourceType("gdelt_event"); len(tools) != 0 {
-		t.Fatalf("gdelt_event: want 0 tools, got %d", len(tools))
-	}
-	if tools := service.ToolsForSourceType("bogus"); len(tools) != 0 {
-		t.Fatalf("bogus: want 0 tools, got %d", len(tools))
 	}
 }
 
@@ -1540,9 +1543,9 @@ func TestEnrichTopic_OnlyAllowedToolsAdvertised(t *testing.T) {
 	airouter := newMockAirRouter()
 
 	defaultInterpretLens(airouter)
-	airouter.addResponse(`{"action":"call_tool","thought":"查行情","tool":"get_etf_quote","args":{"codes":["512480"]}}`)
-	airouter.addResponse(`{"action":"call_tool","thought":"查ETF","tool":"list_etf_by_keyword","args":{"keyword":"半导体"}}`)
-	airouter.addResponse(`{"action":"finish","thought":"done","summary":"芯片ETF涨2%"}`)
+	airouter.addResponse(`{"action":"call_tool","thought":"查股价","tool":"get_stock_price","args":{}}`)
+	airouter.addResponse(`{"action":"call_tool","thought":"搜背景","tool":"web_search","args":{"query":"半导体"}}`)
+	airouter.addResponse(`{"action":"finish","thought":"done","summary":"半导体供需背景已查"}`)
 	defaultAnalyzeEventChain(airouter)
 
 	toolRegistry := service.NewRegistry(&nilFetcher{})
@@ -1550,7 +1553,7 @@ func TestEnrichTopic_OnlyAllowedToolsAdvertised(t *testing.T) {
 		EnrichmentEnabled: true,
 		WindowDays:        14,
 		ContextLayers:     []string{"week"},
-		AllowedTools:      []string{"list_etf_by_keyword"},
+		AllowedTools:      nil, // exploration set always-on; no per-source_type tools exist anymore
 	}
 	boardReader := &mockBoardConfigReader{cfg: boardCfg}
 
@@ -1583,39 +1586,40 @@ func TestEnrichTopic_OnlyAllowedToolsAdvertised(t *testing.T) {
 		t.Fatalf("expected 2 tool calls (1 blocked + 1 executed), got %d", len(al.ToolCalls))
 	}
 	tc1 := al.ToolCalls[0]
-	if tc1.Tool != "get_etf_quote" {
-		t.Fatalf("first tool call: want get_etf_quote, got %s", tc1.Tool)
+	if tc1.Tool != "get_stock_price" {
+		t.Fatalf("first tool call: want get_stock_price (unregistered), got %s", tc1.Tool)
 	}
 	if !strings.Contains(tc1.Thought, "被拦:工具不可用") {
-		t.Fatalf("first tool call should be blocked, got thought: %s", tc1.Thought)
+		t.Fatalf("first tool call should be blocked (not in allowed set), got thought: %s", tc1.Thought)
 	}
 	if !strings.Contains(tc1.ResultFull, "该工具当前不可用") {
 		t.Fatalf("first tool result should say 该工具当前不可用, got: %s", tc1.ResultFull)
 	}
 
 	tc2 := al.ToolCalls[1]
-	if tc2.Tool != "list_etf_by_keyword" {
-		t.Fatalf("second tool call: want list_etf_by_keyword, got %s", tc2.Tool)
+	if tc2.Tool != "web_search" {
+		t.Fatalf("second tool call: want web_search (always-on), got %s", tc2.Tool)
 	}
 	if strings.Contains(tc2.Thought, "被拦") {
 		t.Fatal("second tool call should NOT be blocked")
 	}
 
-	// System prompt advertises only list_etf_by_keyword.
+	// System prompt advertises the always-on exploration + web_search tools, and
+	// never the hallucinated/removed financial tool names.
 	for _, call := range airouter.Calls {
 		if call.Operation != "data_enrichment.tool_use" {
 			continue
 		}
 		for _, msg := range call.Messages {
 			if msg.Role == "system" {
-				if !strings.Contains(msg.Content, "**list_etf_by_keyword**") {
-					t.Fatal("system prompt should mention **list_etf_by_keyword** tool desc")
+				if !strings.Contains(msg.Content, "**web_search**") || !strings.Contains(msg.Content, "**list_boards**") {
+					t.Fatal("system prompt should advertise web_search + list_boards (always-on)")
 				}
-				if strings.Contains(msg.Content, "**get_etf_quote**") {
-					t.Fatal("system prompt should NOT have **get_etf_quote** tool desc (not allowed)")
+				if strings.Contains(msg.Content, "**get_stock_price**") {
+					t.Fatal("system prompt must NOT advertise the hallucinated tool get_stock_price")
 				}
-				if strings.Contains(msg.Content, "**list_sectors**") {
-					t.Fatal("system prompt should NOT have **list_sectors** tool desc (not allowed)")
+				if strings.Contains(msg.Content, "**list_etf_by_keyword**") {
+					t.Fatal("system prompt must NOT advertise removed financial tool list_etf_by_keyword")
 				}
 			}
 		}

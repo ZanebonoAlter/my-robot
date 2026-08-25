@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 import { Icon } from '@iconify/vue'
 import DailyReportMiniLifeline from './DailyReportMiniLifeline.vue'
+import SectionWatchBadge from './SectionWatchBadge.vue'
 import SectionTierBadge from './SectionTierBadge.vue'
 import SectionAnchorBadge from './SectionAnchorBadge.vue'
 import SectionQualityExplore from './SectionQualityExplore.vue'
@@ -22,6 +23,8 @@ const props = defineProps<{
   lifelineEntries: Map<number, RequestCacheEntry<TopicLifelineData>>
   articleEntries: Map<number, RequestCacheEntry<ArticleTitle>>
   reportDetails: Map<number, DailyReport>
+  /** Section id requested by a watch index or timeline preview. */
+  focusSectionId?: number | null
 }>()
 
 const emit = defineEmits<{
@@ -83,7 +86,9 @@ function toggleThread(prefix: string, thread: DailyReportThread) {
 // ("可能跑题的线索 N 条"). No batch toggle: the note is informational, not an
 // action; per-thread articles still open via each thread's own header.
 function demotedThreads(section: DailyReportSection): DailyReportThread[] {
-  return section.threads.filter(thread => isThreadFitDemoted(thread.fit_distance))
+  // Defensive: legacy/abnormal payloads may omit threads (the backend now
+  // always emits "threads": [], but guard the reader against stale caches).
+  return (section.threads ?? []).filter(thread => isThreadFitDemoted(thread.fit_distance))
 }
 
 function demotedCount(section: DailyReportSection): number {
@@ -131,6 +136,23 @@ watch([groups, () => props.reportDate], ([nextGroups, reportDate]) => {
   expandedTopics.value = new Set([first.key])
   if (first.topicId != null) emit('ensureLifeline', first.topicId)
 }, { immediate: true })
+
+watch(() => props.focusSectionId, async (sectionId) => {
+  if (sectionId == null) return
+  const group = groups.value.find(item => item.sections.some(section => section.id === sectionId))
+  if (!group) return
+
+  const next = new Set(expandedTopics.value)
+  next.add(group.key)
+  expandedTopics.value = next
+  if (group.topicId != null && props.zone.key === 'active') emit('ensureLifeline', group.topicId)
+
+  await nextTick()
+  const target = document.getElementById(`report-section-${sectionId}`)
+  if (target && typeof target.scrollIntoView === 'function') {
+    target.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }
+})
 </script>
 
 <template>
@@ -178,9 +200,15 @@ watch([groups, () => props.reportDate], ([nextGroups, reportDate]) => {
 
         <div v-if="expandedTopics.has(group.key)" class="drm-topic__body">
           <div class="drm-topic__sections">
-            <article v-for="section in group.sections" :key="section.id" class="drm-section-card">
+            <article
+              v-for="section in group.sections"
+              :id="`report-section-${section.id}`"
+              :key="section.id"
+              class="drm-section-card"
+            >
               <div class="drm-section-card__head">
                 <span class="drm-section-card__badges">
+                  <SectionWatchBadge v-if="section.lane_tier?.startsWith('watch_')" :lane-tier="section.lane_tier" />
                   <SectionTierBadge :best-tier="section.best_tier" />
                   <SectionAnchorBadge :tier="topicAnchorTier(section.topic_match_distance, section.topic_match_confidence)" />
                 </span>
@@ -527,6 +555,7 @@ watch([groups, () => props.reportDate], ([nextGroups, reportDate]) => {
 
 .drm-section-card {
   position: relative;
+  scroll-margin-top: 5rem;
 }
 
 .drm-section-card__head {

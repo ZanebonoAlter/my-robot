@@ -10,6 +10,7 @@ import (
 	"syntopica-backend/internal/admin/repository"
 	"syntopica-backend/internal/admin/scheduler"
 	"syntopica-backend/internal/models"
+	"syntopica-backend/internal/platform/aihealth"
 	"syntopica-backend/internal/platform/aisettings"
 	"syntopica-backend/internal/platform/analysispause"
 	"syntopica-backend/internal/platform/logging"
@@ -136,11 +137,28 @@ func GetSchedulersStatus(c *gin.Context) {
 		pausedAtStr = pausedAt.Format(time.RFC3339)
 	}
 
+	// ai_healthy + ai_health_routes expose a lightweight model-health summary so
+	// the frontend can render the not-ready banner without an extra request.
+	// analysis_paused reflects USER intent only (UserPaused), so the pause
+	// button never flips because of model health (spec: 健康未就绪时开关不变).
+	healthSnap := aihealth.GetSnapshot()
+	healthRoutes := make([]gin.H, 0, len(healthSnap.Routes))
+	for _, r := range healthSnap.Routes {
+		healthRoutes = append(healthRoutes, gin.H{
+			"route_name":       r.RouteName,
+			"capability":       r.Capability,
+			"primary_provider": r.PrimaryProvider,
+			"reachable":        r.Reachable,
+		})
+	}
+
 	c.JSON(http.StatusOK, gin.H{
 		"success":            true,
 		"data":               schedulers,
-		"analysis_paused":    analysispause.IsPaused(),
+		"analysis_paused":    analysispause.UserPaused(),
 		"analysis_paused_at": pausedAtStr,
+		"ai_healthy":         aihealth.Healthy(),
+		"ai_health_routes":   healthRoutes,
 	})
 }
 

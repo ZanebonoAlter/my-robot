@@ -47,7 +47,15 @@ func TestParseAnalyzeOutput_EventChainLayered(t *testing.T) {
 			],
 			"insight_layer": [
 				{"cert": "medium", "title": "油价短期承压", "logic": "供应收紧→价格上涨", "evidence": [{"source_type":"news","ref":"ctx1","quote":"油价飙升"}]}
-			]
+			],
+			"depth": {
+				"system_reframe": "放进全球能源供应链系统看",
+				"mechanism_layers": [{"layer":"供给冲击","deep_logic":"产能骤降→供需缺口","basis":"遭袭报道"}],
+				"historical_analogy": [{"case":"2019沙特油田遭袭","mechanism":"短期供应中断→油价跳涨","diff":"本次波及范围待证实"}],
+				"regime_shift": null,
+				"boundary": "目前还不能确认补产时序，不宜外推长期趋势",
+				"evidence_chain": [{"source_type":"news","ref":"ctx1","quote":"设施遭袭","date":"2026-07-01"}]
+			}
 		}
 	}`)
 	if err != nil {
@@ -100,7 +108,8 @@ func TestParseAnalyzeOutput_InsightMustHaveEvidence(t *testing.T) {
 				{"cert": "medium", "title": "悬空见解A", "logic": "x", "evidence": []},
 				{"cert": "medium", "title": "悬空见解B", "logic": "x"},
 				{"cert": "medium", "title": "只有web验证也算有据", "logic": "x", "web_verified": [{"source_type":"tool","ref":"w1"}]}
-			]
+			],
+			"depth": {"system_reframe":"sr","mechanism_layers":[{"layer":"L","deep_logic":"d","basis":"b"}],"boundary":"不可外推","evidence_chain":[{"source_type":"news","ref":"r1"}]}
 		}
 	}`)
 	if err != nil {
@@ -133,7 +142,8 @@ func TestParseAnalyzeOutput_ThemeVeinCrossInsightEvidence(t *testing.T) {
 			"cross_insight": [
 				{"cert": "high", "title": "有据跨线索", "logic": "x", "evidence": [{"source_type":"news","ref":"r1"}]},
 				{"cert": "low", "title": "悬空跨线索", "logic": "x", "evidence": []}
-			]
+			],
+			"depth": {"system_reframe":"sr","mechanism_layers":[{"layer":"L","deep_logic":"d","basis":"b"}],"boundary":"不可外推","evidence_chain":[{"source_type":"news","ref":"r1"}]}
 		}
 	}`)
 	if err != nil {
@@ -161,7 +171,8 @@ func TestParseAnalyzeOutput_CertaintyGrading(t *testing.T) {
 				{"cert": "medium", "title": "推演有据", "logic": "x", "evidence": [{"source_type":"news","ref":"r1"}]},
 				{"cert": "low", "title": "假设情景", "logic": "x", "evidence": [{"source_type":"news","ref":"r1"}]},
 				{"cert": "question", "title": "指出条件", "logic": "x", "evidence": [{"source_type":"news","ref":"r1"}]}
-			]
+			],
+			"depth": {"system_reframe":"sr","mechanism_layers":[{"layer":"L","deep_logic":"d","basis":"b"}],"boundary":"不可外推","evidence_chain":[{"source_type":"news","ref":"r1"}]}
 		}
 	}`)
 	if err != nil {
@@ -222,7 +233,8 @@ func TestParseAnalyzeOutput_SinglePoint(t *testing.T) {
 		"lens": "L",
 		"analysis": {
 			"impact": {"implication": "直接提价", "ripple": "下游成本上升", "benchmark": "2022同期"},
-			"evidence": [{"source_type":"news","ref":"r1"}]
+			"evidence": [{"source_type":"news","ref":"r1"}],
+			"depth": {"system_reframe":"sr","mechanism_layers":[{"layer":"L","deep_logic":"d","basis":"b"}],"boundary":"不可外推","evidence_chain":[{"source_type":"news","ref":"r1"}]}
 		}
 	}`)
 	if err != nil {
@@ -263,19 +275,33 @@ func TestParseAnalyzeOutput_RejectsInvalidForm(t *testing.T) {
 // ── analyzeOutput JSON round-trip (marshal → unmarshal per form) ────────────
 
 func TestAnalyzeOutput_JSONRoundTrip(t *testing.T) {
+	validDepth := Depth{
+		SystemReframe:   "sr",
+		MechanismLayers: []MechanismLayer{{Layer: "L", DeepLogic: "d", Basis: "b"}},
+		Boundary:        "不可外推",
+		EvidenceChain:   []EvidenceChainItem{{SourceType: "news", Ref: "r"}},
+	}
 	cases := []analyzeOutput{
 		{Form: FormEventChain, Lens: "L1", Analysis: EventChainAnalysis{
 			FactLayer:    []FactClaim{{Claim: "c", Evidence: []Ref{{SourceType: "news", Ref: "r"}}, Verified: true}},
 			Timeline:     []TimelineNode{{Date: "2026-07-01", Event: "e", Ref: &Ref{SourceType: "news", Ref: "r"}}},
 			InsightLayer: []Insight{{Cert: CertMedium, Title: "t", Logic: "l", Evidence: []Ref{{SourceType: "news", Ref: "r"}}}},
+			Depth:        validDepth,
 		}},
 		{Form: FormThemeVein, Lens: "L2", Analysis: ThemeVeinAnalysis{
 			Veins:        []Vein{{Name: "v", Desc: "d", Evidence: []Ref{{SourceType: "news", Ref: "r"}}}},
 			CrossInsight: []Insight{{Cert: CertHigh, Title: "c", Logic: "l", Evidence: []Ref{{SourceType: "news", Ref: "r"}}}},
+			Depth:        validDepth,
 		}},
 		{Form: FormSinglePoint, Lens: "L3", Analysis: SinglePointAnalysis{
 			Impact:   ImpactAssessment{Implication: "i", Ripple: "r", Benchmark: "b"},
 			Evidence: []Ref{{SourceType: "tool", Ref: "r"}},
+			Depth:    validDepth,
+		}},
+		{Form: FormStructural, Lens: "L5", Analysis: StructuralAnalysis{
+			EvolutionNarrative: "人民币国际化进程的阶段性演进",
+			Phases:             []Phase{{Period: "2009", Event: "跨境贸易试点"}},
+			Depth:              validDepth,
 		}},
 		{Form: FormSparse, Lens: "L4", Analysis: SparseAnalysis{Notice: "n", Summary: "s"}},
 	}
@@ -309,6 +335,10 @@ func TestAnalyzeOutput_JSONRoundTrip(t *testing.T) {
 			}
 		case SinglePointAnalysis:
 			if _, ok := roundtrip.Analysis.(SinglePointAnalysis); !ok {
+				t.Fatalf("case %d body type mismatch", i)
+			}
+		case StructuralAnalysis:
+			if _, ok := roundtrip.Analysis.(StructuralAnalysis); !ok {
 				t.Fatalf("case %d body type mismatch", i)
 			}
 		case SparseAnalysis:
@@ -364,6 +394,7 @@ func TestInterpret_FormClassification(t *testing.T) {
 		{"event_chain", FormEventChain, `{"form":"event_chain","form_reason":"高频线性因果","topics":[{"topic":"石油","reason":"油价"}]}`},
 		{"theme_vein", FormThemeVein, `{"form":"theme_vein","form_reason":"多线并行发散","topics":[{"topic":"AI算力","reason":"芯片"}]}`},
 		{"single_point", FormSinglePoint, `{"form":"single_point","form_reason":"单一事件","topics":[{"topic":"石油","reason":"油价"}]}`},
+		{"structural", FormStructural, `{"form":"structural","form_reason":"长时段结构演化","topics":[{"topic":"货币互换机制","reason":"历史机制"}]}`},
 		{"sparse", FormSparse, `{"form":"sparse","form_reason":"命中极少","topics":[]}`},
 	}
 	for _, c := range cases {
@@ -441,5 +472,152 @@ func TestAgentLensSource_RejectsTooFew(t *testing.T) {
 	_, err := src.Propose(context.Background(), interpretContext{SessionID: "s", LifelineText: "L"}, FormThemeVein)
 	if err == nil {
 		t.Fatal("Propose should reject <2 lens candidates")
+	}
+}
+
+// ── parseAnalyzeOutput: structural form + depth layer ───────────────────────
+
+func TestParseAnalyzeOutput_Structural(t *testing.T) {
+	parsed, err := ParseJSONResponse(`{
+		"form": "structural",
+		"lens": "人民币国际化走到哪一步了",
+		"analysis": {
+			"evolution_narrative": "从跨境贸易试点到本币互换网络的渐进结构演化",
+			"phases": [
+				{"period": "2009", "event": "跨境贸易人民币结算试点", "ref": {"source_type":"news","ref":"ctx1"}},
+				{"period": "2016", "event": "加入 SDR 篮子"}
+			],
+			"depth": {
+				"system_reframe": "放进全球货币体系多极化的大系统看",
+				"mechanism_layers": [{"layer":"清算网络","deep_logic":"本币互换绕开美元清算","basis":"央行互换额度数据"}],
+				"historical_analogy": [{"case":"欧元崛起","mechanism":"区域结算货币替代","diff":"人民币更侧重贸易结算而非金融"}],
+				"regime_shift": null,
+				"boundary": "目前还不能下结论说美元主导地位已被实质性动摇",
+				"evidence_chain": [
+					{"source_type":"web","url":"https://imf.org/x","quote":"SDR 权重调整","institution":"IMF","date":"2016-10-01"}
+				]
+			}
+		}
+	}`)
+	if err != nil {
+		t.Fatalf("parse json: %v", err)
+	}
+	out, err := parseAnalyzeOutput(parsed)
+	if err != nil {
+		t.Fatalf("parseAnalyzeOutput: %v", err)
+	}
+	body, ok := out.Analysis.(StructuralAnalysis)
+	if !ok {
+		t.Fatalf("want StructuralAnalysis, got %T", out.Analysis)
+	}
+	if body.EvolutionNarrative == "" {
+		t.Fatal("evolution_narrative should not be empty")
+	}
+	if len(body.Phases) != 2 {
+		t.Fatalf("phases: want 2, got %d", len(body.Phases))
+	}
+	if len(body.Depth.MechanismLayers) != 1 {
+		t.Fatalf("mechanism_layers: want 1, got %d", len(body.Depth.MechanismLayers))
+	}
+	if len(body.Depth.EvidenceChain) != 1 || body.Depth.EvidenceChain[0].URL == "" {
+		t.Fatal("evidence_chain web entry must carry url")
+	}
+}
+
+// ── parseAnalyzeOutput: non-sparse without depth is rejected ────────────────
+
+func TestParseAnalyzeOutput_DepthRequired_NonSparse(t *testing.T) {
+	// event_chain with NO depth block → error (caller retries).
+	noDepth, err := ParseJSONResponse(`{
+		"form": "event_chain", "lens": "L",
+		"analysis": {"insight_layer": [{"cert":"medium","title":"t","logic":"x","evidence":[{"source_type":"news","ref":"r1"}]}]}
+	}`)
+	if err != nil {
+		t.Fatalf("parse json: %v", err)
+	}
+	if _, err := parseAnalyzeOutput(noDepth); err == nil {
+		t.Fatal("event_chain without depth should be rejected")
+	}
+
+	// event_chain with empty boundary → error.
+	emptyBoundary, err := ParseJSONResponse(`{
+		"form": "event_chain", "lens": "L",
+		"analysis": {
+			"insight_layer": [{"cert":"medium","title":"t","logic":"x","evidence":[{"source_type":"news","ref":"r1"}]}],
+			"depth": {"system_reframe":"sr","mechanism_layers":[{"layer":"L","deep_logic":"d","basis":"b"}],"boundary":"  ","evidence_chain":[{"source_type":"news","ref":"r1"}]}
+		}
+	}`)
+	if err != nil {
+		t.Fatalf("parse json: %v", err)
+	}
+	if _, err := parseAnalyzeOutput(emptyBoundary); err == nil {
+		t.Fatal("empty boundary should be rejected (反过度解读强制)")
+	}
+}
+
+// ── parseAnalyzeOutput: sparse forbids depth (ignored if present) ───────────
+
+func TestParseAnalyzeOutput_SparseForbidsDepth(t *testing.T) {
+	parsed, err := ParseJSONResponse(`{
+		"form": "sparse", "lens": "L",
+		"analysis": {"notice": "命中仅1次", "summary": "仅确认发生",
+			"depth": {"system_reframe":"不该有","boundary":"x","mechanism_layers":[{"layer":"L","deep_logic":"d","basis":"b"}],"evidence_chain":[{"source_type":"news","ref":"r1"}]}}
+	}`)
+	if err != nil {
+		t.Fatalf("parse json: %v", err)
+	}
+	out, err := parseAnalyzeOutput(parsed)
+	if err != nil {
+		t.Fatalf("sparse must parse without depth-validation error: %v", err)
+	}
+	body, ok := out.Analysis.(SparseAnalysis)
+	if !ok {
+		t.Fatalf("want SparseAnalysis, got %T", out.Analysis)
+	}
+	// SparseAnalysis has no Depth field by construction — proving the type
+	// asserts the depth block was ignored, not honoured.
+	if body.Notice == "" {
+		t.Fatal("notice should be set")
+	}
+}
+
+// ── parseAnalyzeOutput: evidence_chain web/page entries carry url+quote ─────
+
+func TestParseAnalyzeOutput_EvidenceChainWebPage(t *testing.T) {
+	parsed, err := ParseJSONResponse(`{
+		"form": "single_point", "lens": "L",
+		"analysis": {
+			"impact": {"implication": "i", "ripple": "r", "benchmark": "b"},
+			"evidence": [{"source_type":"news","ref":"r1"}],
+			"depth": {
+				"system_reframe": "sr",
+				"mechanism_layers": [{"layer":"L","deep_logic":"d","basis":"b"}],
+				"boundary": "不可外推",
+				"evidence_chain": [
+					{"source_type":"web","url":"https://a.example.com","quote":"原文摘录A","institution":"机构A","date":"2026-07-01"},
+					{"source_type":"page","url":"https://b.example.com/doc","quote":"原文摘录B","institution":"机构B","date":"2026-06-01"},
+					{"source_type":"news","ref":"ctx2","quote":"新闻原话"}
+				]
+			}
+		}
+	}`)
+	if err != nil {
+		t.Fatalf("parse json: %v", err)
+	}
+	out, err := parseAnalyzeOutput(parsed)
+	if err != nil {
+		t.Fatalf("parseAnalyzeOutput: %v", err)
+	}
+	body := out.Analysis.(SinglePointAnalysis)
+	if len(body.Depth.EvidenceChain) != 3 {
+		t.Fatalf("evidence_chain: want 3, got %d", len(body.Depth.EvidenceChain))
+	}
+	for i, ec := range body.Depth.EvidenceChain {
+		if (ec.SourceType == "web" || ec.SourceType == "page") && ec.URL == "" {
+			t.Fatalf("evidence_chain[%d] web/page entry must carry url", i)
+		}
+		if ec.Quote == "" {
+			t.Fatalf("evidence_chain[%d] must carry a direct quote", i)
+		}
 	}
 }

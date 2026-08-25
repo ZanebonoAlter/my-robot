@@ -265,7 +265,32 @@ func assignAndUpdateTopics(tx *gorm.DB, boardID uint, periodDate time.Time, sect
 		return nil, fmt.Errorf("load existing topics: %w", err)
 	}
 	today := NormalizeReportDate(periodDate)
-	decisions := planTopicAssignments(sections, existingTopics, cfg, today)
+
+	// Watch-materialized sections (watch-materialized-topic design §D5):
+	//   - watch_keyword sections are EXCLUDED from the planner entirely —
+	//     with no embedding they would fall into the unmatched/auto_new
+	//     branches and the auto_new branch would adopt them into a fresh
+	//     candidate topic (spec violation: keyword track owns no topic).
+	//     Their columns are already correct as inserted.
+	//   - watch_sentence sections carry their own assignment columns
+	//     (PersistentTopicID/manual/active) as inserted; they skip the planner
+	//     too, but their topic joins the lifecycle hit set so consecutive_hits
+	//     / hit_count / last_seen advance like any owned section.
+	plannerSections := sections[:0:0]
+	watchHitTopicIDs := make(map[uint]bool)
+	for i := range sections {
+		switch sections[i].LaneTier {
+		case "watch_keyword":
+			// excluded — nothing to do
+		case "watch_sentence":
+			if sections[i].PersistentTopicID != nil {
+				watchHitTopicIDs[*sections[i].PersistentTopicID] = true
+			}
+		default:
+			plannerSections = append(plannerSections, sections[i])
+		}
+	}
+	decisions := planTopicAssignments(plannerSections, existingTopics, cfg, today)
 
 	// Create candidates and remember their ids.
 	candSpecs := make([]*candidateTopicSpec, 0, len(decisions))
@@ -313,19 +338,27 @@ func assignAndUpdateTopics(tx *gorm.DB, boardID uint, periodDate time.Time, sect
 				touched[id] = true
 			}
 		}
-		if d.sectionIdx >= len(sections) {
+		if d.sectionIdx >= len(plannerSections) {
 			continue
 		}
-		secID := sections[d.sectionIdx].ID
+		secID := plannerSections[d.sectionIdx].ID
 		if err := Repo.UpdateSectionTopicAssignment(tx, secID, topicID, d.distance, d.confidence, d.laneTier, d.topicStatusAtReport); err != nil {
 			return nil, fmt.Errorf("update section %d assignment: %w", secID, err)
 		}
 	}
 
-	// Advance the lifecycle for pre-existing topics only.
+	// Advance the lifecycle for pre-existing topics only. Watch-topic hits
+	// (watch_sentence sections) merge into the same hit set — the lifecycle
+	// rules are identical for every owned section. Watch topics are NOT added
+	// to the centroid-refresh `touched` set: their sections carry no
+	// embeddings, and the anchor semantics is the user's query intent — the
+	// centroid stays at the seeded query vector by design.
 	allTopics, err := Repo.ListAllTopicsByBoard(boardID)
 	if err != nil {
 		return nil, fmt.Errorf("load topics for lifecycle: %w", err)
+	}
+	for id := range watchHitTopicIDs {
+		hitTopicIDs[id] = true
 	}
 	changes := planLifecycle(allTopics, today, hitTopicIDs)
 	if len(changes) > 0 {

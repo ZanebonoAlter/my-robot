@@ -20,7 +20,7 @@ from pathlib import Path
 from typing import Any
 
 
-DEFAULT_BASE_URL = "https://token-plan-cn.xiaomimimo.com/v1"
+DEFAULT_BASE_URL = "https://api.xiaomimimo.com/v1"
 DEFAULT_MODEL = "mimo-v2.5-tts"
 DEFAULT_VOICE = "白桦"
 DEFAULT_INSTRUCTION = (

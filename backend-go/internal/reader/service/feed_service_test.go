@@ -61,20 +61,15 @@ func TestCleanupOldArticlesDoesNotPreservePendingOrIncompleteArticles(t *testing
 	if err := database.DB.Where("feed_id = ?", feed.ID).Order("pub_date DESC").Find(&remaining).Error; err != nil {
 		t.Fatalf("load remaining articles: %v", err)
 	}
-	if len(remaining) != 2 {
-		t.Fatalf("remaining articles = %d, want 2", len(remaining))
+	if len(remaining) != 3 {
+		t.Fatalf("article rows = %d, want 3 (archive must not delete)", len(remaining))
 	}
 
-	titles := map[string]bool{}
 	for _, article := range remaining {
-		titles[article.Title] = true
-	}
-
-	if !titles["new complete"] || !titles["middle pending"] {
-		t.Fatalf("expected newest two articles to remain, remaining = %#v", titles)
-	}
-	if titles["old incomplete"] {
-		t.Fatalf("expected oldest article to be deleted even if incomplete, remaining = %#v", titles)
+		wantArchived := article.Title == "old incomplete"
+		if article.Archived != wantArchived {
+			t.Fatalf("article %q archived = %v, want %v", article.Title, article.Archived, wantArchived)
+		}
 	}
 }
 
@@ -301,22 +296,22 @@ func TestCleanupOldArticlesUnlimited(t *testing.T) {
 	tests := []struct {
 		name        string
 		maxArticles int
-		wantDeleted bool
+		wantArchive bool
 	}{
 		{
-			name:        "max_articles=0 means unlimited, no deletion",
+			name:        "max_articles=0 means unlimited, no archiving",
 			maxArticles: 0,
-			wantDeleted: false,
+			wantArchive: false,
 		},
 		{
-			name:        "max_articles=9999 means unlimited, no deletion",
+			name:        "max_articles=9999 means unlimited, no archiving",
 			maxArticles: 9999,
-			wantDeleted: false,
+			wantArchive: false,
 		},
 		{
 			name:        "max_articles=2 triggers cleanup",
 			maxArticles: 2,
-			wantDeleted: true,
+			wantArchive: true,
 		},
 	}
 
@@ -355,14 +350,19 @@ func TestCleanupOldArticlesUnlimited(t *testing.T) {
 
 			var remaining int64
 			database.DB.Model(&models.Article{}).Where("feed_id = ?", feed.ID).Count(&remaining)
+			var active int64
+			database.DB.Model(&models.Article{}).Where("feed_id = ? AND archived = ?", feed.ID, false).Count(&active)
 
-			if tt.wantDeleted {
-				if remaining > int64(tt.maxArticles) {
-					t.Errorf("remaining articles = %d, expected <= %d", remaining, tt.maxArticles)
+			if remaining != 5 {
+				t.Errorf("article rows = %d, expected 5 (archive must not delete)", remaining)
+			}
+			if tt.wantArchive {
+				if active > int64(tt.maxArticles) {
+					t.Errorf("active articles = %d, expected <= %d", active, tt.maxArticles)
 				}
 			} else {
-				if remaining != 5 {
-					t.Errorf("remaining articles = %d, expected 5 (no deletion)", remaining)
+				if active != 5 {
+					t.Errorf("active articles = %d, expected 5 (no archiving)", active)
 				}
 			}
 		})

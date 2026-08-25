@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { Icon } from '@iconify/vue'
-import { provide, reactive } from 'vue'
+import { computed, provide, reactive } from 'vue'
 import { useAIRouterSettings } from '~/features/ai/composables/useAIRouterSettings'
 import AIRouterBackupProviders from './AIRouterBackupProviders.vue'
 
@@ -9,13 +9,18 @@ provide('ai-router-ctx', reactive(ctx))
 
 const {
   loading, saving, testing, error, success,
-  primaryProviderForm, showPrimaryApiKey,
+  providers, primaryProviderId, primaryProviderForm, showPrimaryApiKey,
   newProviderForm, showNewProviderApiKey,
   editingProviderId, editProviderForm, showEditProviderApiKey,
   backupProviders, showNewProviderForm,
   savePrimaryProvider, testPrimaryProvider,
   deleteBackupProvider, isProviderLinked,
 } = ctx
+
+// 主模型的启动命令是否已配置（命令原文不下发，只能从 providers 列表读标志位）
+const primaryStartCommandConfigured = computed(
+  () => providers.value.find(p => p.id === primaryProviderId.value)?.start_command_configured === true,
+)
 </script>
 
 <template>
@@ -28,7 +33,7 @@ const {
       <!-- Section 1: Primary Provider -->
       <div class="rounded-xl border border-[var(--color-border-subtle)] overflow-hidden" style="background: var(--color-bg-elevated)">
         <div class="px-5 py-3.5 border-b border-[var(--color-border-subtle)] flex items-center justify-between" style="background: var(--color-bg-hover)">
-          <AppSectionHeader title="主模型" description="默认 AI 提供者，保存后自动挂载到所有能力路由" icon-name="mdi:star-four-points" />
+          <AppSectionHeader title="主模型" description="默认 AI 提供者，保存后自动挂载到所有 LLM 能力路由首位（embedding 路由独立配置）" icon-name="mdi:star-four-points" />
           <div class="flex items-center gap-2">
             <button class="px-3 py-1.5 text-xs font-medium rounded-lg transition-colors disabled:opacity-50"
               style="color: var(--color-link); background: var(--color-link-subtle); border: 1px solid var(--color-link-border)"
@@ -42,7 +47,7 @@ const {
         </div>
 
         <div class="p-5 space-y-4">
-          <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+          <div class="grid grid-cols-1 md:grid-cols-4 gap-3">
             <div>
               <label class="block text-[11px] font-medium text-gray-500 uppercase tracking-wider mb-1">名称</label>
               <AppInput v-model="primaryProviderForm.name" type="text" placeholder="default-primary" />
@@ -58,11 +63,36 @@ const {
               <label class="block text-[11px] font-medium text-gray-500 uppercase tracking-wider mb-1">模型</label>
               <AppInput v-model="primaryProviderForm.model" type="text" placeholder="gpt-4o-mini" />
             </div>
+            <div>
+              <label class="block text-[11px] font-medium uppercase tracking-wider mb-1" style="color: var(--color-text-muted)">模型类型</label>
+              <select v-model="primaryProviderForm.model_kind" class="ai-select">
+                <option value="llm">LLM（对话/总结）</option>
+                <option value="embedding">Embedding（向量）</option>
+              </select>
+            </div>
           </div>
           <div>
             <label class="block text-[11px] font-medium text-gray-500 uppercase tracking-wider mb-1">Base URL</label>
             <AppInput v-model="primaryProviderForm.base_url" type="text"
               :placeholder="primaryProviderForm.provider_type === 'ollama' ? 'http://localhost:11434/v1' : 'https://api.openai.com/v1'" />
+          </div>
+          <div>
+            <label class="block text-[11px] font-medium text-gray-500 uppercase tracking-wider mb-1">启动命令（可选）</label>
+            <AppInput v-model="primaryProviderForm.start_command" type="text"
+              :placeholder="primaryStartCommandConfigured ? '已配置（留空保持不变，输入新命令覆盖）' : 'llama-server -m D:/models/qwen.gguf --port 8081'" />
+            <p class="text-[11px] mt-1" style="color: var(--color-text-muted)">本地进程启动命令，留空表示外部托管服务；填写后可在启动时由后端自动拉起</p>
+            <div v-if="primaryStartCommandConfigured" class="mt-1.5">
+              <button v-if="!primaryProviderForm.clear_start_command"
+                class="text-xs px-3 py-1.5 rounded-lg transition-colors"
+                style="color: var(--color-error); background: var(--color-error-bg, rgba(196, 47, 60, 0.1)); border: 1px solid var(--color-error-border, rgba(196, 47, 60, 0.25))"
+                @click="primaryProviderForm.clear_start_command = true">
+                清除已配置的启动命令
+              </button>
+              <span v-else class="text-xs px-3 py-1.5 rounded-lg"
+                style="color: var(--color-warning); background: var(--color-warning-bg, rgba(196, 136, 60, 0.1)); border: 1px solid var(--color-warning-border, rgba(196, 136, 60, 0.25))">
+                保存后将清除已配置的启动命令
+              </span>
+            </div>
           </div>
           <div v-if="primaryProviderForm.provider_type !== 'ollama'">
             <label class="block text-[11px] font-medium text-gray-500 uppercase tracking-wider mb-1">API Key</label>

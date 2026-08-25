@@ -5,7 +5,7 @@ SemanticBoard 和辅助标签相关的所有 API 端点，包括 CRUD、升级�
 ## Requirements
 
 ### Requirement: 板块 CRUD API
-系统 SHALL 提供 SemanticBoard（semantic_labels label_type=board）的增删改查 API，包括列表、详情、手动创建、编辑、删除。API SHALL 使用 `/api/semantic-boards` 命名空间，避免与每日叙事板 `/api/narratives/boards` 混淆。
+系统 SHALL 提供 SemanticBoard（semantic_labels label_type=board）的增删改查 API，包括列表、详情、手动创建、编辑、删除。API SHALL 使用 `/api/semantic-boards` 命名空间。
 
 #### Scenario: 手动创建板块
 - **WHEN** 用户通过 API 创建板块 "量子计算"

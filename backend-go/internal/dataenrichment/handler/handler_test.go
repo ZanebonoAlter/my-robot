@@ -20,6 +20,15 @@ import (
 	"syntopica-backend/internal/platform/database"
 )
 
+// Test-only source type: the source_type enum is extensible (spec "板块数据源
+// 绑定"); built-in financial types were removed, so tests register a neutral
+// dummy to exercise the data-source CRUD endpoints without coupling to any
+// built-in type.
+func init() {
+	repository.RegisterSourceType("test_source")
+	repository.RegisterSourceType("test_source_2")
+}
+
 // ── Test helpers ────────────────────────────────────────────────────────────
 
 func setupHandlerTestDB(t *testing.T) *gorm.DB {
@@ -586,8 +595,8 @@ func TestListDataSources(t *testing.T) {
 	db := setupHandlerTestDB(t)
 	ctx := context.Background()
 
-	ds1 := &repository.BoardDataSource{SemanticBoardID: 1, SourceType: "etf_quote", Enabled: true}
-	ds2 := &repository.BoardDataSource{SemanticBoardID: 1, SourceType: "exchange_rate", Enabled: true}
+	ds1 := &repository.BoardDataSource{SemanticBoardID: 1, SourceType: "test_source", Enabled: true}
+	ds2 := &repository.BoardDataSource{SemanticBoardID: 1, SourceType: "test_source_2", Enabled: true}
 	_ = repository.Repo.CreateBoardDataSource(ctx, ds1)
 	_ = repository.Repo.CreateBoardDataSource(ctx, ds2)
 
@@ -609,13 +618,13 @@ func TestUpsertDataSource(t *testing.T) {
 	h := newTestHandler(db, nil, nil, nil)
 	r := newTestRouter(h)
 
-	body := `{"source_type": "etf_quote", "config": {"keywords": ["半导体"]}, "enabled": true}`
+	body := `{"source_type": "test_source", "config": {"keywords": ["半导体"]}, "enabled": true}`
 	w := doRequest(t, r, "PUT", "/api/semantic-boards/1/data-sources", body)
 	var ds repository.BoardDataSource
 	expectJSONSuccess(t, w, &ds)
 
 	// Verify persisted.
-	got, err := repository.Repo.GetBoardDataSourceByBoardAndType(ctx, 1, "etf_quote")
+	got, err := repository.Repo.GetBoardDataSourceByBoardAndType(ctx, 1, "test_source")
 	if err != nil {
 		t.Fatalf("get: %v", err)
 	}
@@ -629,14 +638,14 @@ func TestUpsertDataSourceUniqueConstraint(t *testing.T) {
 	ctx := context.Background()
 
 	// Pre-create.
-	ds := &repository.BoardDataSource{SemanticBoardID: 1, SourceType: "etf_quote", Enabled: true}
+	ds := &repository.BoardDataSource{SemanticBoardID: 1, SourceType: "test_source", Enabled: true}
 	_ = repository.Repo.CreateBoardDataSource(ctx, ds)
 
 	h := newTestHandler(db, nil, nil, nil)
 	r := newTestRouter(h)
 
 	// Upsert should succeed (update not insert).
-	body := `{"source_type": "etf_quote", "enabled": false}`
+	body := `{"source_type": "test_source", "enabled": false}`
 	w := doRequest(t, r, "PUT", "/api/semantic-boards/1/data-sources", body)
 	var updated repository.BoardDataSource
 	expectJSONSuccess(t, w, &updated)
@@ -649,7 +658,7 @@ func TestDeleteDataSource(t *testing.T) {
 	db := setupHandlerTestDB(t)
 	ctx := context.Background()
 
-	ds := &repository.BoardDataSource{SemanticBoardID: 1, SourceType: "etf_quote", Enabled: true}
+	ds := &repository.BoardDataSource{SemanticBoardID: 1, SourceType: "test_source", Enabled: true}
 	if err := repository.Repo.CreateBoardDataSource(ctx, ds); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
@@ -657,7 +666,7 @@ func TestDeleteDataSource(t *testing.T) {
 	h := newTestHandler(db, nil, nil, nil)
 	r := newTestRouter(h)
 
-	w := doRequest(t, r, "DELETE", "/api/semantic-boards/1/data-sources/etf_quote", "")
+	w := doRequest(t, r, "DELETE", "/api/semantic-boards/1/data-sources/test_source", "")
 	var got map[string]any
 	expectJSONSuccess(t, w, &got)
 	if d, _ := got["deleted"].(bool); !d {
@@ -665,7 +674,7 @@ func TestDeleteDataSource(t *testing.T) {
 	}
 
 	// Verify deleted.
-	_, err := repository.Repo.GetBoardDataSourceByBoardAndType(ctx, 1, "etf_quote")
+	_, err := repository.Repo.GetBoardDataSourceByBoardAndType(ctx, 1, "test_source")
 	if err == nil {
 		t.Fatal("expected error after delete")
 	}

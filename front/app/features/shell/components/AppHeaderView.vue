@@ -9,7 +9,7 @@ import { useNotify } from '~/composables/useNotify'
 
 const { toggleTheme, isDark } = useTheme()
 const { startTour } = useOnboarding()
-const { analysisPaused, loadSchedulersStatus, setAnalysisPaused } = useSchedulerStatus()
+const { analysisPaused, aiHealthy, loadSchedulersStatus, setAnalysisPaused } = useSchedulerStatus()
 useAnalysisPauseFavicon()
 const notify = useNotify()
 const analysisPauseToggling = ref(false)
@@ -27,6 +27,10 @@ async function toggleAnalysisPause() {
   } finally {
     analysisPauseToggling.value = false
   }
+}
+
+function goToAiHealthSettings() {
+  return navigateTo('/settings?section=ai-health')
 }
 
 onMounted(() => {
@@ -49,16 +53,22 @@ defineEmits<{
   toggleSidebar: []
   refresh: []
   markAllRead: []
-  addFeed: []
-  addCategory: []
-  importOpml: []
-  exportOpml: []
   settings: []
   closeRefreshMessage: []
 }>()
 
 import '~/components/layout/AppHeader.css'
 </script>
+
+<style scoped>
+.ai-health-icon--ok {
+  color: var(--color-success);
+}
+
+.ai-health-icon--down {
+  color: var(--color-warning);
+}
+</style>
 
 <template>
   <header class="app-header">
@@ -90,23 +100,23 @@ import '~/components/layout/AppHeader.css'
           :class="analysisPaused ? 'text-amber-500' : 'text-gray-600'"
         />
       </button>
+      <button
+        class="header-btn ai-health-btn"
+        :title="aiHealthy ? 'AI 模型健康' : 'AI 模型未就绪（LLM/Embedding 未连通）'"
+        @click="goToAiHealthSettings"
+      >
+        <Icon
+          icon="mdi:heart-pulse"
+          width="20"
+          height="20"
+          :class="aiHealthy ? 'ai-health-icon--ok' : 'ai-health-icon--down'"
+        />
+      </button>
       <button class="header-btn" title="刷新" @click="$emit('refresh')">
         <Icon icon="mdi:refresh" width="20" height="20" class="text-gray-600" />
       </button>
       <button class="header-btn" title="全部标为已读" @click="$emit('markAllRead')">
         <Icon icon="mdi:email-open-multiple" width="20" height="20" class="text-gray-600" />
-      </button>
-      <button class="header-btn" title="添加订阅" @click="$emit('addFeed')">
-        <Icon icon="mdi:plus" width="20" height="20" class="text-gray-600" />
-      </button>
-      <button class="header-btn" title="添加分类" @click="$emit('addCategory')">
-        <Icon icon="mdi:folder-plus" width="20" height="20" class="text-gray-600" />
-      </button>
-      <button class="header-btn" title="导入" @click="$emit('importOpml')">
-        <Icon icon="mdi:import" width="20" height="20" class="text-gray-600" />
-      </button>
-      <button class="header-btn" title="导出" @click="$emit('exportOpml')">
-        <Icon icon="mdi:export" width="20" height="20" class="text-gray-600" />
       </button>
       <div class="header-divider" />
       <button class="header-btn" title="设置" @click="$emit('settings')">

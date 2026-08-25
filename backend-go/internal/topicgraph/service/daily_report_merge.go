@@ -72,14 +72,57 @@ func cosineDistance(vec1, vec2 string) (float64, error) {
 	similarity := dot / (math.Sqrt(norm1) * math.Sqrt(norm2))
 	return 1.0 - similarity, nil
 }
+
+// sameAnchorClass reports whether two sections may merge under the anchor
+// boundary (fix-section-merge-blackhole): both anchored to the same persistent
+// topic, or both unanchored (the L3 new-narrative pool). Pairs mixing NULL and
+// non-NULL anchors, or different topics, must never merge — the lane
+// pipeline's keep/switch/new adjudication is a system record that the
+// presentation-layer merge must not override. Filtering BEFORE edges are
+// added guarantees every union-find component has a consistent anchor.
+func sameAnchorClass(a, b repository.DailyReportSection) bool {
+	if a.MatchedTopicID == nil && b.MatchedTopicID == nil {
+		return true
+	}
+	if a.MatchedTopicID != nil && b.MatchedTopicID != nil {
+		return *a.MatchedTopicID == *b.MatchedTopicID
+	}
+	return false
+}
+
+// logMergeCandidatePair is the Stage 1 audit line: labels, anchors, lanes,
+// distance, and outcome for every same-day merge candidate pair evaluated
+// (merged edge / rejected-by-boundary / gray-zone→LLM).
+func logMergeCandidatePair(a, b repository.DailyReportSection, dist float64, outcome string) {
+	anchor := func(s repository.DailyReportSection) string {
+		if s.MatchedTopicID == nil {
+			return "new"
+		}
+		return fmt.Sprintf("%d", *s.MatchedTopicID)
+	}
+	lane := func(s repository.DailyReportSection) string {
+		if s.LaneTier == "" {
+			return "-"
+		}
+		return s.LaneTier
+	}
+	logging.Infof("daily-report merge candidate: [%s|t%s|%s] vs [%s|t%s|%s] dist=%.4f → %s",
+		a.ClusterLabel, anchor(a), lane(a), b.ClusterLabel, anchor(b), lane(b), dist, outcome)
+}
+
 func MergeSimilarSections(
 	ctx context.Context,
 	sections []repository.DailyReportSection,
 	threadBatches [][]repository.DailyReportThread,
 	tags []repository.TagInput,
+	mergeEnabled bool,
 ) ([]repository.DailyReportSection, [][]repository.DailyReportThread, error) {
 	ctx, span := otel.Tracer(tracing.ServiceName).Start(ctx, "service.MergeSimilarSections")
 	defer span.End()
+	if !mergeEnabled {
+		logging.Infof("daily-report: section merge disabled by config (daily_report_section_merge_enabled)")
+		return sections, threadBatches, nil
+	}
 	if len(sections) <= 1 {
 		return sections, threadBatches, nil
 	}
@@ -107,12 +150,21 @@ func MergeSimilarSections(
 			if err != nil {
 				continue
 			}
+			// Anchor boundary: reject cross-anchor pairs before any edge is
+			// created (deterministic band AND gray zone) so the union-find
+			// transitive closure can never bridge different lane adjudications.
+			if !sameAnchorClass(sections[i], sections[j]) {
+				logMergeCandidatePair(sections[i], sections[j], dist, "rejected-by-boundary")
+				continue
+			}
 			if dist < 0.20 {
+				logMergeCandidatePair(sections[i], sections[j], dist, "merged")
 				if deterministicPairs[i] == nil {
 					deterministicPairs[i] = make(map[int]bool)
 				}
 				deterministicPairs[i][j] = true
 			} else if dist < 0.25 {
+				logMergeCandidatePair(sections[i], sections[j], dist, "gray-zone-llm")
 				grayZonePairs = append(grayZonePairs, llmMergePair{i: i, j: j, distance: dist})
 			}
 		}

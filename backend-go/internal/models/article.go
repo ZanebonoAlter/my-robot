@@ -5,24 +5,35 @@ import (
 )
 
 type Article struct {
-	ID                         uint       `gorm:"primaryKey" json:"id"`
-	FeedID                     uint       `gorm:"index;not null" json:"feed_id"`
-	CategoryID                 *uint      `gorm:"-" json:"category_id"`
-	Title                      string     `gorm:"size:500;not null" json:"title"`
-	Description                string     `gorm:"type:text" json:"description"`
-	Content                    string     `gorm:"type:text" json:"content"`
-	Link                       string     `gorm:"size:1000" json:"link"`
-	ImageURL                   string     `gorm:"size:1000" json:"image_url"`
-	PubDate                    *time.Time `json:"pub_date"`
-	Author                     string     `gorm:"size:200" json:"author"`
-	Read                       bool       `gorm:"default:false" json:"read"`
-	Favorite                   bool       `gorm:"default:false" json:"favorite"`
+	ID          uint       `gorm:"primaryKey" json:"id"`
+	FeedID      uint       `gorm:"index;not null" json:"feed_id"`
+	CategoryID  *uint      `gorm:"-" json:"category_id"`
+	Title       string     `gorm:"size:500;not null" json:"title"`
+	Description string     `gorm:"type:text" json:"description"`
+	Content     string     `gorm:"type:text" json:"content"`
+	Link        string     `gorm:"size:1000" json:"link"`
+	ImageURL    string     `gorm:"size:1000" json:"image_url"`
+	PubDate     *time.Time `json:"pub_date"`
+	Author      string     `gorm:"size:200" json:"author"`
+	Read        bool       `gorm:"default:false" json:"read"`
+	Favorite    bool       `gorm:"default:false" json:"favorite"`
+	// Archived marks an article as aged out of the feed's active window
+	// (MaxArticles). Archived rows keep all text fields readable (daily report
+	// threads reference them by ID) but are excluded from reader lists/stats,
+	// search (search_vector nulled), and have their topic tags / reading
+	// behaviors removed. See article-retention spec.
+	Archived                   bool       `gorm:"default:false" json:"archived"`
 	SummaryStatus              string     `gorm:"size:20;default:complete" json:"summary_status"`
 	SummaryGeneratedAt         *time.Time `json:"summary_generated_at"`
 	SummaryProcessingStartedAt *time.Time `json:"summary_processing_started_at"`
 
-	CompletionAttempts int        `gorm:"default:0" json:"completion_attempts"`
-	CompletionError    string     `gorm:"type:text" json:"completion_error"`
+	CompletionAttempts int    `gorm:"default:0" json:"completion_attempts"`
+	CompletionError    string `gorm:"type:text" json:"completion_error"`
+	// ContentForm marks the article's content form judged during summary
+	// generation: "mono" (single-topic) or "aggregate" (multi-topic digest).
+	// Empty means the form is unknown (legacy articles or model did not output
+	// the mark) and downstream flows fall back to the mono path.
+	ContentForm        string     `gorm:"size:20" json:"content_form"`
 	AIContentSummary   string     `gorm:"type:text" json:"ai_content_summary"`
 	FirecrawlStatus    string     `gorm:"size:20;default:pending" json:"firecrawl_status"`
 	FirecrawlError     string     `gorm:"type:text" json:"firecrawl_error"`

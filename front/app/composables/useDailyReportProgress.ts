@@ -1,7 +1,7 @@
 /**
  * 日报进度管理器 — 基于 useEventStream
  *
- * 现有消费者（NarrativeGenerateDialog.vue）的 API 完全兼容：
+ * 现有消费者（DailyReportGenerateDialog.vue）的 API 完全兼容：
  *   progress (Map), done, jobId, totalSaved, totalBoards, reset()
  */
 

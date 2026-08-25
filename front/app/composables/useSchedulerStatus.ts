@@ -1,6 +1,6 @@
 import { onUnmounted, ref } from 'vue'
 import { useSchedulerApi } from '~/api'
-import type { SchedulerStatus, SchedulerTriggerResult } from '~/types/scheduler'
+import type { SchedulerAIHealthRoute, SchedulerStatus, SchedulerTriggerResult } from '~/types/scheduler'
 import { isHotScheduler } from '~/utils/schedulerMeta'
 
 export function useSchedulerStatus() {
@@ -8,6 +8,10 @@ export function useSchedulerStatus() {
   // 分析暂停总闸是后端全局开关，用 useState 跨组件共享（同 useNotify 模式，SSR 安全）
   const analysisPaused = useState<boolean>('scheduler:analysis-paused', () => false)
   const analysisPausedAt = useState<string>('scheduler:analysis-paused-at', () => '')
+  // AI 模型健康态（宽松判定，后端启动探活后才有真实值）。默认 true 避免首屏轮询前误弹健康 banner；
+  // 轮询拿到 false 才弹。只用于提示，不影响暂停按钮/favicon（按钮跟 analysisPaused 用户意图）。
+  const aiHealthy = useState<boolean>('scheduler:ai-healthy', () => true)
+  const aiHealthRoutes = useState<SchedulerAIHealthRoute[]>('scheduler:ai-health-routes', () => [])
   const schedulerTriggerFeedback = ref<Record<string, SchedulerTriggerResult | undefined>>({})
   const lastSchedulerTriggerAt = ref<number | null>(null)
   const schedulerLoading = ref(false)
@@ -27,6 +31,8 @@ export function useSchedulerStatus() {
         schedulerStatuses.value = response.data
         analysisPaused.value = response.analysis_paused === true
         analysisPausedAt.value = response.analysis_paused_at ?? ''
+        aiHealthy.value = response.ai_healthy !== false
+        aiHealthRoutes.value = response.ai_health_routes ?? []
       }
     } catch {
       schedulerError.value = '加载定时任务状态失败'
@@ -134,6 +140,7 @@ export function useSchedulerStatus() {
     schedulerStatuses, schedulerTriggerFeedback, schedulerLoading,
     schedulerTriggerLoading, schedulerError, schedulerSuccess,
     analysisPaused, analysisPausedAt, setAnalysisPaused,
+    aiHealthy, aiHealthRoutes,
     loadSchedulersStatus, stopSchedulerPolling, triggerScheduler,
     scheduleTimeLoading, updateScheduleTime,
   }

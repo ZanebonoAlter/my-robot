@@ -6,7 +6,7 @@ import TopicDetectiveWall from './TopicDetectiveWall.client.vue'
 import DailyReportMasthead from './daily-report/DailyReportMasthead.vue'
 import DailyReportSidebar from './daily-report/DailyReportSidebar.vue'
 import DailyReportTopicSection from './daily-report/DailyReportTopicSection.vue'
-import DailyReportWatchBar from './daily-report/DailyReportWatchBar.vue'
+import DailyReportWatchIndex from './daily-report/DailyReportWatchIndex.vue'
 import PeelTransition from '~/components/PeelTransition.vue'
 import {
   buildQualityZones,
@@ -15,6 +15,8 @@ import {
 } from './daily-report/dailyReportMagazine'
 import { useDailyReportReader } from '~/features/tags/composables/useDailyReportReader'
 import type { PeelDirection } from '~/composables/usePeelTransition'
+import { useTopicWatchesApi, type TopicWatchHit } from '~/api/topicWatches'
+import type { ActiveWatchSummary, DailyReportWatchHit } from '~/api/dailyReports'
 
 /** 版块切换条所需的最小版块信息（结构兼容 SemanticBoard）。 */
 interface BoardOption {
@@ -43,6 +45,9 @@ const direction = ref<PeelDirection>('horizontal')
 const animating = ref(false)
 
 const reader = useDailyReportReader(toRef(props, 'boardId'))
+const watchesApi = useTopicWatchesApi()
+const watchHitsByReport = ref(new Map<number, TopicWatchHit[]>())
+const focusSectionId = ref<number | null>(null)
 const showReader = ref(false)
 const showThreadBrowser = ref(false)
 const showDetectiveWall = ref(false)
@@ -63,10 +68,57 @@ const reportStatusLabel: Record<string, string> = {
   failed: '失败',
 }
 
+async function ensureWatchHits(reportId: number, detail?: { activeWatchHits?: DailyReportWatchHit[] }) {
+  if (watchHitsByReport.value.has(reportId)) return watchHitsByReport.value.get(reportId) ?? []
+  if (detail?.activeWatchHits) {
+    const hits = detail.activeWatchHits.map((hit, index): TopicWatchHit => ({
+      id: `${reportId}-${hit.watchId}-${hit.sectionId}-${index}`,
+      watchId: String(hit.watchId),
+      sectionId: String(hit.sectionId),
+      reportId: String(reportId),
+      periodDate: '',
+      reason: hit.reason ?? '',
+      watchLabel: hit.label,
+      watchType: hit.type,
+    }))
+    watchHitsByReport.value.set(reportId, hits)
+    watchHitsByReport.value = new Map(watchHitsByReport.value)
+    return hits
+  }
+
+  const response = await watchesApi.getWatchHits(reportId)
+  const hits = response.success && response.data ? response.data : []
+  watchHitsByReport.value.set(reportId, hits)
+  watchHitsByReport.value = new Map(watchHitsByReport.value)
+  return hits
+}
+
+function locateWatchSection(sectionId: string | number) {
+  focusSectionId.value = null
+  nextTick(() => {
+    focusSectionId.value = Number(sectionId)
+  })
+}
+
 async function openReader(event: MouseEvent, index: number) {
   lastTrigger.value = event.currentTarget as HTMLElement
   showReader.value = true
+  focusSectionId.value = null
   await reader.selectReport(index)
+  const detail = reader.selectedDetail.value
+  if (detail) await ensureWatchHits(detail.id, detail)
+}
+
+function openReaderFromKeyboard(event: KeyboardEvent, index: number) {
+  void openReader(event as unknown as MouseEvent, index)
+}
+
+async function openWatchPreview(event: MouseEvent, index: number, summary: ActiveWatchSummary) {
+  await openReader(event, index)
+  const report = reader.selectedReport.value
+  if (!report) return
+  const hit = (watchHitsByReport.value.get(report.id) ?? []).find(item => item.watchId === String(summary.watchId))
+  if (hit) locateWatchSection(hit.sectionId)
 }
 
 async function closeReader() {
@@ -76,12 +128,18 @@ async function closeReader() {
 }
 
 async function selectReport(index: number) {
+  focusSectionId.value = null
   await reader.selectReport(index)
+  const detail = reader.selectedDetail.value
+  if (detail) await ensureWatchHits(detail.id, detail)
   document.querySelector('.drm-reader')?.scrollTo({ top: 0, behavior: 'smooth' })
 }
 
 async function shiftReport(offset: number) {
+  focusSectionId.value = null
   await reader.shiftReport(offset)
+  const detail = reader.selectedDetail.value
+  if (detail) await ensureWatchHits(detail.id, detail)
   document.querySelector('.drm-reader')?.scrollTo({ top: 0, behavior: 'smooth' })
 }
 
@@ -209,21 +267,47 @@ onUnmounted(() => {
         <small>系统会按板块聚合每日热点，数据积累后日报会自动生成。</small>
       </div>
       <div v-else class="drt-list">
-        <button
+        <article
           v-for="(report, index) in reader.reports.value"
           :key="report.id"
-          type="button"
           class="drt-summary-card"
+          role="button"
+          tabindex="0"
           :style="{ animationDelay: `${index * 50}ms` }"
           @click="openReader($event, index)"
+          @keydown.enter="openReaderFromKeyboard($event, index)"
+          @keydown.space.prevent="openReaderFromKeyboard($event, index)"
         >
-          <span class="drt-summary-card__top">
-            <span>{{ formatMagazineDate(report.period_date) }}</span>
-            <span class="drt-status" :data-status="report.status">{{ reportStatusLabel[report.status] || report.status }}</span>
-          </span>
-          <strong>{{ report.summary || report.title }}</strong>
-          <small>{{ report.article_count }} 篇 · {{ report.cluster_count }} 话题</small>
-        </button>
+          <div class="drt-summary-card__open">
+            <span class="drt-summary-card__top">
+              <span>{{ formatMagazineDate(report.period_date) }}</span>
+              <span class="drt-status" :data-status="report.status">{{ reportStatusLabel[report.status] || report.status }}</span>
+            </span>
+            <strong>{{ report.summary || report.title }}</strong>
+            <small>{{ report.article_count }} 篇 · {{ report.cluster_count }} 话题</small>
+          </div>
+          <div
+            v-if="report.activeWatchSummaries?.length"
+            class="drt-watch-preview"
+            data-testid="watch-preview"
+            aria-label="本期追踪命中"
+          >
+            <button
+              v-for="summary in report.activeWatchSummaries.slice(0, 2)"
+              :key="String(summary.watchId)"
+              type="button"
+              class="drt-watch-preview__tag"
+              :data-type="summary.type"
+              @click.stop="openWatchPreview($event, index, summary)"
+            >
+              <span aria-hidden="true">{{ summary.type === 'keyword' ? '#' : '✦' }}</span>
+              {{ summary.label }}
+            </button>
+            <span v-if="report.activeWatchSummaries.length > 2" class="drt-watch-preview__more">
+              +{{ report.activeWatchSummaries.length - 2 }}
+            </span>
+          </div>
+        </article>
       </div>
       <button v-if="reader.reports.value.length" type="button" class="drt-more-btn" @click="reader.loadMore">
         加载更早
@@ -275,11 +359,6 @@ onUnmounted(() => {
           <PeelTransition :direction="direction" class="drm-peel-host" @end="onPeelEnd">
             <div v-if="reader.selectedDetail.value" :key="reader.selectedDetail.value.id" class="drm-peel-page">
               <DailyReportMasthead :report="reader.selectedDetail.value" :board-title="boardTitle" />
-              <DailyReportWatchBar
-                :board-id="boardId"
-                :report-id="reader.selectedDetail.value.id"
-                :sections="reader.selectedDetail.value.sections"
-              />
               <div class="drm-layout">
                 <DailyReportSidebar
                   :zones="qualityZones"
@@ -294,6 +373,11 @@ onUnmounted(() => {
                   @open-topic-overview="showThreadBrowser = true; closeReader()"
                 />
                 <main class="drm-content">
+                  <DailyReportWatchIndex
+                    :hits="watchHitsByReport.get(reader.selectedDetail.value.id) ?? []"
+                    :sections="reader.selectedDetail.value.sections"
+                    @locate="locateWatchSection"
+                  />
                   <DailyReportTopicSection
                     v-for="zone in qualityZones"
                     :key="`${boardId}-${zone.key}`"
@@ -302,6 +386,7 @@ onUnmounted(() => {
                     :lifeline-entries="reader.lifelineEntries.value"
                     :article-entries="reader.articleEntries.value"
                     :report-details="reader.detailCache.value"
+                    :focus-section-id="focusSectionId"
                     @ensure-lifeline="reader.ensureLifeline"
                     @ensure-articles="reader.ensureArticleTitles"
                     @retry-article="reader.retryArticle"
@@ -438,6 +523,62 @@ onUnmounted(() => {
 .drt-summary-card small {
   color: var(--color-text-muted);
   font-size: 0.66rem;
+}
+
+.drt-summary-card__open {
+  display: grid;
+  gap: 0.45rem;
+}
+
+.drt-watch-preview {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  padding-top: 0.1rem;
+}
+
+.drt-watch-preview__tag,
+.drt-watch-preview__more {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+  min-width: 0;
+  max-width: 14rem;
+  padding: 0.2rem 0.45rem;
+  border: 1px solid var(--color-border-subtle);
+  border-radius: 999px;
+  background: var(--color-bg-hover);
+  color: var(--color-text-secondary);
+  font-size: 0.66rem;
+  line-height: 1.3;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.drt-watch-preview__tag {
+  cursor: pointer;
+}
+
+.drt-watch-preview__tag:hover,
+.drt-watch-preview__tag:focus-visible {
+  border-color: var(--color-accent);
+  color: var(--color-text-primary);
+  outline: none;
+}
+
+.drt-watch-preview__tag[data-type="keyword"] > span {
+  color: var(--color-text-muted);
+}
+
+.drt-watch-preview__tag[data-type="label"] > span {
+  color: var(--color-accent);
+}
+
+.drt-watch-preview__more {
+  border-style: dashed;
+  color: var(--color-text-muted);
 }
 
 .drt-status[data-status="done"] { color: var(--color-success); }

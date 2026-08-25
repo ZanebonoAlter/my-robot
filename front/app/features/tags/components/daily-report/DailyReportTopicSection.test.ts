@@ -93,6 +93,27 @@ function mountSection(over: {
   })
 }
 
+describe('DailyReportTopicSection — watch section anchors', () => {
+  it('adds a stable report-section anchor with scroll margin to each section article', () => {
+    const wrapper = mountSection({ zone: activeZone([makeSection(100, [makeThread(1)])]) })
+    const section = wrapper.find('#report-section-100')
+    expect(section.exists()).toBe(true)
+    expect(section.classes()).toContain('drm-section-card')
+    expect(section.attributes('id')).toBe('report-section-100')
+  })
+
+  it('expands and locates a requested section even when its topic starts collapsed', async () => {
+    const wrapper = mountSection({
+      zone: briefsZone([makeSection(100, [makeThread(1)])]),
+    })
+    expect(wrapper.find('#report-section-100').exists()).toBe(false)
+
+    await wrapper.setProps({ focusSectionId: 100 })
+    await nextTick()
+    expect(wrapper.find('#report-section-100').exists()).toBe(true)
+  })
+})
+
 describe('DailyReportTopicSection — thread-fit soft-degrade (current loop)', () => {
   it('demotes a thread whose fit_distance exceeds the threshold (adds --demoted class)', () => {
     const wrapper = mountSection({
@@ -164,6 +185,16 @@ describe('DailyReportTopicSection — thread-fit soft-degrade (current loop)', (
       ])]),
     })
     expect(wrapper.find('.drm-thread__hint').exists()).toBe(false)
+  })
+
+  it('tolerates a section payload missing the threads field (degraded backend data)', () => {
+    // Regression: sections saved without thread rows used to arrive with the
+    // threads field omitted entirely; demotedCount must not throw.
+    const wrapper = mountSection({
+      zone: activeZone([makeSection(100, [], { threads: undefined as unknown as DailyReportThread[] })]),
+    })
+    expect(wrapper.find('.drm-thread__hint').exists()).toBe(false)
+    expect(wrapper.text()).toContain('板块100')
   })
 
   it('renders the hint row as a non-interactive status note (clicking it does not expand threads)', async () => {

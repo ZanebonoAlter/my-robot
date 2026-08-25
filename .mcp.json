@@ -15,13 +15,6 @@
         "@playwright/mcp@latest"
       ],
       "directTools": true
-    },
-    "context-mode": {
-      "command": "context-mode",
-      "env": {
-        "CONTEXT_MODE_DIR": "D:/project/zcode-data/context-mode"
-      },
-      "directTools": true
     }
   }
 }

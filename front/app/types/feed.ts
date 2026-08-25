@@ -50,7 +50,6 @@ export interface RssFeed {
   refreshStatus?: 'idle' | 'refreshing' | 'success' | 'error'
   refreshError?: string
   lastRefreshAt?: string
-  aiSummaryEnabled?: boolean
   articleSummaryEnabled?: boolean
   completionOnRefresh?: boolean
   maxCompletionRetries?: number
@@ -85,7 +84,6 @@ export interface UpdateFeedData {
   refresh_status?: string
   refresh_error?: string
   last_refresh_at?: string
-  ai_summary_enabled?: boolean
   article_summary_enabled?: boolean
   completion_on_refresh?: boolean
   max_completion_retries?: number

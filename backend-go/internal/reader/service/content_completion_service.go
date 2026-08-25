@@ -139,6 +139,7 @@ func (s *ContentCompletionService) CompleteArticleWithMetadata(ctx context.Conte
 
 	if force {
 		article.AIContentSummary = ""
+		article.ContentForm = ""
 		article.SummaryGeneratedAt = nil
 	}
 
@@ -185,7 +186,9 @@ func (s *ContentCompletionService) CompleteArticleWithMetadata(ctx context.Conte
 	}
 
 	now = currentCompletionTime()
-	article.AIContentSummary = strings.TrimSpace(summary)
+	form, cleaned := parseContentFormMark(summary)
+	article.AIContentSummary = strings.TrimSpace(cleaned)
+	article.ContentForm = form
 	article.SummaryStatus = "complete"
 	article.CompletionError = ""
 	article.SummaryGeneratedAt = &now
@@ -443,6 +446,7 @@ func (s *ContentCompletionService) claimArticleForCompletion(articleID uint, for
 	}
 	if force {
 		updates["ai_content_summary"] = ""
+		updates["content_form"] = ""
 		updates["summary_generated_at"] = nil
 	}
 

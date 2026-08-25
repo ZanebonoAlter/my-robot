@@ -13,7 +13,7 @@ const props = defineProps<{
 }>()
 
 const emit = defineEmits<{
-  'update-feed': [feedId: string, setting: 'refresh_interval' | 'max_articles' | 'ai_summary_enabled' | 'tagging_enabled' | 'firecrawl_enabled' | 'completion_on_refresh' | 'category_id', value: number | boolean | null]
+  'update-feed': [feedId: string, setting: 'refresh_interval' | 'max_articles' | 'tagging_enabled' | 'firecrawl_enabled' | 'completion_on_refresh' | 'category_id', value: number | boolean | null]
   'refresh-feed': [feedId: string]
   'create-category': [name: string]
   'delete-feed': [feedId: string]
@@ -189,6 +189,7 @@ function formatStatus(feed: RssFeed): string {
               {{ option.label }}
             </option>
           </select>
+          <p class="feed-detail__field-hint">超出后旧文归档保留原文，不再出现在列表中</p>
         </div>
       </div>
 
@@ -443,6 +444,12 @@ function formatStatus(feed: RssFeed): string {
   font-size: 12px;
   font-weight: 500;
   color: var(--color-text-secondary);
+}
+
+.feed-detail__field-hint {
+  font-size: 12px;
+  color: var(--color-text-secondary);
+  opacity: 0.8;
 }
 
 .feed-detail__select {

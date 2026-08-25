@@ -102,6 +102,25 @@ func TestAuxiliaryLabelServiceExcludesDisabledLabels(t *testing.T) {
 	require.Equal(t, []string{"OpenAI", "OpenAI"}, embedder.calls)
 }
 
+func TestAuxiliaryLabelServiceDisableAuxiliaryLabelNullsVectors(t *testing.T) {
+	db := setupAuxiliaryLabelTestDB(t)
+	vec := core.FloatsToPgVector(testutil.PadVector([]float64{1, 0, 0}, testutil.TestEmbeddingDim))
+	label := models.SemanticLabel{Label: "OpenAI", Slug: "openai", LabelType: "auxiliary", Status: "active", Embedding: &vec, MergeEmbedding: &vec, Aliases: []string{"Open AI"}}
+	require.NoError(t, db.Create(&label).Error)
+	service := NewAuxiliaryLabelService(db, (&recordingAuxiliaryEmbedder{}).embed)
+
+	require.NoError(t, service.DisableAuxiliaryLabel(context.Background(), label.ID))
+
+	var reloaded models.SemanticLabel
+	require.NoError(t, db.First(&reloaded, label.ID).Error)
+	require.Equal(t, "disabled", reloaded.Status)
+	require.Nil(t, reloaded.Embedding)
+	require.Nil(t, reloaded.MergeEmbedding)
+	// 行本体与 aliases 保留：重新启用后可由 llm_extract 重算向量
+	require.Equal(t, "OpenAI", reloaded.Label)
+	require.Equal(t, []string{"Open AI"}, reloaded.Aliases)
+}
+
 func TestAuxiliaryLabelServiceDisableAuxiliaryLabelMarksOnlyAuxiliaryLabels(t *testing.T) {
 	db := setupAuxiliaryLabelTestDB(t)
 	auxiliary := models.SemanticLabel{Label: "OpenAI", Slug: "openai", LabelType: "auxiliary", Status: "active"}

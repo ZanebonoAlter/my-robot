@@ -89,6 +89,34 @@ func TestSaveAndLoadAnalysisPausedConfig(t *testing.T) {
 	require.Nil(t, pausedAt)
 }
 
+// TestLoadAutoStartModelsConfig_DefaultFalse covers the safe default: when
+// the auto_start_models key is absent from ai_settings, Load returns
+// (false, nil) — the backend must not auto-launch local model processes by
+// default.
+func TestLoadAutoStartModelsConfig_DefaultFalse(t *testing.T) {
+	testutil.SetupTestDB(t)
+
+	enabled, err := LoadAutoStartModelsConfig()
+	require.NoError(t, err)
+	require.False(t, enabled)
+}
+
+// TestSaveAndLoadAutoStartModelsConfig covers the store round trip for both
+// on and off.
+func TestSaveAndLoadAutoStartModelsConfig(t *testing.T) {
+	testutil.SetupTestDB(t)
+
+	require.NoError(t, SaveAutoStartModelsConfig(true))
+	enabled, err := LoadAutoStartModelsConfig()
+	require.NoError(t, err)
+	require.True(t, enabled)
+
+	require.NoError(t, SaveAutoStartModelsConfig(false))
+	enabled, err = LoadAutoStartModelsConfig()
+	require.NoError(t, err)
+	require.False(t, enabled)
+}
+
 func TestIsValidHTTPURL(t *testing.T) {
 	tests := []struct {
 		input string
@@ -110,4 +138,44 @@ func TestIsValidHTTPURL(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestBochaConfigKey covers the jsonb key constant for the Bocha web-search
+// backend (data-enrichment web_search, interface-configurable key).
+func TestBochaConfigKey(t *testing.T) {
+	if bochaConfigKey != "bocha_config" {
+		t.Errorf("bochaConfigKey = %q, want %q", bochaConfigKey, "bocha_config")
+	}
+}
+
+// TestLoadBochaConfig_DefaultEmpty covers the absent-key default: when
+// bocha_config is missing from ai_settings, Load returns an empty map + nil
+// settings + nil error (provider then falls back to env/config.yaml).
+func TestLoadBochaConfig_DefaultEmpty(t *testing.T) {
+	testutil.SetupTestDB(t)
+
+	cfg, settings, err := LoadBochaConfig()
+	require.NoError(t, err)
+	require.Empty(t, cfg)
+	require.Nil(t, settings)
+}
+
+// TestSaveAndLoadBochaConfig covers the store round trip: after Save writes the
+// {api_key, endpoint, enabled} shape, Load reads the same fields back.
+func TestSaveAndLoadBochaConfig(t *testing.T) {
+	testutil.SetupTestDB(t)
+
+	require.NoError(t, SaveBochaConfig(map[string]interface{}{
+		"api_key":  "sk-bocha-123456",
+		"endpoint": "https://api.bochaai.com/v1/web-search",
+		"enabled":  true,
+	}, "Bocha web-search configuration"))
+
+	cfg, settings, err := LoadBochaConfig()
+	require.NoError(t, err)
+	require.NotNil(t, settings)
+	require.Equal(t, bochaConfigKey, settings.Key)
+	require.Equal(t, "sk-bocha-123456", cfg["api_key"])
+	require.Equal(t, "https://api.bochaai.com/v1/web-search", cfg["endpoint"])
+	require.Equal(t, true, cfg["enabled"])
 }

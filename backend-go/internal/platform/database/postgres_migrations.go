@@ -217,6 +217,11 @@ func postgresMigrations() []Migration {
 			Version:     "20260420_0001",
 			Description: "Add indexes for narrative_summaries scope columns.",
 			Up: func(db *gorm.DB) error {
+				// retire-narrative-legacy: table dropped (20260824_0001) / model removed —
+				// fresh replays no longer have the table; skip instead of fail.
+				if !tableExists(db, "narrative_summaries") {
+					return nil
+				}
 				indexes := []string{
 					"CREATE INDEX IF NOT EXISTS idx_narrative_scope ON narrative_summaries(scope_category_id)",
 					"CREATE INDEX IF NOT EXISTS idx_narrative_scope_period ON narrative_summaries(scope_type, scope_category_id, period_date)",
@@ -233,6 +238,11 @@ func postgresMigrations() []Migration {
 			Version:     "20260430_0001",
 			Description: "Add indexes for narrative_boards and narrative_summaries.board_id.",
 			Up: func(db *gorm.DB) error {
+				// retire-narrative-legacy: table dropped (20260824_0001) / model removed —
+				// fresh replays no longer have the table; skip instead of fail.
+				if !tableExists(db, "narrative_boards") {
+					return nil
+				}
 				indexes := []string{
 					"CREATE INDEX IF NOT EXISTS idx_narrative_boards_period ON narrative_boards(period_date)",
 					"CREATE INDEX IF NOT EXISTS idx_narrative_boards_scope ON narrative_boards(scope_category_id)",
@@ -310,10 +320,16 @@ func postgresMigrations() []Migration {
 					"CREATE INDEX IF NOT EXISTS idx_topic_tag_board_labels_semantic_board_id ON topic_tag_board_labels(semantic_board_id)",
 					"CREATE INDEX IF NOT EXISTS idx_board_composition_board_id ON board_composition(board_id)",
 					"CREATE INDEX IF NOT EXISTS idx_board_composition_auxiliary_label_id ON board_composition(auxiliary_label_id)",
-					"CREATE INDEX IF NOT EXISTS idx_narrative_boards_semantic_board_id ON narrative_boards(semantic_board_id)",
 				}
 				for _, s := range indexes {
 					if err := db.Exec(s).Error; err != nil {
+						return fmt.Errorf("semantic label board index: %w", err)
+					}
+				}
+				// retire-narrative-legacy: table dropped (20260824_0001) / model removed —
+				// fresh replays no longer have the table; skip instead of fail.
+				if tableExists(db, "narrative_boards") {
+					if err := db.Exec("CREATE INDEX IF NOT EXISTS idx_narrative_boards_semantic_board_id ON narrative_boards(semantic_board_id)").Error; err != nil {
 						return fmt.Errorf("semantic label board index: %w", err)
 					}
 				}
@@ -363,10 +379,16 @@ func postgresMigrations() []Migration {
 			Up: func(db *gorm.DB) error {
 				columnDrops := []string{
 					"ALTER TABLE topic_tags DROP COLUMN IF EXISTS concept_id CASCADE",
-					"ALTER TABLE narrative_boards DROP COLUMN IF EXISTS abstract_tag_id CASCADE",
-					"ALTER TABLE narrative_boards DROP COLUMN IF EXISTS board_concept_id CASCADE",
-					"ALTER TABLE narrative_boards DROP COLUMN IF EXISTS is_system",
-					"ALTER TABLE narrative_boards DROP COLUMN IF EXISTS abstract_tag_ids",
+				}
+				// retire-narrative-legacy: narrative_boards dropped (20260824_0001) / model
+				// removed — ALTER on a missing table errors on fresh replays; guard it.
+				if tableExists(db, "narrative_boards") {
+					columnDrops = append(columnDrops,
+						"ALTER TABLE narrative_boards DROP COLUMN IF EXISTS abstract_tag_id CASCADE",
+						"ALTER TABLE narrative_boards DROP COLUMN IF EXISTS board_concept_id CASCADE",
+						"ALTER TABLE narrative_boards DROP COLUMN IF EXISTS is_system",
+						"ALTER TABLE narrative_boards DROP COLUMN IF EXISTS abstract_tag_ids",
+					)
 				}
 				for _, s := range columnDrops {
 					if err := db.Exec(s).Error; err != nil {
@@ -1270,8 +1292,13 @@ func postgresMigrations() []Migration {
 						if err := db.Exec(fmt.Sprintf(`ALTER TABLE %s ALTER COLUMN %s SET DEFAULT %s`, table, column, defaultLit)).Error; err != nil {
 							return fmt.Errorf("set default %s.%s: %w", table, column, err)
 						}
-						if err := ensureNotNullDefault(db, table, column, defaultLit); err != nil {
-							return err
+						// respect the notNull flag — the previous unconditional call
+						// silently forced NOT NULL on columns declared nullable
+						// (restore-gorm-default-tags: context_layers/aliases).
+						if notNull {
+							if err := ensureNotNullDefault(db, table, column, defaultLit); err != nil {
+								return err
+							}
 						}
 					}
 					if notNull && defaultLit == "" {
@@ -1662,6 +1689,328 @@ ON CONFLICT (route_id, param_name, value) DO NOTHING`,
 				return nil
 			},
 		},
+
+		// ── AI provider model_kind backfill ────────────────────────
+		// AutoMigrate adds ai_providers.model_kind (DEFAULT 'llm'). Existing
+		// providers therefore all start at 'llm'. This one-shot data migration
+		// flips providers that are EXCLUSIVELY on an embedding route to
+		// 'embedding', and warns about providers bound to BOTH an embedding and an
+		// llm route (ambiguous — the user must split the bindings manually; the
+		// migration does not auto-change routes). Idempotent: the UPDATE only
+		// touches rows still at 'llm'.
+		{
+			Version:     "20260802_0001",
+			Description: "Backfill ai_providers.model_kind from embedding route membership; warn on embedding+llm conflict.",
+			Up: func(db *gorm.DB) error {
+				// Backfill: flip a provider to 'embedding' only if it is on an
+				// embedding route AND not on any llm (non-embedding) route. A
+				// provider on both routes is ambiguous — leave it at the default
+				// 'llm' and warn below so the user decides.
+				res := db.Exec(`
+					UPDATE ai_providers p
+					SET model_kind = 'embedding'
+					WHERE p.model_kind = 'llm'
+					  AND EXISTS (
+					    SELECT 1 FROM ai_route_providers arp
+					    JOIN ai_routes ar ON ar.id = arp.route_id
+					    WHERE arp.provider_id = p.id AND ar.capability = 'embedding'
+					  )
+					  AND NOT EXISTS (
+					    SELECT 1 FROM ai_route_providers arp
+					    JOIN ai_routes ar ON ar.id = arp.route_id
+					    WHERE arp.provider_id = p.id AND ar.capability <> 'embedding'
+					  )
+				`)
+				if res.Error != nil {
+					return fmt.Errorf("backfill ai_providers.model_kind: %w", res.Error)
+				}
+				if res.RowsAffected > 0 {
+					logging.Infof("Migration 20260802_0001: backfilled %d embedding-exclusive providers to model_kind=embedding", res.RowsAffected)
+				}
+
+				// Conflict detection: providers bound to BOTH an embedding route and
+				// an llm route. Warn only — do not auto-change route bindings.
+				type conflictRow struct {
+					ID   uint
+					Name string
+				}
+				var conflicts []conflictRow
+				if err := db.Raw(`
+					SELECT p.id, p.name FROM ai_providers p
+					WHERE EXISTS (
+					    SELECT 1 FROM ai_route_providers arp
+					    JOIN ai_routes ar ON ar.id = arp.route_id
+					    WHERE arp.provider_id = p.id AND ar.capability = 'embedding'
+					  )
+					  AND EXISTS (
+					    SELECT 1 FROM ai_route_providers arp
+					    JOIN ai_routes ar ON ar.id = arp.route_id
+					    WHERE arp.provider_id = p.id AND ar.capability <> 'embedding'
+					  )
+				`).Scan(&conflicts).Error; err != nil {
+					return fmt.Errorf("detect embedding+llm provider conflicts: %w", err)
+				}
+				for _, c := range conflicts {
+					logging.Warnf("migration 20260802_0001: provider %d (%s) 同时绑定在 embedding 路由与 llm 路由，model_kind 冲突，请手动拆分路由绑定", c.ID, c.Name)
+				}
+				return nil
+			},
+		},
+
+		// ── Article archive flag ──────────────────────────────────────
+		// CleanupOldArticles switches from physical DELETE to archive
+		// (UPDATE archived=true). All existing rows start as active — no
+		// backfill. No index: low-cardinality boolean, list queries are
+		// covered by feed_id/pub_date indexes (design D2).
+		{
+			Version:     "20260818_0001",
+			Description: "Add articles.archived boolean NOT NULL DEFAULT false — feed cleanup archives instead of deleting (article-archive-instead-of-delete).",
+			Up: func(db *gorm.DB) error {
+				if err := db.Exec(`ALTER TABLE articles ADD COLUMN IF NOT EXISTS archived boolean NOT NULL DEFAULT false`).Error; err != nil {
+					return fmt.Errorf("add articles.archived: %w", err)
+				}
+				return nil
+			},
+		},
+
+		// ── analysis-remediation W1：孤儿 embedding 清理 + FK 防复发 + 零使用索引清理 ──
+		// GORM 声明了 OnDelete:CASCADE 但 DB 实际无此 FK，删 tag 后向量全部残留
+		// （256k 孤儿行 ≈3GB，已由 scripts/db-cleanup-2026-08/ 手动清理）。本迁移在
+		// 新部署上完成同样的清理+结构修复（幂等）。索引清理与 tracing/model.go 的
+		// tag 摘除配套，否则 AutoMigrate 会重建。articles GIN 全文索引 idx_scan=0
+		// 且代码零引用（analysis-reports/db-analysis-2026-08-20.md #3/#4）。
+		{
+			Version:     "20260820_0001",
+			Description: "Clean orphan topic_tag_embeddings, add FK ON DELETE CASCADE to topic_tags, drop unused indexes (articles GIN + trigger, otel_spans trace_id/kind/status/name). Idempotent.",
+			Up: func(db *gorm.DB) error {
+				if !tableExists(db, "topic_tag_embeddings") || !tableExists(db, "topic_tags") {
+					return nil
+				}
+
+				// 1) 清孤儿 embedding（同 20260801_0002 孤儿先清逻辑：垃圾数据不套
+				// destructive 守卫，不清则 FK 校验现有行失败）
+				res := db.Exec(`DELETE FROM topic_tag_embeddings WHERE topic_tag_id NOT IN (SELECT id FROM topic_tags)`)
+				if res.Error != nil {
+					return fmt.Errorf("clean orphan topic_tag_embeddings: %w", res.Error)
+				}
+				if res.RowsAffected > 0 {
+					logging.Infof("Migration 20260820_0001: cleaned %d orphan topic_tag_embeddings rows", res.RowsAffected)
+				}
+
+				// 2) FK ON DELETE CASCADE（幂等；长锁 DDL 套 withLockTimeout）
+				if err := withLockTimeout(db, "5s", func(tx *gorm.DB) error {
+					if err := tx.Exec(`DO $$ BEGIN
+						IF NOT EXISTS (
+							SELECT 1 FROM information_schema.table_constraints
+							WHERE constraint_name = 'fk_topic_tag_embeddings_tag'
+							  AND table_name = 'topic_tag_embeddings'
+						) THEN
+							ALTER TABLE topic_tag_embeddings
+								ADD CONSTRAINT fk_topic_tag_embeddings_tag
+								FOREIGN KEY (topic_tag_id) REFERENCES topic_tags(id)
+								ON DELETE CASCADE;
+						END IF;
+					END $$`).Error; err != nil {
+						return fmt.Errorf("add fk_topic_tag_embeddings_tag: %w", err)
+					}
+					return nil
+				}); err != nil {
+					return err
+				}
+
+				// 3) 零使用索引清理（与 scripts/db-cleanup-2026-08/apply-structure.sql 一致）
+				if tableExists(db, "articles") {
+					if err := db.Exec(`DROP INDEX IF EXISTS idx_articles_search_vector`).Error; err != nil {
+						return fmt.Errorf("drop idx_articles_search_vector: %w", err)
+					}
+					if err := db.Exec(`DROP TRIGGER IF EXISTS articles_search_vector_trigger ON articles`).Error; err != nil {
+						return fmt.Errorf("drop articles_search_vector_trigger: %w", err)
+					}
+				}
+				if tableExists(db, "otel_spans") {
+					for _, idx := range []string{"idx_otel_spans_trace_id", "idx_otel_spans_kind", "idx_otel_spans_status", "idx_otel_spans_name"} {
+						if err := db.Exec(fmt.Sprintf(`DROP INDEX IF EXISTS %s`, idx)).Error; err != nil {
+							return fmt.Errorf("drop %s: %w", idx, err)
+						}
+					}
+				}
+				return nil
+			},
+		},
+
+		// ── analysis-remediation W1：embedding_queues 30 天保留策略的查询支撑 ──
+		// job_log_cleanup 新增 DELETE ... WHERE status='completed' AND created_at < ?，
+		// 此部分索引（completed 行 15 万+，全体行不到 16 万）支撑该删除扫描。
+		{
+			Version:     "20260820_0002",
+			Description: "Add partial index idx_embedding_queues_completed_created (created_at WHERE status='completed') to back the 30-day retention cleanup in job_log_cleanup. Idempotent.",
+			Up: func(db *gorm.DB) error {
+				if !tableExists(db, "embedding_queues") {
+					return nil
+				}
+				if err := db.Exec(`CREATE INDEX IF NOT EXISTS idx_embedding_queues_completed_created
+					ON embedding_queues (created_at) WHERE status = 'completed'`).Error; err != nil {
+					return fmt.Errorf("create idx_embedding_queues_completed_created: %w", err)
+				}
+				return nil
+			},
+		},
+
+		// ── retire-narrative-legacy: drop dead narrative dual-track tables ──
+		{
+			Version:     "20260824_0001",
+			Description: "Drop legacy narrative_summaries / narrative_boards (zero production writers since the daily-report pipeline took over; dead data, no downgrade path). Destructive — guarded by MIGRATIONS_ALLOW_DESTRUCTIVE per db-migration-safety spec (skip + WARN when not enabled). ⚠️ 不可逆 DROP（破坏性，受 `MIGRATIONS_ALLOW_DESTRUCTIVE` 守卫；生产执行前需备份）",
+			Up: func(db *gorm.DB) error {
+				// Destructive (DROP TABLE): skip unless MIGRATIONS_ALLOW_DESTRUCTIVE=1
+				// (db-migration-safety spec: skip + WARN + record version, do not abort startup).
+				if !IsDestructiveAllowed() {
+					logging.Warnf("skipping destructive migration 20260824_0001 (set MIGRATIONS_ALLOW_DESTRUCTIVE=1 to drop legacy narrative tables)")
+					return nil
+				}
+				tableDrops := []string{
+					"DROP TABLE IF EXISTS narrative_summaries CASCADE",
+					"DROP TABLE IF EXISTS narrative_boards CASCADE",
+				}
+				for _, s := range tableDrops {
+					if err := db.Exec(s).Error; err != nil {
+						return fmt.Errorf("drop legacy narrative table: %w", err)
+					}
+				}
+				return nil
+			},
+		},
+
+		// ── watch-keyword-and-quickadd: board_topic_watches.type column ──
+		// Dual-track watch matching: 'label' (AI semantic, historical rows) vs
+		// 'keyword' (pure text). AutoMigrate creates the column from the model tag
+		// on fresh installs; this migration owns the CHECK constraint
+		// (type IN ('label','keyword')) that AutoMigrate cannot express, and
+		// guarantees NOT NULL + default 'label' on legacy databases. Idempotent.
+		{
+			Version:     "20260824_0002",
+			Description: "Add board_topic_watches.type column (label|keyword) with CHECK constraint, default 'label'.",
+			Up: func(db *gorm.DB) error {
+				if !tableExists(db, "board_topic_watches") {
+					return nil
+				}
+				// Add column with default 'label' (idempotent via IF NOT EXISTS;
+				// mirrors the 20260702_0001 source-column pattern).
+				if err := db.Exec(`
+					ALTER TABLE board_topic_watches
+					ADD COLUMN IF NOT EXISTS type VARCHAR(10) DEFAULT 'label'
+				`).Error; err != nil {
+					return fmt.Errorf("add board_topic_watches.type column: %w", err)
+				}
+				// Backfill + SET NOT NULL via the idempotent helper (no-ops when
+				// the column is already NOT NULL, e.g. AutoMigrate created it).
+				if err := ensureNotNullDefault(db, "board_topic_watches", "type", "'label'"); err != nil {
+					return fmt.Errorf("board_topic_watches.type NOT NULL: %w", err)
+				}
+				// Add CHECK constraint (idempotent: information_schema guard first,
+				// same pattern as 20260630_0001 status CHECK).
+				if err := db.Exec(`
+					DO $$ BEGIN
+						IF NOT EXISTS (
+							SELECT 1 FROM information_schema.table_constraints
+							WHERE constraint_name = 'chk_board_topic_watches_type'
+								  AND table_name = 'board_topic_watches'
+						) THEN
+							ALTER TABLE board_topic_watches
+								ADD CONSTRAINT chk_board_topic_watches_type
+								CHECK (type IN ('label', 'keyword'));
+						END IF;
+					END $$
+				`).Error; err != nil {
+					return fmt.Errorf("add board_topic_watches type CHECK: %w", err)
+				}
+				return nil
+			},
+		},
+
+		// ── watch-materialized-topic: materialized watch tracks + sentence cache ──
+		// watch type 扩展两值：keyword_topic（关键字物化——当天命中文章聚合为
+		// 临时 section，零 AI）、sentence_topic（一句话向量检索辅助标签，物化为
+		// 挂专属持久话题的 section）。type 列从 VARCHAR(10) 扩到 VARCHAR(16)
+		// （'keyword_topic' 13 字符）；CHECK 重建为四值。sentence 轨新增
+		// query（检索句）/ embedding_cache（向量缓存）/ persistent_topic_id
+		// （专属话题 FK，ON DELETE SET NULL——话题被物理删除不断 watch，反向
+		// 联动归档由 service 层显式做）。AutoMigrate 在新装库上建新列；本迁移
+		// 兑底存量库并 owns CHECK/FK。幂等。
+		{
+			Version:     "20260825_0001",
+			Description: "watch-materialized-topic: widen board_topic_watches.type CHECK to 4 values; add query/embedding_cache/persistent_topic_id.",
+			Up: func(db *gorm.DB) error {
+				if !tableExists(db, "board_topic_watches") {
+					return nil
+				}
+				// 1. Widen type VARCHAR(10) → VARCHAR(16) ('keyword_topic' is 13
+				//    chars). Idempotent: same-type ALTER is a no-op.
+				if err := db.Exec(`ALTER TABLE board_topic_watches ALTER COLUMN type TYPE VARCHAR(16)`).Error; err != nil {
+					return fmt.Errorf("widen board_topic_watches.type: %w", err)
+				}
+				// 2. Rebuild the type CHECK with the four-value set. DROP the
+				//    20260824_0002 two-value constraint first, then ADD — guarded by
+				//    withLockTimeout (constraint DDL takes AccessExclusiveLock,
+				//    per db-migration-execution).
+				if err := withLockTimeout(db, "5s", func(tx *gorm.DB) error {
+					if err := tx.Exec(`ALTER TABLE board_topic_watches DROP CONSTRAINT IF EXISTS chk_board_topic_watches_type`).Error; err != nil {
+						return fmt.Errorf("drop old board_topic_watches type CHECK: %w", err)
+					}
+					if err := tx.Exec(`DO $$ BEGIN
+						IF NOT EXISTS (
+							SELECT 1 FROM information_schema.table_constraints
+							WHERE constraint_name = 'chk_board_topic_watches_type'
+								  AND table_name = 'board_topic_watches'
+						) THEN
+							ALTER TABLE board_topic_watches
+								ADD CONSTRAINT chk_board_topic_watches_type
+								CHECK (type IN ('label', 'keyword', 'keyword_topic', 'sentence_topic'));
+						END IF;
+					END $$`).Error; err != nil {
+						return fmt.Errorf("add board_topic_watches type CHECK: %w", err)
+					}
+					return nil
+				}); err != nil {
+					return err
+				}
+				// 3. New columns (idempotent; AutoMigrate also creates them on fresh
+				//    installs from the model tags).
+				if err := db.Exec(`ALTER TABLE board_topic_watches ADD COLUMN IF NOT EXISTS query TEXT`).Error; err != nil {
+					return fmt.Errorf("add board_topic_watches.query: %w", err)
+				}
+				if err := db.Exec(`ALTER TABLE board_topic_watches ADD COLUMN IF NOT EXISTS embedding_cache vector`).Error; err != nil {
+					return fmt.Errorf("add board_topic_watches.embedding_cache: %w", err)
+				}
+				if err := db.Exec(`ALTER TABLE board_topic_watches ADD COLUMN IF NOT EXISTS persistent_topic_id BIGINT`).Error; err != nil {
+					return fmt.Errorf("add board_topic_watches.persistent_topic_id: %w", err)
+				}
+				// 4. FK persistent_topic_id → board_persistent_topics(id) ON DELETE
+				//    SET NULL: deleting a topic must not delete or break the watch.
+				if !tableExists(db, "board_persistent_topics") {
+					return nil
+				}
+				if err := withLockTimeout(db, "5s", func(tx *gorm.DB) error {
+					if err := tx.Exec(`DO $$ BEGIN
+						IF NOT EXISTS (
+							SELECT 1 FROM information_schema.table_constraints
+							WHERE constraint_name = 'fk_board_topic_watches_topic'
+								  AND table_name = 'board_topic_watches'
+						) THEN
+							ALTER TABLE board_topic_watches
+								ADD CONSTRAINT fk_board_topic_watches_topic
+								FOREIGN KEY (persistent_topic_id) REFERENCES board_persistent_topics(id)
+								ON DELETE SET NULL;
+						END IF;
+					END $$`).Error; err != nil {
+						return fmt.Errorf("add fk_board_topic_watches_topic: %w", err)
+					}
+					return nil
+				}); err != nil {
+					return err
+				}
+				return nil
+			},
+		},
 	}
 }
 
@@ -1824,8 +2173,10 @@ func mergeOneAuxLabelDup(db *gorm.DB, sourceID, targetID uint) error {
 			return fmt.Errorf("update target ref_count: %w", err)
 		}
 		if err := tx.Model(&models.SemanticLabel{}).Where("id = ?", sourceID).Updates(map[string]any{
-			"ref_count": int(sourceRefCount),
-			"status":    "disabled",
+			"ref_count":       int(sourceRefCount),
+			"status":          "disabled",
+			"embedding":       nil,
+			"merge_embedding": nil,
 		}).Error; err != nil {
 			return fmt.Errorf("disable source: %w", err)
 		}

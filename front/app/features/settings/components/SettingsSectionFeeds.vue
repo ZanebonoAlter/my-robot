@@ -42,12 +42,54 @@ async function onDeleteFeed() {
   )
   if (ok) selectedFeedId.value = undefined
 }
+
+// 订阅源管理入口（增/导入/导出）——聚合在设置页（slim-header-feed-actions）
+const showAddFeedDialog = ref(false)
+const showAddCategoryDialog = ref(false)
+const showImportDialog = ref(false)
+
+async function handleExportOpml() {
+  try {
+    const blob = await apiStore.exportOpml()
+    const url = window.URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `feeds-export-${new Date().toISOString().split('T')[0]}.opml`
+    a.click()
+    window.URL.revokeObjectURL(url)
+  } catch {
+    error.value = '导出失败'
+  }
+}
+
+function reloadFeeds() {
+  apiStore.fetchFeeds({ per_page: 10000 })
+}
 </script>
 
 <template>
   <div class="feeds-section">
     <div v-if="success" class="msg msg--success">{{ success }}</div>
     <div v-if="error" class="msg msg--error">{{ error }}</div>
+
+    <div class="feeds-toolbar">
+      <button class="feeds-toolbar__btn" @click="showAddFeedDialog = true">
+        <Icon icon="mdi:plus" width="16" height="16" />
+        <span>添加订阅源</span>
+      </button>
+      <button class="feeds-toolbar__btn" @click="showAddCategoryDialog = true">
+        <Icon icon="mdi:folder-plus" width="16" height="16" />
+        <span>添加分类</span>
+      </button>
+      <button class="feeds-toolbar__btn" @click="showImportDialog = true">
+        <Icon icon="mdi:import" width="16" height="16" />
+        <span>导入</span>
+      </button>
+      <button class="feeds-toolbar__btn" @click="handleExportOpml">
+        <Icon icon="mdi:export" width="16" height="16" />
+        <span>导出</span>
+      </button>
+    </div>
 
     <div class="feeds-layout">
       <!-- Master list (left) -->
@@ -84,6 +126,22 @@ async function onDeleteFeed() {
         </div>
       </div>
     </div>
+
+    <AddFeedDialog
+      v-if="showAddFeedDialog"
+      @close="showAddFeedDialog = false"
+      @added="reloadFeeds"
+    />
+    <AddCategoryDialog
+      v-if="showAddCategoryDialog"
+      @close="showAddCategoryDialog = false"
+      @added="reloadFeeds"
+    />
+    <ImportOpmlDialog
+      v-if="showImportDialog"
+      @close="showImportDialog = false"
+      @imported="reloadFeeds"
+    />
   </div>
 </template>
 
@@ -161,6 +219,32 @@ async function onDeleteFeed() {
   background: rgba(248, 113, 113, 0.1);
   border: 1px solid rgba(248, 113, 113, 0.2);
   color: #f87171;
+}
+
+.feeds-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.feeds-toolbar__btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border: 1px solid var(--color-border-subtle);
+  border-radius: 8px;
+  background: var(--color-bg-elevated);
+  color: var(--color-text-primary);
+  font-size: 13px;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.feeds-toolbar__btn:hover {
+  background: var(--color-bg-hover);
+  border-color: var(--color-border-medium);
 }
 
 /* Responsive: stack on narrow */

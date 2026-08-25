@@ -49,6 +49,7 @@
 
 - [x] 4.5 `bash scripts/doc-impact.sh verify openspec/changes/fix-watch-delete-cascade` → 通过（声明: database，文件: ER_DIAGRAM.md + DATABASE_FIELDS.md）
 - [x] 4.6 `bash scripts/check-standards.sh` → 本 change 相关全绿（F 段 doc-impact 通过）
+- 无 flow 影响：本 change 是数据完整性修复（补版本化 FK ON DELETE CASCADE 迁移 `20260801_0002`，修 `DeleteWatch` 在 PG 不级联删 `topic_watch_hits` 的生产 bug），不改任何业务 flow 的生成/编排流程，按《开发执行规范》§12.2 豁免 flow 变更溯源
 
 ### 验证
 

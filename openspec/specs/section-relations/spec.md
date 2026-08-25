@@ -5,10 +5,18 @@
 ## Requirements
 
 ### Requirement: 同日 Section 两阶段合并
-`SaveReport()` 事务中，新 sections 写入数据库后、relations 写入前，系统 SHALL 对同日 sections 执行两阶段合并以消除聚类过碎问题。
+日报生成管线中、`SaveReport()` 落库之前，系统 SHALL 对同日 sections 执行两阶段合并以消除聚类过碎问题。合并整体受配置开关 `daily_report_section_merge_enabled`（存 `ai_settings`，默认 false）控制：开关关闭时系统 SHALL 跳过两阶段合并，sections 按上游 lane 管线原始分组原样落库。
+
+**锚定边界（前置过滤）**
+lane 管线的 keep/switch/new 归因裁决是系统记录，展示层合并不得跨越。所有合并候选对（Stage 1 确定性与 Stage 2 灰区）在建边前 SHALL 先过锚定边界校验，仅以下两类 pair 允许合并：
+
+- 双方 `MatchedTopicID` 均非 NULL 且相等（同话题当日分组）；
+- 双方 `MatchedTopicID` 均 NULL（同属新叙事/未锚定池）。
+
+`MatchedTopicID` 不同、或 NULL 与非 NULL 混合的 pair SHALL 被拒绝：不进入确定性合并、不进入 LLM 仲裁、不参与传递闭包。边界过滤在建边前执行保证传递闭包的连通分量内锚定必然一致。
 
 **Stage 1：确定性合并（embedding）**
-系统 SHALL 计算所有同日 section pairs 的 embedding cosine distance。distance < 0.20 的 pairs SHALL 自动合并为一个 section。
+系统 SHALL 计算所有通过锚定边界的同日 section pairs 的 embedding cosine distance。distance < 0.20 的 pairs SHALL 自动合并为一个 section。
 
 合并规则：
 - 保留 `article_count` 最大的 section 作为主 section
@@ -18,10 +26,13 @@
 - `article_count`、`best_tier`、`avg_score` SHALL 重新计算（合并后的值）
 - 被合并 section SHALL 从 sections 列表中移除
 
-连通性：如果 A↔B 和 B↔C 都 < 0.20，则 A、B、C SHALL 合并为一个 section（使用传递闭包）。
+连通性：如果 A↔B 和 B↔C 都是合法边且距离均 < 0.20，则 A、B、C SHALL 合并为一个 section（使用传递闭包；边界过滤在建边前执行，闭包不会跨越锚定）。
+
+**Stage 1 审计**
+确定性合并的每个候选对（含被锚定边界拒绝的对）SHALL 记录审计日志：双方 `cluster_label`、`MatchedTopicID`、lane_tier、距离、合并或拒绝结果。与 Stage 2 灰区仲裁的 LLM 调用日志共同构成可回放审计面。
 
 **Stage 2：LLM 仲裁（灰色地带）**
-距离在 0.20 - 0.25 之间的 pairs SHALL 批量送 LLM 判断是否合并。
+通过锚定边界且距离在 0.20 - 0.25 之间的 pairs SHALL 批量送 LLM 判断是否合并。
 
 LLM 输入：每个 candidate pair 的 `(section_a_label, section_a_tag_labels[], section_b_label, section_b_tag_labels[])`。
 LLM 输出：`merge_pairs: [[index_a, index_b], ...]` 列表。
@@ -29,25 +40,46 @@ LLM 判定为合并的 pairs SHALL 按 Stage 1 相同规则合并。
 
 合并完成后，系统 SHALL 继续 relation 写入逻辑（基于合并后的 sections）。
 
-#### Scenario: Stage 1 确定性合并
-- **WHEN** sections [A(0.117↔B), B, C] 中 A↔B distance=0.117
+#### Scenario: 合并开关关闭
+- **WHEN** `daily_report_section_merge_enabled=false`（默认）且同日存在多个语义相近的 sections
+- **THEN** 系统 SHALL 跳过两阶段合并，sections 按 lane 管线原始分组落库，不产生任何合并
+
+#### Scenario: Stage 1 确定性合并（同话题）
+- **WHEN** sections [A, B] 同属 topic 7（MatchedTopicID 均为 7），distance=0.15
 - **THEN** 系统 SHALL 合并 A 和 B 为一个 section（保留 article_count 更大的），移除另一个
 
-#### Scenario: 传递闭包合并
-- **WHEN** sections [A, B, C] 中 A↔B=0.15, B↔C=0.18，但 A↔C=0.22
-- **THEN** A、B、C SHALL 全部合并为一个 section
+#### Scenario: 不同话题拒绝合并
+- **WHEN** sections [A(topic 7), B(topic 12)] distance=0.11
+- **THEN** 系统 SHALL 拒绝合并，A、B 各自独立落库，该 pair 不进入 LLM 仲裁
+
+#### Scenario: 新叙事不被锚定 section 吸收
+- **WHEN** sections [A(topic 7, l1_direct), B(MatchedTopicID=NULL, l3_new)] distance=0.14
+- **THEN** 系统 SHALL 拒绝合并，B 作为独立新叙事 section 落库并在 SaveReport 时走 auto_new 创建 candidate topic
+
+#### Scenario: 两个新叙事 section 可合并
+- **WHEN** sections [A(NULL, l3_new), B(NULL, l3_new)] distance=0.18
+- **THEN** 系统 SHALL 允许该 pair 进入正常两阶段合并流程
+
+#### Scenario: 传递闭包不跨越锚定边界
+- **WHEN** sections [A(topic 7), B(topic 7), C(topic 12)]，A↔B=0.15（合法边），B↔C=0.18（跨界被拒）
+- **THEN** 系统 SHALL 仅合并 A、B，C 独立落库
 
 #### Scenario: Stage 2 LLM 仲裁合并
-- **WHEN** sections [A, B] distance=0.21，LLM 判定为 merge=true
+- **WHEN** sections [A, B] 同属 topic 7，distance=0.21，LLM 判定为 merge=true
 - **THEN** 系统 SHALL 合并 A 和 B
 
 #### Scenario: Stage 2 LLM 仲裁拒绝合并
-- **WHEN** sections [A, B] distance=0.23，LLM 判定为 merge=false
+- **WHEN** sections [A, B] 同属 topic 7，distance=0.23，LLM 判定为 merge=false
 - **THEN** 系统 SHALL 保留 A 和 B 为独立 section
 
 #### Scenario: 无灰色地带 pairs
-- **WHEN** 同日所有 section pairs 的 distance 均 < 0.20 或 > 0.25
+- **WHEN** 同日所有通过边界校验的 section pairs 距离均 < 0.20 或 > 0.25
 - **THEN** 系统 SHALL 跳过 Stage 2，不调用 LLM
+
+#### Scenario: 确定性合并审计日志
+- **WHEN** Stage 1 处理候选对 [A(topic 7), B(topic 12)] distance=0.19 且被锚定边界拒绝
+- **THEN** 系统 SHALL 记录含双方 label、MatchedTopicID、lane_tier、距离、拒绝原因的审计日志
+
 
 ### Requirement: Section 关系表
 系统 SHALL 创建 `daily_report_section_relations` 表，存储 Section 之间的多对多跨天关系。
@@ -73,7 +105,7 @@ LLM 判定为合并的 pairs SHALL 按 Stage 1 相同规则合并。
 ### Requirement: 关系写入逻辑
 `SaveReport()` 事务中，新 sections 写入数据库后（含两阶段合并），系统 SHALL 对该 board 执行全量关系重建：清除该 board 所有 relation，按相邻天对逐对执行三阶段二分图匹配（Phase 1 匈牙利 1:1 + Phase 2 split/merge + Phase 3 skip-day），重新写入 relation。
 
-embedding 为空的 section SHALL 跳过关系写入。新 section 的 embedding 仍基于 `cluster_label` 文本生成，逻辑不变。
+embedding 为空的 section SHALL 跳过关系写入。section 的 embedding SHALL 基于 section 内容聚合文本生成（见 section-content-embedding 能力：所聚 tag 的 label/description/代表文章摘录），SHALL NOT 再基于 `cluster_label` 标题文本。
 
 distance 字段存储 pgvector 计算的 cosine distance 值，写入方式使用 raw SQL `INSERT ... ON CONFLICT DO UPDATE` 确保 upsert 时 distance 被正确写入。
 
@@ -125,7 +157,7 @@ distance 字段存储 pgvector 计算的 cosine distance 值，写入方式使�
 
 #### Scenario: BackfillSectionEmbeddings Phase 2
 - **WHEN** 运行 `BackfillSectionEmbeddings`
-- **THEN** Phase 1 补 embedding 后，Phase 2 SHALL 对每个 board 调用 `BackfillRelations(boardID)`
+- **THEN** Phase 1 按 section-content-embedding 能力的内容化规则生成/重算 embedding 后，Phase 2 SHALL 对每个 board 调用 `BackfillRelations(boardID)`
 
 ### Requirement: Section status 动态推导（两阶段）
 系统 SHALL 在 timeline/lifecycle API 返回时动态推导 section 的 `status`（关系状态）和 `ended`（结束标记），不存储在数据库中。

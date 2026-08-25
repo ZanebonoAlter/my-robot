@@ -9,9 +9,12 @@ const routeLabels: Record<string, string> = {
   digest_polish: '日报润色',
   embedding: '向量嵌入',
   feed_discovery: '订阅源发现',
+  data_enrichment_news: '新闻总结',
+  data_enrichment_analysis: '数据分析',
 }
 
-const capabilityOrder = ['summary', 'topic_tagging', 'digest_polish', 'embedding', 'feed_discovery']
+// capabilityOrder 同时是「能力路由」UI 的渲染白名单与「主模型同步」的遍历表。// data_enrichment_news/analysis 历史性遗漏于此，导致设置页看不到这两条 route、// 也无法为「数据分析」单独配强模型——补上。
+const capabilityOrder = ['summary', 'topic_tagging', 'digest_polish', 'embedding', 'feed_discovery', 'data_enrichment_news', 'data_enrichment_analysis']
 
 export function useAIRouterSettings() {
   const loading = ref(false)
@@ -31,6 +34,9 @@ export function useAIRouterSettings() {
     base_url: '',
     api_key: '',
     model: '',
+    model_kind: 'llm',
+    start_command: '',
+    clear_start_command: false,
     enabled: true,
     timeout_seconds: 120,
     enable_thinking: false,
@@ -43,6 +49,8 @@ export function useAIRouterSettings() {
     base_url: '',
     api_key: '',
     model: '',
+    model_kind: 'llm',
+    start_command: '',
     enabled: true,
     timeout_seconds: 120,
     enable_thinking: false,
@@ -61,12 +69,18 @@ export function useAIRouterSettings() {
     base_url: '',
     api_key: '',
     model: '',
+    model_kind: 'llm',
+    start_command: '',
     enabled: true,
     timeout_seconds: 120,
     enable_thinking: false,
     clear_api_key: false,
+    clear_start_command: false,
   })
   const showEditProviderApiKey = ref(false)
+
+  // 当前正在测连通的备用 provider id（卡片按钮 loading/防重入）
+  const testingProviderId = ref<number | null>(null)
 
   const backupProviders = computed(() => providers.value.filter(p => p && typeof p.id === 'number' && p.id !== primaryProviderId.value))
 
@@ -99,6 +113,9 @@ export function useAIRouterSettings() {
     primaryProviderForm.base_url = provider?.base_url || ''
     primaryProviderForm.api_key = ''
     primaryProviderForm.model = provider?.model || ''
+    primaryProviderForm.model_kind = provider?.model_kind || 'llm'
+    primaryProviderForm.start_command = ''
+    primaryProviderForm.clear_start_command = false
     primaryProviderForm.enabled = provider?.enabled ?? true
     primaryProviderForm.timeout_seconds = provider?.timeout_seconds || 120
     primaryProviderForm.enable_thinking = provider?.enable_thinking ?? false
@@ -154,6 +171,22 @@ export function useAIRouterSettings() {
       error.value = message
       success.value = null
     }
+  }
+
+  // ---- Route candidates（按 capability 过滤 model_kind：embedding 路由只接 embedding provider）----
+  function providerModelKind(providerId: number): 'llm' | 'embedding' {
+    return providers.value.find(p => p.id === providerId)?.model_kind || 'llm'
+  }
+
+  function candidatesForCapability(capability: string): AIProvider[] {
+    const wantKind = capability === 'embedding' ? 'embedding' : 'llm'
+    return backupProviders.value.filter(p => (p.model_kind || 'llm') === wantKind)
+  }
+
+  function primaryAllowedForCapability(capability: string): boolean {
+    if (primaryProviderId.value === null) return false
+    const wantKind = capability === 'embedding' ? 'embedding' : 'llm'
+    return providerModelKind(primaryProviderId.value) === wantKind
   }
 
   // ---- Route management ----
@@ -237,6 +270,8 @@ export function useAIRouterSettings() {
         id: providerId || 0, name: primaryProviderForm.name,
         provider_type: primaryProviderForm.provider_type || 'openai_compatible',
         base_url: primaryProviderForm.base_url, model: primaryProviderForm.model,
+        model_kind: primaryProviderForm.model_kind || 'llm',
+        start_command_configured: false,
         enabled: primaryProviderForm.enabled ?? true,
         timeout_seconds: primaryProviderForm.timeout_seconds || 120,
         max_tokens: primaryProviderForm.max_tokens ?? null,
@@ -245,7 +280,14 @@ export function useAIRouterSettings() {
         metadata: primaryProviderForm.metadata, api_key_configured: true,
       }
       if (providerId) {
+        // 主模型 = 同类型能力的默认首选：LLM 主模型只同步到 LLM 能力路由，
+        // embedding 路由保持独立（不把 LLM 挂上 embedding 路由——后端类型
+        // 校验会拒绝，旧行为还曾把 LLM 写进 embedding 路由形成脏数据）。
+        // 用表单的 model_kind 判断（刚保存的值），不查可能过期的 providers 列表。
+        const primaryKind = primaryProviderForm.model_kind || 'llm'
         for (const capability of capabilityOrder) {
+          const wantKind = capability === 'embedding' ? 'embedding' : 'llm'
+          if (primaryKind !== wantKind) continue
           const existingRoute = routes.value.find(r => r.capability === capability)
           let ids = routeSummary(capability)
           if (!ids.includes(providerId)) ids = [providerId, ...ids]
@@ -281,6 +323,8 @@ export function useAIRouterSettings() {
       newProviderForm.base_url = ''
       newProviderForm.api_key = ''
       newProviderForm.model = ''
+      newProviderForm.model_kind = 'llm'
+      newProviderForm.start_command = ''
       newProviderForm.enabled = true
       newProviderForm.timeout_seconds = 120
       newProviderForm.enable_thinking = false
@@ -301,6 +345,9 @@ export function useAIRouterSettings() {
     editProviderForm.base_url = provider.base_url
     editProviderForm.api_key = ''
     editProviderForm.model = provider.model
+    editProviderForm.model_kind = provider.model_kind || 'llm'
+    editProviderForm.start_command = ''
+    editProviderForm.clear_start_command = false
     editProviderForm.enabled = provider.enabled
     editProviderForm.timeout_seconds = provider.timeout_seconds
     editProviderForm.enable_thinking = provider.enable_thinking ?? false
@@ -314,6 +361,9 @@ export function useAIRouterSettings() {
     editProviderForm.base_url = ''
     editProviderForm.api_key = ''
     editProviderForm.model = ''
+    editProviderForm.model_kind = 'llm'
+    editProviderForm.start_command = ''
+    editProviderForm.clear_start_command = false
     editProviderForm.enabled = true
     editProviderForm.timeout_seconds = 120
     editProviderForm.enable_thinking = false
@@ -408,6 +458,22 @@ export function useAIRouterSettings() {
     }
   }
 
+  // 按已保存配置（含库里密钥）测试备用 provider 连通性，provider_id 由后端取数
+  async function testBackupProvider(provider: AIProvider) {
+    if (testingProviderId.value !== null) return
+    testingProviderId.value = provider.id
+    try {
+      const aiAdminApi = useAIAdminApi()
+      const res = await aiAdminApi.testConnection({ provider_id: provider.id })
+      if (!res.success) throw new Error(res.error || '连接测试失败')
+      pushMessage('success', `${provider.name}：${res.message || '连接测试成功'}`)
+    } catch (err) {
+      pushMessage('error', `${provider.name}：${err instanceof Error ? err.message : '连接测试失败'}`)
+    } finally {
+      testingProviderId.value = null
+    }
+  }
+
   onMounted(() => { void loadData() })
 
   return {
@@ -420,12 +486,14 @@ export function useAIRouterSettings() {
     editingProviderId, editProviderForm, showEditProviderApiKey,
     draggingProviderId, draggingCapability,
     backupProviders,
+    testingProviderId,
 
     // Constants
     routeLabels, capabilityOrder,
 
     // Route helpers
     routeSummary, providerName, isProviderLinked,
+    providerModelKind, candidatesForCapability, primaryAllowedForCapability,
     addProviderToRoute, removeProviderFromRoute,
     isPrimaryInRoute, removePrimaryFromRoute, addPrimaryToRoute,
     moveProvider, handleDragStart, handleDragEnd, handleDropOnProvider,
@@ -436,5 +504,6 @@ export function useAIRouterSettings() {
     saveEditedProvider, deleteBackupProvider,
     saveRoutes,
     testPrimaryProvider,
+    testBackupProvider,
   }
 }

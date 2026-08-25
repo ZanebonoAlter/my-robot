@@ -3,9 +3,7 @@
 ## Purpose
 
 TBD
-
 ## Requirements
-
 ### Requirement: Feed 卡片展示完整处理管线 toggle
 每个 feed 卡片 SHALL 展示 4 个 toggle 开关，按管线执行顺序排列：Firecrawl 全文抓取、打标签、AI 摘要、内容补全。
 
@@ -40,7 +38,7 @@ TBD
 - **THEN** 所有分类恢复为展开状态
 
 ### Requirement: 最大文章数"无限制"语义正确
-最大文章数选项 SHALL 使用 `0` 表示无限制。后端 `CleanupOldArticles` SHALL 将 `maxArticles <= 0` 视为不限制。
+最大文章数选项 SHALL 使用 `0` 表示无限制。后端 `CleanupOldArticles` SHALL 将 `maxArticles <= 0` 视为不限制。超出上限的行为语义为归档降级（保留原文、清除衍生数据），而非物理删除，详见 `article-retention` capability。
 
 #### Scenario: 选择无限制
 - **WHEN** 用户选择"无限制"选项
@@ -48,11 +46,11 @@ TBD
 
 #### Scenario: 后端不清理 max_articles=0 的 feed
 - **WHEN** feed.MaxArticles = 0 且文章数超过任意值
-- **THEN** CleanupOldArticles 不删除任何文章
+- **THEN** CleanupOldArticles 不归档任何文章
 
 #### Scenario: 兼容旧的 9999 值
 - **WHEN** feed.MaxArticles = 9999
-- **THEN** 前端显示"无限制"，后端行为与 max_articles=0 一致（不删除）
+- **THEN** 前端显示"无限制"，后端行为与 max_articles=0 一致（不归档）
 
 ### Requirement: Feed 卡片展示 firecrawl 和补全 toggle
 Firecrawl toggle SHALL 控制 `firecrawl_enabled` 字段，内容补全 toggle SHALL 控制 `completion_on_refresh` 字段。
@@ -64,3 +62,59 @@ Firecrawl toggle SHALL 控制 `firecrawl_enabled` 字段，内容补全 toggle S
 #### Scenario: 切换内容补全 toggle
 - **WHEN** 用户点击内容补全 toggle
 - **THEN** 前端调用 PATCH /api/feeds/:id 更新 completion_on_refresh
+
+### Requirement: 订阅源管理区聚合全部 feed 管理入口
+设置工作区「订阅源」section SHALL 提供 4 个管理入口：添加订阅源、添加分类、导入 OPML、导出 OPML，入口与订阅源主列表同处一屏可见位置。首页顶栏 MUST NOT 再出现这 4 个按钮。
+
+#### Scenario: 设置页可见全部管理入口
+- **WHEN** 用户打开 `/settings?section=feeds`
+- **THEN** 订阅源管理区显示「添加订阅源」「添加分类」「导入」「导出」4 个入口
+
+#### Scenario: 添加订阅源
+- **WHEN** 用户点击「添加订阅源」入口
+- **THEN** 打开 `AddFeedDialog` 对话框，行为与迁移前首页顶栏一致
+
+#### Scenario: 添加分类
+- **WHEN** 用户点击「添加分类」入口
+- **THEN** 打开 `AddCategoryDialog` 对话框，行为与迁移前首页顶栏一致
+
+#### Scenario: 导入 OPML
+- **WHEN** 用户点击「导入」入口
+- **THEN** 打开 `ImportOpmlDialog` 对话框，行为与迁移前首页顶栏一致
+
+#### Scenario: 导出 OPML
+- **WHEN** 用户点击「导出」入口
+- **THEN** 浏览器下载 `feeds-export-<date>.opml` 文件，行为与迁移前首页顶栏一致
+
+#### Scenario: 首页顶栏不再出现管理按钮
+- **WHEN** 用户打开首页 `/`
+- **THEN** 顶栏仅显示：暂停分析、AI 健康、刷新、全部已读、设置、新手引导、主题切换共 7 个按钮
+- **AND** 不存在添加订阅、添加分类、导入、导出按钮
+
+#### Scenario: 空状态引导入口保留
+- **GIVEN** 用户没有任何订阅源和分类
+- **WHEN** 用户打开首页 `/`
+- **THEN** `FeedEmptyGuide` 空状态引导仍提供「添加订阅」按钮并可正常打开 `AddFeedDialog`
+
+### Requirement: 最大文章数控件文案反映归档语义
+Feed 设置中最大文章数控件的辅助说明 SHALL 表达"超出后归档保留原文"语义，MUST NOT 出现"删除"措辞。
+
+#### Scenario: 文案展示归档语义
+- **WHEN** 用户查看 feed 卡片的最大文章数控件
+- **THEN** 辅助说明表述为超出上限的文章将被归档（原文保留、不再出现在列表中）
+
+### Requirement: AI 摘要开关状态字段名契约
+前端读取 feed AI 摘要开关时 SHALL 使用后端 `ToDict` 返回的 `article_summary_enabled` 字段（snake_case），不得使用 `ai_summary_enabled`（后端从不返回该键）。字段缺省（undefined/null）时前端 SHALL 按后端 gorm 默认值 `false` 处理，不得回退为 `true`。`aiSummaryEnabled`/`ai_summary_enabled` 相关死字段与死 key SHALL 从前端类型定义中移除。
+
+#### Scenario: feed 开关状态真实反映后端值
+- **WHEN** 后端返回 feed 的 `article_summary_enabled: false`
+- **THEN** 前端该 feed 的 AI 摘要开关状态为关闭（旧行为因读错键恒为 true）
+
+#### Scenario: 字段缺省时按后端默认处理
+- **WHEN** 后端返回的 feed 数据中 `article_summary_enabled` 缺失或为 null
+- **THEN** 前端该 feed 的 AI 摘要开关状态为关闭（false），与 gorm default:false 一致
+
+#### Scenario: 死字段不再存在于类型定义
+- **WHEN** 检查 `front/app/types/feed.ts` 与 `front/app/stores/api.ts` 的响应/更新接口
+- **THEN** 不存在 `aiSummaryEnabled` / `ai_summary_enabled` 字段定义
+

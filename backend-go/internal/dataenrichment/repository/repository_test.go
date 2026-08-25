@@ -14,6 +14,14 @@ import (
 	"syntopica-backend/internal/platform/database"
 )
 
+// Test-only source types: the source_type enum is extensible (spec "板块数据源
+// 绑定"); built-in financial types were removed, so tests register neutral
+// dummies to exercise CRUD mechanics without coupling to any built-in type.
+func init() {
+	repository.RegisterSourceType("test_source")
+	repository.RegisterSourceType("test_source_2")
+}
+
 func setupRepoTestDB(t *testing.T) {
 	t.Helper()
 
@@ -38,7 +46,7 @@ func TestBoardDataSource_CreateAndGetByBoardAndType(t *testing.T) {
 
 	ds := &repository.BoardDataSource{
 		SemanticBoardID: 1,
-		SourceType:      "etf_quote",
+		SourceType:      "test_source",
 		Config:          map[string]any{"keywords": []string{"半导体"}},
 		Enabled:         true,
 	}
@@ -49,7 +57,7 @@ func TestBoardDataSource_CreateAndGetByBoardAndType(t *testing.T) {
 		t.Fatal("expected ID to be set after create")
 	}
 
-	got, err := repository.Repo.GetBoardDataSourceByBoardAndType(ctx, 1, "etf_quote")
+	got, err := repository.Repo.GetBoardDataSourceByBoardAndType(ctx, 1, "test_source")
 	if err != nil {
 		t.Fatalf("get by board and type: %v", err)
 	}
@@ -65,7 +73,7 @@ func TestBoardDataSource_Upsert(t *testing.T) {
 
 	ds := &repository.BoardDataSource{
 		SemanticBoardID: 1,
-		SourceType:      "etf_quote",
+		SourceType:      "test_source",
 		Config:          map[string]any{"keywords": []string{"半导体"}},
 		Enabled:         true,
 	}
@@ -78,7 +86,7 @@ func TestBoardDataSource_Upsert(t *testing.T) {
 		t.Fatalf("upsert #2: %v", err)
 	}
 
-	got, err := repository.Repo.GetBoardDataSourceByBoardAndType(ctx, 1, "etf_quote")
+	got, err := repository.Repo.GetBoardDataSourceByBoardAndType(ctx, 1, "test_source")
 	if err != nil {
 		t.Fatalf("get: %v", err)
 	}
@@ -96,7 +104,7 @@ func TestBoardDataSource_UpsertTOCTOU(t *testing.T) {
 	// First upsert.
 	ds := &repository.BoardDataSource{
 		SemanticBoardID: 1,
-		SourceType:      "etf_quote",
+		SourceType:      "test_source",
 		Enabled:         true,
 	}
 	if err := repository.Repo.UpsertBoardDataSource(ctx, ds); err != nil {
@@ -106,7 +114,7 @@ func TestBoardDataSource_UpsertTOCTOU(t *testing.T) {
 	// Second upsert with same key — must not fail.
 	ds2 := &repository.BoardDataSource{
 		SemanticBoardID: 1,
-		SourceType:      "etf_quote",
+		SourceType:      "test_source",
 		Enabled:         false,
 	}
 	if err := repository.Repo.UpsertBoardDataSource(ctx, ds2); err != nil {
@@ -131,9 +139,9 @@ func TestBoardDataSource_ListByBoardID(t *testing.T) {
 
 	ctx := context.Background()
 
-	ds1 := &repository.BoardDataSource{SemanticBoardID: 1, SourceType: "etf_quote", Enabled: true}
-	ds2 := &repository.BoardDataSource{SemanticBoardID: 1, SourceType: "exchange_rate", Enabled: true}
-	ds3 := &repository.BoardDataSource{SemanticBoardID: 2, SourceType: "etf_quote", Enabled: true}
+	ds1 := &repository.BoardDataSource{SemanticBoardID: 1, SourceType: "test_source", Enabled: true}
+	ds2 := &repository.BoardDataSource{SemanticBoardID: 1, SourceType: "test_source_2", Enabled: true}
+	ds3 := &repository.BoardDataSource{SemanticBoardID: 2, SourceType: "test_source", Enabled: true}
 
 	for _, ds := range []*repository.BoardDataSource{ds1, ds2, ds3} {
 		if err := repository.Repo.CreateBoardDataSource(ctx, ds); err != nil {
@@ -155,12 +163,12 @@ func TestBoardDataSource_UniqueConstraint(t *testing.T) {
 
 	ctx := context.Background()
 
-	ds := &repository.BoardDataSource{SemanticBoardID: 1, SourceType: "etf_quote"}
+	ds := &repository.BoardDataSource{SemanticBoardID: 1, SourceType: "test_source"}
 	if err := repository.Repo.CreateBoardDataSource(ctx, ds); err != nil {
 		t.Fatalf("create #1: %v", err)
 	}
 
-	ds2 := &repository.BoardDataSource{SemanticBoardID: 1, SourceType: "etf_quote"}
+	ds2 := &repository.BoardDataSource{SemanticBoardID: 1, SourceType: "test_source"}
 	if err := repository.Repo.CreateBoardDataSource(ctx, ds2); err == nil {
 		t.Fatal("expected UNIQUE constraint error for duplicate board+source_type")
 	}
@@ -171,7 +179,7 @@ func TestBoardDataSource_Delete(t *testing.T) {
 
 	ctx := context.Background()
 
-	ds := &repository.BoardDataSource{SemanticBoardID: 1, SourceType: "etf_quote"}
+	ds := &repository.BoardDataSource{SemanticBoardID: 1, SourceType: "test_source"}
 	if err := repository.Repo.CreateBoardDataSource(ctx, ds); err != nil {
 		t.Fatalf("create: %v", err)
 	}
@@ -180,9 +188,25 @@ func TestBoardDataSource_Delete(t *testing.T) {
 		t.Fatalf("delete: %v", err)
 	}
 
-	_, err := repository.Repo.GetBoardDataSourceByBoardAndType(ctx, 1, "etf_quote")
+	_, err := repository.Repo.GetBoardDataSourceByBoardAndType(ctx, 1, "test_source")
 	if err == nil {
 		t.Fatal("expected error after delete")
+	}
+}
+
+// TestBoardDataSource_RejectsRemovedFinancialSourceType verifies the spec
+// scenario "金融 source_type 已移除": the removed built-in financial source types
+// (etf_quote / exchange_rate / gdelt_event) are rejected by the CHECK-style
+// application validation, since they are no longer registered.
+func TestBoardDataSource_RejectsRemovedFinancialSourceType(t *testing.T) {
+	setupRepoTestDB(t)
+	ctx := context.Background()
+
+	for _, st := range []string{"etf_quote", "exchange_rate", "gdelt_event"} {
+		ds := &repository.BoardDataSource{SemanticBoardID: 1, SourceType: st, Enabled: true}
+		if err := repository.Repo.CreateBoardDataSource(ctx, ds); err == nil {
+			t.Errorf("create source_type=%s should be rejected (financial types removed), got nil", st)
+		}
 	}
 }
 

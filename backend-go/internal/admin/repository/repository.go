@@ -1,8 +1,6 @@
 package repository
 
 import (
-	"time"
-
 	"gorm.io/gorm"
 	"syntopica-backend/internal/models"
 )
@@ -233,118 +231,6 @@ func (r *AdminRepository) GetFeedByID(id uint) (*models.Feed, error) {
 		return nil, err
 	}
 	return &feed, nil
-}
-
-// ============================================================================
-// Narrative operations
-// ============================================================================
-
-// BoardNarrativeRow — joined result of narrative_summaries + narrative_boards
-type BoardNarrativeRow struct {
-	models.NarrativeSummary
-	BoardName        string    `json:"board_name"`
-	BoardDescription string    `json:"board_description"`
-	BoardPeriodDate  time.Time `json:"board_period_date"`
-}
-
-func (r *AdminRepository) ListNarrativesByDate(date string) ([]BoardNarrativeRow, error) {
-	var rows []BoardNarrativeRow
-	err := r.db.Table("narrative_summaries").
-		Select("narrative_summaries.*, narrative_boards.name AS board_name, narrative_boards.description AS board_description, narrative_boards.period_date AS board_period_date").
-		Joins("LEFT JOIN narrative_boards ON narrative_boards.id = narrative_summaries.board_id").
-		Where("narrative_summaries.period_date = ?", date).
-		Order("narrative_summaries.generation ASC, narrative_summaries.id ASC").
-		Scan(&rows).Error
-	return rows, err
-}
-
-func (r *AdminRepository) GetNarrativeByID(id uint) (*models.NarrativeSummary, error) {
-	var narrative models.NarrativeSummary
-	if err := r.db.First(&narrative, id).Error; err != nil {
-		return nil, err
-	}
-	return &narrative, nil
-}
-
-func (r *AdminRepository) DeleteNarrativeByDate(date time.Time, scopeType string, categoryID *uint) (int, error) {
-	startOfDay := time.Date(date.Year(), date.Month(), date.Day(), 0, 0, 0, 0, date.Location())
-	endOfDay := startOfDay.Add(24 * time.Hour)
-
-	query := r.db.Where("period = ? AND period_date >= ? AND period_date < ?", "daily", startOfDay, endOfDay)
-
-	if scopeType != "" {
-		query = query.Where("scope_type = ?", scopeType)
-		if categoryID != nil {
-			query = query.Where("scope_category_id = ?", *categoryID)
-		}
-	}
-
-	result := query.Delete(&models.NarrativeSummary{})
-	return int(result.RowsAffected), result.Error
-}
-
-func (r *AdminRepository) SaveNarrative(n *models.NarrativeSummary) error {
-	return r.db.Save(n).Error
-}
-
-func (r *AdminRepository) SaveBatchNarratives(narratives []models.NarrativeSummary) error {
-	if len(narratives) == 0 {
-		return nil
-	}
-	return r.db.Create(&narratives).Error
-}
-
-func (r *AdminRepository) ListNarrativeBoards() ([]models.NarrativeBoard, error) {
-	var boards []models.NarrativeBoard
-	err := r.db.Order("period_date DESC, id ASC").Find(&boards).Error
-	return boards, err
-}
-
-func (r *AdminRepository) GetNarrativeBoardByID(id uint) (*models.NarrativeBoard, error) {
-	var board models.NarrativeBoard
-	if err := r.db.First(&board, id).Error; err != nil {
-		return nil, err
-	}
-	return &board, nil
-}
-
-type NarrativeScopeItem struct {
-	CategoryID   uint   `json:"category_id"`
-	CategoryName string `json:"category_name"`
-	BoardCount   int    `json:"board_count"`
-}
-
-func (r *AdminRepository) ListNarrativeScopes(days int) ([]NarrativeScopeItem, error) {
-	// This is a simplified version; the full scopes query is in narrative_service.go
-	var scopes []NarrativeScopeItem
-	now := time.Now()
-	startOfAnchor := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
-	rangeStart := startOfAnchor.AddDate(0, 0, -(days - 1))
-	rangeEnd := startOfAnchor.Add(24 * time.Hour)
-
-	type scopeRow struct {
-		ScopeType       string
-		ScopeCategoryID uint
-		ScopeLabel      string
-		Count           int
-	}
-	var rows []scopeRow
-	if err := r.db.Model(&models.NarrativeBoard{}).
-		Select("scope_type, scope_category_id, scope_label, COUNT(*) as count").
-		Where("period_date >= ? AND period_date < ?", rangeStart, rangeEnd).
-		Group("scope_type, scope_category_id, scope_label").
-		Scan(&rows).Error; err != nil {
-		return nil, err
-	}
-
-	for _, row := range rows {
-		scopes = append(scopes, NarrativeScopeItem{
-			CategoryID:   row.ScopeCategoryID,
-			CategoryName: row.ScopeLabel,
-			BoardCount:   row.Count,
-		})
-	}
-	return scopes, nil
 }
 
 // ============================================================================

@@ -11,7 +11,7 @@ DATA_LIFECYCLE.md  = "数据怎么变的"（哪些表被写入、状态字段怎
 
 ## 文章生命周期
 
-一篇文章从 RSS 入库到进入叙事摘要的完整状态变迁链：
+一篇文章从 RSS 入库到进入日报生成的完整状态变迁链：
 
 ```
 ┌─ RSS 入库 ──────────────────────────────────────────────────────────────┐
@@ -228,61 +228,6 @@ DATA_LIFECYCLE.md  = "数据怎么变的"（哪些表被写入、状态字段怎
 
 ---
 
-## 叙事生成生命周期
-
-从活跃标签到每日叙事摘要的完整链路：
-
-```
-┌─ 输入收集 ───────────────────────────────────────────────────────────────┐
-│  daily_report 调度器 (86400s)                                            │
-│                                                                          │
-│  SELECT article_topic_tags + articles WHERE pub_date within window      │
-│  → 标签-文章关联                                                         │
-│                                                                          │
-│  SELECT semantic_labels WHERE label_type='board' AND status='active'    │
-│  → 全局共享 SemanticBoard                                                │
-└─────────────────────────────────────────────────────────────────────────┘
-                              ↓
-┌─ SemanticBoard → NarrativeBoard 生成 ────────────────────────────────────┐
-│  分类维度: global / feed_category                                        │
-│                                                                          │
-│  CollectSemanticBoardNarrativeInputs                                     │
-│    · 按 date + scope + semantic_board_id 收集 active event tags          │
-│    · 数据源为 topic_tag_board_labels 持久化匹配结果                      │
-│    · category scope 通过 articles → feeds.category_id 限定文章范围       │
-│                                                                          │
-│  对每个有事件的 SemanticBoard:                                           │
-│    · INSERT INTO narrative_boards (semantic_board_id, event_tag_ids,     │
-│             period_date, scope_type, scope_category_id, scope_label)     │
-│    · prev_board_ids 按 semantic_board_id + scope + 前一日匹配            │
-│    · 同一 event tag 可出现在多个 NarrativeBoard，用于多视角叙事          │
-│                                                                          │
-│  无 SemanticBoard 或无匹配 event tags 时生成 0 个 NarrativeBoard，不报错│
-│                                                                          │
-│  后处理:                                                                  │
-│  → DeriveBoardConnections: 派生 Board 间关系                            │
-│  → runFeedbackFromTodayNarratives: 回写标签质量反馈                     │
-│  → cleanEmptyBoards: 删除无 tag 的 Board                                │
-└─────────────────────────────────────────────────────────────────────────┘
-                              ↓
-┌─ Summary 生成 ───────────────────────────────────────────────────────────┐
-│  每个 Board 调用 LLM 生成叙事摘要:                                        │
-│                                                                          │
-│  INSERT INTO narrative_summaries (                                       │
-│    title, summary, status, period, period_date,                         │
-│    related_tag_ids, related_article_ids,                                │
-│    parent_ids, board_id, scope_type, scope_category_id                  │
-│  )                                                                       │
-│                                                                          │
-│  narrative_summaries.status: emerging / continuing / splitting /        │
-│                              merging / ending                            │
-│                                                                          │
-│  INSERT INTO ai_call_logs (capability='daily_report', ...)         │
-└─────────────────────────────────────────────────────────────────────────┘
-```
-
----
-
 ## 数据清理与保留策略
 
 本节记录各表的真实清理/回收机制（真相源：`internal/admin/scheduler/*` + `internal/app/runtime.go`）。**除明确列出者外，其他表无自动清理**，行会无限累积。
@@ -291,7 +236,7 @@ DATA_LIFECYCLE.md  = "数据怎么变的"（哪些表被写入、状态字段怎
 
 | 调度器 | 间隔 | 清理对象与条件 |
 | ------ | ---- | -------------- |
-| `log_cleanup` | 86400s（每日，启动延迟5min） | `DELETE FROM ai_call_logs WHERE created_at < now()-7天`；`DELETE FROM otel_spans WHERE start_time_unix_nano < now()-7天`。**保留 7 天**。 |
+| `log_cleanup` | 86400s（每日，启动延迟5min） | `DELETE FROM ai_call_logs WHERE created_at < now()-7天`；`DELETE FROM otel_spans WHERE start_time_unix_nano < now()-7天`。**保留 7 天**。另：`DELETE FROM ai_embedding_cache WHERE created_at < now()-14天`（embedding 结果缓存，仅白名单 operation 落行）；`DELETE FROM embedding_queues WHERE status='completed' AND created_at < now()-30天`（已完成队列行，保留 30 天）。 |
 | `aux_label_cleanup` | 3600s（每时，启动延迟10min） | 软禁用「无活跃引用」的辅助标签：`semantic_labels` 中 `label_type='auxiliary' AND status='active' AND protected=false AND created_at < now()-1天` 且无 `topic_tag_semantic_labels` 引用且不在 `board_composition` 中 → `status='disabled'`（并删其 board_composition 行）。**不硬删**，模式为 disable、宽限1天。 |
 | `blocked_article_recovery` | 3600s（每时） | 恢复卡在 `articles.firecrawl_status IN ('waiting_for_firecrawl','blocked')` 且其 `feed.firecrawl_enabled=true` 的文章 → 置回 `pending` 重试。另含 STAT-05 告警（阻塞数>50 时 WARN）。 |
 | `preference_update` | 1800s（每30min） | 聚合 `reading_behaviors`→`user_preferences`；并运行孤儿清理：修复/删除 category_id 指向已删分类的 reading_behaviors，删除 feed_id 指向已删源的 reading_behaviors 与 user_preferences。**仅孤儿清理，无时间型 TTL**。 |
@@ -323,14 +268,14 @@ DATA_LIFECYCLE.md  = "数据怎么变的"（哪些表被写入、状态字段怎
 
 - 状态机：`pending → processing → completed / failed`
 - worker `Start()` 时一次性把残留 `processing → pending`。失败时 `markFailed` 置 `failed`、`retry_count++`，**无自动重试**，仅靠手动 `RetryFailed()` API 重置 failed→pending。
-- **无任何行级清除**：completed/failed 行不被定时删除，无限累积。
+- 行级清除：`embedding_queues` 的 `completed` 行由 `log_cleanup` 保留 30 天后删除（`merge_reembedding_queues` 及 failed 行仍无限累积）。
 
 ### 明确无自动清理的表（累积型）
 
 以下表当前**没有任何基于时间或状态的定时清除**，行会一直增长，需要人工/运维介入：
 
-- 队列表：`firecrawl_jobs` / `tag_jobs` / `embedding_queues` / `merge_reembedding_queues` 的 completed/failed 行
-- 叙事与日报：`narrative_summaries` / `narrative_boards` / `board_daily_reports` / `daily_report_sections` / `daily_report_threads` / `daily_report_section_relations`（日报重生成仅删当日同 report 的旧分区，非 TTL 清理）
+- 队列表：`firecrawl_jobs` / `tag_jobs` 的 completed/failed 行；`merge_reembedding_queues` 全部行；`embedding_queues` 的 failed 行（completed 行 30 天后由 `log_cleanup` 清除）
+- 日报：`board_daily_reports` / `daily_report_sections` / `daily_report_threads` / `daily_report_section_relations`（日报重生成仅删当日同 report 的旧分区，非 TTL 清理）
 - 持久话题与观察：`board_persistent_topics`（仅一次性迁移裁剪 candidate、状态机自驱动 candidate→active→archived，无时间型删除）、`board_topic_watches`、`topic_watch_hits`
 - 升级建议：`board_upgrade_suggestions`（仅 watch 软回收为 dismissed，不删行；confirmed/dismissed 行累积）
 - 阅读与偏好：`reading_behaviors`（仅孤儿清理，无 TTL）、`user_preferences`
@@ -359,15 +304,13 @@ DATA_LIFECYCLE.md  = "数据怎么变的"（哪些表被写入、状态字段怎
 3. `ai_settings` 中的 `semantic_board_match_*` 控制 tag → SemanticBoard 匹配
 4. `ai_settings` 中的 `semantic_board_upgrade_*` 控制升级建议
 5. `topic_tag_semantic_labels` 记录 tag → auxiliary label
-6. `topic_tag_board_labels` 记录 tag → SemanticBoard，用于叙事板输入
+6. `topic_tag_board_labels` 记录 tag → SemanticBoard，用于日报匹配输入
 
-### 叙事摘要
+### 日报生成
 
-1. 需要 active SemanticBoard（`semantic_labels.label_type='board'`）且当日有匹配 event tags 才会生成 NarrativeBoard
-2. 冷启动无 SemanticBoard 或无匹配 event tags 时生成 0 个 NarrativeBoard，不报错
-3. `daily_report` 调度器需启用（86400s 间隔）
-4. NarrativeBoard 是每日/scope 实例，长期语义资产是 SemanticBoard
-5. Board 叙事上下文来自 SemanticBoard 的 label 和 description
+1. 需要至少一个 active SemanticBoard（`semantic_labels.label_type='board'`）才有可生成的日报对象；冷启动无 SemanticBoard 时生成空结果且不报错
+2. `daily_report` 调度器需启用（86400s 间隔）
+3. 长期语义资产是 SemanticBoard，每日产物是 `board_daily_reports`（见日报生命周期）
 
 ---
 

@@ -1,9 +1,16 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"net/http"
+	"strings"
+	"time"
+
+	"syntopica-backend/internal/platform/httpclient"
 )
 
 // WebSearchResult is a single hit from a web search.
@@ -31,6 +38,108 @@ type NoopWebSearcher struct{}
 // Search implements WebSearcher by returning a "not configured" error.
 func (NoopWebSearcher) Search(_ context.Context, _ string) ([]WebSearchResult, error) {
 	return nil, errors.New("web_search not configured")
+}
+
+// defaultBochaEndpoint is the Bocha general-search endpoint fallback used when
+// the provider returns an empty endpoint (config.yaml / DB both unset).
+const defaultBochaEndpoint = "https://api.bochaai.com/v1/web-search"
+
+// BochaConfigProvider returns the current Bocha credentials on each call. The
+// provider is consulted by BochaWebSearcher.Search at request time (not at
+// wiring time) so that UI changes take effect immediately without a restart —
+// mirroring how Firecrawl reads DB on every job. Resolution priority is
+// DB(ui) > env > config.yaml > empty (empty → Search returns a
+// "not configured" error so executeWebSearch degrades like NoopWebSearcher).
+type BochaConfigProvider func() (apiKey, endpoint string)
+
+// BochaWebSearcher is the Bocha (bochaai.com) general-search implementation of
+// WebSearcher. It uses the raw-web-results mode (summary:false) and NEVER the
+// AI-summary mode — AI summaries carry hallucination risk and are not usable as
+// verifiable evidence (spec "web 搜索与正文抓取数据源"). Failures surface as an
+// error so executeWebSearch degrades to an error JSON and the agent loop keeps
+// running.
+type BochaWebSearcher struct {
+	config BochaConfigProvider
+	client *http.Client
+}
+
+// NewBochaWebSearcher builds a BochaWebSearcher that reads credentials from the
+// given provider on every Search call (dynamic; UI/config changes take effect
+// without restart).
+func NewBochaWebSearcher(provider BochaConfigProvider) *BochaWebSearcher {
+	return &BochaWebSearcher{
+		config: provider,
+		client: httpclient.New(httpclient.WithTimeout(10 * time.Second)),
+	}
+}
+
+// Search calls the Bocha general-search endpoint and maps the raw web_page
+// results to WebSearchResult. Only items with a non-empty url are kept (the
+// evidence_chain needs clickable URLs). summary:false forces raw results and
+// disables AI summarisation.
+//
+// Credentials are read fresh from the provider each call. When no key is
+// configured (DB/env/config.yaml all empty) it returns a "not configured"
+// error so the caller can degrade to an error JSON (same semantics as
+// NoopWebSearcher).
+func (b *BochaWebSearcher) Search(ctx context.Context, query string) ([]WebSearchResult, error) {
+	apiKey, endpoint := b.config()
+	if strings.TrimSpace(apiKey) == "" {
+		return nil, errors.New("web_search not configured")
+	}
+	if strings.TrimSpace(endpoint) == "" {
+		endpoint = defaultBochaEndpoint
+	}
+	reqBody, _ := json.Marshal(map[string]any{
+		"query":     query,
+		"summary":   false,
+		"count":     10,
+		"freshness": "noLimit",
+	})
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(reqBody))
+	if err != nil {
+		return nil, fmt.Errorf("bocha request: %w", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+apiKey)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := b.client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("bocha fetch: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("bocha status %d", resp.StatusCode)
+	}
+
+	var parsed struct {
+		Code int `json:"code"`
+		Data struct {
+			Result []map[string]any `json:"result"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&parsed); err != nil {
+		return nil, fmt.Errorf("bocha decode: %w", err)
+	}
+
+	out := make([]WebSearchResult, 0, len(parsed.Data.Result))
+	for _, item := range parsed.Data.Result {
+		url, _ := item["url"].(string)
+		if url == "" {
+			continue // drop items without a verifiable URL
+		}
+		title, _ := item["title"].(string)
+		// Bocha fields vary; accept summary ?? snippet ?? description.
+		snippet, _ := item["summary"].(string)
+		if snippet == "" {
+			snippet, _ = item["snippet"].(string)
+		}
+		if snippet == "" {
+			snippet, _ = item["description"].(string)
+		}
+		out = append(out, WebSearchResult{Title: title, URL: url, Snippet: snippet})
+	}
+	return out, nil
 }
 
 // ── Tool: web_search ────────────────────────────────────────────────────────

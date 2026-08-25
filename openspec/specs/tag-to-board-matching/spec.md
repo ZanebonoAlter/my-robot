@@ -81,7 +81,7 @@ hit_rate 规则的 score 为 maxSimilarity 和 adjustedHitRate 的加权混合�
 - **THEN** 后续匹配中，max_sim 规则需要 hit_rate ≥ 0.4 才能挂载
 
 ### Requirement: Tag 可属于多个 Board
-系统 SHALL 允许一个 tag 同时属于多个 SemanticBoard。所有满足匹配规则的 board SHALL 按匹配分从高到低排序，默认最多保留 3 个。系统 SHALL 允许同一 event tag 及其文章在多个 NarrativeBoard 中重复出现。每条 `topic_tag_board_labels` 记录 SHALL 包含 `downgraded` 标记。
+系统 SHALL 允许一个 tag 同时属于多个 SemanticBoard。所有满足匹配规则的 board SHALL 按匹配分从高到低排序，默认最多保留 3 个。同一 event tag 及其文章 SHALL 允许出现在多个版块的日报产物中。每条 `topic_tag_board_labels` 记录 SHALL 包含 `downgraded` 标记。
 
 #### Scenario: 多视角挂载含降级标记
 - **WHEN** tag "霍尔木兹海峡" 同时满足 board "地缘政治"（命中率 75%，downgraded=false）和 board "能源安全"（max_sim 0.82，N=1 降级，downgraded=true）

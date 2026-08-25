@@ -2,6 +2,7 @@ package scheduler
 
 import (
 	"context"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -101,6 +102,52 @@ func TestBaseSchedulerNextRunCallback(t *testing.T) {
 	time.Sleep(targetDelay + 200*time.Millisecond)
 	if atomic.LoadInt32(&executed) < 1 {
 		t.Error("expected at least one execution in NextRun mode")
+	}
+}
+
+// TestBaseSchedulerStopDuringTickDoesNotDeadlock is a regression test for a
+// deadlock in Stop(): it used to hold s.mu while calling wg.Wait(), but the
+// scheduler loop's runJob acquires s.mu before/after executing the job, so a
+// Stop racing an in-flight tick made the loop unable to exit and wg.Wait
+// blocked forever. Multiple rounds raise the odds of hitting the window.
+func TestBaseSchedulerStopDuringTickDoesNotDeadlock(t *testing.T) {
+	for round := 0; round < 5; round++ {
+		started := make(chan struct{})
+		var once sync.Once
+
+		s := New(Config{
+			Name:     "test-stop-during-tick",
+			Interval: 5 * time.Millisecond,
+			Job: func(ctx context.Context) (*JobResult, error) {
+				once.Do(func() { close(started) })
+				time.Sleep(100 * time.Millisecond)
+				return &JobResult{Summary: "ok"}, nil
+			},
+		})
+
+		if err := s.Start(); err != nil {
+			t.Fatalf("round %d: Start() error: %v", round, err)
+		}
+
+		select {
+		case <-started:
+		case <-time.After(2 * time.Second):
+			s.Stop()
+			t.Fatalf("round %d: job did not start within 2s", round)
+		}
+
+		done := make(chan struct{})
+		go func() {
+			s.Stop()
+			close(done)
+		}()
+
+		select {
+		case <-done:
+			// Stop returned while the job was still executing: no deadlock.
+		case <-time.After(5 * time.Second):
+			t.Fatalf("round %d: Stop() deadlocked during tick", round)
+		}
 	}
 }
 

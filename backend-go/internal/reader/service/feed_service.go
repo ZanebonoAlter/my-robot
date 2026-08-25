@@ -146,25 +146,28 @@ func (s *FeedService) CleanupOldArticles(feed *models.Feed) {
 		return
 	}
 
+	// Only active articles count against the window — archived rows must not
+	// erode it (design D4), otherwise every refresh would archive fresh
+	// articles while the feed fills up with historical archived rows.
 	var articleCount int64
-	repository.Repo.DB().Model(&models.Article{}).Where("feed_id = ?", feed.ID).Count(&articleCount)
+	repository.Repo.DB().Model(&models.Article{}).
+		Where("feed_id = ? AND archived = ?", feed.ID, false).
+		Count(&articleCount)
 
-	logging.Infof("[cleanup] feed %d: max=%d, current=%d", feed.ID, maxArticles, articleCount)
+	logging.Infof("[cleanup] feed %d: max=%d, active=%d", feed.ID, maxArticles, articleCount)
 
 	if int(articleCount) <= maxArticles {
-		logging.Infof("[cleanup] feed %d: skip, article count within limit", feed.ID)
+		logging.Infof("[cleanup] feed %d: skip, active article count within limit", feed.ID)
 		return
 	}
 
 	var allArticles []struct {
-		ID              uint
-		Favorite        bool
-		FirecrawlStatus string
-		SummaryStatus   string
+		ID       uint
+		Favorite bool
 	}
 	repository.Repo.DB().Model(&models.Article{}).
-		Select("id, favorite, firecrawl_status, summary_status").
-		Where("feed_id = ?", feed.ID).
+		Select("id, favorite").
+		Where("feed_id = ? AND archived = ?", feed.ID, false).
 		Order("pub_date DESC").
 		Find(&allArticles)
 
@@ -179,30 +182,39 @@ func (s *FeedService) CleanupOldArticles(feed *models.Feed) {
 		}
 	}
 
-	logging.Infof("[cleanup] feed %d: keep=%d (favorite), candidates=%d", feed.ID, len(keepIDs), len(candidates))
+	logging.Infof("[cleanup] feed %d: keep=%d (favorite), archive candidates=%d", feed.ID, len(keepIDs), len(candidates))
 
 	remaining := maxArticles - len(keepIDs)
 	if len(candidates) > 0 {
-		toDelete := candidates
+		toArchive := candidates
 		if remaining > 0 && len(candidates) > remaining {
-			toDelete = candidates[remaining:]
+			toArchive = candidates[remaining:]
 		}
-		if len(toDelete) > 0 {
-			logging.Infof("[cleanup] feed %d: deleting %d articles, IDs=%v", feed.ID, len(toDelete), toDelete)
+		if len(toArchive) > 0 {
+			logging.Infof("[cleanup] feed %d: archiving %d articles, IDs=%v", feed.ID, len(toArchive), toArchive)
 
-			// Collect affected tag IDs before deleting articles (article_topic_tags cascade with article)
+			// Collect affected tag IDs before removing edges (orphan cleanup).
 			var affectedTagIDs []uint
 			repository.Repo.DB().Model(&models.ArticleTopicTag{}).
-				Where("article_id IN ?", toDelete).
+				Where("article_id IN ?", toArchive).
 				Pluck("topic_tag_id", &affectedTagIDs)
 
-			repository.Repo.DB().Where("article_id IN (SELECT id FROM articles WHERE feed_id = ? AND id IN ?)", feed.ID, toDelete).Delete(&models.ReadingBehavior{})
-			repository.Repo.DB().Where("feed_id = ? AND id IN ?", feed.ID, toDelete).Delete(&models.Article{})
+			// Derived data goes away; the row and its text fields stay.
+			repository.Repo.DB().Where("article_id IN ?", toArchive).Delete(&models.ReadingBehavior{})
+			repository.Repo.DB().Where("article_id IN ?", toArchive).Delete(&models.ArticleTopicTag{})
 
-			// Clean up TopicTags that became orphaned after article deletion
+			// Archive the rows. search_vector is Postgres-only (tsvector) —
+			// sqlite test DBs lack the column, so guard the NULL assignment.
+			updates := map[string]interface{}{"archived": true}
+			if repository.Repo.DB().Migrator().HasColumn(&models.Article{}, "search_vector") {
+				updates["search_vector"] = nil
+			}
+			repository.Repo.DB().Model(&models.Article{}).Where("id IN ?", toArchive).Updates(updates)
+
+			// Clean up TopicTags that became orphaned after edge removal
 			tagging.CleanupOrphanedTags(affectedTagIDs)
 		} else {
-			logging.Infof("[cleanup] feed %d: no articles to delete", feed.ID)
+			logging.Infof("[cleanup] feed %d: no articles to archive", feed.ID)
 		}
 	}
 }

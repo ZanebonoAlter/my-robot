@@ -122,7 +122,9 @@
 }
 ```
 
-> `evolution_assessment` 超过 200 字符会被截断并补 `...`；`sectors` 为解析后的 JSON 结构。
+> `evolution_assessment` 超过 200 字符会被截断并补 `...`。
+>
+> **`sectors` 实际形状**（causal-analysis-agent 起，本字段名沿用但语义已改为分析产物）：`{form, lens, analysis}`，按 `form` 多态。`form ∈ event_chain|theme_vein|single_point|structural|sparse`（五形态）。`analysis` 为按形态的分层体（事实层 + 见解层）；**非 sparse 形态还含 `depth` 深度层**（`system_reframe`/`mechanism_layers`/`historical_analogy`/`regime_shift`(可空)/`boundary`(非空)/`evidence_chain`，`evidence_chain.source_type ∈ news|web|page`）；`sparse` 形态只有 `notice`+`summary`，无 depth。旧 result（无 depth）降级渲染不崩。完整 TS 镜像见 `front/app/api/boardEnrichment.ts` 的 `AnalyzeOutput` 联合。
 
 ### GET /api/persistent-topics/:topicId/enrichment/results/:id
 
@@ -343,15 +345,15 @@
 
 ```json
 {
-  "source_type": "etf_quote",
-  "config": { "symbol": "161129", "interval": "1d" },
+  "source_type": "custom_research",
+  "config": { "note": "板块级参数" },
   "enabled": true
 }
 ```
 
 | 字段 | 必填 | 说明 |
 | ------ | ------ | ------ |
-| `source_type` | 是 | 数据源类型标识，字符串 |
+| `source_type` | 是 | 数据源类型标识（受 `ValidateSourceType` 校验）。**内置金融源 `etf_quote`/`exchange_rate`/`gdelt_event` 已移除**，传入返回 `400`（unknown source_type）；枚举可扩展（`repository.RegisterSourceType` 运行时注册）。`web_search`/`fetch_page`/内部导航为 always-on，无需绑定 |
 | `config` | 否 | 数据源配置，任意 JSON 对象 |
 | `enabled` | 否 | 是否启用，布尔；不传按 `true` 处理 |
 

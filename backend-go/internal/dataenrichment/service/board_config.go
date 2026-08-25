@@ -32,23 +32,15 @@ func DefaultBoardConfig() *BoardEnrichmentConfig {
 	}
 }
 
-// ToolsForSourceType maps a board_data_sources.source_type to the concrete tool names
-// available for that source type. Unknown source types return nil.
-//
-//	etf_quote      → [list_etf_by_keyword, get_etf_quote, list_sectors]
-//	exchange_rate  → []   (no tools implemented yet)
-//	gdelt_event    → []   (no tools implemented yet)
+// ToolsForSourceType maps a board_data_sources.source_type to the concrete tool
+// names available for that source type. Built-in source types were all removed
+// when the A-share financial direction was deleted, so this now always returns
+// nil — web_search / fetch_page / the internal navigation tools are always-on
+// (see orchestrator.explorationToolNames), not gated by source_type. The
+// mechanism is retained as an extension point for future structured external
+// sources.
 func ToolsForSourceType(sourceType string) []string {
-	switch sourceType {
-	case "etf_quote":
-		return []string{"list_etf_by_keyword", "get_etf_quote", "list_sectors"}
-	case "exchange_rate":
-		return nil
-	case "gdelt_event":
-		return nil
-	default:
-		return nil
-	}
+	return nil
 }
 
 // Validate returns an error if the config is semantically invalid.

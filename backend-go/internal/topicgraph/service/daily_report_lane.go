@@ -16,11 +16,16 @@ import (
 )
 
 // Lane tier values persisted on DailyReportSection.LaneTier
-// (l1_direct / l2_llm / l3_new). Empty string leaves the column NULL.
+// (l1_direct / l2_llm / l3_new + the watch materialization tiers
+// watch_keyword / watch_sentence, watch-materialized-topic). Empty string
+// leaves the column NULL.
 const (
 	laneL1Direct = "l1_direct"
 	laneL2LLM    = "l2_llm"
 	laneL3New    = "l3_new"
+
+	LaneTierWatchKeyword  = "watch_keyword"
+	LaneTierWatchSentence = "watch_sentence"
 )
 
 // LaneCandidate is one candidate topic for an L2 tag together with its cosine
@@ -121,11 +126,17 @@ func topicAnchorVec(t repository.BoardPersistentTopic) []float64 {
 // BucketTagsByCentroid routes each tag to its lane by cosine distance to the
 // nearest topic anchor (centroid, else 首义 embedding). Pure — no DB, no LLM.
 //
-//	dist < L1 && !vacuum              → L1 (direct attach)
-//	dist < L1 && vacuum               → L2 (vacuum downgrade)
-//	L1 <= dist <= L2                  → L2 (carries top-K candidates)
-//	dist > L2                         → L3
-//	missing embedding / no anchors    → L3
+//	dist < L1 && !vacuum && (gate off || active) → L1 (direct attach)
+//	dist < L1 && (vacuum || gate on && candidate) → L2 (downgrade)
+//	L1 <= dist <= L2                          → L2 (carries top-K candidates)
+//	dist > L2                                 → L3
+//	missing embedding / no anchors            → L3
+//
+// The candidate gate (candidate-topic-l2-gate, default on) strips the L1
+// direct-attach privilege from candidate topics: system guesses must pass L2
+// LLM adjudication for every attach, while user-confirmed active topics keep
+// direct attach. Turning the gate off restores the legacy behavior where both
+// active and candidate direct-attach.
 func BucketTagsByCentroid(tags []repository.TagInput, topics []repository.BoardPersistentTopic, tagEmbeddings map[uint][]float64, cfg repository.PersistentTopicConfig) LaneBuckets {
 	var buckets LaneBuckets
 
@@ -184,10 +195,12 @@ func BucketTagsByCentroid(tags []repository.TagInput, topics []repository.BoardP
 		}
 
 		switch {
-		case nearestDist < cfg.LaneL1Threshold && nearestTopic != nil && !nearestTopic.IsVacuum:
+		case nearestDist < cfg.LaneL1Threshold && nearestTopic != nil && !nearestTopic.IsVacuum &&
+			(!cfg.CandidateL1GateEnabled || nearestTopic.Status == repository.TopicStatusActive):
 			buckets.L1 = append(buckets.L1, LaneTagAssign{Tag: tag, TopicID: nearestID, Distance: nearestDist})
 		case nearestDist <= cfg.LaneL2Threshold:
-			// (dist < L1 && vacuum) OR (L1 <= dist <= L2) → L2.
+			// (dist < L1 && vacuum) OR (dist < L1 && gate on && candidate) OR
+			// (L1 <= dist <= L2) → L2.
 			buckets.L2 = append(buckets.L2, LaneTagAssign{Tag: tag, TopicID: nearestID, Distance: nearestDist, Candidates: candidates})
 		default:
 			buckets.L3 = append(buckets.L3, tag)
@@ -230,6 +243,13 @@ func parseL2Response(content string, l2 []LaneTagAssign) []l2Decision {
 			case "keep":
 				dec.decision = "keep"
 				dec.targetTopicID = nearest
+				// 小模型常态混用 keep/switch：keep 却显式指定候选集内另一话题，
+				// 是 LLM 的语义异议（不想归最近候选）。尊重其指定；空/集外 target
+				// 维持安全网回最近候选。否则 keep 会把 tag 无条件吸附回 embedding
+				// 最近处（含僵尸 candidate），LLM 判断被静默丢弃（卡里巴夫案例根因）。
+				if rd.TargetTopicID != nil && *rd.TargetTopicID != nearest && inCandidateSet(*rd.TargetTopicID, a.Candidates) {
+					dec.targetTopicID = *rd.TargetTopicID
+				}
 			case "switch":
 				if rd.TargetTopicID != nil && inCandidateSet(*rd.TargetTopicID, a.Candidates) {
 					dec.decision = "switch"
@@ -432,6 +452,7 @@ func buildL2Prompt(l2 []LaneTagAssign, topicByID map[uint]repository.BoardPersis
 - new：标签属于尚未覆盖的全新叙事，不归属任何候选，target_topic_id 省略或为 0
 
 判断须基于候选话题的实际近期内容，而非仅凭标题字面沾边；两个话题即使标题字面相似，若各自近期内容分属不同叙事，应视为不同框架。
+状态为「观察中」的候选话题尚未经用户确认：请依据其近期实际内容从严判断 keep；若其近期内容与待判标签分属不同事件，应判 new。
 只返回合法 JSON，不要 Markdown 代码块或解释文字：{"decisions":[{"tag_id":整数,"decision":"keep|switch|new","target_topic_id":整数}]}`
 
 	var sb strings.Builder
@@ -457,20 +478,19 @@ func buildL2Prompt(l2 []LaneTagAssign, topicByID map[uint]repository.BoardPersis
 			fmt.Fprintf(&sb, "- [topic:%d] %s（状态:%s，最近命中:%s，累计%d天，距离%.3f）\n",
 				t.ID, t.Label, statusLabel, t.LastSeenDate.Format("2006-01-02"), t.HitCount, c.Distance)
 			if items := briefs[t.ID]; len(items) > 0 {
-				sb.WriteString("  近期内容:")
+				var frame strings.Builder
 				for _, item := range items {
-					fmt.Fprintf(&sb, "\n  - section \"%s\" (%s)", item.SectionLabel, item.PeriodDate.Format("2006-01-02"))
-					if len(item.ThreadTitles) > 0 {
-						sb.WriteString(": ")
-						for j, tt := range item.ThreadTitles {
-							if j > 0 {
-								sb.WriteString(", ")
-							}
-							fmt.Fprintf(&sb, "thread \"%s\"", tt)
-						}
+					if len(item.TagLabels) == 0 {
+						continue // merged/disabled tags only → no fact fingerprint to show
 					}
+					fmt.Fprintf(&frame, "\n  - section (%s): %s",
+						item.PeriodDate.Format("2006-01-02"), strings.Join(item.TagLabels, " / "))
 				}
-				sb.WriteString("\n")
+				if frame.Len() > 0 {
+					sb.WriteString("  近期 section 实际标签:")
+					sb.WriteString(frame.String())
+					sb.WriteString("\n")
+				}
 			}
 		}
 		sb.WriteString("\n")

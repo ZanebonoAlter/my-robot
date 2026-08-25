@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { computed, nextTick, onMounted, provide, ref, watch } from 'vue'
 import { Icon } from '@iconify/vue'
 import ThemeToggle from '~/components/ui/ThemeToggle.vue'
 import { useOnboarding } from '~/composables/useOnboarding'
@@ -8,7 +9,7 @@ import AuxiliaryLabelPool from './AuxiliaryLabelPool.vue'
 import UpgradeSuggestionPanel from './UpgradeSuggestionPanel.vue'
 import BackfillProgress from './BackfillProgress.vue'
 import MatchingConfigDialog from './MatchingConfigDialog.vue'
-import NarrativeGenerateDialog from './NarrativeGenerateDialog.vue'
+import DailyReportGenerateDialog from './DailyReportGenerateDialog.vue'
 import BoardDailyReportTimeline from './BoardDailyReportTimeline.vue'
 import BoardThreadBrowser from './BoardThreadBrowser.vue'
 import TopicDetectiveWall from './TopicDetectiveWall.client.vue'
@@ -18,6 +19,9 @@ import BoardTimelinePanel from './BoardTimelinePanel.vue'
 import BoardEnrichmentPanel from './BoardEnrichmentPanel.vue'
 import BoardEditDialog from './BoardEditDialog.vue'
 import ArticlePreviewModal from './ArticlePreviewModal.vue'
+import WatchManagePanel from './topic-watch/WatchManagePanel.vue'
+import { WATCH_PANEL_KEY } from './topic-watch/watchPanelInject'
+import { useTopicWatchesApi } from '~/api/topicWatches'
 import { useTagsPage } from '~/features/tags/composables/useTagsPage'
 
 const {
@@ -94,6 +98,22 @@ onMounted(() => {
     void startTagsTour()
   }
 })
+
+// —— 版块级关注管理（watch-keyword-and-quickadd：入口 chip 常驻 tab 栏右端）——
+const watchesApi = useTopicWatchesApi()
+const watchPanelOpen = ref(false)
+const watchCount = ref(0)
+function openWatchPanel() {
+  watchPanelOpen.value = true
+}
+provide(WATCH_PANEL_KEY, openWatchPanel)
+async function loadWatchCount() {
+  if (selectedBoardId.value === null) return
+  const res = await watchesApi.listWatches(selectedBoardId.value)
+  watchCount.value = res.success && res.data ? res.data.length : 0
+}
+watch(selectedBoardId, () => { void loadWatchCount() })
+onMounted(() => { void loadWatchCount() })
 </script>
 
 <template>
@@ -151,6 +171,17 @@ onMounted(() => {
             </button>
             <button type="button" class="tags-content-tab" :class="{ 'tags-content-tab--active': contentTab === 'enrichment' }" @click="contentTab = 'enrichment'">
               <Icon icon="mdi:database-plus-outline" width="14" /> 数据增强
+            </button>
+            <!-- 关注管理入口：tab 栏右端常驻（watch 是版块级实体，与 tab 同层） -->
+            <button
+              type="button"
+              class="tags-watch-chip tags-watch-chip--nowrap"
+              data-testid="watch-panel-chip"
+              title="打开关注管理面板"
+              @click="openWatchPanel"
+            >
+              <Icon icon="mdi:eye-outline" width="12" aria-hidden="true" />
+              我在追踪 <span class="tags-watch-chip__n">({{ watchCount }})</span>
             </button>
           </div>
 
@@ -253,6 +284,12 @@ onMounted(() => {
     </div>
 
     <AddSemanticBoardDialog :visible="showAddDialog" @confirm="handleAddBoard" @cancel="showAddDialog = false" />
+    <WatchManagePanel
+      v-if="selectedBoardId !== null"
+      v-model="watchPanelOpen"
+      :board-id="selectedBoardId"
+      @changed="loadWatchCount"
+    />
     <BoardEditDialog
       :editing-board="!!editingBoard"
       :edit-label="editLabel"
@@ -297,7 +334,7 @@ onMounted(() => {
       @save="handleSaveMatchingConfig"
       @cancel="showMatchingConfigDialog = false"
     />
-    <NarrativeGenerateDialog :visible="showGenerateDialog" :boards="boards" @cancel="showGenerateDialog = false" />
+    <DailyReportGenerateDialog :visible="showGenerateDialog" :boards="boards" @cancel="showGenerateDialog = false" />
     <TagMergePreview :visible="showMergePreview" @close="showMergePreview = false" @merged="handleMergeComplete" />
     <ArticlePreviewModal
       :visible="showArticlePreview"
@@ -328,5 +365,10 @@ onMounted(() => {
 .tags-content-tab:hover { color: var(--color-text-secondary); background: var(--color-bg-hover); }
 .tags-content-tab--active { color: var(--color-accent); background: var(--color-accent-subtle); }
 .tags-content-tab--active::after { content: ''; position: absolute; bottom: -1px; left: 0; right: 0; height: 2px; background: var(--color-accent); border-radius: 1px; }
+/* 关注入口 chip：tab 栏右端常驻（margin-left:auto 推到最右），随版块存在 */
+.tags-watch-chip { display: inline-flex; align-items: center; gap: 0.4rem; flex: 0 0 auto; margin-left: auto; padding: 0.35rem 0.75rem; border: 1px solid var(--color-border-medium); border-radius: 999px; background: none; color: var(--color-text-secondary); font-size: 0.7rem; cursor: pointer; transition: all 0.12s ease; }
+.tags-watch-chip--nowrap { white-space: nowrap; }
+.tags-watch-chip:hover { border-color: var(--color-accent); color: var(--color-accent); }
+.tags-watch-chip__n { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 0.66rem; color: var(--color-text-muted); background: var(--color-bg-hover); border-radius: 8px; padding: 0 0.15rem; }
 .tags-bottombar { position: fixed; bottom: 0; left: 0; right: 0; z-index: 40; display: flex; align-items: center; justify-content: flex-end; gap: 0.75rem; padding: 0.45rem 1.25rem; border-top: 1px solid var(--color-border-subtle); background: var(--color-bg-elevated); backdrop-filter: blur(12px); }
 </style>

@@ -41,6 +41,19 @@ type PersistentTopicConfig struct {
 	CentroidWindow  int     // persistent_topic_centroid_window: # recent sections averaged
 	VacuumWindow    int     // persistent_topic_vacuum_window: attraction stats span (days)
 	L2CandidateK    int     // persistent_topic_l2_candidate_k: top-K candidates for L2 LLM
+	// SectionMergeEnabled (daily_report_section_merge_enabled) gates the
+	// same-day two-stage section merge (fix-section-merge-blackhole). The
+	// content-based section embedding changed the distance geometry so the
+	// 0.20/0.25 thresholds no longer discriminate narratives; default off
+	// keeps sections at the lane pipeline's original granularity.
+	SectionMergeEnabled bool // daily_report_section_merge_enabled: same-day section merge kill switch
+	// CandidateL1GateEnabled (persistent_topic_candidate_l1_gate_enabled,
+	// candidate-topic-l2-gate) gates the observation-period L1 direct-attach:
+	// when on (default), candidate topics do NOT direct-attach near-distance
+	// tags — they fall through to the L2 LLM band; active topics keep direct
+	// attach. When off, both active and candidate direct-attach (legacy
+	// behavior). Runtime kill switch for online rollback without a release.
+	CandidateL1GateEnabled bool // persistent_topic_candidate_l1_gate_enabled: candidate L1 direct-attach gate
 }
 
 // DefaultPersistentTopicConfig returns the seed defaults; used when ai_settings
@@ -64,12 +77,16 @@ func DefaultPersistentTopicConfig() PersistentTopicConfig {
 		// (docs/experience/cluster-bias-investigation.md): L1<0.18 lifts
 		// strong-attach from 14% to 62%, L2[0.18,0.30] leaves ~51% to the
 		// LLM, L3>0.30 is the ~1.3% new-narrative tail.
-		LaneL1Threshold: 0.18,
-		LaneL2Threshold: 0.30,
-		VacuumRatio:     0.20,
-		CentroidWindow:  30,
-		VacuumWindow:    7,
-		L2CandidateK:    5,
+		LaneL1Threshold:     0.18,
+		LaneL2Threshold:     0.30,
+		VacuumRatio:         0.20,
+		CentroidWindow:      30,
+		VacuumWindow:        7,
+		L2CandidateK:        5,
+		SectionMergeEnabled: false,
+		// candidate-topic-l2-gate: gate on by default — candidate topics are
+		// system guesses and must pass L2 adjudication for every attach.
+		CandidateL1GateEnabled: true,
 	}
 }
 
@@ -149,6 +166,8 @@ func LoadPersistentTopicConfig(db *gorm.DB) PersistentTopicConfig {
 		"persistent_topic_centroid_window",
 		"persistent_topic_vacuum_window",
 		"persistent_topic_l2_candidate_k",
+		"daily_report_section_merge_enabled",
+		"persistent_topic_candidate_l1_gate_enabled",
 	}
 	var rows []models.AISettings
 	if err := db.Where("key IN ?", keys).Find(&rows).Error; err != nil {
@@ -209,6 +228,18 @@ func LoadPersistentTopicConfig(db *gorm.DB) PersistentTopicConfig {
 				cfg.L2CandidateK = v
 			} else {
 				logging.Warnf("persistent-topic: invalid l2 candidate k %q; using default %d", r.Value, cfg.L2CandidateK)
+			}
+		case "daily_report_section_merge_enabled":
+			if v, err := strconv.ParseBool(r.Value); err == nil {
+				cfg.SectionMergeEnabled = v
+			} else {
+				logging.Warnf("daily-report: invalid section merge enabled %q; using default %t", r.Value, cfg.SectionMergeEnabled)
+			}
+		case "persistent_topic_candidate_l1_gate_enabled":
+			if v, err := strconv.ParseBool(r.Value); err == nil {
+				cfg.CandidateL1GateEnabled = v
+			} else {
+				logging.Warnf("persistent-topic: invalid candidate l1 gate enabled %q; using default %t", r.Value, cfg.CandidateL1GateEnabled)
 			}
 		}
 	}

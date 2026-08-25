@@ -43,3 +43,8 @@ log:
 storage:
   # Root directory for locally downloaded feed icons (served at /icons).
   icon_dir: "data/icons"
+
+# 博查 Bocha web search（数据增强 web_search 后端；无 key 时优雅降级回 Noop）
+bocha:
+  api_key: ""        # 在此填入博查 key，或设环境变量 BOCHA_API_KEY
+  endpoint: "https://api.bochaai.com/v1/web-search"

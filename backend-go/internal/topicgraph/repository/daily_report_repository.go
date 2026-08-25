@@ -4,7 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sort"
+	"strings"
 	"time"
+	"unicode/utf8"
 
 	"syntopica-backend/internal/models"
 	"syntopica-backend/internal/platform/airouter"
@@ -18,18 +21,27 @@ import (
 
 // GetReportByID retrieves a single daily report by its primary key.
 
+// ActiveWatchSummary is the minimal watch descriptor attached to a report
+// list item. It is populated only for active watches with a hit in that report.
+type ActiveWatchSummary struct {
+	WatchID uint   `json:"watch_id"`
+	Label   string `json:"label"`
+	Type    string `json:"type"`
+}
+
 // ReportListItem is a summary view for list endpoints.
 type ReportListItem struct {
-	ID              uint      `json:"id"`
-	SemanticBoardID uint      `json:"semantic_board_id"`
-	PeriodDate      string    `json:"period_date"`
-	Title           string    `json:"title"`
-	Summary         string    `json:"summary"`
-	ArticleCount    int       `json:"article_count"`
-	EventTagCount   int       `json:"event_tag_count"`
-	ClusterCount    int       `json:"cluster_count"`
-	Status          string    `json:"status"`
-	CreatedAt       time.Time `json:"created_at"`
+	ID                   uint                 `json:"id"`
+	SemanticBoardID      uint                 `json:"semantic_board_id"`
+	PeriodDate           string               `json:"period_date"`
+	Title                string               `json:"title"`
+	Summary              string               `json:"summary"`
+	ArticleCount         int                  `json:"article_count"`
+	EventTagCount        int                  `json:"event_tag_count"`
+	ClusterCount         int                  `json:"cluster_count"`
+	Status               string               `json:"status"`
+	CreatedAt            time.Time            `json:"created_at"`
+	ActiveWatchSummaries []ActiveWatchSummary `json:"active_watch_summaries"`
 }
 
 // ListReports returns recent reports for a board.
@@ -222,16 +234,52 @@ func (r *TopicGraphRepository) SaveReport(report *BoardDailyReport, sections []D
 		for i := range sections {
 			sections[i].ReportID = report.ID
 		}
-		if len(sections) > 0 {
-			if err := tx.CreateInBatches(sections, 20).Error; err != nil {
+		// Insert new sections. Two batches: sections WITH embeddings insert
+		// normally; watch-materialized sections (or any section whose Embedding
+		// is blank) insert with the embedding column omitted — GORM would
+		// otherwise write '' which pgvector rejects (watch-materialized-topic:
+		// 物化 section Embedding 留空 = NULL).
+		withEmb := make([]DailyReportSection, 0, len(sections))
+		withoutEmb := make([]DailyReportSection, 0)
+		for i := range sections {
+			if sections[i].Embedding == "" {
+				withoutEmb = append(withoutEmb, sections[i])
+			} else {
+				withEmb = append(withEmb, sections[i])
+			}
+		}
+		if len(withEmb) > 0 {
+			if err := tx.CreateInBatches(withEmb, 20).Error; err != nil {
 				return fmt.Errorf("create sections: %w", err)
 			}
+		}
+		if len(withoutEmb) > 0 {
+			if err := tx.Omit("embedding").CreateInBatches(withoutEmb, 20).Error; err != nil {
+				return fmt.Errorf("create sections (no embedding): %w", err)
+			}
+		}
+		// Copy the generated IDs back into the caller's slice so subsequent
+		// steps (assignment by SectionID, thread persistence) keep working —
+		// GORM back-fills IDs only into the batch slices we passed in.
+		{
+			wi, wo := 0, 0
+			for i := range sections {
+				if sections[i].Embedding == "" {
+					sections[i].ID = withoutEmb[wo].ID
+					wo++
+				} else {
+					sections[i].ID = withEmb[wi].ID
+					wi++
+				}
+			}
+		}
 
-			// Assign sections to persistent topics and advance the topic
-			// lifecycle, before rebuilding relations — the identity edges
-			// written by RebuildBoardRelations depend on persistent_topic_id
-			// being set. Best-effort non-fatal: a failure degrades to the old
-			// similarity-only graph rather than aborting the whole save.
+		// Assign sections to persistent topics and advance the topic
+		// lifecycle, before rebuilding relations — the identity edges
+		// written by RebuildBoardRelations depend on persistent_topic_id
+		// being set. Best-effort non-fatal: a failure degrades to the old
+		// similarity-only graph rather than aborting the whole save.
+		if len(sections) > 0 {
 			if touched, assignErr := assignAndUpdateTopics(tx, report.SemanticBoardID, report.PeriodDate, sections); assignErr != nil {
 				logging.Warnf("SaveReport: topic assignment failed for board %d: %v", report.SemanticBoardID, assignErr)
 			} else {
@@ -294,6 +342,14 @@ func (r *TopicGraphRepository) GetReportByID(id uint) (*BoardDailyReport, error)
 	// (active/candidate) for UI classification. Without this the frontend's
 	// qualityZones treats every assigned section as "breaking".
 	AttachTopicBriefsToReport(r.db, &report)
+	// GORM leaves Threads nil when a section has no thread rows (legal
+	// degradation path); keep the API contract "threads is always an array"
+	// for the frontend reader.
+	for i := range report.Sections {
+		if report.Sections[i].Threads == nil {
+			report.Sections[i].Threads = []DailyReportThread{}
+		}
+	}
 	return &report, nil
 }
 
@@ -316,19 +372,54 @@ func (r *TopicGraphRepository) ListReports(boardID uint, days int) ([]ReportList
 		return nil, fmt.Errorf("list reports for board %d: %w", boardID, err)
 	}
 
+	summariesByReport := make(map[uint][]ActiveWatchSummary, len(reports))
+	if len(reports) > 0 {
+		reportIDs := make([]uint, len(reports))
+		for i, report := range reports {
+			reportIDs[i] = report.ID
+			summariesByReport[report.ID] = []ActiveWatchSummary{}
+		}
+
+		type activeWatchSummaryRow struct {
+			ReportID uint   `gorm:"column:report_id"`
+			WatchID  uint   `gorm:"column:watch_id"`
+			Label    string `gorm:"column:label"`
+			Type     string `gorm:"column:type"`
+		}
+		var rows []activeWatchSummaryRow
+		err = r.db.Table("topic_watch_hits AS h").
+			Select("DISTINCT h.report_id, w.id AS watch_id, w.label, w.type").
+			Joins("JOIN board_topic_watches AS w ON w.id = h.watch_id").
+			Where("h.report_id IN ? AND w.semantic_board_id = ? AND w.status = ?",
+				reportIDs, boardID, WatchStatusActive).
+			Order("h.report_id ASC, w.id ASC").
+			Scan(&rows).Error
+		if err != nil {
+			return nil, fmt.Errorf("list active watch summaries for board %d: %w", boardID, err)
+		}
+		for _, row := range rows {
+			summariesByReport[row.ReportID] = append(summariesByReport[row.ReportID], ActiveWatchSummary{
+				WatchID: row.WatchID,
+				Label:   row.Label,
+				Type:    row.Type,
+			})
+		}
+	}
+
 	items := make([]ReportListItem, len(reports))
 	for i, rpt := range reports {
 		items[i] = ReportListItem{
-			ID:              rpt.ID,
-			SemanticBoardID: rpt.SemanticBoardID,
-			PeriodDate:      rpt.PeriodDate.Format("2006-01-02"),
-			Title:           rpt.Title,
-			Summary:         rpt.Summary,
-			ArticleCount:    rpt.ArticleCount,
-			EventTagCount:   rpt.EventTagCount,
-			ClusterCount:    rpt.ClusterCount,
-			Status:          rpt.Status,
-			CreatedAt:       rpt.CreatedAt,
+			ID:                   rpt.ID,
+			SemanticBoardID:      rpt.SemanticBoardID,
+			PeriodDate:           rpt.PeriodDate.Format("2006-01-02"),
+			Title:                rpt.Title,
+			Summary:              rpt.Summary,
+			ArticleCount:         rpt.ArticleCount,
+			EventTagCount:        rpt.EventTagCount,
+			ClusterCount:         rpt.ClusterCount,
+			Status:               rpt.Status,
+			CreatedAt:            rpt.CreatedAt,
+			ActiveWatchSummaries: summariesByReport[rpt.ID],
 		}
 	}
 	return items, nil
@@ -360,6 +451,12 @@ func (r *TopicGraphRepository) ListReportsForAllBoards(days int) ([]BoardDailyRe
 	}
 	for i := range reports {
 		AttachTopicBriefsToReport(r.db, &reports[i])
+		// Keep the API contract "threads is always an array" (see GetReportByID).
+		for j := range reports[i].Sections {
+			if reports[i].Sections[j].Threads == nil {
+				reports[i].Sections[j].Threads = []DailyReportThread{}
+			}
+		}
 	}
 	return reports, nil
 }
@@ -399,7 +496,37 @@ func (r *TopicGraphRepository) SaveThreads(tx *gorm.DB, reportID, sectionID uint
 		threads[i].ReportID = reportID
 		threads[i].SectionID = sectionID
 	}
-	return tx.Create(&threads).Error
+	// Watch-materialized threads carry no embedding: GORM's zero-value "" is
+	// an invalid pgvector literal, so blank-embedding threads insert with the
+	// column omitted (NULL) — same treatment as blank-embedding sections
+	// (watch-materialized-topic: 物化 thread Embedding 留空).
+	withEmb := make([]DailyReportThread, 0, len(threads))
+	withoutEmb := make([]DailyReportThread, 0)
+	for i := range threads {
+		if threads[i].Embedding == "" {
+			withoutEmb = append(withoutEmb, threads[i])
+		} else {
+			withEmb = append(withEmb, threads[i])
+		}
+	}
+	if len(withEmb) > 0 {
+		if err := tx.Create(&withEmb).Error; err != nil {
+			return err
+		}
+	}
+	if len(withoutEmb) > 0 {
+		if err := tx.Omit("embedding").Create(&withoutEmb).Error; err != nil {
+			return err
+		}
+		idx := 0
+		for i := range threads {
+			if threads[i].Embedding == "" {
+				threads[i].ID = withoutEmb[idx].ID
+				idx++
+			}
+		}
+	}
+	return nil
 }
 
 // GetBoardSectionTimeline fetches all sections and their relations for a board within a date range.
@@ -772,76 +899,269 @@ func (r *TopicGraphRepository) GetTopicLifeline(topicID uint) (SectionTimelineRe
 	return SectionTimelineResponse{Sections: nodes, Relations: relations}, nil
 }
 
-// BackfillSectionEmbeddings generates embeddings for sections that don't have one,
-// then runs pgvector matching to set prev_section_id for all sections.
-func (r *TopicGraphRepository) BackfillSectionEmbeddings(ctx context.Context) (embedded int, matched int, err error) {
-	// Phase 1: Generate embeddings for sections without them
+// BackfillSectionEmbeddings regenerates section embeddings using the
+// content-assembly rules (tags' label/description/article excerpts — same as
+// the live pipeline; fallback chain: thread titles → cluster_label).
+//
+// Modes (fix-section-embedding-content-based):
+//   - fill mode (recompute=false, the legacy default): only sections whose
+//     embedding IS NULL, text now assembled by the content rules;
+//   - recompute mode (recompute=true): ALL sections in range get re-embedded
+//     (boardID nil = all boards; sinceDays default 30, 0 = unlimited).
+//
+// After embedding, affected topics' centroids are recomputed, then relations
+// are rebuilt per board. Per-section embed failures skip that section and
+// continue; stats are logged and returned.
+func (r *TopicGraphRepository) BackfillSectionEmbeddings(ctx context.Context, recompute bool, boardID *uint, sinceDays int) (embedded, skipped, matched int, err error) {
+	// 1. Load candidate sections (id, board, period_date, cluster_tag_ids,
+	//    cluster_label) plus their thread titles for the fallback chain.
+	type sectionRow struct {
+		ID            uint
+		BoardID       uint
+		TopicID       uint
+		PeriodDate    time.Time
+		ClusterTagIDs JSON
+		ClusterLabel  string
+	}
+
+	query := r.db.Table("daily_report_sections s").
+		Select("s.id, r.semantic_board_id AS board_id, s.persistent_topic_id AS topic_id, r.period_date, s.cluster_tag_ids, s.cluster_label").
+		Joins("JOIN board_daily_reports r ON r.id = s.report_id")
+	if !recompute {
+		query = query.Where("s.embedding IS NULL")
+	} else {
+		if boardID != nil {
+			query = query.Where("r.semantic_board_id = ?", *boardID)
+		}
+		if sinceDays > 0 {
+			query = query.Where("r.period_date >= ?", time.Now().AddDate(0, 0, -sinceDays))
+		}
+	}
+	var rows []sectionRow
+	if err := query.Scan(&rows).Error; err != nil {
+		return 0, 0, 0, fmt.Errorf("query backfill sections: %w", err)
+	}
+	if len(rows) == 0 {
+		logging.Infof("backfill-section-embeddings: no sections in range (recompute=%v)", recompute)
+		return 0, 0, 0, nil
+	}
+
+	// 2. Resolve per-section embed texts. Tag facts (label/description) are
+	//    batch-loaded once; representative-article context is fetched per tag
+	//    over the section's own day window (buildArticleContextForTag lives in
+	//    the service package, so the query is reimplemented here against
+	//    models.Article with the same precedence).
+	texts := make([]string, 0, len(rows))
+	var targets []sectionRow
+	for _, row := range rows {
+		var tagIDs []uint
+		_ = json.Unmarshal(row.ClusterTagIDs, &tagIDs)
+		text := r.assembleSectionEmbedText(tagIDs, row.PeriodDate, row.ID)
+		if strings.TrimSpace(text) == "" {
+			skipped++
+			continue
+		}
+		texts = append(texts, text)
+		targets = append(targets, row)
+	}
+
+	// 3. Batch embed + persist. Affected boards/topics are collected for the
+	//    centroid + relation refresh below.
 	batchSize := 50
-	for {
-		var sections []DailyReportSection
-		if err := r.db.Where("embedding IS NULL").
-			Where("cluster_label != '' AND cluster_label IS NOT NULL").
-			Order("id ASC").
-			Limit(batchSize).
-			Find(&sections).Error; err != nil {
-			return embedded, matched, fmt.Errorf("query sections without embedding: %w", err)
+	touchedBoards := make(map[uint]bool)
+	touchedTopics := make(map[uint]bool)
+	for start := 0; start < len(texts); start += batchSize {
+		end := start + batchSize
+		if end > len(texts) {
+			end = len(texts)
 		}
-		if len(sections) == 0 {
-			break
-		}
-
-		var texts []string
-		for _, sec := range sections {
-			texts = append(texts, sec.ClusterLabel)
-		}
-
 		result, embedErr := airouter.NewRouter().Embed(ctx, airouter.EmbeddingRequest{
-			Input:     texts,
+			Input:     texts[start:end],
 			Operation: "section.embedding_backfill",
 			Metadata: map[string]any{
 				"operation": "daily_report_section_backfill",
+				"recompute": recompute,
 			},
 		}, airouter.CapabilityEmbedding)
 		if embedErr != nil {
-			return embedded, matched, fmt.Errorf("backfill embedding batch: %w", embedErr)
+			// Whole-batch failure: count as skipped, keep going with next batch.
+			logging.Warnf("backfill-section-embeddings: batch embed failed (%d sections skipped): %v", end-start, embedErr)
+			skipped += end - start
+			continue
 		}
-
-		for i, sec := range sections {
-			if i >= len(result.Embeddings) {
-				break
-			}
+		for i := 0; i < end-start && i < len(result.Embeddings); i++ {
+			row := targets[start+i]
 			pgVec := FloatsToPgVector(result.Embeddings[i])
-			if err := r.db.Model(&DailyReportSection{}).Where("id = ?", sec.ID).
+			if err := r.db.Model(&DailyReportSection{}).Where("id = ?", row.ID).
 				Update("embedding", pgVec).Error; err != nil {
-				logging.Warnf("backfill: failed to update embedding for section %d: %v", sec.ID, err)
+				logging.Warnf("backfill-section-embeddings: update section %d failed: %v", row.ID, err)
+				skipped++
 				continue
 			}
 			embedded++
+			touchedBoards[row.BoardID] = true
+			if row.TopicID != 0 {
+				touchedTopics[row.TopicID] = true
+			}
 		}
 	}
 
-	// Phase 2: Rebuild relations for all boards using the unified filtering logic
-	type boardGroup struct {
-		BoardID uint
+	// 4. Refresh centroids for affected topics (now reading committed
+	//    embeddings via r.db).
+	for tid := range touchedTopics {
+		if cerr := r.UpdateCentroidOnSectionChange(nil, tid); cerr != nil {
+			logging.Warnf("backfill-section-embeddings: centroid refresh failed for topic %d: %v", tid, cerr)
+		}
 	}
-	var boards []boardGroup
-	r.db.Raw(`
-		SELECT DISTINCT rpt.semantic_board_id AS board_id
-		FROM daily_report_sections s
-		JOIN board_daily_reports rpt ON rpt.id = s.report_id
-		WHERE s.embedding IS NOT NULL
-	`).Scan(&boards)
 
-	for _, b := range boards {
-		rebuilt, backfillErr := r.BackfillRelations(b.BoardID)
-		if backfillErr != nil {
-			logging.Warnf("BackfillSectionEmbeddings: backfill board %d failed: %v", b.BoardID, backfillErr)
+	// 5. Rebuild cross-day relations for affected boards.
+	for bid := range touchedBoards {
+		rebuilt, rerr := r.BackfillRelations(bid)
+		if rerr != nil {
+			logging.Warnf("backfill-section-embeddings: backfill board %d failed: %v", bid, rerr)
 			continue
 		}
 		matched += rebuilt
 	}
 
-	return embedded, matched, nil
+	logging.Infof("backfill-section-embeddings: complete recompute=%v embedded=%d skipped=%d relations=%d", recompute, embedded, skipped, matched)
+	return embedded, skipped, matched, nil
+}
+
+// Mirrors of the service-layer assembly constants
+// (daily_report_embed_text.go); kept local to avoid the import cycle
+// (service imports repository) — same pattern as repoParsePgVector.
+const (
+	backfillArticleContextRunes = 100
+	// backfillSectionEmbedRunes mirrors the service cap; sized for the
+	// embedding gateway's 512-token per-input limit (see service comments).
+	backfillSectionEmbedRunes = 480
+	backfillContextArticles   = 3
+)
+
+// assembleSectionEmbedText builds the content-based embedding text for one
+// historical section: its tags' label/description/representative-article
+// excerpts over the section's own day window, falling back to thread titles,
+// then cluster_label. Mirrors service.buildSectionEmbedText for backfill.
+func (r *TopicGraphRepository) assembleSectionEmbedText(tagIDs []uint, periodDate time.Time, sectionID uint) string {
+	var sb strings.Builder
+	if len(tagIDs) > 0 {
+		type tagRow struct {
+			ID          uint
+			Label       string
+			Description string
+		}
+		var tags []tagRow
+		if err := r.db.Model(&models.TopicTag{}).
+			Select("id, label, description").
+			Where("id IN ?", tagIDs).
+			Find(&tags).Error; err != nil {
+			tags = nil
+		}
+		byID := make(map[uint]tagRow, len(tags))
+		for _, t := range tags {
+			byID[t.ID] = t
+		}
+		for _, id := range tagIDs {
+			t, ok := byID[id]
+			if !ok {
+				continue
+			}
+			if sb.Len() > 0 {
+				sb.WriteByte('\n')
+			}
+			sb.WriteString(strings.TrimSpace(t.Label))
+			if d := strings.TrimSpace(t.Description); d != "" {
+				sb.WriteString("：")
+				sb.WriteString(d)
+			}
+			if a := strings.TrimSpace(r.tagArticleContext(id, periodDate)); a != "" {
+				sb.WriteString("；代表文章：")
+				if utf8.RuneCountInString(a) > backfillArticleContextRunes {
+					a = string([]rune(a)[:backfillArticleContextRunes])
+				}
+				sb.WriteString(a)
+			}
+			if text := sb.String(); utf8.RuneCountInString(text) >= backfillSectionEmbedRunes {
+				break
+			}
+		}
+	}
+	if text := sb.String(); strings.TrimSpace(text) != "" {
+		return truncateRunesBackfill(text)
+	}
+	// Fallback 1: thread titles.
+	var titles []string
+	if err := r.db.Model(&DailyReportThread{}).
+		Where("section_id = ? AND COALESCE(TRIM(title), '') != ''", sectionID).
+		Order("id ASC").Limit(10).
+		Pluck("title", &titles).Error; err != nil {
+		titles = nil
+	}
+	if len(titles) > 0 {
+		return truncateRunesBackfill(strings.Join(titles, "\n"))
+	}
+	// Fallback 2: cluster label.
+	var label string
+	if err := r.db.Model(&DailyReportSection{}).Select("cluster_label").
+		Where("id = ?", sectionID).Scan(&label).Error; err != nil {
+		return ""
+	}
+	return strings.TrimSpace(label)
+}
+
+// tagArticleContext loads the representative-article context for one tag over
+// the section's day window. Same precedence as the service-layer
+// buildArticleContextForTag (AIContentSummary > FirecrawlContent > Content >
+// Description); reimplemented here to avoid the service import.
+func (r *TopicGraphRepository) tagArticleContext(tagID uint, day time.Time) string {
+	start := time.Date(day.Year(), day.Month(), day.Day(), 0, 0, 0, 0, day.Location())
+	end := start.Add(24 * time.Hour)
+	type articleRow struct {
+		Title            string
+		AIContentSummary string
+		FirecrawlContent string
+		Content          string
+		Description      string
+	}
+	var rows []articleRow
+	if err := r.db.Model(&models.Article{}).
+		Joins("JOIN article_topic_tags ON article_topic_tags.article_id = articles.id").
+		Where("article_topic_tags.topic_tag_id = ? AND articles.pub_date >= ? AND articles.pub_date < ?", tagID, start, end).
+		Order("articles.pub_date DESC").
+		Limit(backfillContextArticles).
+		Find(&rows).Error; err != nil {
+		return ""
+	}
+	var parts []string
+	for _, a := range rows {
+		summary := firstNonBlank(a.AIContentSummary, a.FirecrawlContent, a.Content, a.Description)
+		if strings.TrimSpace(summary) == "" {
+			continue
+		}
+		if title := strings.TrimSpace(a.Title); title != "" {
+			parts = append(parts, fmt.Sprintf("《%s》%s", title, summary))
+		} else {
+			parts = append(parts, summary)
+		}
+	}
+	return strings.Join(parts, " ; ")
+}
+
+func firstNonBlank(fields ...string) string {
+	for _, s := range fields {
+		if trimmed := strings.TrimSpace(s); trimmed != "" {
+			return trimmed
+		}
+	}
+	return ""
+}
+
+func truncateRunesBackfill(s string) string {
+	if utf8.RuneCountInString(s) <= backfillSectionEmbedRunes {
+		return s
+	}
+	return string([]rune(s)[:backfillSectionEmbedRunes])
 }
 
 // BackfillRelations rebuilds relations for a single board.
@@ -906,18 +1226,31 @@ func (r *TopicGraphRepository) BackfillAllRelations() (map[uint]int, error) {
 // ListTopicRecentBriefs — 泳道上下文注入（切片 D）
 // =============================================================================
 
-// ListTopicRecentBriefs fetches, for every active persistent topic on the board,
-// sections from the last `sinceDays` days with up to 2 representative thread
-// titles per section. Sections are sorted by period_date DESC and trimmed to
-// `perTopicLimit` per topic. Returns map[topicID][]TopicRecentBrief.
+// ListTopicRecentBriefs fetches, for every active AND candidate persistent
+// topic on the board (candidate-topic-l2-gate: candidates now flow through L2
+// adjudication and need content to judge), sections from the last `sinceDays`
+// days with up to 5 active tag labels per section — the section's actual
+// tag-label fact fingerprint resolved from cluster_tag_ids. Sections are
+// sorted by period_date DESC and trimmed to `perTopicLimit` per topic.
+// Returns map[topicID][]TopicRecentBrief.
+//
+// The tag labels replace the old cluster_label source (frozen by the
+// orchestrator's topic-label overwrite → zero information) and the old
+// thread-title LATERAL (prompt-hygiene red line: no historical narrative
+// injection). Merged/disabled tags are filtered by topic_tags.status='active'.
 //
 // Degradation contract: when the query fails (DB down etc.), the caller SHALL
 // fall back to label-only injection — the briefs are purely an information
 // enrichment layer and SHALL NOT block ClusterTags.
 func (r *TopicGraphRepository) ListTopicRecentBriefs(boardID uint, sinceDays int, perTopicLimit int) (map[uint][]TopicRecentBrief, error) {
 	cutoff := time.Now().AddDate(0, 0, -sinceDays).Truncate(24 * time.Hour)
+	// Same-day exclusion: briefs inject only facts from BEFORE today. A same-day
+	// rerun would otherwise feed back the current run's own (possibly wrong)
+	// attachments as "recent content" evidence — the self-corroboration loop
+	// behind the Kalibaf candidate case. Yesterday becomes evidence tomorrow.
+	today := NormalizeReportDate(time.Now())
 
-	// 1) Collect active topic IDs on this board.
+	// 1) Collect anchorable topic IDs (active + candidate) on this board.
 	type topicRow struct {
 		ID     uint
 		Status string
@@ -925,89 +1258,102 @@ func (r *TopicGraphRepository) ListTopicRecentBriefs(boardID uint, sinceDays int
 	var topics []topicRow
 	err := r.db.Model(&BoardPersistentTopic{}).
 		Select("id, status").
-		Where("semantic_board_id = ? AND status = ?", boardID, TopicStatusActive).
+		Where("semantic_board_id = ? AND status IN ?", boardID, []string{TopicStatusActive, TopicStatusCandidate}).
 		Find(&topics).Error
 	if err != nil {
-		return nil, fmt.Errorf("listTopicRecentBriefs: load active topics: %w", err)
+		return nil, fmt.Errorf("listTopicRecentBriefs: load anchorable topics: %w", err)
 	}
 	if len(topics) == 0 {
 		return nil, nil
 	}
 
-	activeIDs := make([]uint, len(topics))
+	anchorIDs := make([]uint, len(topics))
 	for i, t := range topics {
-		activeIDs[i] = t.ID
+		anchorIDs[i] = t.ID
 	}
 
-	// 2) Raw query: sections + threads joined, ordered for downstream grouping.
+	// 2) Raw query: sections + tag labels (fact fingerprint). Each section's
+	// cluster_tag_ids JSON array is unnested with ordinality and LEFT JOINed
+	// against topic_tags (active only), so merged/disabled tags yield NULL
+	// labels that are dropped at assembly while the section itself survives
+	// (label-only degradation at prompt level). Duplicate tag ids inside one
+	// array are collapsed via DISTINCT ON; tag_ord preserves the array order
+	// so the per-section cap of 5 keeps the cluster's own tag ordering.
 	type row struct {
-		TopicID      uint      `gorm:"column:persistent_topic_id"`
-		SectionID    uint      `gorm:"column:section_id"`
-		SectionLabel string    `gorm:"column:section_label"`
-		PeriodDate   time.Time `gorm:"column:period_date"`
-		ThreadTitle  *string   `gorm:"column:thread_title"`
-		FitDistance  *float64  `gorm:"column:fit_distance"`
+		TopicID    uint      `gorm:"column:persistent_topic_id"`
+		SectionID  uint      `gorm:"column:section_id"`
+		PeriodDate time.Time `gorm:"column:period_date"`
+		TagLabel   *string   `gorm:"column:tag_label"`
 	}
 
 	var rows []row
 	err = r.db.Raw(`
-		SELECT
-			ds.persistent_topic_id,
-			ds.id AS section_id,
-			ds.cluster_label AS section_label,
-			bdr.period_date,
-			t.title AS thread_title,
-			t.fit_distance
-		FROM daily_report_sections ds
-		JOIN board_daily_reports bdr ON bdr.id = ds.report_id
-		LEFT JOIN LATERAL (
-			SELECT d.title, d.fit_distance
-			FROM daily_report_threads d
-			WHERE d.section_id = ds.id
-			ORDER BY COALESCE(d.fit_distance, 999999) ASC, d.id ASC
-			LIMIT 2
-		) t ON true
-		WHERE ds.persistent_topic_id IN ?
-		  AND bdr.period_date >= ?
-		ORDER BY ds.persistent_topic_id, bdr.period_date DESC, ds.id ASC
-	`, activeIDs, cutoff).Scan(&rows).Error
+		WITH expanded AS (
+			SELECT
+				ds.persistent_topic_id,
+				ds.id AS section_id,
+				bdr.period_date,
+				tt.label AS tag_label,
+				ord.n AS tag_ord
+			FROM daily_report_sections ds
+			JOIN board_daily_reports bdr ON bdr.id = ds.report_id
+			LEFT JOIN LATERAL jsonb_array_elements_text(ds.cluster_tag_ids) WITH ORDINALITY AS ord(elem, n) ON true
+			LEFT JOIN topic_tags tt ON tt.id = ord.elem::bigint AND tt.status = 'active'
+			WHERE ds.persistent_topic_id IN ?
+				AND bdr.period_date >= ?
+				AND bdr.period_date < ?
+		)
+		SELECT DISTINCT ON (persistent_topic_id, section_id, tag_ord, tag_label)
+			persistent_topic_id, section_id, period_date, tag_label
+		FROM expanded
+		ORDER BY persistent_topic_id, section_id, tag_ord, tag_label
+	`, anchorIDs, cutoff, today).Scan(&rows).Error
 	if err != nil {
-		return nil, fmt.Errorf("listTopicRecentBriefs: query sections+threads: %w", err)
+		return nil, fmt.Errorf("listTopicRecentBriefs: query sections+tag labels: %w", err)
 	}
 
-	// 3) Group rows by topic → section → threads.
-	// Because the query is ordered by (topic_id, period_date DESC, section_id),
-	// a streaming assembly is straightforward.
+	// 3) Group rows by topic → section → tag labels (cap 5 per section).
+	// Re-sort by (topic_id, period_date DESC, section_id ASC) so per-topic
+	// trimming keeps the newest sections; a section→index map keeps each
+	// section's labels assembling in tag_ord order regardless of sort moves.
+	sort.SliceStable(rows, func(i, j int) bool {
+		if rows[i].TopicID != rows[j].TopicID {
+			return rows[i].TopicID < rows[j].TopicID
+		}
+		if !rows[i].PeriodDate.Equal(rows[j].PeriodDate) {
+			return rows[i].PeriodDate.After(rows[j].PeriodDate)
+		}
+		return rows[i].SectionID < rows[j].SectionID
+	})
+
+	const tagsPerSectionCap = 5
+
 	result := make(map[uint][]TopicRecentBrief)
 	type sectionKey struct {
 		TopicID   uint
 		SectionID uint
 	}
-	seenSec := make(map[sectionKey]*TopicRecentBrief)
+	briefIdx := make(map[sectionKey]int) // section → index into result[topicID]
 
 	for _, row := range rows {
 		sk := sectionKey{row.TopicID, row.SectionID}
-		_, exists := seenSec[sk]
+		idx, exists := briefIdx[sk]
 		if !exists {
 			// Enforce per-topic section cap.
 			if len(result[row.TopicID]) >= perTopicLimit {
 				continue
 			}
-			brief := &TopicRecentBrief{
-				TopicID:      row.TopicID,
-				SectionID:    row.SectionID,
-				SectionLabel: row.SectionLabel,
-				PeriodDate:   row.PeriodDate,
-			}
-			seenSec[sk] = brief
-			result[row.TopicID] = append(result[row.TopicID], *brief)
+			result[row.TopicID] = append(result[row.TopicID], TopicRecentBrief{
+				TopicID:    row.TopicID,
+				SectionID:  row.SectionID,
+				PeriodDate: row.PeriodDate,
+			})
+			idx = len(result[row.TopicID]) - 1
+			briefIdx[sk] = idx
 		}
-		// Append thread title (up to 2 per section per query LIMIT).
-		if row.ThreadTitle != nil && *row.ThreadTitle != "" {
-			// Since we modify the slice element in-place, update the result map entry.
-			idx := len(result[row.TopicID]) - 1
-			result[row.TopicID][idx].ThreadTitles = append(
-				result[row.TopicID][idx].ThreadTitles, *row.ThreadTitle)
+		// Append tag label (cap per section; NULL = merged/disabled tag → dropped).
+		if row.TagLabel != nil && *row.TagLabel != "" && len(result[row.TopicID][idx].TagLabels) < tagsPerSectionCap {
+			result[row.TopicID][idx].TagLabels = append(result[row.TopicID][idx].TagLabels, *row.TagLabel)
 		}
 	}
 

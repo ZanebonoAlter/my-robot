@@ -312,7 +312,10 @@ func RebuildBoardRelations(tx *gorm.DB, boardID uint) error {
 		return fmt.Errorf("delete old relations: %w", err)
 	}
 
-	// 2. Load all sections with embeddings, grouped by date
+	// 2. Load all sections with embeddings, grouped by date. Watch-materialized
+	//    sections are excluded explicitly by lane_tier (design §D5): they
+	//    carry no embeddings today (naturally skipped), but the explicit
+	//    filter guards future drift if they ever gain vectors.
 	type dateSection struct {
 		ID        uint
 		Embedding string
@@ -326,6 +329,7 @@ func RebuildBoardRelations(tx *gorm.DB, boardID uint) error {
 		WHERE r.semantic_board_id = ?
 		  AND s.embedding IS NOT NULL
 		  AND s.cluster_label IS NOT NULL AND s.cluster_label != ''
+		  AND (s.lane_tier IS NULL OR s.lane_tier NOT LIKE 'watch_%')
 		ORDER BY r.period_date ASC, s.id ASC
 	`, boardID).Scan(&allSections).Error; err != nil {
 		return fmt.Errorf("query sections: %w", err)
@@ -478,6 +482,7 @@ func writeIdentityEdges(tx *gorm.DB, boardID uint) error {
 			WHERE r.semantic_board_id = ?
 			  AND s.persistent_topic_id IS NOT NULL
 			  AND s.embedding IS NOT NULL
+			  AND (s.lane_tier IS NULL OR s.lane_tier NOT LIKE 'watch_%')
 		),
 		pairs AS (
 			SELECT DISTINCT ON (o1.section_id)

@@ -7,13 +7,16 @@ import type { Article, RssFeed } from '~/types'
 
 const updateArticleMock = vi.fn()
 const bulkUpdateArticlesMock = vi.fn()
+const getFeedsMock = vi.fn()
 
 vi.mock('~/api/categories', () => ({
   useCategoriesApi: () => ({}),
 }))
 
 vi.mock('~/api/feeds', () => ({
-  useFeedsApi: () => ({}),
+  useFeedsApi: () => ({
+    getFeeds: getFeedsMock,
+  }),
 }))
 
 vi.mock('~/api/articles', () => ({
@@ -82,6 +85,34 @@ describe('useApiStore', () => {
     setActivePinia(createPinia())
     updateArticleMock.mockReset()
     bulkUpdateArticlesMock.mockReset()
+    getFeedsMock.mockReset()
+  })
+
+  it('fetchFeeds maps article_summary_enabled to the AI summary toggle', async () => {
+    const { apiStore } = await createStores()
+    getFeedsMock.mockResolvedValue({
+      success: true,
+      data: [{ id: 7, title: 'F', url: 'https://example.com/f', article_summary_enabled: false }],
+    })
+
+    await apiStore.fetchFeeds()
+
+    expect(apiStore.feeds).toHaveLength(1)
+    expect(apiStore.feeds[0]!.articleSummaryEnabled).toBe(false)
+    // 死字段 aiSummaryEnabled 不得再出现在映射产物里（后端从不返回 ai_summary_enabled）
+    expect('aiSummaryEnabled' in apiStore.feeds[0]!).toBe(false)
+  })
+
+  it('fetchFeeds defaults AI summary toggle to false when field missing', async () => {
+    const { apiStore } = await createStores()
+    getFeedsMock.mockResolvedValue({
+      success: true,
+      data: [{ id: 8, title: 'F2', url: 'https://example.com/f2' }],
+    })
+
+    await apiStore.fetchFeeds()
+
+    expect(apiStore.feeds[0]!.articleSummaryEnabled).toBe(false)
   })
 
   it('markAllAsRead via articlesStore clears apiStore feed unread counts', async () => {

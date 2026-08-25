@@ -103,6 +103,7 @@
 | `queues` | tag-queue / embedding-queue / merge-reembedding-queue 的 retry | 复用 `EmbeddingQueuePanel` + `TagQueuePanel`；retry 后任务状态异步变化 |
 | `ai-providers` / `capability-routes` | provider 凭据、能力路由绑定 | 复用 `features/ai/` 面板；表单提交走 `api/aiAdmin` |
 | `feeds` | 订阅源主列表 + 详情编辑 | `FeedMasterList` + `FeedDetailEditor` |
+| `feeds` | 管理工具条（增/导入/导出） | 顶部 `.feeds-toolbar__btn` × 4，文本依次为「添加订阅源 / 添加分类 / 导入 / 导出」（slim-header-feed-actions 起，首页顶栏不再有此入口）；前 3 个分别打开 `AddFeedDialog` / `AddCategoryDialog` / `ImportOpmlDialog`（`.app-dialog`），「导出」直接下载 `feeds-export-<date>.opml` 无对话框 |
 
 ---
 

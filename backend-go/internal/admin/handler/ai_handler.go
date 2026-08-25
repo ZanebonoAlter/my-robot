@@ -17,18 +17,21 @@ import (
 )
 
 type UpsertProviderRequest struct {
-	Name           string   `json:"name" binding:"required"`
-	ProviderType   string   `json:"provider_type"`
-	BaseURL        string   `json:"base_url" binding:"required"`
-	APIKey         string   `json:"api_key"`
-	Model          string   `json:"model" binding:"required"`
-	Enabled        *bool    `json:"enabled"`
-	TimeoutSeconds int      `json:"timeout_seconds"`
-	MaxTokens      *int     `json:"max_tokens"`
-	Temperature    *float64 `json:"temperature"`
-	EnableThinking *bool    `json:"enable_thinking"`
-	Metadata       string   `json:"metadata"`
-	ClearAPIKey    bool     `json:"clear_api_key"`
+	Name              string   `json:"name" binding:"required"`
+	ProviderType      string   `json:"provider_type"`
+	BaseURL           string   `json:"base_url" binding:"required"`
+	APIKey            string   `json:"api_key"`
+	Model             string   `json:"model" binding:"required"`
+	Enabled           *bool    `json:"enabled"`
+	TimeoutSeconds    int      `json:"timeout_seconds"`
+	MaxTokens         *int     `json:"max_tokens"`
+	Temperature       *float64 `json:"temperature"`
+	EnableThinking    *bool    `json:"enable_thinking"`
+	Metadata          string   `json:"metadata"`
+	ClearAPIKey       bool     `json:"clear_api_key"`
+	ModelKind         string   `json:"model_kind"`
+	StartCommand      string   `json:"start_command"`
+	ClearStartCommand bool     `json:"clear_start_command"`
 }
 
 type UpdateRouteRequest struct {
@@ -49,18 +52,20 @@ func ListProviders(c *gin.Context) {
 	data := make([]gin.H, 0, len(providers))
 	for _, provider := range providers {
 		data = append(data, gin.H{
-			"id":                 provider.ID,
-			"name":               provider.Name,
-			"provider_type":      provider.ProviderType,
-			"base_url":           provider.BaseURL,
-			"model":              provider.Model,
-			"enabled":            provider.Enabled,
-			"timeout_seconds":    provider.TimeoutSeconds,
-			"max_tokens":         provider.MaxTokens,
-			"temperature":        provider.Temperature,
-			"enable_thinking":    provider.EnableThinking,
-			"metadata":           provider.Metadata,
-			"api_key_configured": strings.TrimSpace(provider.APIKey) != "",
+			"id":                       provider.ID,
+			"name":                     provider.Name,
+			"provider_type":            provider.ProviderType,
+			"base_url":                 provider.BaseURL,
+			"model":                    provider.Model,
+			"enabled":                  provider.Enabled,
+			"timeout_seconds":          provider.TimeoutSeconds,
+			"max_tokens":               provider.MaxTokens,
+			"temperature":              provider.Temperature,
+			"enable_thinking":          provider.EnableThinking,
+			"metadata":                 provider.Metadata,
+			"model_kind":               provider.ModelKind,
+			"start_command_configured": strings.TrimSpace(provider.StartCommand) != "",
+			"api_key_configured":       strings.TrimSpace(provider.APIKey) != "",
 		})
 	}
 
@@ -80,6 +85,8 @@ func UpsertProvider(c *gin.Context) {
 		BaseURL:        strings.TrimSpace(req.BaseURL),
 		APIKey:         strings.TrimSpace(req.APIKey),
 		Model:          strings.TrimSpace(req.Model),
+		ModelKind:      strings.TrimSpace(req.ModelKind),
+		StartCommand:   strings.TrimSpace(req.StartCommand),
 		TimeoutSeconds: req.TimeoutSeconds,
 		MaxTokens:      req.MaxTokens,
 		Temperature:    req.Temperature,
@@ -119,10 +126,16 @@ func UpdateProvider(c *gin.Context) {
 	provider.Name = strings.TrimSpace(req.Name)
 	provider.ProviderType = strings.TrimSpace(req.ProviderType)
 	provider.BaseURL = strings.TrimSpace(req.BaseURL)
+	provider.ModelKind = strings.TrimSpace(req.ModelKind)
 	if req.ClearAPIKey {
 		provider.APIKey = ""
 	} else if strings.TrimSpace(req.APIKey) != "" {
 		provider.APIKey = strings.TrimSpace(req.APIKey)
+	}
+	if req.ClearStartCommand {
+		provider.StartCommand = ""
+	} else if strings.TrimSpace(req.StartCommand) != "" {
+		provider.StartCommand = strings.TrimSpace(req.StartCommand)
 	}
 	provider.Model = strings.TrimSpace(req.Model)
 	provider.TimeoutSeconds = req.TimeoutSeconds
@@ -292,7 +305,7 @@ func GetSettings(c *gin.Context) {
 	var settings []models.AISettings
 	repository.Repo.DB().Order("key ASC").Find(&settings)
 	for _, s := range settings {
-		if s.Key == "summary_config" || s.Key == "firecrawl_config" {
+		if s.Key == "summary_config" || s.Key == "firecrawl_config" || s.Key == "bocha_config" {
 			continue
 		}
 		data[s.Key] = s.Value
@@ -328,10 +341,14 @@ func SaveSettings(c *gin.Context) {
 }
 
 type TestConnectionRequest struct {
-	BaseURL      string `json:"base_url" binding:"required"`
+	// Inline credentials path (unsaved forms, e.g. the primary model editor).
+	BaseURL      string `json:"base_url"`
 	APIKey       string `json:"api_key"`
 	Model        string `json:"model"`
 	ProviderType string `json:"provider_type"`
+	// Stored-provider path (saved backup providers): loads the full config
+	// (including the stored API key, never returned to the client) by ID.
+	ProviderID uint `json:"provider_id"`
 }
 
 func TestConnection(c *gin.Context) {
@@ -346,6 +363,18 @@ func TestConnection(c *gin.Context) {
 		APIKey:       strings.TrimSpace(req.APIKey),
 		Model:        strings.TrimSpace(req.Model),
 		ProviderType: strings.TrimSpace(req.ProviderType),
+	}
+	if req.ProviderID > 0 {
+		var stored models.AIProvider
+		if err := repository.Repo.DB().First(&stored, req.ProviderID).Error; err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"success": false, "error": "provider not found"})
+			return
+		}
+		provider = stored
+	}
+	if provider.BaseURL == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "base_url is required"})
+		return
 	}
 
 	result, err := airouter.TestConnection(c.Request.Context(), provider)

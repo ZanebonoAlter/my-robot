@@ -1,12 +1,16 @@
 package dataenrichment
 
 import (
+	"strings"
+
 	"gorm.io/gorm"
 
 	"syntopica-backend/internal/dataenrichment/handler"
 	"syntopica-backend/internal/dataenrichment/repository"
 	"syntopica-backend/internal/dataenrichment/service"
 	"syntopica-backend/internal/platform/airouter"
+	"syntopica-backend/internal/platform/aisettings"
+	"syntopica-backend/internal/platform/config"
 )
 
 // InitRepository initializes the dataenrichment repository singleton.
@@ -55,9 +59,35 @@ func Init(db *gorm.DB) {
 	boardLister := NewDBBoardLister(db)
 	laneLister := NewDBLaneLister(db)
 	laneDetailRenderer := service.NewRendererLaneDetailAdapter(lifelineReader, renderer)
+
+	// web_search backend: Bocha client reads credentials dynamically on each
+	// Search via a provider (DB(ui) > env > config.yaml > empty). Reading on
+	// demand lets UI changes take effect without restart (mirrors Firecrawl
+	// reading DB per job). When all sources are empty the provider returns "",
+	// BochaWebSearcher.Search returns a "not configured" error, and
+	// executeWebSearch degrades to an error JSON (same semantics as Noop).
+	// NoopWebSearcher is retained only as a test stub.
+	bochaProvider := service.BochaConfigProvider(func() (string, string) {
+		// 1. DB (UI) first. enabled 缺省视为启用（仅显式 false 才跳过 DB）。
+		if cfg, _, err := aisettings.LoadBochaConfig(); err == nil && cfg != nil {
+			if v, ok := cfg["enabled"].(bool); !ok || v {
+				if k, _ := cfg["api_key"].(string); strings.TrimSpace(k) != "" {
+					ep, _ := cfg["endpoint"].(string)
+					return k, ep
+				}
+			}
+		}
+		// 2. env / config.yaml 兑底。
+		if c := config.AppConfig; c != nil {
+			return c.Bocha.APIKey, c.Bocha.Endpoint
+		}
+		return "", ""
+	})
+
 	toolRegistry := service.NewRegistry(
 		service.NewDefaultHTTPFetcher(),
-		service.WithWebSearcher(service.NoopWebSearcher{}),
+		service.WithWebSearcher(service.NewBochaWebSearcher(bochaProvider)),
+		service.WithPageFetcher(service.NewReaderPageFetcher()),
 		service.WithBoardLister(boardLister),
 		service.WithLaneLister(laneLister),
 		service.WithLaneDetailRenderer(laneDetailRenderer),

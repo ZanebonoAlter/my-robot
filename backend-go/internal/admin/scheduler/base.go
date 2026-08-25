@@ -206,17 +206,26 @@ func (s *BaseScheduler) Start() error {
 // Stop implements Scheduler.Stop.
 func (s *BaseScheduler) Stop() {
 	s.mu.Lock()
-	defer s.mu.Unlock()
-
 	if !s.running {
+		s.mu.Unlock()
 		return
 	}
-
 	s.running = false
 	close(s.stopChan)
+	s.mu.Unlock()
+
+	// Wait outside the lock: runJob acquires s.mu to update state before
+	// and after executing the job, so holding s.mu while waiting would
+	// deadlock whenever Stop races an in-flight tick (the loop could never
+	// exit and wg.Wait would block forever). Concurrent Stop/Start is not
+	// supported (single-user system), so no new loop can be added while
+	// we wait.
 	s.wg.Wait()
+
+	s.mu.Lock()
 	s.stopChan = make(chan struct{})
 	s.nextRun = nil
+	s.mu.Unlock()
 }
 
 // TriggerNow implements the Scheduler interface. It executes the job

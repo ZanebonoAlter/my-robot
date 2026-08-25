@@ -10,9 +10,11 @@ export type SectionKey =
   | 'feeds'
   | 'ai-providers'
   | 'capability-routes'
+  | 'ai-health'
   | 'queues'
   | 'preferences'
   | 'firecrawl'
+  | 'bocha'
   | 'rsshub'
   | 'proxy'
   | 'schedulers'
@@ -28,9 +30,11 @@ const sections: SectionMeta[] = [
   { key: 'feeds', label: '订阅源', description: '管理 RSS 订阅源的刷新、抓取和标签配置', icon: 'mdi:rss' },
   { key: 'ai-providers', label: 'AI 模型', description: '配置主模型与备用模型提供商', icon: 'mdi:brain' },
   { key: 'capability-routes', label: '能力路由', description: '按能力分配模型优先级与降级顺序', icon: 'mdi:routes' },
+  { key: 'ai-health', label: 'AI 健康', description: '各路由主模型连通性与本地模型自动拉起开关', icon: 'mdi:heart-pulse' },
   { key: 'queues', label: '队列', description: 'Embedding 与标签打标队列的监控', icon: 'mdi:format-list-bulleted' },
   { key: 'preferences', label: '兴趣画像', description: '按版块查看兴趣标签与权重，驱动订阅源推荐', icon: 'mdi:account-heart-outline' },
   { key: 'firecrawl', label: 'Firecrawl', description: 'Firecrawl 服务配置与抓取参数', icon: 'mdi:spider' },
+  { key: 'bocha', label: '博查搜索', description: '数据增强联网检索的博查 web 搜索配置', icon: 'mdi:magnify' },
   { key: 'rsshub', label: 'RSSHub', description: '订阅源发现的 RSSHub 实例地址', icon: 'mdi:radio-tower' },
   { key: 'proxy', label: '出站代理', description: 'feed 抓取等所有外部请求的全局代理', icon: 'mdi:lan-connect' },
   { key: 'schedulers', label: '定时任务', description: '定时任务状态与手动触发', icon: 'mdi:clock-outline' },

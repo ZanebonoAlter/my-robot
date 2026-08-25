@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"time"
 
+	"gorm.io/gorm"
+
 	"syntopica-backend/internal/admin/repository"
 	"syntopica-backend/internal/models"
 	"syntopica-backend/internal/platform/logging"
@@ -30,6 +32,14 @@ func TagQualityScoreJob(ctx context.Context) (*JobResult, error) {
 		logging.Warnf("TagQualityScore: failed to reconcile auxiliary label ref_count: %v", result.Error)
 	}
 
+	// Reconcile: fix denormalized feed_count on topic tags. Tagging paths do
+	// not maintain it incrementally (only hard-merge recomputes it), so
+	// list/clustering ordering by feed_count would drift over time without
+	// this periodic full recalculation.
+	if err := RecalculateTopicTagFeedCounts(repository.Repo.DB()); err != nil {
+		logging.Warnf("TagQualityScore: failed to reconcile topic tag feed_count: %v", err)
+	}
+
 	// Reconcile: remove orphan auxiliary labels
 	var orphanAuxDeleted int64
 	cutoff := time.Now().AddDate(0, 0, -1)
@@ -52,4 +62,20 @@ func TagQualityScoreJob(ctx context.Context) (*JobResult, error) {
 		},
 		Summary: fmt.Sprintf("quality scores recomputed (orphan_aux_deleted=%d)", orphanAuxDeleted),
 	}, nil
+}
+
+// RecalculateTopicTagFeedCounts rebuilds the denormalized feed_count on
+// topic_tags as the number of DISTINCT feeds whose articles reference the tag
+// via article_topic_tags. Called periodically by TagQualityScoreJob because
+// tagging paths do not maintain feed_count incrementally (only hard-merge
+// recomputes it), so ordering by feed_count would otherwise drift over time.
+func RecalculateTopicTagFeedCounts(db *gorm.DB) error {
+	return db.Exec(`
+		UPDATE topic_tags
+		SET feed_count = (
+			SELECT COUNT(DISTINCT a.feed_id)
+			FROM article_topic_tags att
+			JOIN articles a ON a.id = att.article_id
+			WHERE att.topic_tag_id = topic_tags.id
+		)`).Error
 }

@@ -1,5 +1,6 @@
 # 偏好向量画像与订阅源发现（Discovery）
 
+<!-- doc-impact-applies: backend-go/internal/admin/service/, backend-go/internal/admin/handler/, backend-go/internal/admin/repository/ | section=业务约束与不变量 -->
 > 大功能：阅读行为 → 偏好向量画像（按 SemanticBoard 聚合）→ 驱动 RSSHub 订阅源发现（向量粗筛 + LLM 精排 + 卡片状态机）→ 一键/填参订阅落地；问答式交互做冷启动。
 > 跨端。互补：`flow/reading.md`（阅读行为采集，本 flow 的权重源）、`flow/scheduler.md`（`preference_profile_update` / `rsshub_catalog_sync` 两 job）。
 >
@@ -79,10 +80,10 @@ accept：选定值/输入值走原 accept parameters 路径（直订/填参验�
 
 ## 业务约束与不变量
 
-> 本节同时是 `scripts/doc-impact.sh context` 的数据源——改 `internal/admin/`（偏好画像 / 发现 / 目录同步）代码前会被自动 dump，必读。
+> 本节同时是 constraint-injection extension 的注入数据源——改 `internal/admin/`（偏好画像 / 发现 / 目录同步） 代码前会被自动注入 system prompt，必读。
 
 1. **偏好向量 = 行为加权标签质心，按版块分桶（全量重建幂等）**：`vec(board) = normalize(Σ w(tag)×tag_embedding(tag))`，`w(tag) = Σ behavior_weight × exp(-days/30)`，`behavior_weight`：`favorite=1.0 / 深读(scroll≥80% 或 time≥120s)=0.6 / 普通 open=0.3`。标签经 `topic_tag_board_labels` 分桶（一标签最多 3 版块都计入），未挂版块标签进全局桶。每桶最小标签数不足退全局桶。`RecomputeAll` 全量重建幂等——**只动 `source=behavior` 行，`source=seed` 行 MUST NOT 被覆盖**（种子与行为分行，重算清空 behavior 行重算，seed 行由问答独立维护）。改权重/衰减属于业务语义变更，非纯重构。
-2. **种子加权合并累积（非覆盖）**：问答兴趣表达 embedding 与板块向量匹配（相似度 ≥ `SeedMatchThresholdDefault=0.5` 落对应版块，否则落全局桶），以 `source=seed` 写入 `preference_vectors`，**保 `UNIQUE(board_id, source)` 单行**：upsert 时 `new_vec = normalize(α×incoming + (1−α)×existing)`（`SeedMergeAlphaDefault=0.4`，均可配），`tag_weights` 同步合并 top 列表。多次问答落同版块 = 累积非覆盖。
+2. **种子加权合并累积（非覆盖）**：问答兴趣表达 embedding 与版块向量匹配（相似度 ≥ `SeedMatchThresholdDefault=0.5` 落对应版块，否则落全局桶），以 `source=seed` 写入 `preference_vectors`，**保 `UNIQUE(board_id, source)` 单行**：upsert 时 `new_vec = normalize(α×incoming + (1−α)×existing)`（`SeedMergeAlphaDefault=0.4`，均可配），`tag_weights` 同步合并 top 列表。多次问答落同版块 = 累积非覆盖。
 3. **维度 / 模型一致性校验阻断**：`preference_vectors` / `route_embeddings` 入库记 `dimension` / `model`；重算 / 粗筛前校验与当前 `embedding_config` 同维同模型，不一致则**报错并阻断该轮**（不静默算错）。恢复路径：`source=behavior` 行下次重算自动按新 tag 向量重建（纯派生）；`source=seed` 行非派生不可自动重建，需重新问答或手动触发种子重嵌（重嵌时清空对应 seed 行让用户重新表达，避免用错维度向量污染画像）。
 4. **recommendation_hash 幂等（不含 source，qa/manual 共享池）**：`recommendation_hash = hash(route_id + board_id)`，**不含 source**——`qa` 与 `manual_refresh` 共享同一幂等池与 dismiss 冷却池。同 hash 已有 pending 行则不重复入库（符合「同源不重复推荐」语义）；问答先占坑的 route+board，手动刷新不再重复入库，反之亦然。此为预期，非 bug。
 5. **dismiss 冷却跨 source 生效（默认 30 天）**：被 dismiss 的推荐在 `DismissCooldownDaysDefault=30`（可配）天内，同 hash 下一轮生成被 `countDismissedInCooldown` 拦截。**冷却同样按 hash 跨 source**：用户拒绝的源换皮（qa 重出 / 手动刷新重出）不再推。沿用 `board_upgrade_suggestions` 已验证的 `suggestion_hash` 幂等 + `CountDismissedInCooldown` 模式。

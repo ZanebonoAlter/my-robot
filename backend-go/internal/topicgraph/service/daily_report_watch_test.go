@@ -1,13 +1,18 @@
 package service
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
 	"testing"
 	"time"
 
+	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"gorm.io/gorm"
 
+	"syntopica-backend/internal/platform/airouter"
 	"syntopica-backend/internal/topicgraph/repository"
 )
 
@@ -123,4 +128,293 @@ func TestWatchHitJSONSchemaRoundtrip(t *testing.T) {
 	require.Len(t, parsed.Hits, 1)
 	assert.Equal(t, uint(1), parsed.Hits[0].WatchID)
 	assert.Equal(t, "test reason", parsed.Hits[0].Reason)
+}
+
+// ── Dual-track watch evaluation (watch-keyword-and-quickadd) ─────────────────
+
+// countingChat wraps a watchChatFunc and counts invocations, so tests can
+// assert the keyword branch makes ZERO AI calls.
+type countingChat struct {
+	calls int
+}
+
+func (cc *countingChat) f(_ context.Context, _ airouter.ChatRequest) (*airouter.ChatResult, error) {
+	cc.calls++
+	return &airouter.ChatResult{Content: `{"hits":[]}`}, nil
+}
+
+// watchTestDB is a lightweight in-memory DB for EvaluateWatchHits dual-track
+// tests (watches + hits only; no section/thread tables needed — keyword
+// branch reads threads via repository.Repo, seeded via ListWatchSectionTexts*
+// queries against the sections/threads tables below).
+func watchTestDB(t *testing.T) *gorm.DB {
+	t.Helper()
+	db, err := gorm.Open(sqlite.Open(fmt.Sprintf("file:%s?mode=memory&cache=shared", t.Name())), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(
+		&repository.BoardTopicWatch{},
+		&repository.TopicWatchHit{},
+		&repository.BoardDailyReport{},
+		&repository.DailyReportSection{},
+		&repository.DailyReportThread{},
+	))
+	return db
+}
+
+func seedWatchReportSectionThread(t *testing.T, db *gorm.DB, boardID uint, threadTitle, threadSummary string) (*repository.BoardDailyReport, *repository.DailyReportSection) {
+	t.Helper()
+	now := repository.NormalizeReportDate(time.Now())
+	report := repository.BoardDailyReport{
+		SemanticBoardID: boardID,
+		PeriodDate:      now,
+		Title:           "dual-track test report",
+		Status:          "completed",
+	}
+	require.NoError(t, db.Create(&report).Error)
+	sec := repository.DailyReportSection{
+		ReportID:     report.ID,
+		ClusterLabel: "section containing keywords",
+		Embedding:    repository.FloatsToPgVector([]float64{0}),
+	}
+	require.NoError(t, db.Create(&sec).Error)
+	th := repository.DailyReportThread{
+		ReportID:  report.ID,
+		SectionID: sec.ID,
+		Title:     threadTitle,
+		Summary:   threadSummary,
+	}
+	require.NoError(t, db.Create(&th).Error)
+	return &report, &sec
+}
+
+// keyword watches go through the text branch with ZERO AI calls (chat=0).
+func TestEvaluateWatchHits_KeywordTrackZeroAICalls(t *testing.T) {
+	db := watchTestDB(t)
+	original := repository.Repo
+	repository.Repo = repository.NewTopicGraphRepository(db)
+	t.Cleanup(func() { repository.Repo = original })
+
+	report, sec := seedWatchReportSectionThread(t, db, 1, "ASML 光刻机对华出口", "")
+
+	watch := repository.BoardTopicWatch{
+		SemanticBoardID: 1,
+		Label:           "ASML|镓锗 出口",
+		Type:            repository.WatchTypeKeyword,
+		Status:          repository.WatchStatusActive,
+	}
+	require.NoError(t, db.Create(&watch).Error)
+
+	chat := &countingChat{}
+	err := evaluateWatchHitsWithChat(context.Background(), 1, report, []repository.DailyReportSection{*sec}, chat.f)
+	require.NoError(t, err)
+	assert.Zero(t, chat.calls, "keyword track MUST NOT call AI")
+
+	var hits []repository.TopicWatchHit
+	require.NoError(t, db.Where("watch_id = ?", watch.ID).Find(&hits).Error)
+	require.Len(t, hits, 1)
+	assert.Equal(t, sec.ID, hits[0].SectionID)
+	assert.Equal(t, report.ID, hits[0].ReportID)
+	assert.Equal(t, "含关键字『ASML、出口』", hits[0].Reason)
+}
+
+// label watches keep the existing AI path; a keyword watch in the same board
+// adds text hits without disturbing the AI call count.
+func TestEvaluateWatchHits_LabelTrackStillCallsAI(t *testing.T) {
+	db := watchTestDB(t)
+	original := repository.Repo
+	repository.Repo = repository.NewTopicGraphRepository(db)
+	t.Cleanup(func() { repository.Repo = original })
+
+	report, sec := seedWatchReportSectionThread(t, db, 1, "ASML 光刻机对华出口", "")
+
+	labelWatch := repository.BoardTopicWatch{
+		SemanticBoardID: 1,
+		Label:           "半导体管制",
+		Type:            repository.WatchTypeLabel,
+		Status:          repository.WatchStatusActive,
+	}
+	require.NoError(t, db.Create(&labelWatch).Error)
+	kwWatch := repository.BoardTopicWatch{
+		SemanticBoardID: 1,
+		Label:           "ASML",
+		Type:            repository.WatchTypeKeyword,
+		Status:          repository.WatchStatusActive,
+	}
+	require.NoError(t, db.Create(&kwWatch).Error)
+
+	chatFn := func(_ context.Context, _ airouter.ChatRequest) (*airouter.ChatResult, error) {
+		return &airouter.ChatResult{Content: fmt.Sprintf(`{"hits":[{"watch_id":%d,"section_id":%d,"reason":"AI hit"}]}`, labelWatch.ID, sec.ID)}, nil
+	}
+	err := evaluateWatchHitsWithChat(context.Background(), 1, report, []repository.DailyReportSection{*sec}, chatFn)
+	require.NoError(t, err)
+
+	var labelHits, kwHits []repository.TopicWatchHit
+	require.NoError(t, db.Where("watch_id = ?", labelWatch.ID).Find(&labelHits).Error)
+	require.NoError(t, db.Where("watch_id = ?", kwWatch.ID).Find(&kwHits).Error)
+	assert.Len(t, labelHits, 1, "label track hit written via AI path")
+	assert.Len(t, kwHits, 1, "keyword track hit written via text path in the same run")
+	assert.Equal(t, "AI hit", labelHits[0].Reason)
+	assert.Equal(t, "含关键字『ASML』", kwHits[0].Reason)
+}
+
+// paused watches (either type) are excluded from evaluation entirely.
+func TestEvaluateWatchHits_PausedWatchesSkipped(t *testing.T) {
+	db := watchTestDB(t)
+	original := repository.Repo
+	repository.Repo = repository.NewTopicGraphRepository(db)
+	t.Cleanup(func() { repository.Repo = original })
+
+	report, sec := seedWatchReportSectionThread(t, db, 1, "ASML 光刻机", "")
+
+	paused := repository.BoardTopicWatch{
+		SemanticBoardID: 1,
+		Label:           "ASML",
+		Type:            repository.WatchTypeKeyword,
+		Status:          repository.WatchStatusPaused,
+	}
+	require.NoError(t, db.Create(&paused).Error)
+
+	chat := &countingChat{}
+	err := evaluateWatchHitsWithChat(context.Background(), 1, report, []repository.DailyReportSection{*sec}, chat.f)
+	require.NoError(t, err)
+	assert.Zero(t, chat.calls)
+
+	var count int64
+	db.Model(&repository.TopicWatchHit{}).Count(&count)
+	assert.Zero(t, count, "paused watch must not produce hits")
+}
+
+// instant match hits historical sections within the window and is idempotent
+// with the daily-report-time evaluation (same unique key → one row).
+func TestMatchKeywordInstant_HitsAndDedup(t *testing.T) {
+	db := watchTestDB(t)
+	original := repository.Repo
+	repository.Repo = repository.NewTopicGraphRepository(db)
+	t.Cleanup(func() { repository.Repo = original })
+
+	boardID := uint(1)
+	report, sec := seedWatchReportSectionThread(t, db, boardID, "ASML 光刻机对华出口", "")
+
+	watch := repository.BoardTopicWatch{
+		SemanticBoardID: boardID,
+		Label:           "ASML",
+		Type:            repository.WatchTypeKeyword,
+		Status:          repository.WatchStatusActive,
+	}
+	require.NoError(t, db.Create(&watch).Error)
+
+	n, err := matchKeywordInstantAt(context.Background(), boardID, watch.ID, 14, time.Now())
+	require.NoError(t, err)
+	assert.Equal(t, 1, n)
+
+	// Re-run (idempotency): the unique index dedupes; count stays 1.
+	n2, err := matchKeywordInstantAt(context.Background(), boardID, watch.ID, 14, time.Now())
+	require.NoError(t, err)
+	assert.Equal(t, 1, n2, "matched count reflects sections, not new rows")
+
+	var hitRows []repository.TopicWatchHit
+	require.NoError(t, db.Where("watch_id = ?", watch.ID).Find(&hitRows).Error)
+	assert.Len(t, hitRows, 1, "same (watch,section,report) key must occupy exactly one row")
+
+	// Daily-report-time keyword evaluation writes the same key again → still 1.
+	chat := &countingChat{}
+	require.NoError(t, evaluateWatchHitsWithChat(context.Background(), boardID, report, []repository.DailyReportSection{*sec}, chat.f))
+	require.NoError(t, db.Where("watch_id = ?", watch.ID).Find(&hitRows).Error)
+	assert.Len(t, hitRows, 1, "instant + daily-report match must dedupe to one row")
+	assert.Zero(t, chat.calls)
+}
+
+// window boundary: 14-day window includes day-14, excludes day-15 (T1/T3).
+func TestMatchKeywordInstant_WindowBoundary(t *testing.T) {
+	db := watchTestDB(t)
+	original := repository.Repo
+	repository.Repo = repository.NewTopicGraphRepository(db)
+	t.Cleanup(func() { repository.Repo = original })
+
+	boardID := uint(1)
+	now := time.Now()
+
+	mkReport := func(daysAgo int, title string) {
+		date := repository.NormalizeReportDate(now).AddDate(0, 0, -daysAgo)
+		rep := repository.BoardDailyReport{
+			SemanticBoardID: boardID,
+			PeriodDate:      date,
+			Title:           fmt.Sprintf("report %d days ago", daysAgo),
+			Status:          "completed",
+		}
+		require.NoError(t, db.Create(&rep).Error)
+		sec := repository.DailyReportSection{
+			ReportID:     rep.ID,
+			ClusterLabel: title,
+			Embedding:    repository.FloatsToPgVector([]float64{0}),
+		}
+		require.NoError(t, db.Create(&sec).Error)
+		require.NoError(t, db.Create(&repository.DailyReportThread{
+			ReportID:  rep.ID,
+			SectionID: sec.ID,
+			Title:     title,
+			Summary:   "",
+		}).Error)
+	}
+	mkReport(14, "ASML 十四天前")
+	mkReport(15, "ASML 十五天前")
+
+	watch := repository.BoardTopicWatch{
+		SemanticBoardID: boardID,
+		Label:           "ASML",
+		Type:            repository.WatchTypeKeyword,
+		Status:          repository.WatchStatusActive,
+	}
+	require.NoError(t, db.Create(&watch).Error)
+
+	n, err := matchKeywordInstantAt(context.Background(), boardID, watch.ID, 14, now)
+	require.NoError(t, err)
+	assert.Equal(t, 1, n, "day-14 section is inside the window; day-15 is not")
+}
+
+// empty board (no reports at all): zero hits, no error (T2 / P1 variant).
+func TestMatchKeywordInstant_EmptyBoard(t *testing.T) {
+	db := watchTestDB(t)
+	original := repository.Repo
+	repository.Repo = repository.NewTopicGraphRepository(db)
+	t.Cleanup(func() { repository.Repo = original })
+
+	watch := repository.BoardTopicWatch{
+		SemanticBoardID: 999,
+		Label:           "ASML",
+		Type:            repository.WatchTypeKeyword,
+		Status:          repository.WatchStatusActive,
+	}
+	require.NoError(t, db.Create(&watch).Error)
+
+	n, err := matchKeywordInstantAt(context.Background(), 999, watch.ID, 14, time.Now())
+	require.NoError(t, err)
+	assert.Zero(t, n)
+}
+
+// label watches never instant-match (design: only keyword supports instant).
+func TestMatchKeywordInstant_LabelWatchNeverInstantMatches(t *testing.T) {
+	db := watchTestDB(t)
+	original := repository.Repo
+	repository.Repo = repository.NewTopicGraphRepository(db)
+	t.Cleanup(func() { repository.Repo = original })
+
+	boardID := uint(1)
+	_, _ = seedWatchReportSectionThread(t, db, boardID, "半导体管制 ASML", "")
+
+	labelWatch := repository.BoardTopicWatch{
+		SemanticBoardID: boardID,
+		Label:           "ASML",
+		Type:            repository.WatchTypeLabel,
+		Status:          repository.WatchStatusActive,
+	}
+	require.NoError(t, db.Create(&labelWatch).Error)
+
+	n, err := matchKeywordInstantAt(context.Background(), boardID, labelWatch.ID, 14, time.Now())
+	require.NoError(t, err)
+	assert.Zero(t, n, "label watch must not instant-match")
+
+	var count int64
+	db.Model(&repository.TopicWatchHit{}).Where("watch_id = ?", labelWatch.ID).Count(&count)
+	assert.Zero(t, count, "label watch must produce no instant hit rows")
 }

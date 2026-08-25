@@ -532,17 +532,45 @@ func buildDoneMessage(jobID string, totalSaved int, totalBoards int) map[string]
 }
 
 // triggerBackfillEmbeddings handles POST /api/daily-reports/backfill-embeddings
+// Query: recompute (bool, default false), board_id (optional), since_days
+// (optional, recompute only; default 30, 0 = unlimited).
 func triggerBackfillEmbeddings(c *gin.Context) {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
-	defer cancel()
+	recompute := c.Query("recompute") == "true"
+	var boardID *uint
+	if v := c.Query("board_id"); v != "" {
+		id, err := strconv.ParseUint(v, 10, 64)
+		if err != nil || id == 0 {
+			c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "invalid board_id"})
+			return
+		}
+		uid := uint(id)
+		boardID = &uid
+	}
+	sinceDays := 30
+	if v := c.Query("since_days"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n < 0 {
+			c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "invalid since_days"})
+			return
+		}
+		sinceDays = n
+	}
 
+	// WithTimeout only after validation: early-return paths (400) never spawn
+	// the goroutine, so the context must not be created before them.
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
 	go func() {
-		embedded, matched, err := repository.Repo.BackfillSectionEmbeddings(ctx)
+		// cancel must live inside the worker goroutine: a handler-scoped
+		// `defer cancel()` fires the moment this handler returns (right after
+		// the "processing" JSON), canceling the async backfill's first embed
+		// call (observed: `Post ...: context canceled`).
+		defer cancel()
+		embedded, skipped, matched, err := repository.Repo.BackfillSectionEmbeddings(ctx, recompute, boardID, sinceDays)
 		if err != nil {
 			logging.Errorf("daily-report: backfill failed: %v", err)
 			return
 		}
-		logging.Infof("daily-report: backfill complete: %d sections embedded, %d sections matched", embedded, matched)
+		logging.Infof("daily-report: backfill complete: %d sections embedded, %d skipped, %d sections matched", embedded, skipped, matched)
 	}()
 
 	c.JSON(http.StatusOK, gin.H{

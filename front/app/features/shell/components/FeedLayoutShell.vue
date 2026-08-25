@@ -52,8 +52,6 @@ const selectedFeed = ref<string | null>(null)
 const selectedArticle = ref<Article | null>(null)
 
 const showAddFeedDialog = ref(false)
-const showAddCategoryDialog = ref(false)
-const showImportDialog = ref(false)
 
 const router = useRouter()
 
@@ -407,22 +405,6 @@ async function handleMarkAllRead() {
   await fetchGlobalUnreadCount()
 }
 
-async function handleExportOpml() {
-  try {
-    const blob = await apiStore.exportOpml()
-    const url = window.URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = `feeds-export-${new Date().toISOString().split('T')[0]}.opml`
-    a.click()
-    window.URL.revokeObjectURL(url)
-  } catch (error) {
-    refreshMessage.value = '导出失败'
-    refreshMessageType.value = 'error'
-    showRefreshMessage.value = true
-  }
-}
-
 function toggleSidebar() {
   sidebarCollapsed.value = !sidebarCollapsed.value
 }
@@ -458,10 +440,6 @@ import '~/components/FeedLayout.css'
       @toggle-sidebar="toggleSidebar"
       @refresh="handleRefresh"
       @mark-all-read="handleMarkAllRead"
-      @add-feed="showAddFeedDialog = true"
-      @add-category="showAddCategoryDialog = true"
-      @import-opml="showImportDialog = true"
-      @export-opml="handleExportOpml"
       @settings="router.push('/settings')"
       @close-refresh-message="showRefreshMessage = false"
     />
@@ -531,13 +509,6 @@ import '~/components/FeedLayout.css'
       @added="() => {}"
     />
 
-    <!-- 添加分类对话框 -->
-    <AddCategoryDialog
-      v-if="showAddCategoryDialog"
-      @close="showAddCategoryDialog = false"
-      @added="() => {}"
-    />
-
     <!-- 编辑分类对话框 -->
     <EditCategoryDialog
       v-if="editCategoryId && editingCategory"
@@ -555,12 +526,6 @@ import '~/components/FeedLayout.css'
       @deleted="() => {}"
     />
 
-    <!-- 导入 OPML 对话框 -->
-    <ImportOpmlDialog
-      v-if="showImportDialog"
-      @close="showImportDialog = false"
-      @imported="() => {}"
-    />
   </div>
 </template>
 

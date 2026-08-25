@@ -43,6 +43,13 @@ var (
 	TestConnection = handler.TestConnection
 )
 
+// AI model health handlers (ai-model-health)
+var (
+	GetAIHealth        = handler.GetAIHealth
+	SetAutoStartModels = handler.SetAutoStartModels
+	ReprobeAIHealth    = handler.ReprobeAIHealth
+)
+
 // Scheduler handlers
 var (
 	GetSchedulersStatus         = handler.GetSchedulersStatus
@@ -92,6 +99,8 @@ var (
 	SaveRSSHubSettings     = handler.SaveRSSHubSettings
 	GetProxySettings       = handler.GetProxySettings
 	SaveProxySettings      = handler.SaveProxySettings
+	GetBochaSettings       = handler.GetBochaSettings
+	SaveBochaSettings      = handler.SaveBochaSettings
 )
 
 // Route param option dictionary handlers (feed-param-options)

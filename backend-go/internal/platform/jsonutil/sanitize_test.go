@@ -132,3 +132,74 @@ func TestSanitizeLLMJSON_RealOllamaResponse(t *testing.T) {
 	require.NoError(t, json.Unmarshal([]byte(result), &parsed))
 	require.Len(t, parsed, 2)
 }
+
+func TestSanitizeLLMJSON_FixesTrailingCommas(t *testing.T) {
+	input := `{"tags":[{"label":"A","category":"event",},{"label":"B","category":"keyword",},],}`
+
+	result := SanitizeLLMJSON(input)
+	require.True(t, json.Valid([]byte(result)), "result should be valid JSON: %s", result)
+
+	var parsed struct {
+		Tags []struct {
+			Label string `json:"label"`
+		} `json:"tags"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(result), &parsed))
+	require.Len(t, parsed.Tags, 2)
+	require.Equal(t, "A", parsed.Tags[0].Label)
+	require.Equal(t, "B", parsed.Tags[1].Label)
+}
+
+func TestSanitizeLLMJSON_FixesTrailingCommasInBareArray(t *testing.T) {
+	input := `[{"label":"A",},{"label":"B",},]`
+
+	result := SanitizeLLMJSON(input)
+	require.True(t, json.Valid([]byte(result)), "result should be valid JSON: %s", result)
+}
+
+func TestSanitizeLLMJSON_PreservesCommaInsideStringLiteral(t *testing.T) {
+	// The ",}" sequence inside a description string must survive verbatim.
+	input := `[{"label":"X","description":"a,}b"},{"label":"Y","description":"ok"}]`
+
+	result := SanitizeLLMJSON(input)
+	require.True(t, json.Valid([]byte(result)), "result should be valid JSON: %s", result)
+
+	var parsed []struct {
+		Label       string `json:"label"`
+		Description string `json:"description"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(result), &parsed))
+	require.Len(t, parsed, 2)
+	require.Equal(t, "a,}b", parsed[0].Description)
+}
+
+func TestSanitizeLLMJSON_TrailingCommaInsideStringLiteralNotTouched(t *testing.T) {
+	// The string contains a trailing-comma-like sequence; only the REAL
+	// trailing comma (after the closing quote) must be stripped.
+	input := `[{"label":"X","description":"ends with,}",},{"label":"Y"}]`
+
+	result := SanitizeLLMJSON(input)
+	require.True(t, json.Valid([]byte(result)), "result should be valid JSON: %s", result)
+
+	var parsed []struct {
+		Label       string `json:"label"`
+		Description string `json:"description"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(result), &parsed))
+	require.Len(t, parsed, 2)
+	require.Equal(t, "ends with,}", parsed[0].Description)
+}
+
+func TestSanitizeLLMJSON_MultilineTrailingComma(t *testing.T) {
+	input := "{\n  \"tags\": [\n    {\"label\": \"A\"},\n  ],\n}"
+
+	result := SanitizeLLMJSON(input)
+	require.True(t, json.Valid([]byte(result)), "result should be valid JSON: %s", result)
+}
+
+func TestSanitizeLLMJSON_ValidJSONWithCommaStructuresUnchanged(t *testing.T) {
+	input := `{"a":"1,}","b":[1,2],"c":{"d":true}}`
+
+	result := SanitizeLLMJSON(input)
+	require.Equal(t, input, result)
+}

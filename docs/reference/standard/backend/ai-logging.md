@@ -1,7 +1,7 @@
 # AI 调用记录规范（AI Call Logging）
 
 <!--
-doc-impact-applies: backend-go/internal/platform/airouter/, backend-go/internal/dataenrichment/
+doc-impact-applies: backend-go/internal/platform/airouter/, backend-go/internal/dataenrichment/ | section=Requirements
 -->
 
 > **权威源**：本文件是后端所有 AI/LLM 调用"必须记录什么、怎么记录"的唯一权威。

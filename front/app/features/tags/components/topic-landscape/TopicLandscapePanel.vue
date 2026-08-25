@@ -329,7 +329,7 @@ function onSelectTopic(id: number) {
   cursor: not-allowed;
 }
 
-/* WS 进度（mirror NarrativeGenerateDialog 风格） */
+/* WS 进度（mirror DailyReportGenerateDialog 风格） */
 .tlp-progress {
   display: flex;
   flex-direction: column;

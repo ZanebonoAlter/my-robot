@@ -95,8 +95,6 @@ func RunAutoMigrate(db *gorm.DB) error {
 		&models.FeedRecommendation{},
 		&models.FirecrawlJob{},
 		&models.TagJob{},
-		&models.NarrativeSummary{},
-		&models.NarrativeBoard{},
 	}
 	allModels = append(allModels, extraModels...)
 	return db.AutoMigrate(allModels...)

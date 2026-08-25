@@ -58,13 +58,6 @@ func exportSpecs() []ExportSpec {
 				"last_execution_result": clearAll,
 			},
 		},
-		{
-			Table:   "narrative_boards",
-			Columns: []string{"id", "period_date", "name", "description", "scope_type", "scope_category_id", "scope_label", "event_tag_ids", "prev_board_ids", "semantic_board_id", "is_system", "created_at"},
-			// Keep boards whose period falls in the window OR that are referenced by recent summaries.
-			Where: "period_date >= NOW() - INTERVAL ':days days'",
-		},
-
 		// --- Layer 1: topic_tags batch #1 (unmerged, recent) ---
 		// Self-reference topic_tags_merged_into_id_fkey requires merged-into rows
 		// to exist before their dependents, so export unmerged rows first.
@@ -157,12 +150,6 @@ func exportSpecs() []ExportSpec {
 			Columns: []string{"id", "article_id", "topic_tag_id", "score", "source", "created_at", "updated_at"},
 			Where:   recent,
 		},
-		{
-			Table:   "narrative_summaries",
-			Columns: []string{"id", "title", "summary", "status", "period", "period_date", "generation", "parent_ids", "related_tag_ids", "related_article_ids", "source", "scope_type", "scope_category_id", "scope_label", "board_id", "created_at", "updated_at"},
-			Where:   "period_date >= NOW() - INTERVAL ':days days'",
-		},
-
 		// --- Layer 4: daily report (detective wall core data) ---
 		{
 			Table:   "board_daily_reports",

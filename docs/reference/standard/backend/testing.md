@@ -1,5 +1,9 @@
 # 后端测试（testing + testcontainer）
 
+<!--
+doc-impact-applies: _test.go, backend-go/internal/testutil, tests/workflow, tests/firecrawl | section=🛑 DSN 安全红线（事故教训 — 不可违反）
+-->
+
 > **权威源**：本文件是后端测试约定的唯一权威。运行门禁见《开发执行规范》§4.1、集成测试执行纪律见 §6。
 > 含 🛑 **DSN 安全红线（事故教训）**，必须遵守。
 
@@ -77,6 +81,7 @@ func TestSomethingUnit(t *testing.T) {
 - `testutil` 包**没有**默认 DSN，**不读取**任何环境变量（包括历史上的 `TEST_DB_DSN`）
 - 它**只能**启动隔离容器，**无法**连接 `docker-compose.pg.yml` 跑的开发库（那是生产数据所在）
 - **禁止**重新引入任何「默认数据库连接」或「env 覆盖」机制
+- 集成测试文件命名：`xxx_test.go` 与源码同包；需要 Docker 的用 testcontainers，轻量 CRUD 可用内存 SQLite（见「测试分层」表）
 
 ## 集成测试常见陷阱
 

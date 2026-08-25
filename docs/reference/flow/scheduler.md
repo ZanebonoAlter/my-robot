@@ -1,7 +1,7 @@
 # 定时任务流程（Scheduler）
 
 <!-- doc-impact-applies: backend-go/internal/admin/scheduler/ | section=业务约束与不变量 -->
-> 大功能：横切的调度器集合（feed 刷新、内容增强、AI 总结、Digest/叙事、标签、状态回传、手动 trigger）。
+> 大功能：横切的调度器集合（feed 刷新、内容增强、AI 总结、Digest/日报、标签、状态回传、手动 trigger）。
 > 跨端。互补：`architecture/runtime.md` §Scheduler 状态、§优雅退出。
 
 ## 需求说明
@@ -122,4 +122,5 @@ auto_refresh scheduler
 | 2026-08-04 | ai-model-health-gate | 健康门接入分析暂停：`IsPaused` 改为「用户暂停或模型不健康」；启动探针遍历路由主 provider 探活（宽松判定：embedding 主通且 ≥1 llm 主通），不健康时分析类 job 跳过；`auto_start_models` 开关 + provider `start_command` 启动自动拉起本地模型（fire-and-forget，不托管进程、不记 PID） | [`openspec/changes/archive/2026-08-04-ai-model-health-gate`](../../../openspec/changes/archive/2026-08-04-ai-model-health-gate) |
 | 2026-08-18 | 自动拉起防重复（直接修复） | 修复慢启动模型导致的进程无限堆积：同一次探测内同 provider 多路由只探/拉一次；成功拉起后 10 分钟冷却窗口内 reprobe 不再执行 start_command 只继续轮询；`RunStartupProbe` 全局互斥，进行中时新触发的 reprobe 直接跳过 | 直接修复（用户豁免 openspec 流程），行为约束见 [`openspec/specs/ai-model-health/spec.md`](../../../openspec/specs/ai-model-health/spec.md) |
 | 2026-08-19 | ai-health-reprobe | 健康门自愈：快照 not healthy 时后台定时重探（默认 60s，健康后停手）+ `POST /api/ai/health/reprobe` 手动异步重探（in-flight 返回 skipped）+ 前端设置页/banner「重新检测」入口；修复全局代理污染——httpclient 对回环地址（localhost/127.x/::1）直连，本地 LLM 探测不再被代理 502 拦截 | [`openspec/changes/archive/2026-08-19-ai-health-reprobe`](../../../openspec/changes/archive/2026-08-19-ai-health-reprobe) |
+| 2026-08-24 | retire-narrative-legacy | 调度器职责描述「Digest/叙事」→「Digest/日报」（narrative 管线废弃清单保留为历史注记） | [`openspec/changes/archive/2026-08-24-retire-narrative-legacy`](../../../openspec/changes/archive/2026-08-24-retire-narrative-legacy) |
 | 2026-08-22 | analysis-remediation | `job_log_cleanup` 扩展保留策略：新增 `embedding_queues` completed > 30 天清理（`idx_embedding_queues_completed_created` 索引支撑），防止 completed 历史行无限累积 | [`openspec/changes/archive/2026-08-22-analysis-remediation`](../../../openspec/changes/archive/2026-08-22-analysis-remediation) |

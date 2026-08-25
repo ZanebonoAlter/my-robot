@@ -374,7 +374,34 @@ func seedTestActiveTopic(t *testing.T, db *gorm.DB, boardID uint, label string, 
 	return topic.ID
 }
 
-func seedTestSectionWithTopic(t *testing.T, db *gorm.DB, reportID uint, label string, topicID uint) uint {
+func seedTestCandidateTopic(t *testing.T, db *gorm.DB, boardID uint, label string, lastSeen time.Time) uint {
+	t.Helper()
+	topic := BoardPersistentTopic{
+		SemanticBoardID: boardID,
+		Label:           label,
+		Embedding:       FloatsToPgVector([]float64{0}),
+		Status:          TopicStatusCandidate,
+		FirstSeenDate:   lastSeen,
+		LastSeenDate:    lastSeen,
+		HitCount:        1,
+	}
+	require.NoError(t, db.Create(&topic).Error)
+	return topic.ID
+}
+
+// seedTestTopicTag creates a topic_tags row with the given label/status.
+func seedTestTopicTag(t *testing.T, db *gorm.DB, label string, status string) uint {
+	t.Helper()
+	tag := models.TopicTag{Label: label, Slug: "slug-" + label, Status: status, Category: "event"}
+	require.NoError(t, db.Create(&tag).Error)
+	return tag.ID
+}
+
+// seedTestSectionWithTopic creates a section whose ClusterTagIDs reference the
+// given tag ids (fact fingerprint source). Pass no tagIDs for a NULL
+// cluster_tag_ids column; pass JSON{} (empty) via seedEmptyTagIDs for an empty
+// JSON array.
+func seedTestSectionWithTopic(t *testing.T, db *gorm.DB, reportID uint, label string, topicID uint, tagIDs ...uint) uint {
 	t.Helper()
 	section := DailyReportSection{
 		ReportID:          reportID,
@@ -383,43 +410,32 @@ func seedTestSectionWithTopic(t *testing.T, db *gorm.DB, reportID uint, label st
 		Embedding:         FloatsToPgVector([]float64{0}),
 		PersistentTopicID: &topicID,
 	}
-	err := db.Create(&section).Error
-	require.NoError(t, err)
+	if tagIDs != nil {
+		raw, err := json.Marshal(tagIDs)
+		require.NoError(t, err)
+		section.ClusterTagIDs = JSON(raw)
+	}
+	require.NoError(t, db.Create(&section).Error)
 	return section.ID
 }
 
-func seedTestThread(t *testing.T, db *gorm.DB, sectionID uint, title string, fitDistance *float64) uint {
-	t.Helper()
-	thread := DailyReportThread{
-		SectionID:   sectionID,
-		Title:       title,
-		Embedding:   FloatsToPgVector([]float64{0}),
-		FitDistance: fitDistance,
-	}
-	err := db.Create(&thread).Error
-	require.NoError(t, err)
-	return thread.ID
-}
-
-func TestListTopicRecentBriefs_Basic(t *testing.T) {
+// TestListTopicRecentBriefs_TagLabelInjection covers spec scenario
+// 「candidate 话题近期内容注入」/「L2 候选预筛注入」的 repo 侧：注入内容 SHALL 为
+// section 当天实际 tag 标签（cluster_tag_ids 解析出的 topic_tags.label），
+// 而非被话题 label 硬覆盖的 cluster_label（零信息复读）。
+func TestListTopicRecentBriefs_TagLabelInjection(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 	repo := NewTopicGraphRepository(db)
 
 	boardID := seedTestBoard(t, db)
 	now := NormalizeReportDate(time.Now())
 
-	// Active topic
 	topicID := seedTestActiveTopic(t, db, boardID, "AI 编程工具平台化竞争", now)
+	tagA := seedTestTopicTag(t, db, "Codex 推出第三方模型接入", "active")
+	tagB := seedTestTopicTag(t, db, "GitHub Copilot X 发布新功能", "active")
 
-	// Report + section with threads
 	reportID := seedTestReport(t, db, boardID, now.AddDate(0, 0, -1))
-	sectionID := seedTestSectionWithTopic(t, db, reportID, "开发者 Agent 平台化", topicID)
-
-	// Threads with different fit_distances: best fit first, NULL last
-	dist0 := 0.12
-	dist1 := 0.35
-	seedTestThread(t, db, sectionID, "Codex 推出第三方模型接入", &dist0)
-	seedTestThread(t, db, sectionID, "GitHub Copilot X 发布新功能", &dist1)
+	sectionID := seedTestSectionWithTopic(t, db, reportID, "开发者 Agent 平台化", topicID, tagA, tagB)
 
 	briefs, err := repo.ListTopicRecentBriefs(boardID, 7, 5)
 	require.NoError(t, err)
@@ -429,10 +445,10 @@ func TestListTopicRecentBriefs_Basic(t *testing.T) {
 	items := briefs[topicID]
 	require.Len(t, items, 1)
 	assert.Equal(t, sectionID, items[0].SectionID)
-	assert.Equal(t, "开发者 Agent 平台化", items[0].SectionLabel)
-	require.Len(t, items[0].ThreadTitles, 2)
-	assert.Equal(t, "Codex 推出第三方模型接入", items[0].ThreadTitles[0]) // best fit first
-	assert.Equal(t, "GitHub Copilot X 发布新功能", items[0].ThreadTitles[1])
+	// Fact fingerprint: actual tag labels, in cluster_tag_ids order.
+	assert.Equal(t, []string{"Codex 推出第三方模型接入", "GitHub Copilot X 发布新功能"}, items[0].TagLabels)
+	// The frozen cluster_label SHALL NOT be the injected content anymore.
+	assert.NotContains(t, items[0].TagLabels, "开发者 Agent 平台化")
 }
 
 func TestListTopicRecentBriefs_SevenDayWindow(t *testing.T) {
@@ -443,18 +459,16 @@ func TestListTopicRecentBriefs_SevenDayWindow(t *testing.T) {
 	now := NormalizeReportDate(time.Now())
 
 	topicID := seedTestActiveTopic(t, db, boardID, "以黎冲突升级", now)
+	tag1 := seedTestTopicTag(t, db, "真主党越境打击", "active")
+	tag2 := seedTestTopicTag(t, db, "以军空袭黎南部", "active")
 
 	// Section within 7 days
 	r1 := seedTestReport(t, db, boardID, now.AddDate(0, 0, -3))
-	s1 := seedTestSectionWithTopic(t, db, r1, "真主党越境打击", topicID)
-	d0 := 0.08
-	seedTestThread(t, db, s1, "真主党向以色列北部发射火箭", &d0)
+	s1 := seedTestSectionWithTopic(t, db, r1, "真主党越境打击", topicID, tag1)
 
 	// Section outside 7 days (10 days ago)
 	r2 := seedTestReport(t, db, boardID, now.AddDate(0, 0, -10))
-	s2 := seedTestSectionWithTopic(t, db, r2, "以军空袭黎南部", topicID)
-	d1 := 0.05
-	seedTestThread(t, db, s2, "以色列空袭黎巴嫩南部目标", &d1)
+	_ = seedTestSectionWithTopic(t, db, r2, "以军空袭黎南部", topicID, tag2)
 
 	briefs, err := repo.ListTopicRecentBriefs(boardID, 7, 5)
 	require.NoError(t, err)
@@ -463,7 +477,8 @@ func TestListTopicRecentBriefs_SevenDayWindow(t *testing.T) {
 	// Only the 3-day-ago section should be present (7-day window)
 	items := briefs[topicID]
 	assert.Len(t, items, 1)
-	assert.Equal(t, "真主党越境打击", items[0].SectionLabel)
+	assert.Equal(t, s1, items[0].SectionID)
+	assert.Equal(t, []string{"真主党越境打击"}, items[0].TagLabels)
 }
 
 func TestListTopicRecentBriefs_PerTopicLimit(t *testing.T) {
@@ -474,28 +489,61 @@ func TestListTopicRecentBriefs_PerTopicLimit(t *testing.T) {
 	now := NormalizeReportDate(time.Now())
 
 	topicID := seedTestActiveTopic(t, db, boardID, "AI 算力生态", now)
+	tagID := seedTestTopicTag(t, db, "算力扩产", "active")
 
-	// Create 6 sections (limit is 5), descending by date
-	d0 := 0.10
+	// Create 6 sections (limit is 5), descending by date; keep their ids so the
+	// per-topic trim (newest-first) can be asserted by SectionID.
+	sectionIDs := make([]uint, 0, 6)
 	for i := 0; i < 6; i++ {
 		r := seedTestReport(t, db, boardID, now.AddDate(0, 0, -(i+1)))
-		s := seedTestSectionWithTopic(t, db, r, fmt.Sprintf("section-%d", i+1), topicID)
-		seedTestThread(t, db, s, fmt.Sprintf("thread-%d", i+1), &d0)
+		s := seedTestSectionWithTopic(t, db, r, fmt.Sprintf("section-%d", i+1), topicID, tagID)
+		sectionIDs = append(sectionIDs, s)
 	}
 
 	briefs, err := repo.ListTopicRecentBriefs(boardID, 7, 5)
 	require.NoError(t, err)
 	require.Len(t, briefs, 1)
 
-	// Should be truncated to 5 newest sections
+	// Should be truncated to 5 newest sections (section-1..5, newest first).
 	items := briefs[topicID]
 	assert.Len(t, items, 5, "per-topic limit = 5")
-	// Verify newest first (by period_date DESC)
-	assert.Equal(t, "section-1", items[0].SectionLabel)
-	assert.Equal(t, "section-5", items[4].SectionLabel)
+	gotIDs := make([]uint, 0, 5)
+	for _, item := range items {
+		gotIDs = append(gotIDs, item.SectionID)
+	}
+	assert.Equal(t, sectionIDs[:5], gotIDs, "newest 5 sections kept, newest first")
 }
 
-func TestListTopicRecentBriefs_ThreadFitDistanceOrdering(t *testing.T) {
+// TestListTopicRecentBriefs_PerSectionTagCap asserts the per-section tag-label
+// cap: a section whose cluster_tag_ids lists 7 tags yields at most 5 labels,
+// preserving the cluster's own array order.
+func TestListTopicRecentBriefs_PerSectionTagCap(t *testing.T) {
+	db := testutil.SetupTestDB(t)
+	repo := NewTopicGraphRepository(db)
+
+	boardID := seedTestBoard(t, db)
+	now := NormalizeReportDate(time.Now())
+
+	topicID := seedTestActiveTopic(t, db, boardID, "大模型监管与安全", now)
+	tagIDs := make([]uint, 0, 7)
+	for i := 0; i < 7; i++ {
+		tagIDs = append(tagIDs, seedTestTopicTag(t, db, fmt.Sprintf("tag-%d", i+1), "active"))
+	}
+	r := seedTestReport(t, db, boardID, now.AddDate(0, 0, -1))
+	seedTestSectionWithTopic(t, db, r, "many-tags", topicID, tagIDs...)
+
+	briefs, err := repo.ListTopicRecentBriefs(boardID, 7, 5)
+	require.NoError(t, err)
+	require.Len(t, briefs[topicID], 1)
+	assert.Len(t, briefs[topicID][0].TagLabels, 5, "per-section tag cap = 5")
+	assert.Equal(t, []string{"tag-1", "tag-2", "tag-3", "tag-4", "tag-5"}, briefs[topicID][0].TagLabels,
+		"cap keeps the cluster's own tag order")
+}
+
+// TestListTopicRecentBriefs_MergedDisabledTagsFiltered asserts that
+// merged/disabled tags (topic_tags.status != 'active') are filtered out of the
+// injected labels while the remaining active labels survive in order.
+func TestListTopicRecentBriefs_MergedDisabledTagsFiltered(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 	repo := NewTopicGraphRepository(db)
 
@@ -503,57 +551,75 @@ func TestListTopicRecentBriefs_ThreadFitDistanceOrdering(t *testing.T) {
 	now := NormalizeReportDate(time.Now())
 
 	topicID := seedTestActiveTopic(t, db, boardID, "中东局势", now)
-	reportID := seedTestReport(t, db, boardID, now)
-	sectionID := seedTestSectionWithTopic(t, db, reportID, "中东冲突升级", topicID)
-
-	// Threads: 3 threads with different fit_distances; LIMIT 2 returns the two smallest
-	dLarge := 0.95
-	dSmall := 0.15
-	var dMedium float64 = 0.50
-	seedTestThread(t, db, sectionID, "thread-large-dist", &dLarge)
-	seedTestThread(t, db, sectionID, "thread-small-dist", &dSmall)
-	seedTestThread(t, db, sectionID, "thread-medium-dist-excluded", &dMedium)
+	tagA := seedTestTopicTag(t, db, "active-tag", "active")
+	tagM := seedTestTopicTag(t, db, "merged-tag", "merged")
+	r := seedTestReport(t, db, boardID, now.AddDate(0, 0, -1))
+	// Array order: A, M — M filtered, A kept.
+	seedTestSectionWithTopic(t, db, r, "mixed", topicID, tagA, tagM)
 
 	briefs, err := repo.ListTopicRecentBriefs(boardID, 7, 5)
 	require.NoError(t, err)
-	require.Len(t, briefs, 1)
-
-	items := briefs[topicID]
-	require.Len(t, items, 1)
-	require.Len(t, items[0].ThreadTitles, 2, "LIMIT 2 per section")
-	// Smallest fit_distance first, then next smallest; largest (0.95) excluded by LIMIT
-	assert.Equal(t, "thread-small-dist", items[0].ThreadTitles[0])
-	assert.Equal(t, "thread-medium-dist-excluded", items[0].ThreadTitles[1])
+	require.Len(t, briefs[topicID], 1)
+	assert.Equal(t, []string{"active-tag"}, briefs[topicID][0].TagLabels,
+		"merged/disabled tag labels dropped from injection")
 }
 
-func TestListTopicRecentBriefs_CandidateExcluded(t *testing.T) {
+// TestListTopicRecentBriefs_CandidateIncluded covers spec scenario
+// 「candidate 话题近期内容注入」（candidate-topic-l2-gate）：candidate 话题现流经
+// L2 裁决，briefs 注入范围 SHALL 覆盖 active 与 candidate 两类。
+func TestListTopicRecentBriefs_CandidateIncluded(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 	repo := NewTopicGraphRepository(db)
 
 	boardID := seedTestBoard(t, db)
 	now := NormalizeReportDate(time.Now())
 
-	// Candidate topic — should NOT appear in briefs
-	candidate := BoardPersistentTopic{
-		SemanticBoardID: boardID,
-		Label:           "候选话题",
-		Embedding:       FloatsToPgVector([]float64{0}),
-		Status:          TopicStatusCandidate,
-		FirstSeenDate:   now,
-		LastSeenDate:    now,
-		HitCount:        1,
-	}
-	require.NoError(t, db.Create(&candidate).Error)
+	candidateID := seedTestCandidateTopic(t, db, boardID, "候选话题", now)
+	tagID := seedTestTopicTag(t, db, "candidate-section-tag", "active")
 
-	reportID := seedTestReport(t, db, boardID, now)
-	_ = seedTestSectionWithTopic(t, db, reportID, "candidate-section", candidate.ID)
+	reportID := seedTestReport(t, db, boardID, now.AddDate(0, 0, -1))
+	sectionID := seedTestSectionWithTopic(t, db, reportID, "candidate-section", candidateID, tagID)
 
 	briefs, err := repo.ListTopicRecentBriefs(boardID, 7, 5)
 	require.NoError(t, err)
-	assert.Len(t, briefs, 0, "candidate topics excluded from briefs")
+	require.Len(t, briefs, 1, "candidate topic included in briefs")
+	require.Contains(t, briefs, candidateID)
+	require.Len(t, briefs[candidateID], 1)
+	assert.Equal(t, sectionID, briefs[candidateID][0].SectionID)
+	assert.Equal(t, []string{"candidate-section-tag"}, briefs[candidateID][0].TagLabels)
 }
 
-func TestListTopicRecentBriefs_NoActiveTopics(t *testing.T) {
+// TestListTopicRecentBriefs_ExcludesTodaySections asserts the same-day
+// exclusion: sections from today's report SHALL NOT be injected as "recent
+// content" — otherwise an earlier run of today (or a same-day rerun) that
+// mis-attached tags would self-corroborate as briefs evidence
+// （卡里巴夫同日重跑自证回路根因）。次日运行时昨日 section 才作为证据。
+func TestListTopicRecentBriefs_ExcludesTodaySections(t *testing.T) {
+	db := testutil.SetupTestDB(t)
+	repo := NewTopicGraphRepository(db)
+
+	boardID := seedTestBoard(t, db)
+	now := NormalizeReportDate(time.Now())
+
+	topicID := seedTestActiveTopic(t, db, boardID, "观察期话题", now)
+	todayTag := seedTestTopicTag(t, db, "今日误挂 tag", "active")
+	ydayTag := seedTestTopicTag(t, db, "昨日事实 tag", "active")
+
+	yesterday := seedTestReport(t, db, boardID, now.AddDate(0, 0, -1))
+	ydaySection := seedTestSectionWithTopic(t, db, yesterday, "昨日 section", topicID, ydayTag)
+	today := seedTestReport(t, db, boardID, now)
+	seedTestSectionWithTopic(t, db, today, "今日 section", topicID, todayTag)
+
+	briefs, err := repo.ListTopicRecentBriefs(boardID, 7, 5)
+	require.NoError(t, err)
+	require.Contains(t, briefs, topicID)
+	require.Len(t, briefs[topicID], 1, "only yesterday's section is injected")
+	assert.Equal(t, ydaySection, briefs[topicID][0].SectionID)
+	assert.Equal(t, []string{"昨日事实 tag"}, briefs[topicID][0].TagLabels,
+		"today's mis-attached tag must not self-corroborate")
+}
+
+func TestListTopicRecentBriefs_NoTopicsNil(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 	repo := NewTopicGraphRepository(db)
 
@@ -573,14 +639,12 @@ func TestListTopicRecentBriefs_MultipleTopics(t *testing.T) {
 
 	topicA := seedTestActiveTopic(t, db, boardID, "Topic A", now)
 	topicB := seedTestActiveTopic(t, db, boardID, "Topic B", now)
+	tagA := seedTestTopicTag(t, db, "tag-a", "active")
+	tagB := seedTestTopicTag(t, db, "tag-b", "active")
 
-	r := seedTestReport(t, db, boardID, now)
-	sA := seedTestSectionWithTopic(t, db, r, "Section A", topicA)
-	sB := seedTestSectionWithTopic(t, db, r, "Section B", topicB)
-
-	d0 := 0.05
-	seedTestThread(t, db, sA, "Thread A1", &d0)
-	seedTestThread(t, db, sB, "Thread B1", &d0)
+	r := seedTestReport(t, db, boardID, now.AddDate(0, 0, -1))
+	seedTestSectionWithTopic(t, db, r, "Section A", topicA, tagA)
+	seedTestSectionWithTopic(t, db, r, "Section B", topicB, tagB)
 
 	briefs, err := repo.ListTopicRecentBriefs(boardID, 7, 5)
 	require.NoError(t, err)
@@ -589,4 +653,51 @@ func TestListTopicRecentBriefs_MultipleTopics(t *testing.T) {
 	assert.Contains(t, briefs, topicB)
 	assert.Len(t, briefs[topicA], 1)
 	assert.Len(t, briefs[topicB], 1)
+	assert.Equal(t, []string{"tag-a"}, briefs[topicA][0].TagLabels)
+	assert.Equal(t, []string{"tag-b"}, briefs[topicB][0].TagLabels)
+}
+
+func TestListReports_AttachesUniqueActiveWatchSummaries(t *testing.T) {
+	db := testutil.SetupTestDB(t)
+	repo := NewTopicGraphRepository(db)
+
+	boardID := seedTestBoard(t, db)
+	now := NormalizeReportDate(time.Now())
+	newerReportID := seedTestReport(t, db, boardID, now)
+	olderReportID := seedTestReport(t, db, boardID, now.AddDate(0, 0, -1))
+
+	active, err := repo.CreateWatch(CreateWatchInput{SemanticBoardID: boardID, Label: "ASML", Type: WatchTypeKeyword})
+	require.NoError(t, err)
+	paused, err := repo.CreateWatch(CreateWatchInput{SemanticBoardID: boardID, Label: "paused watch", Type: WatchTypeLabel})
+	require.NoError(t, err)
+	pausedStatus := WatchStatusPaused
+	_, err = repo.UpdateWatch(paused.ID, nil, nil, &pausedStatus)
+	require.NoError(t, err)
+	deleted, err := repo.CreateWatch(CreateWatchInput{SemanticBoardID: boardID, Label: "deleted watch", Type: WatchTypeLabel})
+	require.NoError(t, err)
+
+	for _, sectionID := range []uint{101, 102} {
+		require.NoError(t, db.Create(&TopicWatchHit{
+			WatchID: active.ID, SectionID: sectionID, ReportID: newerReportID,
+			PeriodDate: now, Reason: "active hit",
+		}).Error)
+	}
+	require.NoError(t, db.Create(&TopicWatchHit{
+		WatchID: paused.ID, SectionID: 103, ReportID: newerReportID,
+		PeriodDate: now, Reason: "paused hit",
+	}).Error)
+	require.NoError(t, db.Create(&TopicWatchHit{
+		WatchID: deleted.ID, SectionID: 104, ReportID: olderReportID,
+		PeriodDate: now.AddDate(0, 0, -1), Reason: "deleted hit",
+	}).Error)
+	require.NoError(t, repo.DeleteWatch(deleted.ID))
+
+	items, err := repo.ListReports(boardID, 2)
+	require.NoError(t, err)
+	require.Len(t, items, 2)
+	assert.Equal(t, newerReportID, items[0].ID)
+	assert.Equal(t, olderReportID, items[1].ID)
+	require.Len(t, items[0].ActiveWatchSummaries, 1)
+	assert.Equal(t, ActiveWatchSummary{WatchID: active.ID, Label: "ASML", Type: WatchTypeKeyword}, items[0].ActiveWatchSummaries[0])
+	assert.Empty(t, items[1].ActiveWatchSummaries)
 }

@@ -99,6 +99,17 @@ export interface DailyReportQualityEntry {
   downgraded: boolean
 }
 
+export interface ActiveWatchSummary {
+  watchId: number | string
+  label: string
+  type: 'label' | 'keyword'
+}
+
+export interface DailyReportWatchHit extends ActiveWatchSummary {
+  sectionId: number
+  reason?: string
+}
+
 export interface DailyReportSection {
   id: number
   cluster_index: number
@@ -121,6 +132,9 @@ export interface DailyReportSection {
    *  后端必须输出小写枚举值（active | candidate）；混合大小写将降级到"其他动态"。
    *  snake_case，与 daily-report API 约定一致。 */
   topic_status_at_report?: string | null
+  /** 分桶来源（l1_direct / l2_llm / l3_new / watch_keyword / watch_sentence）。
+   *  watch_* = 关注物化板块（watch-materialized-topic）；旧数据可能为 null。 */
+  lane_tier?: string | null
 }
 
 export interface DailyReport {
@@ -137,6 +151,8 @@ export interface DailyReport {
   dynamics: string
   sections: DailyReportSection[]
   created_at: string
+  /** Active watch hits returned with the report detail when available. */
+  activeWatchHits?: DailyReportWatchHit[]
 }
 
 export interface DailyReportListItem {
@@ -150,6 +166,38 @@ export interface DailyReportListItem {
   article_count: number
   event_tag_count: number
   created_at: string
+  /** One summary per active watch with at least one hit in this report. */
+  activeWatchSummaries?: ActiveWatchSummary[]
+}
+
+interface ActiveWatchSummaryPayload {
+  watch_id?: number
+  watchId?: number
+  label: string
+  type?: string
+  watch_type?: string
+  watchType?: string
+}
+
+interface DailyReportListItemPayload extends Omit<DailyReportListItem, 'activeWatchSummaries'> {
+  active_watch_summaries?: ActiveWatchSummaryPayload[]
+  activeWatchSummaries?: ActiveWatchSummaryPayload[]
+}
+
+function normalizeWatchSummary(payload: ActiveWatchSummaryPayload): ActiveWatchSummary {
+  return {
+    watchId: payload.watchId ?? payload.watch_id ?? 0,
+    label: payload.label,
+    type: (payload.type ?? payload.watchType ?? payload.watch_type) === 'keyword' ? 'keyword' : 'label',
+  }
+}
+
+function normalizeReportListItem(payload: DailyReportListItemPayload): DailyReportListItem {
+  const summaries = payload.activeWatchSummaries ?? payload.active_watch_summaries
+  return {
+    ...payload,
+    activeWatchSummaries: summaries?.map(normalizeWatchSummary),
+  }
 }
 
 export function useDailyReportsApi() {
@@ -159,7 +207,12 @@ export function useDailyReportsApi() {
 
   async function getBoardDailyReports(boardId: number, params?: { days?: number }): Promise<ApiResponse<{ reports: DailyReportListItem[] }>> {
     const query = params ? apiClient.buildQueryParams(params) : ''
-    return apiClient.get(`/semantic-boards/${boardId}/daily-reports${query ? `?${query}` : ''}`)
+    const response = await apiClient.get<{ reports: DailyReportListItemPayload[] }>(`/semantic-boards/${boardId}/daily-reports${query ? `?${query}` : ''}`)
+    if (!response.success || !response.data) return response as ApiResponse<{ reports: DailyReportListItem[] }>
+    return {
+      ...response,
+      data: { ...response.data, reports: (response.data.reports ?? []).map(normalizeReportListItem) },
+    }
   }
 
   async function getDailyReportDetail(id: number): Promise<ApiResponse<{ report: DailyReport }>> {

@@ -218,9 +218,12 @@ cmd_verify() {
 			fi
 			# 规则 2：不在 changed 集合，且未在 git 历史提交
 			# （事后补归档场景：change 改动已 commit 进主线，工作树 diff 为空；
-			#   只要文件曾被提交即视为「已更新」，避免 base=HEAD 对已提交改动的误报）
+			#   只要文件曾被提交即视为「已更新」，避免 base=HEAD 对已提交改动的误报。
+			#   gitignored 文档（如 docs/research/）双重兑底全 miss：不在 git status 也无 git 历史
+			#   → 只要工作树存在即视为已更新，否则永远误报「声明了未更新」）
 			if ! echo "$changed" | grep -qxF "$f"; then
-				if ! git log --oneline -- "$f" 2>/dev/null | grep -q .; then
+				if ! git check-ignore -q "$f" 2>/dev/null && \
+					! git log --oneline -- "$f" 2>/dev/null | grep -q .; then
 					add_fail "声明了未更新: $f"
 				fi
 			fi

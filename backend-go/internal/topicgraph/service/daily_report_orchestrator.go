@@ -59,9 +59,10 @@ func GenerateDailyReport(ctx context.Context, boardID uint, date time.Time) (*re
 			anchorStats.FilteredByWindow, anchorStats.TruncatedByLimit)
 	}
 
-	// Step 3.5: Load recent briefs for active topics (Slice D — lane context
-	// injection). On failure, degrade to label-only injection — briefs are
-	// purely an enrichment layer and SHALL NOT block ClusterTags.
+	// Step 3.5: Load recent briefs for anchorable topics (active AND candidate
+	// — candidate-topic-l2-gate) (Slice D — lane context injection). On failure,
+	// degrade to label-only injection — briefs are purely an enrichment layer
+	// and SHALL NOT block ClusterTags.
 	const (
 		briefsSinceDays   = 7
 		briefsPerTopicCap = 5
@@ -73,14 +74,14 @@ func GenerateDailyReport(ctx context.Context, boardID uint, date time.Time) (*re
 			logging.Warnf("daily-report: load topic briefs for board %d failed (degrading to label-only): %v", boardID, briefsErr)
 		} else {
 			topicBriefs = briefs
-			activeWithBriefs := 0
+			topicsWithBriefs := 0
 			for _, items := range briefs {
 				if len(items) > 0 {
-					activeWithBriefs++
+					topicsWithBriefs++
 				}
 			}
-			logging.Infof("daily-report: board %d topic briefs loaded: %d active topics have recent content",
-				boardID, activeWithBriefs)
+			logging.Infof("daily-report: board %d topic briefs loaded: %d anchorable topics have recent content",
+				boardID, topicsWithBriefs)
 		}
 	}
 	// Lane-driven clustering (daily-report-lane-driven-clustering): bucket tags
@@ -340,6 +341,52 @@ func GenerateDailyReport(ctx context.Context, boardID uint, date time.Time) (*re
 	if mergeErr != nil {
 		logging.Warnf("daily-report: section merge failed for board %d: %v", boardID, mergeErr)
 		// Non-fatal: continue with unmerged sections
+	}
+
+	// Step 7.5: Watch materialization (watch-materialized-topic) — append the
+	// materialized-track sections after the regular pipeline and merge. Each
+	// watch's failure degrades to a skip + warn (spec: 物化失败不阻断)； report-level
+	// counters stay at the regular-clustering caliber (spec: 计数不重复). The
+	// appended sections carry lane_tier watch_keyword / watch_sentence, which
+	// downstream hooks (assignment/lifecycle, relations, hint tracks) use as
+	// the exclusion/ownership marker.
+	matWatches, matErr := repository.Repo.ListActiveMaterializedWatchesByBoard(boardID)
+	if matErr != nil {
+		logging.Warnf("daily-report: list materialized watches failed for board %d (skipping materialization): %v", boardID, matErr)
+	} else if len(matWatches) > 0 {
+		nextIdx := len(sections)
+		appended := 0
+		var kwWatches []repository.BoardTopicWatch
+		sentenceCfg := LoadWatchSentenceConfig(repository.Repo.DB())
+		embedRouter := airouter.NewRouter()
+		for _, w := range matWatches {
+			switch w.Type {
+			case repository.WatchTypeKeywordTopic:
+				kwWatches = append(kwWatches, w)
+			case repository.WatchTypeSentenceTopic:
+				sec, threads, sErr := MaterializeSentenceWatch(ctx, w, date, sentenceCfg, embedRouter.Embed)
+				if sErr != nil {
+					logging.Warnf("daily-report: sentence materialization failed for watch %d (skipped): %v", w.ID, sErr)
+					continue
+				}
+				if sec == nil {
+					continue // no hit today — legal
+				}
+				sec.ClusterIndex = nextIdx + appended
+				sections = append(sections, *sec)
+				threadBatches = append(threadBatches, threads)
+				appended++
+			}
+		}
+		if len(kwWatches) > 0 {
+			kwSections, kwBatches, kErr := MaterializeKeywordWatches(ctx, boardID, kwWatches, nextIdx+appended)
+			if kErr != nil {
+				logging.Warnf("daily-report: keyword materialization failed for board %d (skipped): %v", boardID, kErr)
+			} else {
+				sections = append(sections, kwSections...)
+				threadBatches = append(threadBatches, kwBatches...)
+			}
+		}
 	}
 
 	return report, sections, threadBatches, nil

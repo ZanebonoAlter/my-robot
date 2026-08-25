@@ -8,19 +8,18 @@
 
 | 方法 | 路径 | 说明 |
 | ------ | ------ | ------ |
-| GET | `/semantic-boards` | 查询 active 板块列表 |
-| GET | `/semantic-boards/:id` | 查询单个板块 |
-| POST | `/semantic-boards` | 创建板块 |
-| PUT | `/semantic-boards/:id` | 更新板块 |
-| DELETE | `/semantic-boards/:id` | 软删除板块（status→disabled） |
-| GET | `/semantic-boards/:id/composition` | 查看板块构成辅助标签 |
+| GET | `/semantic-boards` | 查询 active 版块列表 |
+| GET | `/semantic-boards/:id` | 查询单个版块 |
+| POST | `/semantic-boards` | 创建版块 |
+| PUT | `/semantic-boards/:id` | 更新版块 |
+| DELETE | `/semantic-boards/:id` | 软删除版块（status→disabled） |
+| GET | `/semantic-boards/:id/composition` | 查看版块构成辅助标签 |
 | POST | `/semantic-boards/:id/composition` | 新增 composition 辅助标签 |
 | DELETE | `/semantic-boards/:id/composition/:auxiliary_label_id` | 移除 composition 辅助标签 |
-| GET | `/semantic-boards/:id/articles` | 查询板块下的文章 |
-| GET | `/semantic-boards/:id/narratives` | 查询板块叙事 |
-| GET | `/semantic-boards/:id/suggest-auxiliaries` | 板块级辅助标签建议 |
+| GET | `/semantic-boards/:id/articles` | 查询版块下的文章 |
+| GET | `/semantic-boards/:id/suggest-auxiliaries` | 版块级辅助标签建议 |
 | GET | `/semantic-boards/suggest-auxiliaries` | 全局辅助标签建议 |
-| GET | `/semantic-boards/:id/match-detail/:tagId` | tag 与板块匹配明细 |
+| GET | `/semantic-boards/:id/match-detail/:tagId` | tag 与版块匹配明细 |
 | GET | `/auxiliary-labels` | 查询辅助标签池 |
 | GET | `/auxiliary-labels/clusters` | 辅助标签聚类 |
 | POST | `/auxiliary-labels/merge-alias` | 合并辅助标签为 alias |
@@ -34,13 +33,18 @@
 | POST | `/semantic-boards/upgrade-suggestions/generate` | 生成升级建议 |
 | POST | `/semantic-boards/backfill` | 触发匹配回填任务 |
 | GET | `/semantic-boards/backfill/:id` | 查询回填进度 |
-| POST | `/semantic-boards/backfill-embeddings` | 板块向量回填 |
+| POST | `/semantic-boards/backfill-embeddings` | 版块向量回填 |
 | POST | `/semantic-boards/rematch-all` | 全量重新匹配 |
 | GET | `/semantic-boards/matching-config` | 读取匹配参数 |
 | PUT | `/semantic-boards/matching-config` | 更新匹配参数 |
 | GET | `/tags/:id/auxiliary-labels` | tag 关联辅助标签 |
-| GET | `/tags/:id/semantic-boards` | tag 所属板块 |
+| GET | `/tags/:id/semantic-boards` | tag 所属版块 |
 | POST | `/semantic-boards/:id/persistent-topics/manual` | 手动新建持久话题 |
+| POST | `/semantic-boards/:id/topic-watches` | 创建版块级关注（label / keyword / keyword_topic / sentence_topic） |
+| GET | `/semantic-boards/:id/topic-watches` | 列出该版块全部关注（含 paused） |
+| PATCH | `/topic-watches/:id` | 更新关注 label / query 或 active / paused 状态 |
+| DELETE | `/topic-watches/:id` | 删除关注及其命中记录（sentence_topic 需 confirm_archive_topic 确认归档专属话题） |
+| GET | `/daily-reports/:id/watch-hits` | 查询某期日报的关注命中 |
 
 ## SemanticBoard CRUD
 
@@ -166,7 +170,7 @@ Response `data`：
 
 ### POST `/semantic-boards/:id/composition`
 
-向板块 composition 新增一个辅助标签（幂等，重复添加不报错；不会自动回填历史 `topic_tag_board_labels`）。
+向版块 composition 新增一个辅助标签（幂等，重复添加不报错；不会自动回填历史 `topic_tag_board_labels`）。
 
 Request：
 
@@ -174,7 +178,7 @@ Request：
 { "auxiliary_label_id": 10 }
 ```
 
-- `auxiliary_label_id` 必填，须为 `active` 的辅助标签。板块不存在返回 404；辅助标签不存在或非 active 返回 400。
+- `auxiliary_label_id` 必填，须为 `active` 的辅助标签。版块不存在返回 404；辅助标签不存在或非 active 返回 400。
 
 Response `data`：
 
@@ -505,7 +509,7 @@ Response `data.status`：`pending`、`running`、`completed`、`failed`。
 
 ### POST `/semantic-boards/backfill-embeddings`
 
-为所有缺少 embedding 的板块（`label_type=board` 且 `embedding IS NULL`）补算向量。同步逐个嵌入并写库。
+为所有缺少 embedding 的版块（`label_type=board` 且 `embedding IS NULL`）补算向量。同步逐个嵌入并写库。
 
 无需请求体。Response `data`：
 
@@ -515,7 +519,7 @@ Response `data.status`：`pending`、`running`、`completed`、`failed`。
 
 ### POST `/semantic-boards/rematch-all`
 
-对所有已存在 `topic_tag_board_labels` 记录的 topic tag 全量重新匹配板块，同步执行。
+对所有已存在 `topic_tag_board_labels` 记录的 topic tag 全量重新匹配版块，同步执行。
 
 无需请求体。Response `data`：
 
@@ -566,7 +570,7 @@ Response `data`：返回更新后的完整配置。
 
 ### GET `/semantic-boards/:id/match-detail/:tagId`
 
-按需实时计算某个 topic tag 与指定 SemanticBoard 的匹配明细。该接口不会修改匹配结果；`match_reason` 和 `score` 以 `topic_tag_board_labels` 中已存储值为准，`config` 和 `pairs` 用当前配置实时计算，便于解释“为什么这个 tag 属于这个板块”。
+按需实时计算某个 topic tag 与指定 SemanticBoard 的匹配明细。该接口不会修改匹配结果；`match_reason` 和 `score` 以 `topic_tag_board_labels` 中已存储值为准，`config` 和 `pairs` 用当前配置实时计算，便于解释“为什么这个 tag 属于这个版块”。
 
 Response `data`：
 
@@ -655,14 +659,14 @@ Response `data`：
 
 ### GET `/semantic-boards/suggest-auxiliaries`
 
-按自然语言查询全局推荐辅助标签（按与查询向量的余弦相似度排序），用于建/编板块时挑选构成标签。
+按自然语言查询全局推荐辅助标签（按与查询向量的余弦相似度排序），用于建/编版块时挑选构成标签。
 
 Query：
 
 - `label` 必填，查询文本。
 - `description` 可选，拼接到查询文本。
 - `search` 可选，按 label / slug 模糊过滤。
-- `exclude_board_id` 可选，排除已在该板块 composition 中的标签。
+- `exclude_board_id` 可选，排除已在该版块 composition 中的标签。
 - `page` / `page_size` 可选，默认 `1` / `20`，`page_size` 上限 100。
 
 Response `data`：
@@ -680,19 +684,19 @@ Response `data`：
 
 ### GET `/semantic-boards/:id/suggest-auxiliaries`
 
-以板块 `:id` 自身的 `label + description` 向量为查询，推荐可补充进该板块的辅助标签（自动排除已在该板块 composition 中的标签）。
+以版块 `:id` 自身的 `label + description` 向量为查询，推荐可补充进该版块的辅助标签（自动排除已在该版块 composition 中的标签）。
 
 Query：
 
 - `search` / `page` / `page_size` 可选，同全局接口。
 
-Response `data`：结构同全局接口。板块不存在返回 404。
+Response `data`：结构同全局接口。版块不存在返回 404。
 
-## 板块文章与叙事
+## 版块文章与叙事
 
 ### GET `/semantic-boards/:id/articles`
 
-查询板块 `:id` 下的文章（通过该板块的 topic tag 关联），支持按匹配质量或时间排序与分页。
+查询版块 `:id` 下的文章（通过该版块的 topic tag 关联），支持按匹配质量或时间排序与分页。
 
 Query：
 
@@ -723,32 +727,6 @@ Response（`data` 为文章数组，`pagination` 与 `data` 同级）：
 ```
 
 文章字段同 `GET /articles/:id`（`ToDict()`），额外带 `feed_name` 与 `filtered_tags`；无数据时 `data` 为空数组。
-
-### GET `/semantic-boards/:id/narratives`
-
-查询板块 `:id` 的叙事摘要（`narrative_summaries`，按周期倒序）。
-
-Query：
-
-- `days` 可选，默认 7，`<1` 取 7。查询最近 N 天（基于 `period_date`）。
-
-Response `data`（数组，无数据时为 `[]`）：
-
-```json
-[
-  {
-    "id": 1,
-    "title": "...",
-    "summary": "...",
-    "status": "completed",
-    "related_tags": [{ "id": 42, "label": "..." }],
-    "related_article_ids": [1, 2],
-    "scope_type": "daily",
-    "article_count": 2,
-    "period_date": "2026-07-01"
-  }
-]
-```
 
 ## 持久话题手动编排
 
@@ -807,3 +785,49 @@ Response `data`：
 - 事务任一步失败（含 `RebuildBoardRelations` 失败）—— 整事务回滚。
 
 **与日报生成的关系**：手动建泳道是用户即时操作，不在 `SaveReport` 日报生成流程内；建好的 active topic 在下一期日报生成时被 `ListAnchorableTopicsByBoard` 纳入 AND-gate，与算法生成的 active topic 一视同仁。
+
+## 版块关注（topic-watch）
+
+### POST `/semantic-boards/:id/topic-watches`
+
+创建版块级关注。请求体：
+
+```json
+{
+  "label": "ASML|镓锗 出口",
+  "type": "keyword"
+}
+```
+
+- `label` 必填。
+- `type` 可选：`label`（默认，AI 语义单信号判定）/ `keyword`（确定性文本匹配，提示轨）/ `keyword_topic`（关键字物化轨）/ `sentence_topic`（一句话物化轨）。旧客户端不传 `type` 时按 `label` 创建。
+- `keyword` / `keyword_topic` 语法：空格表示 AND、`|` 表示 OR；例如 `ASML|镓锗 出口` 表示「(ASML 或 镓锗) 且含 出口」。匹配不区分大小写。`keyword` 扫描日报 section 的叙事线标题与摘要（提示轨）；`keyword_topic` 扫描当天全部未归档文章的标题+摘要层（物化轨，可捞 tag 体系漏网文章），命中聚合成固定名「关键字『X』相关话题」板块（`lane_tier=watch_keyword`，零 AI，无持久话题）。
+- `sentence_topic` 携带可选 `query`（检索句，embedding 输入，缺省回退 label）：每期日报按其向量在版块辅助标签池余弦检索 top-K（阈值/上限可配 `watch_sentence_retrieval_threshold` 0.55 / `watch_sentence_retrieval_top_k` 8），命中标签解析为当天有文章的 event tag，文章并集聚合为挂**专属持久话题**的板块（`lane_tier=watch_sentence`，`topic_match_confidence=manual`，跨天延续）。向量缓存于 `embedding_cache`，PATCH label/query 时失效、下次日报生成时惰性补算。
+- keyword 家族表达式为空、纯空白、纯分隔符或以 `|` 结尾时返回 400；前导或中间空分支忽略，与服务端解析器一致。
+- 物化轨从下一期日报开始生效（无历史回填）；物化失败降级跳过不阻断日报。
+
+成功响应的 `data` 是创建的 watch。所有 watch 都带 `type`；keyword 创建额外带 `instant_hit_count`，表示已同步回扫本版块近 14 天日报后命中的 section 数（回扫失败不阻断创建，计数返回 0 并记服务端告警）：
+
+```json
+{
+  "success": true,
+  "data": {
+    "id": 42,
+    "semantic_board_id": 7,
+    "label": "ASML|镓锗 出口",
+    "type": "keyword",
+    "status": "active",
+    "instant_hit_count": 3,
+    "created_at": "2026-08-24T...",
+    "updated_at": "2026-08-24T..."
+  }
+}
+```
+
+### 关注管理与命中查询
+
+- `GET /semantic-boards/:id/topic-watches` 返回该版块的 active 与 paused 关注；`type` 始终可用，历史行默认返回 `label`；sentence_topic 额外带 `query` 与 `persistent_topic_id`。
+- `PATCH /topic-watches/:id` 可更新 `label`、`query` 或 `status`（仅 `active` / `paused`）；更新 `label` / `query` 会使 sentence_topic 的 `embedding_cache` 失效（下次日报生成时惰性补算）。
+- `DELETE /topic-watches/:id` 会通过外键级联清理其 `topic_watch_hits`。sentence_topic 删除需携带查询参数 `confirm_archive_topic=true`：后端先软归档其专属持久话题（UpdateTopic status=archived，历史物化 section 保留且归属不变），再删关注行；未确认返回 400（错误信息含话题名）。keyword_topic 直接删除，历史物化板块保留。
+- 日报列表响应的每个 report 额外带 `active_watch_summaries`：`[{ watch_id, label, type }]`。它由一次批量关联查询回填，按 watch 去重，仅含 active watch；列表用于在时间线记录下预告最多两个 `# keyword` / `✦ label` 命中，余项由前端显示 `+N`。
+- `GET /daily-reports/:id/watch-hits` 仅返回该期 active watch 的命中记录，并额外含 `watch_label`、`watch_type`；label 的 `reason` 是 AI 理由，keyword 的 `reason` 是机械文本「含关键字『…』」。暂停或删除关注后重新读取不得返回其历史命中。

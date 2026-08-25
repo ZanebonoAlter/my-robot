@@ -1,0 +1,443 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="editorial">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>关注双轨（keyword）· Mockup</title>
+<style>
+  /* === 主题 token（与 topic-watch-bar.html 同源，从 main.css 精简内联）=== */
+  :root {
+    --raw-teal-500: #2d8a7a;
+  }
+  [data-theme="editorial"] {
+    --color-bg-base:#faf7f2; --color-bg-elevated:#f5f0e6; --color-bg-sunken:#e8dfd1;
+    --color-bg-hover:rgba(255,255,255,.85); --color-bg-active:rgba(255,255,255,.6);
+    --color-text-primary:#1a1a1a; --color-text-secondary:#5a5a5a; --color-text-muted:#8a8a8a;
+    --color-border-subtle:rgba(26,26,26,.08); --color-border-medium:rgba(26,26,26,.15); --color-border-strong:rgba(26,26,26,.25);
+    --color-accent:#d94a4a; --color-accent-hover:#c12f2f; --color-accent-subtle:rgba(217,74,74,.08);
+    --color-accent-soft:#d0dde8; --shadow-medium:0 2px 8px rgba(26,26,26,.08);
+    --serif:"Noto Serif SC","Source Han Serif SC",Georgia,serif;
+    --sans:system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;
+    --mono:ui-monospace,"SF Mono",Consolas,monospace;
+  }
+  [data-theme="dark"] {
+    --color-bg-base:#080c12; --color-bg-elevated:rgba(17,27,38,.98); --color-bg-sunken:#0e161d;
+    --color-bg-hover:rgba(255,255,255,.06); --color-bg-active:rgba(255,255,255,.08);
+    --color-text-primary:rgba(255,255,255,.9); --color-text-secondary:rgba(255,255,255,.6); --color-text-muted:rgba(255,255,255,.35);
+    --color-border-subtle:rgba(255,255,255,.06); --color-border-medium:rgba(255,255,255,.10); --color-border-strong:rgba(255,255,255,.18);
+    --color-accent:rgba(240,138,75,.85); --color-accent-hover:rgba(240,138,75,1); --color-accent-subtle:rgba(240,138,75,.08);
+    --color-accent-soft:rgba(255,255,255,.12); --shadow-medium:0 2px 8px rgba(0,0,0,.4);
+    --serif:"Noto Serif SC","Source Han Serif SC",Georgia,serif;
+    --sans:system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;
+    --mono:ui-monospace,"SF Mono",Consolas,monospace;
+  }
+
+  *{box-sizing:border-box}
+  html,body{margin:0;background:var(--color-bg-base);color:var(--color-text-primary);font-family:var(--sans);transition:background .3s}
+  body{padding:0 0 5rem}
+
+  /* mock 控制条 */
+  .mock-bar{position:sticky;top:0;z-index:50;display:flex;align-items:center;gap:.75rem;flex-wrap:wrap;
+    padding:.6rem 1.25rem;background:var(--color-bg-sunken);border-bottom:1px solid var(--color-border-medium);
+    font-size:.78rem;color:var(--color-text-secondary)}
+  .mock-bar b{color:var(--color-text-primary)}
+  .mock-bar .spacer{flex:1}
+  .seg{display:inline-flex;border:1px solid var(--color-border-medium);border-radius:6px;overflow:hidden}
+  .seg button{appearance:none;border:0;background:transparent;color:var(--color-text-secondary);
+    padding:.3rem .7rem;font-size:.74rem;cursor:pointer;font-family:var(--sans)}
+  .seg button.on{background:var(--color-accent);color:#fff}
+  [data-theme="dark"] .seg button.on{color:#080c12}
+
+  .report{max-width:46rem;margin:0 auto;padding:2.5rem 1.25rem 0}
+  .mast{padding-bottom:1rem;border-bottom:3px double var(--color-border-strong);text-align:center;font-family:var(--serif)}
+  .mast .eye{color:var(--color-accent);font-size:.74rem;font-style:italic;letter-spacing:.18em;text-transform:uppercase;margin-bottom:.4rem}
+  .mast h1{margin:0;font-size:2rem;font-weight:900;letter-spacing:-.02em}
+  .mast .meta{margin-top:.5rem;color:var(--color-text-muted);font-size:.68rem;font-family:var(--mono);letter-spacing:.08em}
+  .mast .sep{color:var(--color-accent);margin:0 .4rem}
+
+  /* ====== 关注标记栏 ====== */
+  .watch{margin-top:1.75rem;font-family:var(--serif)}
+  .watch__head{display:flex;align-items:center;gap:.5rem;padding-bottom:.6rem}
+  .watch__eye{display:inline-flex;align-items:center;gap:.4rem;color:var(--color-accent);
+    font-size:.72rem;font-style:italic;letter-spacing:.16em;text-transform:uppercase;font-family:var(--sans)}
+  .watch__eye svg{width:14px;height:14px}
+  .watch__title{font-size:.92rem;color:var(--color-text-secondary);font-style:italic}
+  .watch__add{margin-left:auto;appearance:none;border:1px solid var(--color-border-medium);
+    background:transparent;color:var(--color-text-secondary);padding:.32rem .7rem;border-radius:6px;
+    font-size:.74rem;cursor:pointer;font-family:var(--sans);display:inline-flex;align-items:center;gap:.3rem}
+  .watch__add:hover{border-color:var(--color-accent);color:var(--color-accent)}
+
+  /* 即时回扫反馈 banner（建 keyword 后出现，几秒后可关）*/
+  .scan{margin-top:.6rem;display:flex;align-items:flex-start;gap:.5rem;padding:.6rem .8rem;
+    border:1px solid rgba(45,138,122,.35);background:rgba(45,138,122,.07);border-radius:6px;
+    font-family:var(--sans);font-size:.76rem;color:var(--color-text-secondary);line-height:1.6}
+  .scan svg{width:15px;height:15px;flex:none;color:#2d8a7a;margin-top:.1rem}
+  .scan b{color:var(--color-text-primary)}
+  .scan a{color:#2d8a7a;text-decoration:underline;cursor:pointer}
+  [data-theme="dark"] .scan{border-color:rgba(94,214,193,.3);background:rgba(94,214,193,.06)}
+  [data-theme="dark"] .scan svg,[data-theme="dark"] .scan a{color:#5ed6c1}
+
+  /* 关注分组卡片 —— label 类（实线左条） */
+  .wgroup{border:1px solid var(--color-border-medium);border-left:3px solid var(--color-accent);
+    background:var(--color-bg-elevated);border-radius:0 4px 4px 0;margin-top:.6rem;overflow:hidden}
+  .wgroup__bar{display:flex;align-items:center;gap:.5rem;padding:.6rem .85rem;cursor:pointer;
+    border-bottom:1px solid transparent}
+  .wgroup.open .wgroup__bar{border-bottom-color:var(--color-border-subtle)}
+  .wgroup__chev{width:12px;height:12px;color:var(--color-text-muted);transition:transform .2s;flex:none}
+  .wgroup.open .wgroup__chev{transform:rotate(90deg)}
+  .wgroup__label{font-size:1rem;font-weight:700;color:var(--color-text-primary);line-height:1.35}
+  .wgroup__count{font-family:var(--mono);font-size:.68rem;color:var(--color-text-muted);
+    background:var(--color-accent-subtle);padding:.1rem .45rem;border-radius:10px}
+  .wgroup__ops{margin-left:auto;display:flex;gap:.2rem;opacity:0;transition:opacity .15s}
+  .wgroup:hover .wgroup__ops,.wgroup__ops:focus-within{opacity:1}
+  .wop{appearance:none;border:0;background:transparent;color:var(--color-text-muted);
+    width:24px;height:24px;border-radius:4px;cursor:pointer;display:inline-flex;align-items:center;justify-content:center}
+  .wop:hover{background:var(--color-bg-hover);color:var(--color-text-secondary)}
+  .wop svg{width:14px;height:14px}
+  .wgroup__body{display:none;padding:.2rem .85rem .7rem}
+  .wgroup.open .wgroup__body{display:block}
+  .whit{display:block;padding:.5rem .2rem;border-top:1px dashed var(--color-border-subtle);text-decoration:none;color:inherit}
+  .whit:first-child{border-top:0}
+  .whit__title{font-size:.9rem;font-weight:600;color:var(--color-text-primary);line-height:1.5;
+    font-family:var(--serif);display:inline}
+  .whit:hover .whit__title{color:var(--color-accent)}
+  .whit__meta{display:inline-flex;align-items:center;gap:.4rem;margin-left:.5rem;
+    font-size:.64rem;color:var(--color-text-muted);font-family:var(--mono);vertical-align:middle}
+  .whit__reason{display:block;margin-top:.2rem;font-size:.78rem;font-style:italic;
+    color:var(--color-text-secondary);line-height:1.6;font-family:var(--serif)}
+
+  /* ====== keyword 类分组（视觉微区分）====== */
+  .wgroup--kw{border-left:3px dashed var(--raw-teal-500)}
+  .wgroup--kw .wgroup__label{display:inline-flex;align-items:center;gap:.35rem}
+  .kwmark{display:inline-flex;align-items:center;gap:.15rem;font-family:var(--mono);font-size:.62rem;
+    color:#2d8a7a;background:rgba(45,138,122,.1);border-radius:4px;padding:.08rem .38rem;font-weight:600}
+  .kwmark svg{width:11px;height:11px}
+  [data-theme="dark"] .kwmark{color:#5ed6c1;background:rgba(94,214,193,.12)}
+  /* keyword 命中理由：非斜体、sans、带「含关键字」机械标注（与 label 的 AI 斜体理由对照）*/
+  .whit__kw{display:block;margin-top:.25rem;font-family:var(--sans);font-size:.72rem;line-height:1.6;
+    color:var(--color-text-secondary)}
+  .whit__kw .hitword{font-family:var(--mono);font-size:.68rem;color:#2d8a7a;background:rgba(45,138,122,.1);
+    border-radius:3px;padding:.05rem .3rem;margin:0 .1rem}
+  [data-theme="dark"] .whit__kw .hitword{color:#5ed6c1;background:rgba(94,214,193,.12)}
+
+  .watch__empty{margin-top:.6rem;padding:1.2rem;text-align:center;border:1px dashed var(--color-border-medium);
+    border-radius:6px;color:var(--color-text-muted);font-style:italic;font-family:var(--serif)}
+  .watch__empty b{color:var(--color-text-secondary);font-style:normal}
+
+  .body-hint{margin-top:3rem;padding-top:1.5rem;border-top:4px double var(--color-border-strong);
+    font-family:var(--serif)}
+  .body-hint .eye{color:var(--color-text-muted);font-size:.7rem;letter-spacing:.16em;text-transform:uppercase;font-family:var(--sans)}
+  .body-hint h2{margin:.4rem 0;font-size:1.3rem}
+  .body-hint p{margin:0;color:var(--color-text-secondary);font-size:.82rem;line-height:1.7}
+
+  /* ====== 新建关注对话框（overlay 演示）====== */
+  .overlay{position:fixed;inset:0;background:rgba(10,10,10,.45);display:none;align-items:flex-start;
+    justify-content:center;padding:14vh 1rem 0;z-index:100}
+  .overlay.show{display:flex}
+  .dlg{width:100%;max-width:26rem;background:var(--color-bg-elevated);border:1px solid var(--color-border-medium);
+    border-radius:10px;box-shadow:var(--shadow-medium);overflow:hidden;font-family:var(--sans)}
+  .dlg__head{display:flex;align-items:center;padding:.9rem 1.1rem .5rem}
+  .dlg__title{font-family:var(--serif);font-size:1.05rem;font-weight:700}
+  .dlg__close{margin-left:auto;appearance:none;border:0;background:transparent;color:var(--color-text-muted);
+    cursor:pointer;width:26px;height:26px;border-radius:4px;display:inline-flex;align-items:center;justify-content:center}
+  .dlg__close:hover{background:var(--color-bg-hover);color:var(--color-text-secondary)}
+  .dlg__close svg{width:15px;height:15px}
+  .dlg__body{padding:.3rem 1.1rem 1.1rem}
+
+  /* 类型 segmented */
+  .type-seg{display:flex;border:1px solid var(--color-border-medium);border-radius:8px;overflow:hidden;margin-top:.3rem}
+  .type-seg button{flex:1;appearance:none;border:0;background:transparent;cursor:pointer;
+    padding:.55rem .4rem;font-family:var(--sans);font-size:.78rem;color:var(--color-text-secondary);
+    display:flex;flex-direction:column;align-items:center;gap:.15rem}
+  .type-seg button svg{width:16px;height:16px}
+  .type-seg button small{font-size:.62rem;color:var(--color-text-muted)}
+  .type-seg button.on{background:var(--color-accent-subtle);color:var(--color-accent)}
+  .type-seg button.on small{color:var(--color-accent)}
+
+  .dlg__field{margin-top:.9rem}
+  .dlg__field label{display:block;font-size:.72rem;color:var(--color-text-secondary);margin-bottom:.35rem}
+  .dlg input[type=text]{width:100%;appearance:none;border:1px solid var(--color-border-medium);border-radius:6px;
+    background:var(--color-bg-base);color:var(--color-text-primary);padding:.55rem .7rem;font-size:.85rem;
+    font-family:var(--sans)}
+  .dlg input[type=text]:focus{outline:2px solid var(--color-accent-subtle);border-color:var(--color-accent)}
+  .dlg input[type=text]::placeholder{color:var(--color-text-muted)}
+
+  /* keyword 态：语法说明 + 实时解析预览 */
+  .kw-hint{margin-top:.5rem;font-size:.68rem;color:var(--color-text-muted);line-height:1.7}
+  .kw-hint b{color:var(--color-text-secondary);font-weight:600}
+  .kw-hint code{font-family:var(--mono);font-size:.66rem;background:var(--color-bg-sunken);
+    border-radius:3px;padding:.06rem .3rem}
+  .parse-preview{margin-top:.55rem;display:flex;align-items:center;flex-wrap:wrap;gap:.35rem;min-height:1.6rem}
+  .parse-preview .pgroup{display:inline-flex;align-items:center;gap:.25rem;font-family:var(--mono);font-size:.7rem;
+    border:1px dashed rgba(45,138,122,.5);border-radius:5px;padding:.18rem .5rem;color:#2d8a7a;background:rgba(45,138,122,.05)}
+  .parse-preview .pgroup .orr{color:var(--color-text-muted)}
+  .parse-preview .pand{font-family:var(--sans);font-size:.66rem;color:var(--color-text-muted)}
+  .parse-preview .pinvalid{font-size:.7rem;color:var(--color-accent);font-style:italic}
+  [data-theme="dark"] .parse-preview .pgroup{color:#5ed6c1;border-color:rgba(94,214,193,.4);background:rgba(94,214,193,.05)}
+
+  /* 回扫说明（keyword 态独有）*/
+  .scan-note{margin-top:.7rem;display:flex;gap:.45rem;align-items:flex-start;font-size:.7rem;
+    color:var(--color-text-secondary);line-height:1.6;background:var(--color-bg-sunken);
+    border-radius:6px;padding:.5rem .65rem}
+  .scan-note svg{width:14px;height:14px;flex:none;margin-top:.15rem;color:var(--raw-teal-500)}
+
+  .dlg__foot{display:flex;justify-content:flex-end;gap:.5rem;margin-top:1rem}
+  .btn{appearance:none;border-radius:6px;cursor:pointer;font-family:var(--sans);font-size:.78rem;padding:.5rem 1rem}
+  .btn--ghost{border:1px solid var(--color-border-medium);background:transparent;color:var(--color-text-secondary)}
+  .btn--ghost:hover{border-color:var(--color-text-muted)}
+  .btn--primary{border:0;background:var(--color-accent);color:#fff}
+  .btn--primary:hover{background:var(--color-accent-hover)}
+  [data-theme="dark"] .btn--primary{color:#080c12}
+  .btn--primary:disabled{opacity:.45;cursor:not-allowed}
+
+  .note{max-width:46rem;margin:2rem auto 0;padding:1rem 1.25rem;font-size:.74rem;line-height:1.7;
+    color:var(--color-text-muted);font-family:var(--sans);border-top:1px solid var(--color-border-subtle)}
+  .note b{color:var(--color-text-secondary)}
+</style>
+</head>
+<body>
+
+<div class="mock-bar">
+  <b>关注双轨（keyword）· Mockup</b>
+  <span>状态：</span>
+  <div class="seg" id="seg-state">
+    <button data-state="hits" class="on">常态·两类命中</button>
+    <button data-state="dlg-label">新建·话题型</button>
+    <button data-state="dlg-kw">新建·关键字型</button>
+    <button data-state="created">建后·即时回扫</button>
+  </div>
+  <span class="spacer"></span>
+  <div class="seg" id="seg-theme">
+    <button data-theme="editorial" class="on">Editorial</button>
+    <button data-theme="dark">Dark</button>
+  </div>
+</div>
+
+<div class="report">
+  <header class="mast">
+    <div class="eye">Syntopica · 每日脉络</div>
+    <h1>地缘周报</h1>
+    <div class="meta">2026年6月29日<span class="sep">·</span>48 篇<span class="sep">·</span>12 话题</div>
+  </header>
+
+  <section class="watch" id="watch">
+    <div class="watch__head">
+      <a class="watch__eye" href="watch-manage-panel.html" title="打开版块级关注管理面板" style="cursor:pointer">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+        你在追踪 · 3 个关注 →
+      </a>
+      <span class="watch__title">命中你主动标记的动态（点击头部跳管理面板）</span>
+    </div>
+
+    <!-- 即时回扫反馈（created 态可见）-->
+    <div class="scan" id="scan-banner" style="display:none">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M20 6L9 17l-5-5"/></svg>
+      <div>关键字关注 <b>「ASML|镓锗 出口」</b>已创建，已回扫近 14 天动态——<a>命中 3 条历史 section</a>，点击逐条查看。</div>
+    </div>
+
+    <div id="pane-hits">
+      <!-- label 类分组（实线左条 + serif 斜体 AI 理由）-->
+      <div class="wgroup open">
+        <div class="wgroup__bar" onclick="this.parentElement.classList.toggle('open')">
+          <svg class="wgroup__chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M9 6l6 6-6 6"/></svg>
+          <span class="wgroup__label">美伊会不会真打起来</span>
+          <span class="wgroup__count">命中 2</span>
+          <span class="wgroup__ops">
+            <button class="wop" title="暂停"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg></button>
+            <button class="wop" title="删除"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6"/></svg></button>
+          </span>
+        </div>
+        <div class="wgroup__body">
+          <a class="whit" href="#">
+            <span class="whit__title">霍尔木兹海峡油轮遇袭，油价单日跳涨 4%</span>
+            <span class="whit__meta">§ A-03</span>
+            <span class="whit__reason">↳ 这是事态升级的直接信号：海峡通航安全首次受实质威胁，与你关注的"会不会真打"高度相关。</span>
+          </a>
+          <a class="whit" href="#">
+            <span class="whit__title">IAEA 报告：伊朗浓缩铀纯度突破 90%</span>
+            <span class="whit__meta">§ A-07</span>
+            <span class="whit__reason">↳ 距武器级仅一步之遥，是"打不打"的关键前置变量。</span>
+          </a>
+        </div>
+      </div>
+
+      <!-- keyword 类分组（虚线左条 + # 标记 + 机械理由，视觉与 label 类区分）-->
+      <div class="wgroup wgroup--kw" id="kw-new">
+        <div class="wgroup__bar" onclick="this.parentElement.classList.toggle('open')">
+          <svg class="wgroup__chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M9 6l6 6-6 6"/></svg>
+          <span class="wgroup__label"><span class="kwmark"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M10 3L8 21M16 3l-2 18M3 8h18M2 15h18"/></svg>ASML|镓锗 出口</span></span>
+          <span class="wgroup__count">命中 3</span>
+          <span class="wgroup__ops">
+            <button class="wop" title="暂停"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg></button>
+            <button class="wop" title="删除"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6"/></svg></button>
+          </span>
+        </div>
+        <div class="wgroup__body">
+          <a class="whit" href="#">
+            <span class="whit__title">荷兰扩大 ASML 对华 DUV 设备出口限制</span>
+            <span class="whit__meta">§ C-01</span>
+            <span class="whit__kw">含关键字<span class="hitword">ASML</span><span class="hitword">出口</span></span>
+          </a>
+          <a class="whit" href="#">
+            <span class="whit__title">中国对镓、锗出口实施新一轮反制许可</span>
+            <span class="whit__meta">§ C-04</span>
+            <span class="whit__kw">含关键字<span class="hitword">镓锗</span><span class="hitword">出口</span></span>
+          </a>
+          <a class="whit" href="#">
+            <span class="whit__title">出口管制清单三季度更新：设备、材料双扩容</span>
+            <span class="whit__meta">§ C-06</span>
+            <span class="whit__kw">含关键字<span class="hitword">出口</span></span>
+          </a>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="body-hint">
+    <div class="eye">话题 · 今日动态</div>
+    <h2>（正文从这里开始）</h2>
+    <p>系统按 persistent_topic 归属的正文分区。上方"你在追踪"是用户主动盯的命中，此处是聚类涌现的话题归属。</p>
+  </section>
+</div>
+
+<!-- ============ 新建关注对话框 ============ -->
+<div class="overlay" id="overlay">
+  <div class="dlg" role="dialog" aria-label="新建关注">
+    <div class="dlg__head">
+      <span class="dlg__title">新建关注</span>
+      <button class="dlg__close" id="btn-close-dlg" title="关闭">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M18 6L6 18M6 6l12 12"/></svg>
+      </button>
+    </div>
+    <div class="dlg__body">
+      <div class="type-seg" id="type-seg">
+        <button data-type="label">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+          关注话题
+          <small>一句话关切 · AI 语义匹配</small>
+        </button>
+        <button data-type="keyword" id="btn-type-kw">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M10 3L8 21M16 3l-2 18M3 8h18M2 15h18"/></svg>
+          关注关键字
+          <small>盯具体词 · 立即回扫命中</small>
+        </button>
+      </div>
+
+      <!-- label 态输入区 -->
+      <div class="dlg__field" id="field-label">
+        <label>关注内容</label>
+        <input type="text" placeholder="一句话描述你的关切，如：美伊会不会真打起来">
+      </div>
+
+      <!-- keyword 态输入区 -->
+      <div class="dlg__field" id="field-kw" style="display:none">
+        <label>关键字表达式</label>
+        <input type="text" id="kw-input" placeholder="如：ASML|镓锗 出口" value="ASML|镓锗 出口">
+        <div class="kw-hint">
+          <b>空格</b> = 且（全含才命中）· <code>|</code> = 或（含任一即命中）· 大小写不敏感。
+          匹配范围：叙事线标题 + 摘要。
+        </div>
+        <div class="parse-preview" id="parse-preview"></div>
+        <div class="scan-note">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.35-4.35"/></svg>
+          <span>提交后立即回扫本版块近 14 天动态，命中马上出现在对应日报的「你在追踪」栏，无需等下一期。</span>
+        </div>
+      </div>
+
+      <div class="dlg__foot">
+        <button class="btn btn--ghost" id="btn-cancel">取消</button>
+        <button class="btn btn--primary" id="btn-submit">创建关注</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<p class="note">
+  <b>设计要点：</b>① 本栏只读：只展示本期命中，栏头「你在追踪 · N 个关注」点击跳版块级管理面板（watch-manage-panel.html），栏内无新建入口——创建/管理唯一入口在面板。② 两类同栏共表：label 组实线左条 + serif 斜体 AI 理由（语义追踪的心智）；keyword 组青绿虚线左条 + <code>#</code> 标记 + 等宽字体机械理由「含关键字『XX』」（确定性抓取的心智）。③ 新建对话框（类型双选/解析预览/回扫说明）与回扫反馈在管理面板原型中演示，组件复用。④ 全程语义 token，editorial / dark 双主题可切。
+</p>
+
+<script>
+  // 主题切换
+  document.querySelectorAll('#seg-theme button').forEach(b=>{
+    b.onclick=()=>{
+      document.documentElement.setAttribute('data-theme', b.dataset.theme);
+      document.querySelectorAll('#seg-theme button').forEach(x=>x.classList.toggle('on', x===b));
+    };
+  });
+
+  const overlay=document.getElementById('overlay');
+  const scanBanner=document.getElementById('scan-banner');
+  const kwNew=document.getElementById('kw-new');
+  const kwInput=document.getElementById('kw-input');
+  const parsePreview=document.getElementById('parse-preview');
+  const submitBtn=document.getElementById('btn-submit');
+
+  // 类型切换
+  let curType='label';
+  document.querySelectorAll('#type-seg button').forEach(b=>{
+    b.onclick=()=>{
+      curType=b.dataset.type;
+      document.querySelectorAll('#type-seg button').forEach(x=>x.classList.toggle('on', x===b));
+      document.getElementById('field-label').style.display = curType==='label'?'block':'none';
+      document.getElementById('field-kw').style.display = curType==='keyword'?'block':'none';
+      if(curType==='keyword') renderParse();
+    };
+  });
+
+  // 实时解析预览（与后端 parseKeywordExpr 同规则：先拆 | 再拆空格）
+  function parseExpr(s){
+    return s.split('|').map(g=>g.trim().split(/\s+/).filter(Boolean)).filter(g=>g.length>0);
+  }
+  function renderParse(){
+    const groups=parseExpr(kwInput.value);
+    parsePreview.innerHTML='';
+    if(!kwInput.value.trim()){ // 空串
+      const el=document.createElement('span');el.className='pinvalid';el.textContent='表达式为空，提交将被拒绝';
+      parsePreview.appendChild(el);submitBtn.disabled=true;return;
+    }
+    if(groups.length===0){ // 纯分隔符
+      const el=document.createElement('span');el.className='pinvalid';el.textContent='未解析出有效关键字，提交将被拒绝';
+      parsePreview.appendChild(el);submitBtn.disabled=true;return;
+    }
+    submitBtn.disabled=false;
+    groups.forEach((g,i)=>{
+      if(i>0){const and=document.createElement('span');and.className='pand';and.textContent='且';parsePreview.appendChild(and);}
+      const chip=document.createElement('span');chip.className='pgroup';
+      chip.textContent=g.join(' ');
+      parsePreview.appendChild(chip);
+    });
+    // OR 语义标注
+    const orGroups=parseExpr(kwInput.value.replace(/\s+/g,' '));
+    if(groups.some(g=>kwInput.value.split('|').length>1)){
+      const hint=document.createElement('span');hint.className='pand';
+      hint.textContent='（每组内任一词命中即算，组间须全含）';
+      parsePreview.appendChild(hint);
+    }
+  }
+  kwInput.addEventListener('input', renderParse);
+
+  // 状态机
+  function setState(s){
+    overlay.classList.toggle('show', s.startsWith('dlg'));
+    scanBanner.style.display = (s==='created')?'flex':'none';
+    if(s==='created'){ kwNew.classList.add('open'); }
+    if(s.startsWith('dlg')){
+      curType = s==='dlg-kw'?'keyword':'label';
+      document.querySelectorAll('#type-seg button').forEach(x=>x.classList.toggle('on', x.dataset.type===curType));
+      document.getElementById('field-label').style.display = curType==='label'?'block':'none';
+      document.getElementById('field-kw').style.display = curType==='keyword'?'block':'none';
+      if(curType==='keyword') renderParse();
+    }
+  }
+  document.querySelectorAll('#seg-state button').forEach(b=>{
+    b.onclick=()=>{
+      document.querySelectorAll('#seg-state button').forEach(x=>x.classList.toggle('on', x===b));
+      setState(b.dataset.state);
+    };
+  });
+  document.getElementById('btn-close-dlg').onclick=()=>setState('hits');
+  document.getElementById('btn-cancel').onclick=()=>setState('hits');
+  document.getElementById('btn-submit').onclick=()=>setState('created');
+</script>
+</body>
+</html>

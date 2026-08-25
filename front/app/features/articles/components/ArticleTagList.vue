@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { Icon } from '@iconify/vue'
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import type { ArticleTag } from '~/types'
 
 interface Props {
@@ -43,12 +43,22 @@ const sortedTags = computed(() => [...props.tags].sort((left, right) => {
   return rightCount - leftCount
 }))
 
+// compact 截断态下被隐藏的标签数；展开后仍保持原值，用于 +N 徽章文案与显隐
+const expanded = ref(false)
+
 const visibleTags = computed(() => {
-  if (!props.compact) return sortedTags.value
+  if (!props.compact || expanded.value) return sortedTags.value
   return sortedTags.value.slice(0, props.maxVisible)
 })
 
-const hiddenCount = computed(() => Math.max(sortedTags.value.length - visibleTags.value.length, 0))
+const hiddenCount = computed(() => {
+  if (!props.compact) return 0
+  return Math.max(sortedTags.value.length - props.maxVisible, 0)
+})
+
+function toggleExpanded() {
+  expanded.value = !expanded.value
+}
 
 function isHighlighted(tag: ArticleTag) {
   return props.highlightedSlugs.includes(tag.slug)
@@ -91,7 +101,16 @@ function handleWatchClick(tag: ArticleTag) {
       </button>
     </span>
 
-    <span v-if="hiddenCount" class="article-tag article-tag--more">+{{ hiddenCount }}</span>
+    <button
+      v-if="hiddenCount"
+      type="button"
+      class="article-tag article-tag--more"
+      :aria-expanded="expanded"
+      :title="expanded ? '收起标签' : `展开剩余 ${hiddenCount} 个标签`"
+      @click="toggleExpanded"
+    >
+      {{ expanded ? '−' : `+${hiddenCount}` }}
+    </button>
   </div>
 </template>
 
@@ -171,5 +190,17 @@ function handleWatchClick(tag: ArticleTag) {
 .article-tag--more {
   background: rgba(18, 24, 30, 0.06);
   color: var(--color-text-muted);
+  cursor: pointer;
+  font-family: inherit;
+  transition: background 0.15s;
+}
+
+.article-tag--more:hover {
+  background: rgba(18, 24, 30, 0.12);
+}
+
+.article-tag--more:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 1px;
 }
 </style>

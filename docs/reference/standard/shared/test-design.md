@@ -28,11 +28,23 @@ doc-impact-applies: openspec/changes/, _test.go, .spec.ts, .test.ts | section=JI
 | # | 变体（组/条目） | 期望答案 | 层 | 落点 |
 ### 效果核对（触发问句④时）
 - 触发原因 / 核对方法 / 量化结果 / 结论
+### 继承与调整（涉及 MODIFIED/REMOVED Requirements 时必填，见问句⓪）
+| 旧 Scenario | 处置 | 旧测试文件 | 动作 |
 ### 白盒附加（复杂档：状态机/算法/协议）
 分支表 + 边界值清单 + 不适用划除留痕（判据主线程定，机械枚举可派子线程）
 ```
 
 与归档对账的关系：主链路表的「来源 Scenario + 落点」列是设计层映射；机器对账仍以 tasks 验证节的 `| Scenario | 测试文件 |` 表为准（scenario-trace.sh 只扫 tasks.md）——两者指向同一批落点，不另起炉灶。
+
+## 问句⓪：改契约了吗（回归走查，条件问句）
+
+仅当本 change 的 delta specs 含 **MODIFIED / REMOVED Requirements** 时必答，纯新增 capability 豁免。
+
+改契约时旧测试可能仍在断言旧契约——**跑绿 ≠ 对**。用 `bash scripts/test-assets.sh <capability>` 反查旧资产（主 specs 现状节拍 / archive 历史含 test-cases*.md 的 change / 历史 Scenario→测试文件映射），然后在 test-cases.md 填「继承与调整」表，逐行处置才算验收：
+
+| 旧 Scenario | 处置 | 旧测试文件 | 动作 |
+| --- | --- | --- | --- |
+| <标题> | 继承 / 改语义 / 废止 | <路径> | 照跑（回归网） / 改断言 / 删除留痕 |
 
 ## 问句①：节拍全吗（被主链路表引用）
 
@@ -89,7 +101,7 @@ UI 故事必检前三项可用性变体（误输入反馈 / 空态 / 错误态�
 
 验收必须落成三形态之一：**命令+期望**（`go test ./internal/topicgraph/service -run TestX → PASS`）、**文件存在**（`新增 xxx_test.go`）、**人工留痕**（`人工：验证方式说明`——光写「人工」不算）。
 
-**禁用词表**（spec-gate 检查⑤扫描此表；改此表必同步 `.pi/extensions/spec-gate.ts` 内置常量）：
+**禁用词表**（spec-gate 检查⑤扫描此表；改此表必同步 `.pi/extensions/lib/test-case-gate.ts` 常量与 `.pi/extensions/spec-gate.ts` 引用，双向声明缺一不可）：
 
 | 违例措辞 | 问题 | 改法 |
 | --- | --- | --- |
@@ -97,7 +109,10 @@ UI 故事必检前三项可用性变体（误输入反馈 / 空态 / 错误态�
 | 「测试 PASS」（不带命令） | 哪个测试？ | 带完整命令 |
 | 「正确 / 合理 / 完整 / 等 / 之类」单独出现 | 不可判定 | 封闭式列举或量化 |
 | 纯函数任务提「SQLite」 | 分层错配（⑤b） | 「单元测试（无 DB）」 |
-| ⑤a 复杂档关键词（算法 / 状态机 / 解析 / 协议）任务无 test-cases*.md | 复杂档漏白盒（⑤a） | 补文档或写明为何不需要 |
+| proposal 未声明复杂度（缺 `<!-- complexity: complex\|simple -->`） | 声明制下复杂度是设计阶段判断，应落机器可读声明 | proposal 头补声明 |
+| 声明 `complex` 但 change 目录无 test-cases*.md | 声明复杂档漏白盒（⑤a 强违例，动工入口 steer + 归档 warn 双提醒） | 补文档或改声明 |
+| 声明 `simple` 但任务行命中复杂档关键词（算法 / 状态机 / 解析 / 协议）且无 test-cases*.md | 声明与任务措辞矛盾（⑤a 反向质询） | 改声明为 complex 并补文档，或调整措辞并确非复杂档 |
+| 未声明 + 任务行命中复杂档关键词且无 test-cases*.md | 可能复杂档漏白盒（⑤a 兜底，entry-gate 动工时 steer 提醒） | 补声明；确复杂则补文档 |
 
 ## 白盒分支表（复杂档附加）
 
@@ -120,6 +135,7 @@ UI 故事必检前三项可用性变体（误输入反馈 / 空态 / 错误态�
 **单元**：测试单元 = 一个 Requirement 的用户故事，**由 change 目录 test-cases.md 串成完整故事**（spec Scenario 只是断言片段）：主链路表串节拍（步/动作/来源 Scenario/期望/层/落点）+ 变体走查 + 效果核对 + 白盒附加。涉及行为的 change 必须有 test-cases.md（纯文档/工具链豁免）。双轨：方法单测允许（快反馈），交付账本在故事层——故事绿才算交付。
 
 **四问句**：
+0. **⓪ 改契约了吗**（仅 MODIFIED/REMOVED Requirements 时）——旧测试可能仍断言旧契约，跑绿≠对：`bash scripts/test-assets.sh <capability>` 反查旧资产，test-cases.md 填「继承与调整」表（旧Scenario×处置×旧测试×动作）逐行处置
 1. **节拍全吗**——每 Scenario 有落点；SHALL NOT 有负向节拍；外部依赖失败有答案；无自动化→「人工…」留痕
 2. **变体走查**——五组固定清单，每变体有明确答案，不适用划除留痕：
    - 输入：空串｜纯空白(全角/tab)｜纯分隔符(单/连/首/尾)｜单token｜大小写｜特殊字符｜超长
@@ -130,6 +146,6 @@ UI 故事必检前三项可用性变体（误输入反馈 / 空态 / 错误态�
 3. **层选对了吗**——最便宜层：纯逻辑→函数单测｜SQL/迁移→testcontainer PG(repository禁SQLite)｜HTTP→handler｜组件→Vitest｜**完整交互故事→opencli 端到端(前端交互 change 主链路至少一个 opencli 落点或人工豁免)**；视觉派 k3 截图
 4. **效果核对了吗**——效果依赖断言外因素(数据覆盖率/LLM行为)→真库量化核对：触发原因/方法/量化结果/结论
 
-**验收措辞**：三形态之一——命令+期望｜文件存在｜「人工：验证方式」。黑名单：「单测覆盖」无清单｜「PASS」无命令｜「正确/合理/完整/等/之类」单独出现｜纯函数×SQLite（⑤b）｜⑤a 关键词任务无 test-cases*.md。
+**验收措辞**：三形态之一——命令+期望｜文件存在｜「人工：验证方式」。黑名单：「单测覆盖」无清单｜「PASS」无命令｜「正确/合理/完整/等/之类」单独出现｜纯函数×SQLite（⑤b）｜复杂度未声明｜声明 complex 缺 test-cases*.md（⑤a 强违例）｜simple/未声明+任务行命中 ⑤a 关键词（算法/状态机/解析/协议）。词表不扩容（主信号=声明，词表仅兜底）。
 
 **白盒附加**：复杂档（状态机/算法/协议）在 test-cases.md 白盒附加节出分支表+边界值+不适用划除留痕（判据主线程定）——附加件非主角。

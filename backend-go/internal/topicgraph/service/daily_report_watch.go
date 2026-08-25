@@ -94,6 +94,11 @@ func EvaluateWatchHits(ctx context.Context, boardID uint, report *repository.Boa
 // evaluateWatchHitsWithChat is the testable core of EvaluateWatchHits.
 // It accepts a chat function so tests can inject a mock instead of hitting
 // the real AI provider.
+//
+// Dual-track (watch-keyword-and-quickadd): active watches are split by type —
+// label watches keep the existing batch-AI single-shot path unchanged;
+// keyword watches are matched by pure text (matchKeywordSections, zero AI).
+// Hits from both tracks merge into one batch upsert.
 func evaluateWatchHitsWithChat(
 	ctx context.Context,
 	boardID uint,
@@ -112,9 +117,82 @@ func evaluateWatchHitsWithChat(
 		return nil
 	}
 
-	// Build a set of valid IDs to filter AI hallucinations.
-	validWatchIDs := make(map[uint]bool, len(watches))
+	var labelWatches, keywordWatches []repository.BoardTopicWatch
 	for _, w := range watches {
+		if w.Type == repository.WatchTypeKeyword {
+			keywordWatches = append(keywordWatches, w)
+		} else {
+			labelWatches = append(labelWatches, w) // historical rows: type='label'
+		}
+	}
+
+	var allHits []repository.TopicWatchHit
+
+	// Materialized sections are invisible to the label track too (spec:
+	// 物化 section 不被提示轨扫描命中) — a keyword section trivially containing
+	// its own keyword is signal-free noise.
+	hintSections := make([]repository.DailyReportSection, 0, len(sections))
+	for _, s := range sections {
+		if s.LaneTier == LaneTierWatchKeyword || s.LaneTier == LaneTierWatchSentence {
+			continue
+		}
+		hintSections = append(hintSections, s)
+	}
+	if len(hintSections) == 0 {
+		return nil
+	}
+
+	// ── Label track: existing batch AI single-shot (unchanged behavior) ──
+	if len(labelWatches) > 0 {
+		labelHits, labelErr := evaluateLabelWatchHitsWithChat(ctx, boardID, report, hintSections, labelWatches, chat)
+		if labelErr != nil {
+			return labelErr
+		}
+		allHits = append(allHits, labelHits...)
+	}
+
+	// ── Keyword track: pure text matching, zero AI calls ──
+	if len(keywordWatches) > 0 {
+		keywordHits, keywordErr := evaluateKeywordWatchHits(ctx, report, keywordWatches)
+		if keywordErr != nil {
+			return keywordErr
+		}
+		allHits = append(allHits, keywordHits...)
+	}
+
+	if len(allHits) == 0 {
+		return nil
+	}
+
+	// Batch upsert hits — silently skip duplicates on (watch_id, section_id, report_id)
+	// so the daily report is never blocked by a duplicate AI response (or by a
+	// hit already written by the keyword instant match at creation time).
+	if err := repository.Repo.DB().Clauses(clause.OnConflict{
+		Columns:   []clause.Column{{Name: "watch_id"}, {Name: "section_id"}, {Name: "report_id"}},
+		DoNothing: true,
+	}).Create(&allHits).Error; err != nil {
+		return fmt.Errorf("write watch hits: %w", err)
+	}
+
+	logging.Infof("daily-report: wrote %d watch hits (label watches=%d, keyword watches=%d) for board %d report %d",
+		len(allHits), len(labelWatches), len(keywordWatches), boardID, report.ID)
+	return nil
+}
+
+// evaluateLabelWatchHitsWithChat is the pre-dual-track AI matching logic,
+// extracted unchanged: one batch call over all label watches + the report's
+// sections, hallucinated IDs filtered.
+func evaluateLabelWatchHitsWithChat(
+	ctx context.Context,
+	boardID uint,
+	report *repository.BoardDailyReport,
+	sections []repository.DailyReportSection,
+	labelWatches []repository.BoardTopicWatch,
+	chat watchChatFunc,
+) ([]repository.TopicWatchHit, error) {
+	// Build a set of valid IDs to filter AI hallucinations.
+	validWatchIDs := make(map[uint]bool, len(labelWatches))
+	for _, w := range labelWatches {
 		validWatchIDs[w.ID] = true
 	}
 	validSectionIDs := make(map[uint]bool, len(sections))
@@ -122,7 +200,7 @@ func evaluateWatchHitsWithChat(
 		validSectionIDs[s.ID] = true
 	}
 
-	prompt := buildWatchHitPrompt(watches, sections)
+	prompt := buildWatchHitPrompt(labelWatches, sections)
 
 	temperature := 0.1
 	maxTokens := 4096
@@ -157,12 +235,12 @@ func evaluateWatchHitsWithChat(
 		},
 		Metadata: map[string]any{
 			"operation":     "daily_report_watch_hit",
-			"watch_count":   len(watches),
+			"watch_count":   len(labelWatches),
 			"section_count": len(sections),
 		},
 	})
 	if err != nil {
-		return fmt.Errorf("AI watch hit call failed: %w", err)
+		return nil, fmt.Errorf("AI watch hit call failed: %w", err)
 	}
 
 	logging.Infof("daily-report: watch hit LLM response length=%d for board %d report %d",
@@ -170,25 +248,46 @@ func evaluateWatchHitsWithChat(
 
 	hits, err := parseWatchHitResponse(result.Content, validWatchIDs, validSectionIDs, report)
 	if err != nil {
-		return fmt.Errorf("parse watch hit response: %w", err)
+		return nil, fmt.Errorf("parse watch hit response: %w", err)
+	}
+	return hits, nil
+}
+
+// evaluateKeywordWatchHits matches every keyword watch against the report's
+// persisted threads text (title+summary, lowercased). Deterministic — no AI
+// involved; the reason is the mechanical 含关键字『XX』 text.
+func evaluateKeywordWatchHits(
+	ctx context.Context,
+	report *repository.BoardDailyReport,
+	keywordWatches []repository.BoardTopicWatch,
+) ([]repository.TopicWatchHit, error) {
+	_, span := otel.Tracer(tracing.ServiceName).Start(ctx, "service.evaluateKeywordWatchHits")
+	defer span.End()
+
+	// Sections + threads text are re-read from the DB: EvaluateWatchHits runs
+	// AFTER SaveReport (threads persisted there), and the in-memory sections
+	// slice does not carry thread text.
+	texts, err := repository.Repo.ListWatchSectionTextsByReport(report.ID)
+	if err != nil {
+		return nil, fmt.Errorf("list section texts: %w", err)
+	}
+	if len(texts) == 0 {
+		return nil, nil
 	}
 
-	if len(hits) == 0 {
-		return nil
+	var hits []repository.TopicWatchHit
+	for _, w := range keywordWatches {
+		for _, h := range matchKeywordSections(w.Label, texts) {
+			hits = append(hits, repository.TopicWatchHit{
+				WatchID:    w.ID,
+				SectionID:  h.SectionID,
+				ReportID:   report.ID,
+				PeriodDate: h.PeriodDate,
+				Reason:     buildKeywordHitReason(h.MatchedWords),
+			})
+		}
 	}
-
-	// Batch upsert hits — silently skip duplicates on (watch_id, section_id, report_id)
-	// so the daily report is never blocked by a duplicate AI response.
-	if err := repository.Repo.DB().Clauses(clause.OnConflict{
-		Columns:   []clause.Column{{Name: "watch_id"}, {Name: "section_id"}, {Name: "report_id"}},
-		DoNothing: true,
-	}).Create(&hits).Error; err != nil {
-		return fmt.Errorf("write watch hits: %w", err)
-	}
-
-	logging.Infof("daily-report: wrote %d watch hits for board %d report %d",
-		len(hits), boardID, report.ID)
-	return nil
+	return hits, nil
 }
 
 func watchHitSystemPrompt() string {

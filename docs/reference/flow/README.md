@@ -15,6 +15,26 @@
 
 **不装**：代码怎么写（去 `standard/`）、架构骨架（去 `architecture/`）、跨功能传导耦合（去 `architecture/coupling-map.md`）。
 
+## 权威中英词表（术语统一基准）
+
+flow 文档与 UI 文案统一使用下列译名；与本表冲突的历史写法（如「板块」）属错别字，修正时以本表为准：
+
+| 中文 | 英文/代码标识 | 说明 |
+| ---- | -------------- | ---- |
+| 版块 | semantic board（`semantic_labels.label_type='board'`） | 用户可管理的长期语义资产；历史误写「板块」一律修正为「版块」 |
+| 话题 | persistent topic（`board_persistent_topics`） | 版块内跨日存活的话题框架 |
+| 主题标签 | topic tag（`topic_tags`） | 文章级事件/主题标签 |
+| 章节 | section（`daily_report_sections`） | 日报内聚类章节 |
+| 叙事线 | thread（`daily_report_threads`） | 日报章节内的叙事线程；「叙事线」是 thread 的唯一合法中文指称 |
+| 订阅发现候选 | feed recommendation（`feed_recommendations`） | 偏好向量推荐的订阅源候选 |
+
+**「叙事」的合法用法登记**（其余场景改用「日报/叙事线/章节」语境）：
+
+1. 产品页专有名「叙事工坊」（tags 页）——保留不改。
+2. `evolution_narrative`（结构演化叙述）——data-enrichment 域活概念，指版块结构演化的叙述文本，与已下线的 narrative_boards/narrative_summaries 双轨无关。
+
+> 历史背景：旧「叙事摘要双轨」（narrative_boards / narrative_summaries 表及生成链路）已随 retire-narrative-legacy 全量下线，日报（board_daily_reports）是其唯一承接者。
+
 ## 全局主链路
 
 ```mermaid
@@ -25,8 +45,7 @@ flowchart LR
   PG -.可选.-> SUMMARY[AI 总结]
   PG -.可选.-> DIGEST[Digest 聚合]
   PG -.可选.-> TAG[标签向量化/自动合并]
-  PG -.可选.-> NARR[叙事摘要]
-  ENRICH & SUMMARY & DIGEST & TAG & NARR --> API[backend API]
+  ENRICH & SUMMARY & DIGEST & TAG --> API[backend API]
   API --> FETCH[前端 app/api 拉取]
   FETCH --> STORE[apiStore 映射]
   STORE --> DERIVE[派生 store / feature 组件]
@@ -43,7 +62,7 @@ flowchart LR
 | [ai-summary.md](./ai-summary.md) | AI 总结批量生成 | reader / ai |
 | [daily-report.md](./daily-report.md) | 日报 / Digest 聚合 | admin(daily_report) / ai |
 | [topic-graph.md](./topic-graph.md) | 话题图谱（PersistentTopic 归属/展示） | topicgraph / tags |
-| [semantic-board.md](./semantic-board.md) | 语义版块（管理/匹配/升级/叙事面板） | tagmanagement / tags |
+| [semantic-board.md](./semantic-board.md) | 语义版块（管理/匹配/升级/治理面板） | tagmanagement / tags |
 | [scheduler.md](./scheduler.md) | 定时任务（横切：feed刷新/状态回传/手动trigger） | admin(scheduler) / settings |
 
 ## 约束
@@ -63,4 +82,7 @@ flowchart LR
 | 2026-08-23 | harness-facts-tier-a | harness 层事实库落地（`.pi/harness/events.db` 六类事件记账：constraint.inject / pin.write / pin.read / gate.check / subagent.dispatch / session.start），constraint-injection 注入与 pin 读写经 lib/harness-log 自报，模型零参与；flow 文档作为注入数据源的机制不变，仅新增记账维度 | [archive/2026-08-23-harness-facts-tier-a](../../../openspec/changes/archive/2026-08-23-harness-facts-tier-a) |
 | 2026-08-23 | constraint-domain-declaration | 约束注入改业务域显式声明：proposal.md 头部 `constraint-domains` 标记声明即注入（change 全文退出关键词命中源，根治 harness 类 change 撞车误注入）；9 个 flow 文档头部补 `doc-impact-applies` 标签成为 JIT 路径命中单一真相源（json jitDocs 退役） | [archive/2026-08-23-constraint-domain-declaration](../../../openspec/changes/archive/2026-08-23-constraint-domain-declaration) |
 | 2026-08-23 | constraint-injection-tier-b | 注入工程升级两件：① 注入块总量预算（budgetBytes 默认 32K）+ 分层降级（keyword→jit→findings digest→域声明→占位，永不真丢，降级确定性保前缀缓存），constraint.inject 附 degraded 记账；② 档位持久化（mode.set 事件）+ 会话边界恢复三路径（resume/reload 两段式、startup 冷启动同 sessionId 恢复——真实链路返工实证 quit 重启走 startup）。事件词汇六类→七类，flow 约束节内容与辖区不变 | [archive/2026-08-23-constraint-injection-tier-b](../../../openspec/changes/archive/2026-08-23-constraint-injection-tier-b) |
+| 2026-08-24 | retire-narrative-legacy | narrative 遗留双轨清算：DROP narrative_summaries/narrative_boards（20260824_0001 destructive）、删 models/admin 死方法/死路由/dump-sanitizer 条目、NarrativeGenerateDialog→DailyReportGenerateDialog；本 README 落权威中英词表（版块/话题/主题标签/章节/叙事线/订阅发现候选）+「叙事」合法用法登记 | [`openspec/changes/archive/2026-08-24-retire-narrative-legacy`](../../../openspec/changes/archive/2026-08-24-retire-narrative-legacy) |
 | 2026-08-23 | fix-mode-recovery-cross-session | 档位恢复勘误：砍掉 tier-b 第 2 段「全局最新 mode.set 兜底」——多 pi 窗口并行是常态，全局最新几乎必然属其他窗口（实测探索窗口 reload 被灌入他窗口 implementation 档）；resume/reload/startup 三路径统一仅按同 sessionId 取数，/resume 用目标会话自身 id 必中，兜底防御场景不存在 | [archive/2026-08-23-fix-mode-recovery-cross-session](../../../openspec/changes/archive/2026-08-23-fix-mode-recovery-cross-session) |
+| 2026-08-26 | harness-observability-fixes | harness 观测面修复三件：① gate.check diag 用 truncateDiagGate 节最小字节下限（不丢 FAIL 行）；② quality-gate 增量路由（触发集=本回合相对快照新增/变化路径，非 git 累积 diff）+ 失败粘性（上回合失败未转绿纯对话也重跑）；③ telemetry 补 subagent.complete 回填（完成派发也有账）。事件词汇七类不变，仅补完成态记账 | [archive/2026-08-26-harness-observability-fixes](../../../openspec/changes/archive/2026-08-26-harness-observability-fixes) |
+| 2026-08-26 | test-case-entry-gate | 白盒用例反馈前置两件：① 复杂度声明制——proposal 头 MUST 携 `<!-- complexity: complex\|simple -->`（判定标准：状态机≥3状态/算法/多模块协议任一命中，义务家在开发执行规范 §2，openspec 官方 skill 不植入定制项）；② entry-gate 动工入口门禁——implementation 档 + 缺 test-cases*.md 时 steer 提醒进上下文（声明 complex=强提醒，simple/未声明+4 词兜底=质询），spec-gate ⑤a 归档同步声明优先。补文档义务从归档末端提前到动工瞬间，不再全靠自觉 | [archive/2026-08-26-test-case-entry-gate](../../../openspec/changes/archive/2026-08-26-test-case-entry-gate) |

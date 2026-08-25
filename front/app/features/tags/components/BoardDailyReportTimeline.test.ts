@@ -9,6 +9,7 @@ const api = vi.hoisted(() => ({
   getDailyReportDetail: vi.fn(),
   getTopicLifeline: vi.fn(),
   getArticle: vi.fn(),
+  getWatchHits: vi.fn(),
 }))
 
 vi.mock('~/api/dailyReports', () => ({
@@ -21,6 +22,10 @@ vi.mock('~/api/dailyReports', () => ({
 
 vi.mock('~/api/articles', () => ({
   useArticlesApi: () => ({ getArticle: api.getArticle }),
+}))
+
+vi.mock('~/api/topicWatches', () => ({
+  useTopicWatchesApi: () => ({ getWatchHits: api.getWatchHits }),
 }))
 
 vi.mock('@floating-ui/vue', () => ({
@@ -58,6 +63,11 @@ const reports: DailyReportListItem[] = [
     article_count: 4,
     event_tag_count: 2,
     created_at: '2026-06-21T12:00:00Z',
+    activeWatchSummaries: [
+      { watchId: 1, label: 'ASML', type: 'keyword' },
+      { watchId: 2, label: '中东局势', type: 'label' },
+      { watchId: 3, label: '出口限制', type: 'keyword' },
+    ],
   },
   {
     id: 52,
@@ -124,6 +134,7 @@ describe('BoardDailyReportTimeline preserved behavior', () => {
     api.getBoardDailyReports.mockResolvedValue({ success: true, data: { reports } })
     api.getDailyReportDetail.mockImplementation(async (id: number) => ({ success: true, data: { report: makeDetail(id) } }))
     api.getArticle.mockResolvedValue({ success: true, data: { id: 99, title: '航运恢复观察' } })
+    api.getWatchHits.mockResolvedValue({ success: true, data: [] })
   })
 
   afterEach(() => {
@@ -149,6 +160,38 @@ describe('BoardDailyReportTimeline preserved behavior', () => {
     await nextTick()
     expect(document.body.querySelector('.drm-overlay')).toBeNull()
     expect(document.activeElement).toBe(reportCard.element)
+  })
+
+  it('renders at most two active watch previews and locates the tagged section without list N+1 requests', async () => {
+    api.getWatchHits.mockResolvedValue({
+      success: true,
+      data: [{
+        id: 'watch-hit-1',
+        watchId: '1',
+        sectionId: '366',
+        reportId: '60',
+        periodDate: '2026-06-21',
+        reason: '含关键字『ASML』',
+        watchLabel: 'ASML',
+        watchType: 'keyword',
+      }],
+    })
+
+    const wrapper = await mountTimeline()
+    expect(wrapper.findAll('[data-testid="watch-preview"]')).toHaveLength(1)
+    expect(wrapper.findAll('.drt-watch-preview__tag')).toHaveLength(2)
+    expect(wrapper.find('.drt-watch-preview__more').text()).toBe('+1')
+    expect(api.getBoardDailyReports).toHaveBeenCalledOnce()
+
+    await wrapper.find('.drt-watch-preview__tag').trigger('click')
+    await flushPromises()
+    expect(api.getWatchHits).toHaveBeenCalledWith(60)
+    expect(document.body.querySelector('#report-section-366')).not.toBeNull()
+
+    const watchIndex = document.body.querySelector('[data-testid="watch-index"]')
+    const contentColumn = document.body.querySelector('.drm-content')
+    expect(watchIndex).not.toBeNull()
+    expect(contentColumn?.contains(watchIndex)).toBe(true)
   })
 
   it('keeps topic overview entry point', async () => {

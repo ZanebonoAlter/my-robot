@@ -77,6 +77,7 @@ extension SHALL 通过 `input` 事件识别阶段命令设置会话内档位（`
 
 - **WHEN** 以 `session_start{reason:"new"|"fork"}` 开始会话，此前另一会话刚记录过 mode.set
 - **THEN** 档位为未激活，不从事实库恢复
+
 ### Requirement: 每 turn system prompt 强制注入
 
 `before_agent_start` SHALL 按档位命中将约束文档追加进 system prompt：未激活档仅注入索引文档；激活档注入 baseDocs + 业务域声明（proposal.md `constraint-domains` 标记）+ 关键词命中（仅最近用户输入，change 文本不参与）+ JIT 路径命中（write/edit 路径）。**关键词命中与 JIT 命中 SHALL 会话内只增不减**（命中不因输入滚动窗词条滚出而移除、注入顺序稳定，保 system prompt 前缀缓存——系统提示变一字则全部历史缓存报废）。注入块 SHALL 标注「与 AGENTS.md 优先级宪法冲突时以宪法为准」。
@@ -86,6 +87,8 @@ extension SHALL 通过 `input` 事件识别阶段命令设置会话内档位（`
 业务域声明 SHALL 解析 proposal.md 头部的 `<!-- constraint-domains: <域>, ... -->` HTML 注释标记（可多行合并），域名合法值 SHALL 为 `docs/reference/flow/*.md` 的 basename；未知域名 SHALL 宽容忽略并在状态提示；无声明 SHALL 不注入任何 flow 约束节并在状态栏提示（不阻断）。声明域注入每回合从文件重解析，SHALL NOT 进入只增不减粘性集合。
 
 JIT pathSignals SHALL 复用文档既有 `doc-impact-applies` frontmatter 标签生成（standard 与 flow 文档统一单一真相源，不发明第二套映射），`.pi/constraint-injection.json` MUST NOT 手写 pathSignals。
+
+节级注入 SHALL 设最小字节下限（`minSectionBytes`，配置缺省 512）：提取的节内容低于下限时 SHALL 回退注入该文档全文（fail-safe，与「配置的节不存在时回落全文」同族），避免文档编辑中间态注入残缺节。回退全文时 `constraint.inject` 记账 bytes SHALL 为实际注入的全文字节数（不虚标节字节数）。
 
 注入块（文档节 + change 级文件）总量 SHALL 受 `budgetBytes` 预算限制（配置缺省默认 32768 字节）。超预算时 SHALL 按命中信号强度分层降级（先降推断信号、后降声明信号：关键词命中节 → JIT 命中节 → change 级文件 digest 收紧 → 域声明节 → change 级文件降占位；baseDocs 与注入块 header SHALL NOT 降级）。降级 MUST NOT 真丢文档——每个命中文档至少保留一行占位（标题 + `read` 全文路径），模型可自行补取。降级决策 SHALL 确定性（相同命中集合 + 相同文档内容 + 相同预算 → 相同降级结果，顺序按命中信号分层与首次命中顺序稳定）。超预算发生时注入块头部 SHALL 列出已降级路径（模型可见省略通知）。记账时被降级文档的 `constraint.inject` payload MUST 附降级标记与降级后字节数；预算降级到占位行的 explore-findings SHALL NOT 记 `pin.read`（模型未见 pin 标题）。
 
@@ -108,6 +111,11 @@ JIT pathSignals SHALL 复用文档既有 `doc-impact-applies` frontmatter 标签
 
 - **WHEN** 档位激活且声明域或最近输入命中某 flow 域
 - **THEN** 注入内容为该 flow 文档「业务约束与不变量」节（非全文），节尾附全文路径指引
+
+#### Scenario: 节残缺时回退全文
+
+- **WHEN** 某 flow 文档「业务约束与不变量」节处于编辑中间态仅 133B（低于 minSectionBytes 下限），全文完整
+- **THEN** 注入回退为该文档全文，constraint.inject 记账 bytes 为全文字节数（残缺节不进 system prompt）
 
 #### Scenario: change 文本不触发关键词命中
 
@@ -158,6 +166,7 @@ JIT pathSignals SHALL 复用文档既有 `doc-impact-applies` frontmatter 标签
 
 - **WHEN** daily-report 约束节（7.8K）本回合被降级为占位行
 - **THEN** 产生一条 constraint.inject，payload 附降级标记与降级后字节数（区别于未降级回合）
+
 ### Requirement: pin_finding 落点解析
 
 extension SHALL 注册 `pin_finding` 工具持久化探索发现，落点与 research-retention 规则对齐，三级解析：
@@ -185,7 +194,7 @@ extension SHALL 注册 `pin_finding` 工具持久化探索发现，落点与 res
 
 ### Requirement: smoke test 覆盖纯函数
 
-extension 的纯逻辑（档位匹配、栈判定、速览提取、**节提取**、**命中粘性**、落点三级解析、命令匹配）SHALL 有可脱离 pi harness 运行的 smoke test（node 直跑 .cjs 模式，同源项目 `tests/*.smoke.cjs` 实践）。
+extension 的纯逻辑（档位匹配、栈判定、速览提取、**节提取**、**节最小字节判定与全文回退**、**命中粘性**、落点三级解析、命令匹配）SHALL 有可脱离 pi harness 运行的 smoke test（node 直跑 .cjs 模式，同源项目 `tests/*.smoke.cjs` 实践）。
 
 #### Scenario: smoke test 直跑
 
@@ -196,3 +205,8 @@ extension 的纯逻辑（档位匹配、栈判定、速览提取、**节提取**
 
 - **WHEN** 配置了 `section` 的文档内不存在该 `## 节名`（文档结构变更未同步配置）
 - **THEN** 回落全文注入（不报错、不静默跳过，fail-safe）
+
+#### Scenario: 节低于最小字节下限回退全文
+
+- **WHEN** smoke test 对节提取纯函数传入低于 `minSectionBytes` 的节内容与完整全文
+- **THEN** 判定结果为回退全文（与节不存在回落同族），断言通过

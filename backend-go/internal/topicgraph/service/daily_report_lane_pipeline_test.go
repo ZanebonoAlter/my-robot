@@ -46,10 +46,10 @@ func TestClusterTagsLane_FakeLLM(t *testing.T) {
 		{ID: 4, Label: "l3-far"},
 	}
 	emb := map[uint][]float64{
-		1: unit(1, 0),  // dist 0.0 to T7 → L1
-		2: unit(0, 1),  // dist 0.0 to T8 (vacuum) → L2 downgrade
+		1: unit(1, 0),     // dist 0.0 to T7 → L1
+		2: unit(0, 1),     // dist 0.0 to T8 (vacuum) → L2 downgrade
 		3: unit(0.8, 0.6), // dist 0.2 to T7 → L2 (candidate T7)
-		4: unit(-1, 0), // dist 2.0 to T7, 1.0 to T8 → L3
+		4: unit(-1, 0),    // dist 2.0 to T7, 1.0 to T8 → L3
 	}
 
 	clusters, err := ClusterTagsLane(context.Background(), tags, topics, emb, nil, laneCfg())
@@ -83,6 +83,44 @@ func TestClusterTagsLane_FakeLLM(t *testing.T) {
 		}
 	}
 	assert.True(t, l3TagIDs[3] && l3TagIDs[4], "both the L2-new tag and the L3 tag landed in L3 groups")
+}
+
+// TestClusterTagsLane_NilBriefsDegradation covers spec scenario
+// 「briefs 查询失败降级 label-only」(candidate-topic-l2-gate 3.3)：当 briefs 载入
+// 失败（orchestrator 降级为 nil 传入）时，lane 管线 SHALL 正常完成：L2 裁决
+// 照常进行，prompt 仅含 label/状态/距离等非叙事信号，无近期标签块。
+func TestClusterTagsLane_NilBriefsDegradation(t *testing.T) {
+	var capturedUser string
+	origChat := clusterChatFn
+	t.Cleanup(func() { clusterChatFn = origChat })
+	clusterChatFn = func(ctx context.Context, system, user string, schema *airouter.JSONSchema, operation string) (string, error) {
+		if operation == "daily_report.decide_l2_tags" {
+			capturedUser = user
+			return `{"decisions":[{"tag_id":1,"decision":"keep"}]}`, nil
+		}
+		return `{"groups":[{"group_name":"g","tag_ids":[]}]}`, nil
+	}
+
+	topics := []repository.BoardPersistentTopic{{
+		ID: 7, Label: "半导体产业链", Status: repository.TopicStatusActive,
+		Centroid: repository.FloatsToPgVector(unit(1, 0)),
+	}}
+	tags := []repository.TagInput{
+		{ID: 1, Label: "weak-1"}, {ID: 2, Label: "weak-2"}, {ID: 3, Label: "weak-3"},
+	}
+	emb := map[uint][]float64{1: unit(0.8, 0.6), 2: unit(0.8, 0.6), 3: unit(0.8, 0.6)}
+
+	// nil briefs = degradation path; the pipeline SHALL NOT fail.
+	clusters, err := ClusterTagsLane(context.Background(), tags, topics, emb, nil, laneCfg())
+	require.NoError(t, err, "nil briefs (query failure) must not break the lane pipeline")
+	require.NotEmpty(t, clusters)
+
+	// The L2 prompt degrades to label-only: non-narrative signals intact,
+	// no recent-tag-label block.
+	assert.Contains(t, capturedUser, "半导体产业链", "label-only: topic label present")
+	assert.Contains(t, capturedUser, "正式", "label-only: status present")
+	assert.NotContains(t, capturedUser, "近期 section 实际标签",
+		"degradation: no recent-tag block when briefs unavailable")
 }
 
 // TestClusterTagsLane_L2OnlySwitchOffShortlist verifies the off-shortlist

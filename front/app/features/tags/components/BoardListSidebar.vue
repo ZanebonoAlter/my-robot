@@ -130,7 +130,7 @@ function sourceTitle(source: string): string {
         </button>
         <button type="button" class="sb-action-btn sb-action-btn--ghost" @click="emit('open-generate')">
           <Icon icon="mdi:auto-fix" width="14" />
-          整理叙事
+          生成日报
         </button>
       </div>
     </div>

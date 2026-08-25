@@ -55,7 +55,7 @@ type TopicTag struct {
 	IsCanonical  bool        `json:"is_canonical"`                                               // true if this is a canonical tag (not merged)
 	Source       string      `gorm:"size:20" json:"source"`                                      // llm, heuristic, manual
 	FeedCount    int         `json:"feed_count"`                                                 // distinct feed count referencing this tag
-	Status       string      `gorm:"size:20;index" json:"status"`                                // active, merged
+	Status       string      `gorm:"size:20;default:active;index" json:"status"`                 // active, merged
 	MergedIntoID *uint       `gorm:"index" json:"merged_into_id,omitempty"`                      // points to target tag when merged
 	IsWatched    bool        `json:"is_watched"`                                                 // user-watched tag for feed filtering
 	WatchedAt    *time.Time  `json:"watched_at,omitempty"`                                       // when the tag was watched
@@ -144,8 +144,8 @@ type TagMergeSuggestion struct {
 	ExistingLabel string    `gorm:"size:160" json:"existing_label"`
 	Category      string    `gorm:"size:20" json:"category"`
 	Similarity    float64   `gorm:"index:idx_tag_merge_suggestion_status_sim" json:"similarity"`
-	Status        string    `gorm:"size:20;index:idx_tag_merge_suggestion_status_sim" json:"status"` // pending, merged, dismissed
-	Source        string    `gorm:"size:20" json:"source"`                                           // incremental, full_scan
+	Status        string    `gorm:"size:20;default:pending;index:idx_tag_merge_suggestion_status_sim" json:"status"` // pending, merged, dismissed
+	Source        string    `gorm:"size:20" json:"source"`                                                           // incremental, full_scan
 	LLMVerdict    string    `gorm:"type:text" json:"llm_verdict"`
 	CreatedAt     time.Time `json:"created_at"`
 	UpdatedAt     time.Time `json:"updated_at"`

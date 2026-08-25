@@ -45,26 +45,29 @@ func buildClusterSystemPrompt(tagCount int, existingTopics []repository.BoardPer
 	// minting a new label for the same ongoing story (root cause A: the
 	// cluster step had no memory, so labels drifted day to day).
 	//
-	// Slice D (lane context injection): for active topics, append recent
-	// section/thread content so the LLM can disambiguate topics by actual
-	// substance, not just label surface similarity.
+	// Slice D (lane context injection): for anchorable topics (active AND
+	// candidate — candidate-topic-l2-gate), append recent section tag labels
+	// (fact fingerprint) so the LLM can disambiguate topics by actual
+	// substance, not just label surface similarity. Thread narratives stay
+	// out (prompt-hygiene red line).
 	if len(existingTopics) > 0 {
 		base += "\n\n## 该板块已有的叙事框架\n"
 		base += "请优先将标签归入下列已有框架：仅当该组事件确实延续某框架的核心议题时，才把该框架 id 填入该组的 matched_topic_id，group_name 沿用或微调该框架标题。不要仅因语境沾边（如人物、地点、时间相同）就把语义不相关的事件并入。若一组标签明显属于尚未覆盖的新叙事，开新组并让 matched_topic_id 为 null。\n"
-		// Guidance: when recent content is provided for active topics, the LLM
+		// Guidance: when recent content is provided for anchorable topics, the LLM
 		// must base its attribution on actual narrative substance, not just title
 		// surface similarity.
-		hasActiveContent := false
+		hasRecentContent := false
 		if briefs != nil {
 			for _, t := range existingTopics {
-				if t.Status == repository.TopicStatusActive && len(briefs[t.ID]) > 0 {
-					hasActiveContent = true
-					break
+				for _, item := range briefs[t.ID] {
+					if len(item.TagLabels) > 0 {
+						hasRecentContent = true
+					}
 				}
 			}
 		}
-		if hasActiveContent {
-			base += "\n⚠️ 重要：对于标注了「近期内容」的正式话题，请依据框架近期实际内容判断归属，而非仅凭标题字面沾边。两个话题即使标题字面相似，若各自近期内容分属不同叙事，应视为不同框架。\n"
+		if hasRecentContent {
+			base += "\n⚠️ 重要：对于标注了「近期内容」的话题，请依据框架近期实际内容判断归属，而非仅凭标题字面沾边。两个话题即使标题字面相似，若各自近期内容分属不同叙事，应视为不同框架。\n"
 		}
 		for _, t := range existingTopics {
 			statusLabel := "正式"
@@ -75,22 +78,21 @@ func buildClusterSystemPrompt(tagCount int, existingTopics []repository.BoardPer
 				t.ID, t.Label, statusLabel,
 				t.LastSeenDate.Format("2006-01-02"), t.HitCount)
 
-			// Slice D: inject recent section/thread content for active topics only.
-			// candidate topics remain label-only (too unstable for content injection).
-			if t.Status == repository.TopicStatusActive && briefs != nil && len(briefs[t.ID]) > 0 {
-				base += "\n  近期实际内容:"
+			// Slice D: inject recent section tag labels (fact fingerprint) for
+			// anchorable topics. Sections whose tags are all merged/disabled
+			// contribute no line (label-only degradation).
+			if briefs != nil && len(briefs[t.ID]) > 0 {
+				var frame strings.Builder
 				for _, item := range briefs[t.ID] {
-					base += fmt.Sprintf("\n  - section \"%s\" (%s)",
-						item.SectionLabel, item.PeriodDate.Format("2006-01-02"))
-					if len(item.ThreadTitles) > 0 {
-						base += ": "
-						for j, tt := range item.ThreadTitles {
-							if j > 0 {
-								base += ", "
-							}
-							base += fmt.Sprintf("thread \"%s\"", tt)
-						}
+					if len(item.TagLabels) == 0 {
+						continue
 					}
+					fmt.Fprintf(&frame, "\n  - section (%s): %s",
+						item.PeriodDate.Format("2006-01-02"), strings.Join(item.TagLabels, " / "))
+				}
+				if frame.Len() > 0 {
+					base += "\n  近期实际内容:"
+					base += frame.String()
 				}
 			}
 			base += "\n"

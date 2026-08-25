@@ -57,17 +57,17 @@
 │  │composition│  │       │  │ board_upgrade_   │ │  ├───────────────┤ │
 │  └───────────┘  │       │  │   suggestions    │ │  │ topic_enrichment│ │
 └────────┬────────┘       │  └─────────────────┘ │  │  _result/review │ │
-         │ (board)        └──────────┬────────────┘  ├───────────────┤ │
-         │                           │ (persistent_  │ stock_debate_  │ │
-┌────────▼────────┐       ┌──────────▼──────────┐   │   result       │ │
-│ Daily Report /  │       │   Narrative         │   └───────────────┘ │
-│ Persistent Topic│       │  ┌────────────────┐ │   └─────────────────┘
-│  board_daily_   │       │  │narrative_boards │ │
-│   reports       │       │  ├────────────────┤ │   ┌─────────────────┐
-│  daily_report_  │       │  │narrative_       │ │   │ AI Infra        │
-│   sections      │       │  │ summaries       │ │   │ ai_providers/   │
-│  daily_report_  │       │  └────────────────┘ │   │  ai_routes/     │
-│   threads       │       └─────────────────────┘   │  ai_route_      │
+         │ (board)        └─────────────────────┘  ├───────────────┤ │
+         │                                           │ stock_debate_  │ │
+┌────────▼────────┐                                 │   result       │ │
+│ Daily Report /  │                                 └───────────────┘ │
+│ Persistent Topic│                                 └─────────────────┘
+│  board_daily_   │
+│   reports       │                                 ┌─────────────────┐
+│  daily_report_  │                                 │ AI Infra        │
+│   sections      │                                 │ ai_providers/   │
+│  daily_report_  │                                 │  ai_routes/     │
+│   threads       │                                 │  ai_route_      │
 │  daily_report_  │                                 │  providers/     │
 │ section_relations                                  │  ai_call_logs/  │
 │  board_persistent│                                 │  ai_settings/   │
@@ -82,7 +82,7 @@
 - 实线箭头 → 表示 **GORM 逻辑引用**（源表字段指向目标表 `id`）；除 `topic_tags.merged_into_id` 外均无 DB 级 FK。
 - `semantic_labels` 是语义标签中心表，辅助标签（`label_type=auxiliary`）和 SemanticBoard（`label_type=board`）共存于此表。
 - `topic_tags` 通过 `topic_tag_semantic_labels` 和 `topic_tag_board_labels` 两张桥接表与 `semantic_labels` 关联。
-- `narrative_boards` / `board_daily_reports` / `board_persistent_topics` / `board_topic_watches` / `board_data_sources` 均通过 `semantic_board_id` 逻辑引用 `semantic_labels`。
+- `board_daily_reports` / `board_persistent_topics` / `board_topic_watches` / `board_data_sources` 均通过 `semantic_board_id` 逻辑引用 `semantic_labels`。
 - 「AI Summaries」域（`ai_summaries` 等）已废弃（无对应 model，见下文该域说明）。
 
 ---
@@ -320,35 +320,6 @@ erDiagram
     }
 ```
 
-### Narrative（叙事摘要面）
-
-```mermaid
-erDiagram
-    semantic_labels ||--o{ narrative_boards : "semantic_board_id"
-    narrative_boards ||--o{ narrative_summaries : "board_id"
-
-    narrative_boards {
-        SERIAL id PK
-        VARCHAR name
-        TEXT description
-        TEXT event_tag_ids "JSON array"
-        INTEGER semantic_board_id FK
-        BOOLEAN is_system
-    }
-    narrative_summaries {
-        BIGSERIAL id PK
-        VARCHAR title
-        TEXT summary
-        VARCHAR status
-        VARCHAR period
-        INTEGER board_id FK
-        TEXT related_tag_ids "JSON array"
-        TEXT related_article_ids "JSON array"
-    }
-```
-
-> 本域关联均**无** OnDelete 声明，均为逻辑关联（`narrative_boards.semantic_board_id`、`narrative_summaries.board_id`）。
-
 ### AI Infrastructure（AI 基础设施）
 
 ```mermaid
@@ -585,8 +556,6 @@ erDiagram
 | `topic_analysis_cursors` | `topic_tag_id` | `topic_tags` | `id` | 无 OnDelete |
 | `ai_route_providers` | `route_id` | `ai_routes` | `id` | 无 OnDelete |
 | `ai_route_providers` | `provider_id` | `ai_providers` | `id` | 无 OnDelete |
-| `narrative_boards` | `semantic_board_id` | `semantic_labels` | `id` | 无 OnDelete |
-| `narrative_summaries` | `board_id` | `narrative_boards` | `id` | 无 OnDelete |
 | `board_daily_reports` | `semantic_board_id` | `semantic_labels` | `id` | 无 OnDelete |
 | `board_daily_reports` | `prev_report_id` | `board_daily_reports` | `id` | 自引用，可空，无 OnDelete |
 | `daily_report_sections` | `report_id` | `board_daily_reports` | `id` | 无 OnDelete（`BoardDailyReport.Sections`） |
@@ -647,11 +616,6 @@ erDiagram
 
 以下字段使用 JSON 数组存储关联 ID，不通过 FK 约束保证完整性：
 
-- **`narrative_boards.event_tag_ids`** → `topic_tags.id`：关联的 event 标签
-- **`narrative_boards.prev_board_ids`** → `narrative_boards.id`：前日关联 Board
-- **`narrative_summaries.parent_ids`** → `narrative_summaries.id`：父叙事
-- **`narrative_summaries.related_tag_ids`** → `topic_tags.id`：关联标签
-- **`narrative_summaries.related_article_ids`** → `articles.id`：关联文章
 
 ### 已废弃表（无对应 model）
 

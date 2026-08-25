@@ -1,0 +1,97 @@
+import { describe, expect, it, vi } from 'vitest'
+import { flushPromises, mount } from '@vue/test-utils'
+import { ref } from 'vue'
+import TagsPage from './TagsPage.vue'
+
+const apiMocks = vi.hoisted(() => ({
+  listWatches: vi.fn(),
+}))
+
+vi.mock('~/api/topicWatches', () => ({
+  useTopicWatchesApi: () => ({ listWatches: apiMocks.listWatches }),
+}))
+
+vi.mock('~/composables/useOnboarding', () => ({
+  useOnboarding: () => ({ isTagsFirstRun: ref(false), startTagsTour: vi.fn() }),
+}))
+
+vi.mock('~/features/tags/composables/useTagsPage', () => ({
+  useTagsPage: () => new Proxy({
+    boards: ref([{ id: 1974, label: '地缘政治' }]),
+    selectedBoardId: ref(1974),
+    contentTab: ref('composition'),
+    boardsLoading: ref(false),
+    boardsError: ref(null),
+    compositionLabels: ref([]),
+    compositionLoading: ref(false),
+  }, {
+    get: (target, key) => key in target ? target[key as keyof typeof target] : ref(null),
+  }),
+}))
+
+vi.mock('@iconify/vue', () => ({
+  Icon: { name: 'Icon', inheritAttrs: true, template: '<span />' },
+}))
+
+// TagsPage 的主题开关依赖 Nuxt `#imports`；本组件测试只验证 tab 栏入口，
+// 以轻量 stub 隔离主题运行时。
+vi.mock('~/components/ui/ThemeToggle.vue', () => ({
+  default: { name: 'ThemeToggle', template: '<span />' },
+}))
+vi.mock('./BoardThreadBrowser.vue', () => ({ default: { name: 'BoardThreadBrowser', template: '<span />' } }))
+vi.mock('./AddSemanticBoardDialog.vue', () => ({ default: { template: '<span />' } }))
+vi.mock('./BoardCompositionPanel.vue', () => ({ default: { template: '<span />' } }))
+vi.mock('./AuxiliaryLabelPool.vue', () => ({ default: { template: '<span />' } }))
+vi.mock('./UpgradeSuggestionPanel.vue', () => ({ default: { template: '<span />' } }))
+vi.mock('./BackfillProgress.vue', () => ({ default: { template: '<span />' } }))
+vi.mock('./MatchingConfigDialog.vue', () => ({ default: { template: '<span />' } }))
+vi.mock('./DailyReportGenerateDialog.vue', () => ({ default: { template: '<span />' } }))
+vi.mock('./BoardDailyReportTimeline.vue', () => ({ default: { template: '<span />' } }))
+vi.mock('./TopicDetectiveWall.client.vue', () => ({ default: { template: '<span />' } }))
+vi.mock('./TagMergePreview.vue', () => ({ default: { template: '<span />' } }))
+vi.mock('./BoardListSidebar.vue', () => ({ default: { template: '<span />' } }))
+vi.mock('./BoardTimelinePanel.vue', () => ({ default: { template: '<span />' } }))
+vi.mock('./BoardEnrichmentPanel.vue', () => ({ default: { template: '<span />' } }))
+vi.mock('./BoardEditDialog.vue', () => ({ default: { template: '<span />' } }))
+vi.mock('./ArticlePreviewModal.vue', () => ({ default: { template: '<span />' } }))
+
+const WatchManagePanelStub = {
+  name: 'WatchManagePanel',
+  props: ['modelValue'],
+  template: '<div data-testid="watch-manage-panel-stub" :data-open="String(modelValue)" />',
+}
+
+describe('TagsPage — 版块级关注入口', () => {
+  it('在五个平级内容 tab 下常驻，计数含 active+paused，并可打开管理面板', async () => {
+    apiMocks.listWatches.mockResolvedValue({
+      success: true,
+      data: [
+        { id: '1', status: 'active' },
+        { id: '2', status: 'paused' },
+      ],
+    })
+
+    const wrapper = mount(TagsPage, {
+      shallow: true,
+      global: { stubs: { WatchManagePanel: WatchManagePanelStub } },
+    })
+    await flushPromises()
+
+    const tabs = wrapper.findAll('.tags-content-tab')
+    expect(tabs).toHaveLength(5)
+    const chip = wrapper.find('[data-testid="watch-panel-chip"]')
+    expect(chip.exists()).toBe(true)
+    expect(chip.text()).toContain('我在追踪')
+    expect(chip.text()).toContain('(2)')
+    expect(chip.classes()).toContain('tags-watch-chip--nowrap')
+    expect(chip.attributes('style') || '').not.toContain('white-space: normal')
+
+    for (const tab of tabs) {
+      await tab.trigger('click')
+      expect(wrapper.find('[data-testid="watch-panel-chip"]').exists()).toBe(true)
+    }
+
+    await chip.trigger('click')
+    expect(wrapper.find('[data-testid="watch-manage-panel-stub"]').attributes('data-open')).toBe('true')
+  })
+})

@@ -65,9 +65,18 @@ export interface RequestCacheEntry<T> {
 
 export function sortDailyReportSections(sections: DailyReportSection[]): DailyReportSection[] {
   return [...sections].sort((a, b) => {
+    // 物化板块（watch_*）排分区末尾：算法聚类是主叙事，关注物化是叠加板块。
+    const aw = isWatchSection(a) ? 1 : 0
+    const bw = isWatchSection(b) ? 1 : 0
+    if (aw !== bw) return aw - bw
     if (a.best_tier !== b.best_tier) return a.best_tier - b.best_tier
     return b.avg_score - a.avg_score
   })
+}
+
+/** 关注物化板块（watch-materialized-topic）：lane_tier 前缀 watch_ 标记。 */
+export function isWatchSection(section: DailyReportSection): boolean {
+  return section.lane_tier === 'watch_keyword' || section.lane_tier === 'watch_sentence'
 }
 
 export function buildQualityZones(sections: DailyReportSection[]): QualityZone[] {

@@ -5,7 +5,9 @@ import {
   buildQualityZones,
   createRequestCache,
   groupSectionsByTopic,
+  isWatchSection,
   selectLeadStory,
+  sortDailyReportSections,
 } from './dailyReportMagazine'
 import type { DailyReport, DailyReportSection, SectionRelation, SectionTimelineNode } from '~/api/dailyReports'
 
@@ -259,5 +261,27 @@ describe('createRequestCache', () => {
     await cache.load(1)
     cache.clear()
     expect(cache.get(1).status).toBe('idle')
+  })
+})
+
+// ── watch-materialized-topic: 物化板块排序 ──────────────────────────────
+
+describe('watch-materialized sections sort to zone tail', () => {
+  it('watch_* sections come after regular sections regardless of tier', () => {
+    const sections = [
+      { id: 3, best_tier: 4, avg_score: 0, lane_tier: 'watch_keyword' },
+      { id: 1, best_tier: 1, avg_score: 0.8, lane_tier: 'l1_direct' },
+      { id: 4, best_tier: 4, avg_score: 0, lane_tier: 'watch_sentence' },
+      { id: 2, best_tier: 2, avg_score: 0.5, lane_tier: null },
+    ] as unknown as DailyReportSection[]
+    const sorted = sortDailyReportSections(sections)
+    expect(sorted.map(s => s.id)).toEqual([1, 2, 3, 4])
+  })
+
+  it('isWatchSection detects both watch tiers', () => {
+    expect(isWatchSection({ lane_tier: 'watch_keyword' } as DailyReportSection)).toBe(true)
+    expect(isWatchSection({ lane_tier: 'watch_sentence' } as DailyReportSection)).toBe(true)
+    expect(isWatchSection({ lane_tier: 'l1_direct' } as DailyReportSection)).toBe(false)
+    expect(isWatchSection({} as DailyReportSection)).toBe(false)
   })
 })

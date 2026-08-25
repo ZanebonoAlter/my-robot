@@ -1,6 +1,10 @@
 package models
 
-import "time"
+import (
+	"time"
+
+	"gorm.io/gorm"
+)
 
 type SemanticLabel struct {
 	ID    uint   `gorm:"primaryKey" json:"id"`
@@ -24,13 +28,27 @@ type SemanticLabel struct {
 	// WindowDays — real-time detail window for cycle-B (default 14).
 	WindowDays int `json:"window_days"`
 	// ContextLayers — which granularity layers the interpreter reads (default ["week","month","year","all"]).
-	ContextLayers []string  `gorm:"type:jsonb;serializer:json;default:'[\"week\",\"month\",\"year\",\"all\"]'" json:"context_layers"`
+	// No GORM default tag: a JSON string array requires embedded double quotes inside
+	// the tag value, which reflect.StructTag syntax cannot express (the `\"` spelling
+	// passes vet but corrupts GORM's tag parsing — root cause of the NULL-insert bug).
+	// Default is filled by BeforeCreate instead.
+	ContextLayers []string  `gorm:"type:jsonb;serializer:json" json:"context_layers"`
 	CreatedAt     time.Time `json:"created_at"`
 	UpdatedAt     time.Time `json:"updated_at"`
 }
 
 func (SemanticLabel) TableName() string {
 	return "semantic_labels"
+}
+
+// BeforeCreate fills the ContextLayers default on insert. The tag-based default
+// is impossible here (see field comment), and a NULL insert would violate the
+// NOT NULL constraint carried by existing databases (migration 20260723_0001).
+func (s *SemanticLabel) BeforeCreate(tx *gorm.DB) error {
+	if len(s.ContextLayers) == 0 {
+		s.ContextLayers = []string{"week", "month", "year", "all"}
+	}
+	return nil
 }
 
 type TopicTagSemanticLabel struct {

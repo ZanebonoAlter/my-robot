@@ -96,7 +96,7 @@
 - **THEN** 系统 SHALL 根据用户选择的 all / unassigned / board 模式入队，异步逐个执行 board 匹配
 
 ### Requirement: 冷启动允许无 SemanticBoard
-系统 SHALL 允许冷启动阶段没有任何 SemanticBoard。无 SemanticBoard 时，tag SHALL 仍然提取和积累辅助标签；NarrativeBoard 生成 SHALL 跳过 semantic board 派生，直到用户确认创建第一批 SemanticBoard 并回填。
+系统 SHALL 允许冷启动阶段没有任何 SemanticBoard。无 SemanticBoard 时，tag SHALL 仍然提取和积累辅助标签；日报生成 SHALL 自然产出空结果且不报错，直到用户确认创建第一批 SemanticBoard 并回填。
 
 #### Scenario: 冷启动无 board
 - **WHEN** 系统尚无 label_type="board" 的 semantic_labels

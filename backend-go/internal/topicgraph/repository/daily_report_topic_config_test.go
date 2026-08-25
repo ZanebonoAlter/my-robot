@@ -42,3 +42,44 @@ func TestLoadPersistentTopicConfig_SectionMergeEnabled(t *testing.T) {
 		assert.False(t, cfg.SectionMergeEnabled)
 	})
 }
+
+// TestLoadPersistentTopicConfig_CandidateGate covers the
+// persistent_topic_candidate_l1_gate_enabled switch (candidate-topic-l2-gate):
+// absent row → default true (gate on); explicit true/false parse; invalid →
+// warn + keep default true.
+func TestLoadPersistentTopicConfig_CandidateGate(t *testing.T) {
+	seed := func(t *testing.T, db *gorm.DB, value string) {
+		t.Helper()
+		require.NoError(t, db.Create(&models.AISettings{
+			Key:   "persistent_topic_candidate_l1_gate_enabled",
+			Value: value,
+		}).Error)
+	}
+
+	t.Run("no row defaults to true", func(t *testing.T) {
+		db := testutil.SetupTestDB(t)
+		cfg := LoadPersistentTopicConfig(db)
+		assert.True(t, cfg.CandidateL1GateEnabled)
+	})
+
+	t.Run("explicit false disables gate", func(t *testing.T) {
+		db := testutil.SetupTestDB(t)
+		seed(t, db, "false")
+		cfg := LoadPersistentTopicConfig(db)
+		assert.False(t, cfg.CandidateL1GateEnabled)
+	})
+
+	t.Run("explicit true enables gate", func(t *testing.T) {
+		db := testutil.SetupTestDB(t)
+		seed(t, db, "true")
+		cfg := LoadPersistentTopicConfig(db)
+		assert.True(t, cfg.CandidateL1GateEnabled)
+	})
+
+	t.Run("invalid value warns and keeps default true", func(t *testing.T) {
+		db := testutil.SetupTestDB(t)
+		seed(t, db, "banana")
+		cfg := LoadPersistentTopicConfig(db)
+		assert.True(t, cfg.CandidateL1GateEnabled)
+	})
+}

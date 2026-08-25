@@ -150,7 +150,7 @@ func TestClusterTags_WithBriefsShortCircuit(t *testing.T) {
 		{ID: 2, Label: "Event B", ArticleCount: 3},
 	}
 	briefs := map[uint][]repository.TopicRecentBrief{
-		7: {{TopicID: 7, SectionID: 101, SectionLabel: "Test", ThreadTitles: []string{"thread"}}},
+		7: {{TopicID: 7, SectionID: 101, TagLabels: []string{"tag"}}},
 	}
 	// Short-circuit path: ≤2 tags skips LLM, briefs are irrelevant but must not break.
 	groups, err := ClusterTags(nil, tags, nil, briefs)
@@ -257,26 +257,23 @@ func TestBuildClusterSystemPrompt_ActiveTopicWithRecentBriefs(t *testing.T) {
 		7: {
 			{
 				TopicID: 7, SectionID: 101,
-				SectionLabel: "真主党越境打击",
-				PeriodDate:   now.AddDate(0, 0, -1),
-				ThreadTitles: []string{"真主党向以色列北部发射火箭", "以军拦截黎方无人机"},
+				TagLabels:  []string{"真主党越境打击", "以军拦截黎方无人机"},
+				PeriodDate: now.AddDate(0, 0, -1),
 			},
 			{
 				TopicID: 7, SectionID: 102,
-				SectionLabel: "以军空袭黎南部",
-				PeriodDate:   now.AddDate(0, 0, -2),
-				ThreadTitles: []string{"以色列空袭黎巴嫩南部目标"},
+				TagLabels:  []string{"以军空袭黎南部"},
+				PeriodDate: now.AddDate(0, 0, -2),
 			},
 		},
 	}
 	prompt := buildClusterSystemPrompt(10, topics, briefs)
-	// Active topic with briefs SHALL include recent content
+	// Active topic with briefs SHALL include recent content as tag-label
+	// fact fingerprints, joined per section.
 	assert.Contains(t, prompt, "以黎冲突升级")
 	assert.Contains(t, prompt, "近期实际内容")
-	assert.Contains(t, prompt, "真主党越境打击")
-	assert.Contains(t, prompt, "真主党向以色列北部发射火箭")
-	assert.Contains(t, prompt, "以军空袭黎南部")
-	assert.Contains(t, prompt, "以色列空袭黎巴嫩南部目标")
+	assert.Contains(t, prompt, "section (2026-06-29): 真主党越境打击 / 以军拦截黎方无人机")
+	assert.Contains(t, prompt, "section (2026-06-28): 以军空袭黎南部")
 }
 
 func TestBuildClusterSystemPrompt_ActiveTopicEmptyBriefs(t *testing.T) {
@@ -292,7 +289,10 @@ func TestBuildClusterSystemPrompt_ActiveTopicEmptyBriefs(t *testing.T) {
 	assert.NotContains(t, prompt, "近期实际内容")
 }
 
-func TestBuildClusterSystemPrompt_CandidateTopicNoBriefs(t *testing.T) {
+// TestBuildClusterSystemPrompt_CandidateTopicWithBriefs covers spec
+// requirement「注入范围 SHALL 覆盖 active 与 candidate 两类话题」
+// (candidate-topic-l2-gate)：candidate 流经 L2 裁决，近期内容 SHALL 注入。
+func TestBuildClusterSystemPrompt_CandidateTopicWithBriefs(t *testing.T) {
 	now := time.Now()
 	topics := []repository.BoardPersistentTopic{
 		{ID: 15, Label: "候选叙事", Status: repository.TopicStatusCandidate,
@@ -300,16 +300,14 @@ func TestBuildClusterSystemPrompt_CandidateTopicNoBriefs(t *testing.T) {
 	}
 	briefs := map[uint][]repository.TopicRecentBrief{
 		15: {
-			{TopicID: 15, SectionID: 201, SectionLabel: "some-section",
-				PeriodDate: now, ThreadTitles: []string{"some-thread"}},
+			{TopicID: 15, SectionID: 201, TagLabels: []string{"some-tag"},
+				PeriodDate: now},
 		},
 	}
 	prompt := buildClusterSystemPrompt(10, topics, briefs)
-	// Candidate topic SHALL NOT show recent content even if briefs exist
 	assert.Contains(t, prompt, "候选叙事")
-	assert.NotContains(t, prompt, "some-section")
-	assert.NotContains(t, prompt, "some-thread")
-	assert.NotContains(t, prompt, "近期实际内容")
+	assert.Contains(t, prompt, "近期实际内容")
+	assert.Contains(t, prompt, "some-tag", "candidate topic carries its tag-label fact fingerprint")
 }
 
 func TestBuildClusterSystemPrompt_ActiveAndCandidateMixed(t *testing.T) {
@@ -322,12 +320,12 @@ func TestBuildClusterSystemPrompt_ActiveAndCandidateMixed(t *testing.T) {
 	}
 	briefs := map[uint][]repository.TopicRecentBrief{
 		7: {
-			{TopicID: 7, SectionID: 101, SectionLabel: "真主党越境打击",
-				PeriodDate: now, ThreadTitles: []string{"真主党发射火箭"}},
+			{TopicID: 7, SectionID: 101, TagLabels: []string{"真主党越境打击"},
+				PeriodDate: now},
 		},
 		15: {
-			{TopicID: 15, SectionID: 201, SectionLabel: "should-not-appear",
-				PeriodDate: now, ThreadTitles: []string{"hidden-thread"}},
+			{TopicID: 15, SectionID: 201, TagLabels: []string{"candidate-tag"},
+				PeriodDate: now},
 		},
 	}
 	prompt := buildClusterSystemPrompt(10, topics, briefs)
@@ -335,10 +333,9 @@ func TestBuildClusterSystemPrompt_ActiveAndCandidateMixed(t *testing.T) {
 	assert.Contains(t, prompt, "以黎冲突升级")
 	assert.Contains(t, prompt, "真主党越境打击")
 	assert.Contains(t, prompt, "近期实际内容")
-	// Candidate is label-only
+	// Candidate ALSO carries its content (candidate-topic-l2-gate)
 	assert.Contains(t, prompt, "候选叙事")
-	assert.NotContains(t, prompt, "should-not-appear")
-	assert.NotContains(t, prompt, "hidden-thread")
+	assert.Contains(t, prompt, "candidate-tag")
 }
 
 func TestBuildClusterSystemPrompt_GuidanceTextPresent(t *testing.T) {
@@ -349,8 +346,8 @@ func TestBuildClusterSystemPrompt_GuidanceTextPresent(t *testing.T) {
 	}
 	briefs := map[uint][]repository.TopicRecentBrief{
 		7: {
-			{TopicID: 7, SectionID: 101, SectionLabel: "Codex 更新",
-				PeriodDate: now, ThreadTitles: []string{"Codex 推出插件系统"}},
+			{TopicID: 7, SectionID: 101, TagLabels: []string{"Codex 推出插件系统"},
+				PeriodDate: now},
 		},
 	}
 	prompt := buildClusterSystemPrompt(10, topics, briefs)

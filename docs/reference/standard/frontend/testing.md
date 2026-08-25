@@ -1,5 +1,9 @@
 # 前端测试（Vitest + Playwright）
 
+<!--
+doc-impact-applies: .test.ts, .spec.ts, front/tests/ | section=单元测试（Vitest）
+-->
+
 > **权威源**：本文件是前端测试约定的唯一权威。运行门禁见《开发执行规范》§5.1。
 
 ## 用例设计（测什么）

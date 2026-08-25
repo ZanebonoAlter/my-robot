@@ -185,14 +185,18 @@ func (DailyReportThread) TableName() string {
 }
 
 // TopicRecentBrief captures a section's recent content for context injection
-// (Slice D: lane context injection). Carried transiently between repository and
+// (Slice D: lane context injection). The content is the section's actual tag
+// labels on that day (fact fingerprint) — NOT cluster_label (frozen by the
+// orchestrator's topic-label overwrite, zero information) and NOT thread
+// narratives (prompt-hygiene red line: no historical narrative injection).
+// Scope: active AND candidate topics (candidates flow through L2 adjudication
+// and need content to judge). Carried transiently between repository and
 // service — never persisted directly.
 type TopicRecentBrief struct {
-	TopicID      uint      `json:"topic_id"`
-	SectionID    uint      `json:"section_id"`
-	SectionLabel string    `json:"section_label"`
-	PeriodDate   time.Time `json:"period_date"`
-	ThreadTitles []string  `json:"thread_titles"` // 1-2 representative thread titles
+	TopicID    uint      `json:"topic_id"`
+	SectionID  uint      `json:"section_id"`
+	TagLabels  []string  `json:"tag_labels"` // up to 5 active tag labels resolved from cluster_tag_ids
+	PeriodDate time.Time `json:"period_date"`
 }
 
 // JSON is a custom type for GORM jsonb columns.
@@ -425,17 +429,58 @@ const (
 	WatchStatusPaused = "paused"
 )
 
-// BoardTopicWatch is a user-declared watch label on a SemanticBoard.
-// It is deliberately independent from BoardPersistentTopic: no shared
-// foreign keys, no shared lifecycle. A watch is a single-signal AI detector
-// that fires at daily-report end without affecting any topic state.
+// Topic watch types: how a watch participates in the daily report
+// (watch-materialized-topic). Two families:
+//   - hint tracks (label / keyword): read-only hit overlay, zero report impact;
+//   - materialized tracks (keyword_topic / sentence_topic): append a real
+//     section to each day's report (see specs/watch-materialized-topic).
+//
+// label — AI semantic matching (batch single-shot at daily-report end);
+// keyword — pure text matching against threads title+summary, zero AI;
+// keyword_topic — materialized: aggregate the day's keyword-matching articles
+// into an ephemeral section (no persistent topic, zero AI);
+// sentence_topic — materialized: embed the sentence once, retrieve the day's
+// related auxiliary labels, aggregate into a section owned by a dedicated
+// source=manual persistent topic.
+const (
+	WatchTypeLabel         = "label"
+	WatchTypeKeyword       = "keyword"
+	WatchTypeKeywordTopic  = "keyword_topic"
+	WatchTypeSentenceTopic = "sentence_topic"
+)
+
+// BoardTopicWatch is a user-declared watch on a SemanticBoard. Hint tracks
+// (label / keyword) stay a read-only overlay: no shared foreign keys with
+// BoardPersistentTopic, no lifecycle impact. Materialized tracks extend the
+// report itself: keyword_topic appends an ephemeral section (still no topic
+// link), while sentence_topic owns a dedicated persistent topic via
+// PersistentTopicID (created at first materialization, archived when the
+// watch is deleted with confirmation).
 type BoardTopicWatch struct {
-	ID              uint      `gorm:"primarykey" json:"id"`
-	SemanticBoardID uint      `gorm:"not null;index" json:"semantic_board_id"`
-	Label           string    `gorm:"size:200;not null" json:"label"`
-	Status          string    `gorm:"size:20;not null;default:active" json:"status"`
-	CreatedAt       time.Time `json:"created_at"`
-	UpdatedAt       time.Time `json:"updated_at"`
+	ID              uint   `gorm:"primarykey" json:"id"`
+	SemanticBoardID uint   `gorm:"not null;index" json:"semantic_board_id"`
+	Label           string `gorm:"size:200;not null" json:"label"`
+	// Query is the sentence_topic retrieval sentence (the embedding input);
+	// empty falls back to Label. Hint tracks ignore it.
+	Query string `gorm:"type:text" json:"query,omitempty"`
+	// Type selects the track: 'label' (AI semantic, default for historical
+	// rows), 'keyword' (pure text), 'keyword_topic' / 'sentence_topic'
+	// (materialized). CHECK constraint is owned by migration 20260825_0001
+	// (AutoMigrate cannot express it).
+	Type string `gorm:"size:16;not null;default:label" json:"type"`
+	// EmbeddingCache caches the sentence_topic query vector: embedded once at
+	// creation, invalidated by label/query PATCH, lazily recomputed at the next
+	// daily-report generation when NULL. Dimension is runtime-determined
+	// (same convention as SemanticLabel.Embedding).
+	EmbeddingCache *string `gorm:"type:vector" json:"-"`
+	// PersistentTopicID links a sentence_topic watch to its dedicated
+	// source=manual persistent topic (set at first materialization). NULL for
+	// every other track. FK (ON DELETE SET NULL) owned by migration
+	// 20260825_0001.
+	PersistentTopicID *uint     `gorm:"index" json:"persistent_topic_id,omitempty"`
+	Status            string    `gorm:"size:20;not null;default:active" json:"status"`
+	CreatedAt         time.Time `json:"created_at"`
+	UpdatedAt         time.Time `json:"updated_at"`
 
 	Hits []TopicWatchHit `gorm:"foreignKey:WatchID;constraint:OnDelete:CASCADE" json:"hits,omitempty"`
 }
@@ -453,6 +498,10 @@ type TopicWatchHit struct {
 	PeriodDate time.Time `gorm:"type:date;not null" json:"period_date"`
 	Reason     string    `gorm:"type:text" json:"reason"`
 	CreatedAt  time.Time `json:"created_at"`
+	// WatchLabel and WatchType are populated by GetWatchHitsByReport's active
+	// watch join. They are transient and are not persisted on hit writes.
+	WatchLabel string `gorm:"-" json:"watch_label"`
+	WatchType  string `gorm:"-" json:"watch_type"`
 }
 
 func (TopicWatchHit) TableName() string { return "topic_watch_hits" }

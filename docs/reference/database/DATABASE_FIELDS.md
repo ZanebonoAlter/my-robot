@@ -49,8 +49,6 @@
 | `merge_reembedding_queues` | 合并后重算向量队列 | `models.MergeReembeddingQueue` | 向量 |
 | `firecrawl_jobs` | Firecrawl 抓取任务 | `models.FirecrawlJob` | 任务队列 |
 | `tag_jobs` | 标签任务 | `models.TagJob` | 任务队列 |
-| `narrative_summaries` | 叙事摘要 | `models.NarrativeSummary` | 叙事 |
-| `narrative_boards` | 叙事板块 | `models.NarrativeBoard` | 叙事 |
 | `board_daily_reports` | 板块日报主表 | `topicgraph.BoardDailyReport` | 日报/持久话题/Watch |
 | `daily_report_sections` | 日报分区 | `topicgraph.DailyReportSection` | 日报/持久话题/Watch |
 | `daily_report_threads` | 日报叙事线程 | `topicgraph.DailyReportThread` | 日报/持久话题/Watch |
@@ -654,52 +652,6 @@
 
 ---
 
-## §8 叙事域
-
-### 8.1 narrative_summaries（叙事摘要）
-
-| 字段名 | 类型 | 约束/默认/索引 | 用途 |
-| -------- | ------ | ------ | ------ |
-| `id` | BIGSERIAL | PK | 主键 |
-| `title` | VARCHAR(300) | NOT NULL | 叙事标题 |
-| `summary` | TEXT | NOT NULL | 叙事内容 |
-| `status` | VARCHAR(20) | NOT NULL; index | 状态：`emerging` / `continuing` / `splitting` / `merging` / `ending` |
-| `period` | VARCHAR(20) | NOT NULL DEFAULT 'daily' | 周期：`daily` / `watched_tag` |
-| `period_date` | TIMESTAMP | NOT NULL; index `idx_narrative_period_date` | 周期日期 |
-| `generation` | INTEGER | NOT NULL DEFAULT 0 | 代际 |
-| `parent_ids` | TEXT | — | 父叙事 ID 列表 |
-| `related_tag_ids` | TEXT | — | 关联标签 ID 列表 |
-| `related_article_ids` | TEXT | — | 关联文章 ID 列表 |
-| `source` | VARCHAR(20) | DEFAULT 'ai' | 来源 |
-| `scope_type` | VARCHAR(20) | NOT NULL DEFAULT 'global' | 作用域：`global` / `feed_category` / **`board`** |
-| `scope_category_id` | INTEGER | —（`*uint`）; index `idx_narrative_scope` | 分类 ID |
-| `scope_label` | VARCHAR(100) | — | 分类名称 |
-| `board_id` | INTEGER | —（`*uint`）; index | 所属 Board ID（逻辑关联 `narrative_boards.id`） |
-| `created_at` | TIMESTAMP | — | 创建时间 |
-| `updated_at` | TIMESTAMP | — | 更新时间 |
-
-> `scope_type` 比旧文档多一个 `board` 值（`NarrativeScopeTypeBoard`）。
-> 复合索引：`idx_narrative_scope_period(scope_type, scope_category_id, period_date)`；单列 `idx_narrative_summaries_board_id(board_id)`。
-
-### 8.2 narrative_boards（叙事板块）
-
-| 字段名 | 类型 | 约束/默认/索引 | 用途 |
-| -------- | ------ | ------ | ------ |
-| `id` | SERIAL | PK | 主键 |
-| `period_date` | TIMESTAMP | NOT NULL; index `idx_narrative_boards_period` | 周期日期 |
-| `name` | VARCHAR(300) | NOT NULL | 板块名称 |
-| `description` | TEXT | — | 板块描述 |
-| `scope_type` | VARCHAR(20) | NOT NULL DEFAULT 'global' | 作用域：`global` / `feed_category` |
-| `scope_category_id` | INTEGER | —（`*uint`）; index `idx_narrative_boards_scope` | 分类 ID |
-| `scope_label` | VARCHAR(100) | — | 分类名称 |
-| `event_tag_ids` | TEXT | — | 关联 event 标签 ID 列表（JSON 数组） |
-| `prev_board_ids` | TEXT | — | 前日关联 Board ID 列表（JSON 数组，跨日延续） |
-| `semantic_board_id` | INTEGER | —（`*uint`）; index `idx_narrative_boards_semantic_board_id` | 关联 SemanticBoard ID（逻辑关联 `semantic_labels.id`） |
-| `is_system` | BOOLEAN | NOT NULL DEFAULT false | 是否为系统自动生成 |
-| `created_at` | TIMESTAMP | — | 创建时间 |
-
-> 注：迁移 `20260522_0001` 曾 `DROP COLUMN is_system`，但 struct 仍保留 `IsSystem`，AutoMigrate 每次启动重建该列，**实际列存在**。
-
 ---
 
 ## §9 日报 / 持久话题 / Watch 域
@@ -829,13 +781,14 @@
 
 ### 9.6 board_topic_watches（用户声明的话题 Watch 标签）
 
-板块上用户声明的 Watch 标签。与持久话题刻意独立：无共享 FK、无共享生命周期。Watch 是单信号 AI 检测器，在日报生成结束时触发，不影响任何 topic 状态。
+版块上用户声明的 Watch 标签。与持久话题刻意独立：无共享 FK、无共享生命周期；命中始终是只读覆盖层，不影响任何 topic 状态。`type=label` 是日报结束时的 AI 单信号检测；`type=keyword` 是 threads 标题+摘要的确定性文本匹配，并在创建时回扫近 14 天历史日报。
 
 | 字段名 | 类型 | 约束/默认/索引 | 用途 |
 | -------- | ------ | ------ | ------ |
 | `id` | SERIAL | PK | 主键 |
-| `semantic_board_id` | INTEGER | NOT NULL; index | 所属语义板块 |
-| `label` | VARCHAR(200) | NOT NULL | Watch 标签文本 |
+| `semantic_board_id` | INTEGER | NOT NULL; index | 所属语义版块 |
+| `label` | VARCHAR(200) | NOT NULL | label 关注文本或 keyword 表达式 |
+| `type` | VARCHAR(10) | NOT NULL DEFAULT 'label'; **CHECK** `chk_board_topic_watches_type (type IN ('label','keyword'))`（迁移 `20260824_0002`） | 命中判定轨：`label`（AI）/ `keyword`（文本） |
 | `status` | VARCHAR(20) | NOT NULL DEFAULT 'active'; **CHECK** `chk_board_topic_watches_status (status IN ('active','paused'))` | 状态：`active` / `paused` |
 | `created_at` | TIMESTAMP | — | 创建时间 |
 | `updated_at` | TIMESTAMP | — | 更新时间 |
@@ -844,7 +797,7 @@
 
 ### 9.7 topic_watch_hits（Watch 命中记录）
 
-单次 AI 检测到的 Watch 与日报分区的匹配。只读覆盖层，**不得**改变任何 section 的 `persistent_topic_id` 或任何 topic 状态。
+label 类 AI 或 keyword 类文本匹配得到的 Watch 与日报分区的匹配。只读覆盖层，**不得**改变任何 section 的 `persistent_topic_id` 或任何 topic 状态；keyword 的 `reason` 固定为「含关键字『…』」。
 
 | 字段名 | 类型 | 约束/默认/索引 | 用途 |
 | -------- | ------ | ------ | ------ |
@@ -1201,17 +1154,11 @@ UNIQUE(route_id, param_name, value) 复合唯一索引防同参数重复录入�
 | `idx_topic_tag_board_labels_semantic_board_id` | topic_tag_board_labels | `(semantic_board_id)` |
 | `idx_board_composition_board_id` | board_composition | `(board_id)` |
 | `idx_board_composition_auxiliary_label_id` | board_composition | `(auxiliary_label_id)` |
-| `idx_narrative_boards_semantic_board_id` | narrative_boards | `(semantic_board_id)` |
 
 ### 叙事域索引（迁移 `20260420_0001` / `20260430_0001`）
 
 | 索引名 | 表 | 列 |
 | -------- | ------ | ------ |
-| `idx_narrative_scope` | narrative_summaries | `(scope_category_id)` |
-| `idx_narrative_scope_period` | narrative_summaries | `(scope_type, scope_category_id, period_date)` |
-| `idx_narrative_summaries_board_id` | narrative_summaries | `(board_id)` |
-| `idx_narrative_boards_period` | narrative_boards | `(period_date)` |
-| `idx_narrative_boards_scope` | narrative_boards | `(scope_category_id)` |
 
 ### 偏好/发现域索引（gorm tag）
 
@@ -1265,6 +1212,7 @@ UNIQUE(route_id, param_name, value) 复合唯一索引防同参数重复录入�
 | `chk_board_persistent_topics_status` | board_persistent_topics | `status IN ('candidate','active','archived')` | `20260619_0001` |
 | `chk_board_persistent_topics_source` | board_persistent_topics | `source IN ('auto','manual')` | `20260702_0001` |
 | `chk_board_topic_watches_status` | board_topic_watches | `status IN ('active','paused')` | `20260630_0001` |
+| `chk_board_topic_watches_type` | board_topic_watches | `type IN ('label','keyword')` | `20260824_0002` |
 
 ### DB 级外键（全库共 2 条）
 

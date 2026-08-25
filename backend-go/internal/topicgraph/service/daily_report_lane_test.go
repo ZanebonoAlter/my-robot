@@ -98,6 +98,69 @@ func TestBucketTagsByCentroid_VacuumDowngrade(t *testing.T) {
 	assert.Empty(t, b.L1)
 }
 
+// ---- candidate L1 gate (candidate-topic-l2-gate) ----
+
+// gateCfg returns a lane config with the candidate gate explicitly on
+// (mirrors the production default from DefaultPersistentTopicConfig).
+func gateCfg() repository.PersistentTopicConfig {
+	cfg := laneCfg()
+	cfg.CandidateL1GateEnabled = true
+	return cfg
+}
+
+// TestBucketTagsByCentroid_CandidateNearDistanceDowngradesL2 covers spec
+// scenario「candidate 近距离降级 L2（观察期门禁）」: with the gate on, a
+// near-distance tag (dist < L1) whose nearest topic is candidate SHALL land in
+// L2 carrying its candidate set, NOT direct-attach.
+func TestBucketTagsByCentroid_CandidateNearDistanceDowngradesL2(t *testing.T) {
+	topic := repository.BoardPersistentTopic{ID: 7, Centroid: repository.FloatsToPgVector(unit(1, 0)), Status: repository.TopicStatusCandidate}
+	tags := []repository.TagInput{{ID: 1, Label: "candidate-near"}}
+	emb := map[uint][]float64{1: unit(1, 0)} // dist 0.0 < 0.18
+	b := BucketTagsByCentroid(tags, []repository.BoardPersistentTopic{topic}, emb, gateCfg())
+	require.Len(t, b.L2, 1, "gate on: candidate near-distance tag downgraded to L2")
+	assert.Empty(t, b.L1, "gate on: no direct attach to candidate topic")
+	require.Len(t, b.L2[0].Candidates, 1, "L2 assign carries its candidate set")
+	assert.Equal(t, uint(7), b.L2[0].Candidates[0].TopicID)
+}
+
+// TestBucketTagsByCentroid_GateOffRestoresLegacyL1 covers spec scenario
+// 「门禁开关关闭回退旧行为」: with the gate off, a near-distance tag whose
+// nearest topic is candidate direct-attaches (legacy behavior).
+func TestBucketTagsByCentroid_GateOffRestoresLegacyL1(t *testing.T) {
+	topic := repository.BoardPersistentTopic{ID: 7, Centroid: repository.FloatsToPgVector(unit(1, 0)), Status: repository.TopicStatusCandidate}
+	tags := []repository.TagInput{{ID: 1, Label: "legacy-l1"}}
+	emb := map[uint][]float64{1: unit(1, 0)}
+	cfg := laneCfg()
+	cfg.CandidateL1GateEnabled = false
+	b := BucketTagsByCentroid(tags, []repository.BoardPersistentTopic{topic}, emb, cfg)
+	require.Len(t, b.L1, 1, "gate off: candidate topic direct-attaches (legacy)")
+	assert.Empty(t, b.L2)
+}
+
+// TestBucketTagsByCentroid_ActiveKeepsL1WithGateOn is a regression guard for
+// spec scenario「L1 直挂命中」: with the gate on, ACTIVE topics keep direct
+// attach — the gate must only affect candidates.
+func TestBucketTagsByCentroid_ActiveKeepsL1WithGateOn(t *testing.T) {
+	topic := repository.BoardPersistentTopic{ID: 7, Centroid: repository.FloatsToPgVector(unit(1, 0)), Status: repository.TopicStatusActive}
+	tags := []repository.TagInput{{ID: 1, Label: "active-near"}}
+	emb := map[uint][]float64{1: unit(1, 0)}
+	b := BucketTagsByCentroid(tags, []repository.BoardPersistentTopic{topic}, emb, gateCfg())
+	require.Len(t, b.L1, 1, "gate on: active topic still direct-attaches")
+	assert.Empty(t, b.L2)
+}
+
+// TestBucketTagsByCentroid_VacuumActiveStillL2WithGateOn covers spec scenario
+// 「vacuum active 不直挂（既有规则保持）」under the gate: vacuum downgrade is
+// orthogonal to the candidate gate.
+func TestBucketTagsByCentroid_VacuumActiveStillL2WithGateOn(t *testing.T) {
+	topic := repository.BoardPersistentTopic{ID: 7, Centroid: repository.FloatsToPgVector(unit(1, 0)), IsVacuum: true, Status: repository.TopicStatusActive}
+	tags := []repository.TagInput{{ID: 1, Label: "vacuum-near"}}
+	emb := map[uint][]float64{1: unit(1, 0)}
+	b := BucketTagsByCentroid(tags, []repository.BoardPersistentTopic{topic}, emb, gateCfg())
+	require.Len(t, b.L2, 1, "vacuum active still downgrades strong-match tag to L2")
+	assert.Empty(t, b.L1)
+}
+
 func TestBucketTagsByCentroid_NoTopicsAllL3(t *testing.T) {
 	tags := []repository.TagInput{{ID: 1, Label: "x"}, {ID: 2, Label: "y"}}
 	emb := map[uint][]float64{1: unit(1, 0), 2: unit(0, 1)}
@@ -116,7 +179,7 @@ func TestBucketTagsByCentroid_TopKTruncation(t *testing.T) {
 	// Tag at [1,0]; two topics both within L2 (dist 0.2 and 0.25); top-K=1
 	// keeps only the nearest (topic 7).
 	topics := []repository.BoardPersistentTopic{
-		{ID: 7, Centroid: repository.FloatsToPgVector(unit(0.8, 0.6))},       // dist 0.2 (nearest)
+		{ID: 7, Centroid: repository.FloatsToPgVector(unit(0.8, 0.6))},      // dist 0.2 (nearest)
 		{ID: 8, Centroid: repository.FloatsToPgVector(unit(0.75, 0.66144))}, // dist 0.25
 	}
 	tags := []repository.TagInput{{ID: 1, Label: "weak"}}
@@ -133,8 +196,13 @@ func TestBucketTagsByCentroid_TopKTruncation(t *testing.T) {
 
 func l2Assign(tagID uint, cands ...LaneCandidate) LaneTagAssign {
 	return LaneTagAssign{
-		Tag:        repository.TagInput{ID: tagID},
-		TopicID:    func() uint { if len(cands) > 0 { return cands[0].TopicID }; return 0 }(),
+		Tag: repository.TagInput{ID: tagID},
+		TopicID: func() uint {
+			if len(cands) > 0 {
+				return cands[0].TopicID
+			}
+			return 0
+		}(),
 		Candidates: cands,
 	}
 }
@@ -146,6 +214,32 @@ func TestParseL2Response_KeepUsesNearest(t *testing.T) {
 	require.Len(t, dec, 1)
 	assert.Equal(t, "keep", dec[0].decision)
 	assert.Equal(t, uint(7), dec[0].targetTopicID)
+	assert.False(t, dec[0].offShortlist)
+}
+
+func TestParseL2Response_KeepHonorsInShortlistTarget(t *testing.T) {
+	// 小模型常态混用 keep/switch（实测 ~10-20% 的 keep 会填非最近 target）：
+	// keep 却显式指定候选集内另一话题 = LLM 的语义异议。parser SHALL 尊重该
+	// 指定，而非静默改写回最近候选——否则 keep 会把 tag 无条件吸附回
+	// embedding 最近处（含僵尸 candidate），LLM 判断被丢弃（卡里巴夫案例根因）。
+	l2 := []LaneTagAssign{l2Assign(1, LaneCandidate{7, 0.2}, LaneCandidate{8, 0.25})}
+	content := `{"decisions":[{"tag_id":1,"decision":"keep","target_topic_id":8}]}`
+	dec := parseL2Response(content, l2)
+	require.Len(t, dec, 1)
+	assert.Equal(t, "keep", dec[0].decision)
+	assert.Equal(t, uint(8), dec[0].targetTopicID, "in-shortlist keep target honored")
+	assert.False(t, dec[0].offShortlist)
+}
+
+func TestParseL2Response_KeepOffShortlistTargetFallsBackNearest(t *testing.T) {
+	// keep + 集外/空 target：维持安全网回最近候选（keep 不携带换轨强意图，
+	// 不像 off-shortlist switch 那样降级 new）。
+	l2 := []LaneTagAssign{l2Assign(1, LaneCandidate{7, 0.2}, LaneCandidate{8, 0.25})}
+	content := `{"decisions":[{"tag_id":1,"decision":"keep","target_topic_id":999}]}`
+	dec := parseL2Response(content, l2)
+	require.Len(t, dec, 1)
+	assert.Equal(t, "keep", dec[0].decision)
+	assert.Equal(t, uint(7), dec[0].targetTopicID, "off-shortlist keep target falls back to nearest")
 	assert.False(t, dec[0].offShortlist)
 }
 
@@ -270,10 +364,9 @@ func l2PromptFixture() ([]LaneTagAssign, map[uint]repository.BoardPersistentTopi
 	}
 	briefs := map[uint][]repository.TopicRecentBrief{
 		10: {{
-			TopicID:      10,
-			SectionLabel: "半导体国产替代",
-			PeriodDate:   time.Date(2026, 3, 6, 0, 0, 0, 0, time.UTC),
-			ThreadTitles: []string{"半导体链全线跌停引发市场恐慌"},
+			TopicID:    10,
+			TagLabels:  []string{"半导体国产替代", "光刻机出口管制"},
+			PeriodDate: time.Date(2026, 3, 6, 0, 0, 0, 0, time.UTC),
 		}},
 	}
 	return l2, topics, briefs
@@ -290,9 +383,11 @@ func TestBuildL2Prompt_ExcludesThreadTitles(t *testing.T) {
 		"L2 prompt must not render thread entries at all")
 }
 
-// TestBuildL2Prompt_KeepsSectionLabelAndMeta guards that non-narrative signals
-// (label / status / hit meta / distance / section_label) remain injected.
-func TestBuildL2Prompt_KeepsSectionLabelAndMeta(t *testing.T) {
+// TestBuildL2Prompt_KeepsTagLabelFingerprintAndMeta guards that non-narrative
+// signals (label / status / hit meta / distance / recent tag labels) remain
+// injected (candidate-topic-l2-gate: tag-label fact fingerprint replaces the
+// frozen section_label).
+func TestBuildL2Prompt_KeepsTagLabelFingerprintAndMeta(t *testing.T) {
 	l2, topics, briefs := l2PromptFixture()
 	_, user := buildL2Prompt(l2, topics, briefs)
 	assert.Contains(t, user, "半导体产业链", "topic label kept")
@@ -300,6 +395,40 @@ func TestBuildL2Prompt_KeepsSectionLabelAndMeta(t *testing.T) {
 	assert.Contains(t, user, "2026-03-07", "last-seen date kept")
 	assert.Contains(t, user, "累计5天", "hit count kept")
 	assert.Contains(t, user, "0.220", "distance kept")
-	assert.Contains(t, user, "半导体国产替代", "section_label kept as weak framework signal")
-	assert.Contains(t, user, "2026-03-06", "section period date kept")
+	assert.Contains(t, user, "section (2026-03-06): 半导体国产替代 / 光刻机出口管制",
+		"recent tag-label fact fingerprint rendered in `section (date): tag1 / tag2` form")
+}
+
+// TestBuildL2Prompt_CandidateStrictAdjudication covers spec scenario「L2 裁决中
+// 观察中话题从严判断」(candidate-topic-l2-gate D5)：system prompt SHALL 含观察期
+// 从严指令，观察中候选话题的近期 tag 标签 SHALL 注入 user prompt。
+func TestBuildL2Prompt_CandidateStrictAdjudication(t *testing.T) {
+	l2 := []LaneTagAssign{{
+		Tag:        repository.TagInput{ID: 1, Label: "伊朗代防长发表强硬言论"},
+		Candidates: []LaneCandidate{{TopicID: 20, Distance: 0.08}},
+	}}
+	topics := map[uint]repository.BoardPersistentTopic{
+		20: {
+			ID:           20,
+			Label:        "伊朗议长透露凌晨应急决断",
+			Status:       repository.TopicStatusCandidate,
+			LastSeenDate: time.Date(2026, 3, 7, 0, 0, 0, 0, time.UTC),
+			HitCount:     10,
+		},
+	}
+	briefs := map[uint][]repository.TopicRecentBrief{
+		20: {{
+			TopicID:    20,
+			TagLabels:  []string{"伊朗议长透露哈梅内伊殉难后决断"},
+			PeriodDate: time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC),
+		}},
+	}
+	system, user := buildL2Prompt(l2, topics, briefs)
+	// System carries the observation-period strict-keep instruction (D5).
+	assert.Contains(t, system, "观察中")
+	assert.Contains(t, system, "从严")
+	// User renders the candidate's recent tag labels (fact fingerprint).
+	assert.Contains(t, user, "状态:观察中", "candidate status rendered as 观察中")
+	assert.Contains(t, user, "section (2026-03-01): 伊朗议长透露哈梅内伊殉难后决断",
+		"candidate's recent tag labels injected")
 }

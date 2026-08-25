@@ -42,16 +42,6 @@ func TestSemanticLabelAssociationModelShapes(t *testing.T) {
 	mustHaveGORMTag(t, reflect.TypeOf(BoardComposition{}), "AuxiliaryLabelID", "primaryKey")
 }
 
-func TestNarrativeBoardHasSemanticBoardLink(t *testing.T) {
-	typ := reflect.TypeOf(NarrativeBoard{})
-	mustHaveGORMTag(t, typ, "SemanticBoardID", "index:idx_narrative_boards_semantic_board_id")
-
-	field, _ := typ.FieldByName("SemanticBoardID")
-	if field.Type != reflect.TypeOf((*uint)(nil)) {
-		t.Fatalf("SemanticBoardID type = %v, want *uint", field.Type)
-	}
-}
-
 func mustHaveGORMTag(t *testing.T, typ reflect.Type, fieldName string, want string) {
 	t.Helper()
 	field, ok := typ.FieldByName(fieldName)

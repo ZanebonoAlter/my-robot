@@ -1,10 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-const { getMock, postMock, patchMock, deleteMock } = vi.hoisted(() => ({
+const { getMock, postMock, patchMock, deleteMock, buildQueryParamsMock } = vi.hoisted(() => ({
   getMock: vi.fn(),
   postMock: vi.fn(),
   patchMock: vi.fn(),
   deleteMock: vi.fn(),
+  buildQueryParamsMock: vi.fn(() => 'days=7'),
 }))
 
 vi.mock('./client', () => ({
@@ -13,10 +14,44 @@ vi.mock('./client', () => ({
     post: postMock,
     patch: patchMock,
     delete: deleteMock,
+    buildQueryParams: buildQueryParamsMock,
   },
 }))
 
 import { useDailyReportsApi } from './dailyReports'
+
+describe('useDailyReportsApi — active watch summaries', () => {
+  beforeEach(() => {
+    getMock.mockReset()
+    getMock.mockResolvedValue({
+      success: true,
+      data: {
+        reports: [{
+          id: 9,
+          semantic_board_id: 1974,
+          period_date: '2026-06-29',
+          title: '日报',
+          summary: '',
+          status: 'done',
+          cluster_count: 1,
+          article_count: 2,
+          event_tag_count: 1,
+          created_at: '2026-06-29',
+          active_watch_summaries: [{ watch_id: 7, label: 'ASML', type: 'keyword' }],
+        }],
+      },
+    })
+  })
+
+  it('normalizes the batched activeWatchSummaries field without another request per report', async () => {
+    const api = useDailyReportsApi()
+    const response = await api.getBoardDailyReports(1974, { days: 7 })
+    expect(response.data?.reports[0]?.activeWatchSummaries).toEqual([
+      { watchId: 7, label: 'ASML', type: 'keyword' },
+    ])
+    expect(getMock).toHaveBeenCalledOnce()
+  })
+})
 
 describe('useDailyReportsApi — getBoardSectionTimeline time-range params (task 2.5)', () => {
   beforeEach(() => {

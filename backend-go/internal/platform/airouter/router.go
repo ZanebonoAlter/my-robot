@@ -254,16 +254,12 @@ func (r *Router) saveEmbeddingCache(req EmbeddingRequest, model string, res *Emb
 	if !embeddingCacheable(req.Operation) {
 		return
 	}
-	payload, err := json.Marshal(res.Embeddings)
-	if err != nil {
-		logging.Warnf("airouter: embedding cache marshal failed: %v", err)
-		return
-	}
+	payload := models.EncodeEmbeddingVectors(res.Embeddings)
 	rec := &models.AIEmbeddingCache{
 		CacheKey:     embeddingCacheKey(model, req.Input),
 		Model:        model,
 		Operation:    req.Operation,
-		Embedding:    string(payload),
+		Embedding:    payload,
 		Dimensions:   res.Dimensions,
 		InputPreview: truncateRunes(strings.Join(req.Input, " "), maxCachePreviewRunes),
 		CreatedAt:    time.Now(),
@@ -358,8 +354,8 @@ func (r *Router) Embed(ctx context.Context, req EmbeddingRequest, capability Cap
 		// A broken cache (e.g. table missing) must never block real calls.
 		logging.Warnf("airouter: embedding cache lookup failed (key=%s): %v", cacheKey, lookupErr)
 	} else if cached != nil {
-		var vectors [][]float64
-		if err := json.Unmarshal([]byte(cached.Embedding), &vectors); err != nil {
+		vectors, err := models.DecodeEmbeddingVectors(cached.Embedding)
+		if err != nil {
 			logging.Warnf("airouter: embedding cache decode failed (key=%s): %v", cacheKey, err)
 		} else {
 			hitMeta := map[string]any{}

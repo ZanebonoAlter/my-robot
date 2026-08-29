@@ -151,6 +151,29 @@ BACKEND_PORT=5000
 
 AI 相关设置（LLM 凭证、Firecrawl、Digest 导出）通过 Web UI 配置并存储在数据库中 — 不通过环境变量设置。详见 [配置指南](configuration.md#数据库存储的设置ai-功能)。
 
+### PostgreSQL autovacuum 调优（docker-compose.pg.yml）
+
+`docker-compose.pg.yml` 为 postgres 服务追加了 autovacuum 调优参数（optimize-pg-storage，2026-08-28）：
+
+```yaml
+command:
+  - postgres
+  - -c
+  - autovacuum_vacuum_scale_factor=0.05        # 默认 0.2，大表触发严重滞后
+  - -c
+  - autovacuum_vacuum_insert_scale_factor=0.05 # 纯 INSERT 表（otel_spans）的触发器
+  - -c
+  - autovacuum_vacuum_insert_threshold=500
+  - -c
+  - autovacuum_vacuum_cost_limit=2000          # 默认 200 追不上写入速度
+  - -c
+  - wal_compression=on                         # 高写入库 WAL 全页镜像压缩
+```
+
+**为什么**：默认参数下高写入量表（otel_spans 日增 ~82 万行、embedding 缓存反复重写）的死元组回收严重滞后，实测 TOAST 膨胀 13 倍、库体积膨胀到 12GB；收紧触发阈值 + 提高 cost limit 后 vacuum 跟得上写入。
+
+**生效方式**：参数变更需 recreate 容器（`docker compose -f docker-compose.pg.yml up -d`，数据在 `./data` bind mount 不丢）。验证：`docker exec syntopica-postgres psql -U postgres -d syntopica -c "SHOW autovacuum_vacuum_scale_factor;"` → `0.05`。
+
 ### 破坏性迁移开关
 
 部分历史版本迁移会 `TRUNCATE` 业务表以清理与旧 schema 不兼容的数据（如 `20260706_0001`、`20260712_0001`、`20260718_0001`）。这些迁移由 `MIGRATIONS_ALLOW_DESTRUCTIVE` 环境变量控制：

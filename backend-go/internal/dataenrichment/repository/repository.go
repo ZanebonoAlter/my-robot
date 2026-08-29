@@ -181,9 +181,74 @@ func (r *Repository) DeleteTopicLifelineContextsOlderThan(ctx context.Context, g
 
 // ── TopicEnrichmentResult ───────────────────────────────────────────────────
 
-// CreateTopicEnrichmentResult inserts a new immutable result snapshot.
+// CreateTopicEnrichmentResult inserts a new immutable result snapshot. Empty
+// kind values from pre-result-kind callers are classified compatibly by scope.
 func (r *Repository) CreateTopicEnrichmentResult(ctx context.Context, result *TopicEnrichmentResult) error {
-	return r.db.WithContext(ctx).Create(result).Error
+	if result.AnalysisScope == "" {
+		if result.SemanticBoardID != nil {
+			result.AnalysisScope = "board"
+		} else {
+			result.AnalysisScope = "topic"
+		}
+	}
+	if result.ResultKind == "" {
+		result.ResultKind = EffectiveResultKind(result)
+	}
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := validateResultShape(tx, result); err != nil {
+			return err
+		}
+		return tx.Create(result).Error
+	})
+}
+
+// CreateBoardInvestigationResult classifies and validates a child investigation
+// before inserting it. The parent brief remains immutable and may have many
+// investigation children.
+func (r *Repository) CreateBoardInvestigationResult(ctx context.Context, result *TopicEnrichmentResult) error {
+	result.ResultKind = ResultKindBoardInvestigation
+	return r.CreateTopicEnrichmentResult(ctx, result)
+}
+
+func validateResultShape(tx *gorm.DB, result *TopicEnrichmentResult) error {
+	hasParentData := result.ParentResultID != nil || result.QuestionKey != nil
+	switch result.ResultKind {
+	case ResultKindTopicAnalysis:
+		if result.AnalysisScope != "topic" || result.PersistentTopicID == nil || result.SemanticBoardID != nil || hasParentData {
+			return fmt.Errorf("invalid %s result shape", result.ResultKind)
+		}
+	case ResultKindBoardBrief, ResultKindLegacyBoardAnalysis:
+		if result.AnalysisScope != "board" || result.SemanticBoardID == nil || result.PersistentTopicID != nil || hasParentData {
+			return fmt.Errorf("invalid %s result shape", result.ResultKind)
+		}
+	case ResultKindBoardInvestigation:
+		if result.AnalysisScope != "board" || result.SemanticBoardID == nil || result.PersistentTopicID != nil || result.ParentResultID == nil || result.QuestionKey == nil || !IsValidQuestionKey(*result.QuestionKey) {
+			return fmt.Errorf("invalid %s result shape", result.ResultKind)
+		}
+		var parent TopicEnrichmentResult
+		err := tx.Where(
+			"id = ? AND semantic_board_id = ? AND analysis_scope = ? AND result_kind = ?",
+			*result.ParentResultID, *result.SemanticBoardID, "board", ResultKindBoardBrief,
+		).First(&parent).Error
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return fmt.Errorf("board investigation parent must be a board_brief on the same board")
+		}
+		if err != nil {
+			return fmt.Errorf("validate board investigation parent: %w", err)
+		}
+	default:
+		return fmt.Errorf("unknown result_kind: %s", result.ResultKind)
+	}
+	return nil
+}
+
+func isBoardResultKind(kind string) bool {
+	switch kind {
+	case ResultKindBoardBrief, ResultKindBoardInvestigation, ResultKindLegacyBoardAnalysis:
+		return true
+	default:
+		return false
+	}
 }
 
 // ListTopicEnrichmentResultsByTopic returns all results for a topic, newest first.
@@ -235,6 +300,167 @@ func (r *Repository) GetPrevLatestTopicEnrichmentResult(ctx context.Context, top
 	return &result, nil
 }
 
+// ── Board-scoped enrichment results (board-level-deep-analysis) ───────────
+
+// ListBoardEnrichmentResults returns all board-scope results for a board,
+// newest first. Topic-scope rows are excluded by the scope filter — board
+// reports never mix with single-lane reports even though they share the table.
+func (r *Repository) ListBoardEnrichmentResults(ctx context.Context, boardID uint) ([]TopicEnrichmentResult, error) {
+	var list []TopicEnrichmentResult
+	err := r.db.WithContext(ctx).
+		Where("semantic_board_id = ? AND analysis_scope = ?", boardID, "board").
+		Order("id DESC").
+		Find(&list).Error
+	if err != nil {
+		return nil, fmt.Errorf("list board enrichment results: %w", err)
+	}
+	return list, nil
+}
+
+// GetLatestBoardEnrichmentResult returns the newest board-scope result for a board.
+func (r *Repository) GetLatestBoardEnrichmentResult(ctx context.Context, boardID uint) (*TopicEnrichmentResult, error) {
+	var result TopicEnrichmentResult
+	err := r.db.WithContext(ctx).
+		Where("semantic_board_id = ? AND analysis_scope = ?", boardID, "board").
+		Order("id DESC").
+		First(&result).Error
+	if err != nil {
+		return nil, fmt.Errorf("get latest board enrichment result: %w", err)
+	}
+	return &result, nil
+}
+
+// GetPrevLatestBoardEnrichmentResult returns the newest board-scope result
+// before the given ID (review judge compares against this one).
+func (r *Repository) GetPrevLatestBoardEnrichmentResult(ctx context.Context, boardID uint, beforeID uint) (*TopicEnrichmentResult, error) {
+	var result TopicEnrichmentResult
+	err := r.db.WithContext(ctx).
+		Where("semantic_board_id = ? AND analysis_scope = ? AND id < ?", boardID, "board", beforeID).
+		Order("id DESC").
+		First(&result).Error
+	if err != nil {
+		return nil, fmt.Errorf("get prev board enrichment result: %w", err)
+	}
+	return &result, nil
+}
+
+// ListBoardEnrichmentResultsByKind returns board results of one explicit kind,
+// newest first. The unfiltered method above remains the compatibility API.
+func (r *Repository) ListBoardEnrichmentResultsByKind(ctx context.Context, boardID uint, kind string) ([]TopicEnrichmentResult, error) {
+	if !isBoardResultKind(kind) {
+		return nil, fmt.Errorf("invalid board result_kind: %s", kind)
+	}
+	var list []TopicEnrichmentResult
+	err := r.db.WithContext(ctx).
+		Where("semantic_board_id = ? AND analysis_scope = ? AND result_kind = ?", boardID, "board", kind).
+		Order("id DESC").
+		Find(&list).Error
+	if err != nil {
+		return nil, fmt.Errorf("list board enrichment results by kind: %w", err)
+	}
+	return list, nil
+}
+
+// GetLatestBoardEnrichmentResultByKind returns the newest result of kind.
+func (r *Repository) GetLatestBoardEnrichmentResultByKind(ctx context.Context, boardID uint, kind string) (*TopicEnrichmentResult, error) {
+	if !isBoardResultKind(kind) {
+		return nil, fmt.Errorf("invalid board result_kind: %s", kind)
+	}
+	var result TopicEnrichmentResult
+	err := r.db.WithContext(ctx).
+		Where("semantic_board_id = ? AND analysis_scope = ? AND result_kind = ?", boardID, "board", kind).
+		Order("id DESC").
+		First(&result).Error
+	if err != nil {
+		return nil, fmt.Errorf("get latest board enrichment result by kind: %w", err)
+	}
+	return &result, nil
+}
+
+// GetPrevLatestBoardEnrichmentResultByKind returns the newest same-kind result
+// before beforeID, for kind-isolated review comparisons.
+func (r *Repository) GetPrevLatestBoardEnrichmentResultByKind(ctx context.Context, boardID uint, kind string, beforeID uint) (*TopicEnrichmentResult, error) {
+	if !isBoardResultKind(kind) {
+		return nil, fmt.Errorf("invalid board result_kind: %s", kind)
+	}
+	var result TopicEnrichmentResult
+	err := r.db.WithContext(ctx).
+		Where("semantic_board_id = ? AND analysis_scope = ? AND result_kind = ? AND id < ?", boardID, "board", kind, beforeID).
+		Order("id DESC").
+		First(&result).Error
+	if err != nil {
+		return nil, fmt.Errorf("get prev board enrichment result by kind: %w", err)
+	}
+	return &result, nil
+}
+
+// ListBoardEnrichmentResultsByParent returns all investigation children of one
+// immutable brief, newest first.
+func (r *Repository) ListBoardEnrichmentResultsByParent(ctx context.Context, parentResultID uint) ([]TopicEnrichmentResult, error) {
+	var list []TopicEnrichmentResult
+	err := r.db.WithContext(ctx).
+		Where("parent_result_id = ? AND result_kind = ?", parentResultID, ResultKindBoardInvestigation).
+		Order("id DESC").
+		Find(&list).Error
+	if err != nil {
+		return nil, fmt.Errorf("list board enrichment results by parent: %w", err)
+	}
+	return list, nil
+}
+
+// ── ReferenceRole (methodology profiles; design D5) ──────────────────────
+
+// CreateReferenceRole inserts a new reference role.
+func (r *Repository) CreateReferenceRole(ctx context.Context, role *ReferenceRole) error {
+	return r.db.WithContext(ctx).Create(role).Error
+}
+
+// GetReferenceRoleByID fetches one reference role.
+func (r *Repository) GetReferenceRoleByID(ctx context.Context, id uint) (*ReferenceRole, error) {
+	var role ReferenceRole
+	err := r.db.WithContext(ctx).First(&role, id).Error
+	if err != nil {
+		return nil, fmt.Errorf("get reference role: %w", err)
+	}
+	return &role, nil
+}
+
+// ListReferenceRoles returns all roles, newest-updated last.
+func (r *Repository) ListReferenceRoles(ctx context.Context) ([]ReferenceRole, error) {
+	var list []ReferenceRole
+	err := r.db.WithContext(ctx).Order("updated_at DESC").Find(&list).Error
+	if err != nil {
+		return nil, fmt.Errorf("list reference roles: %w", err)
+	}
+	return list, nil
+}
+
+// ListEnabledReferenceRoles returns enabled roles ordered updated_at DESC —
+// the injection order (design D5: newest first when truncating to the ~4k cap).
+// Queried fresh on every orchestration so enable/disable takes effect
+// immediately without restart (M7.5).
+func (r *Repository) ListEnabledReferenceRoles(ctx context.Context) ([]ReferenceRole, error) {
+	var list []ReferenceRole
+	err := r.db.WithContext(ctx).
+		Where("enabled = ?", true).
+		Order("updated_at DESC").
+		Find(&list).Error
+	if err != nil {
+		return nil, fmt.Errorf("list enabled reference roles: %w", err)
+	}
+	return list, nil
+}
+
+// UpdateReferenceRole saves mutable fields (name/title/content/enabled).
+func (r *Repository) UpdateReferenceRole(ctx context.Context, role *ReferenceRole) error {
+	return r.db.WithContext(ctx).Save(role).Error
+}
+
+// DeleteReferenceRole removes a role permanently.
+func (r *Repository) DeleteReferenceRole(ctx context.Context, id uint) error {
+	return r.db.WithContext(ctx).Delete(&ReferenceRole{}, id).Error
+}
+
 // ── TopicEnrichmentReview ───────────────────────────────────────────────────
 
 // CreateTopicEnrichmentReview inserts a new review.
@@ -264,6 +490,19 @@ func (r *Repository) ListAppliedTopicEnrichmentReviews(ctx context.Context, topi
 		Find(&list).Error
 	if err != nil {
 		return nil, fmt.Errorf("list applied reviews: %w", err)
+	}
+	return list, nil
+}
+
+// ListAppliedBoardEnrichmentReviews returns applied=true reviews scoped to a board.
+func (r *Repository) ListAppliedBoardEnrichmentReviews(ctx context.Context, boardID uint) ([]TopicEnrichmentReview, error) {
+	var list []TopicEnrichmentReview
+	err := r.db.WithContext(ctx).
+		Where("semantic_board_id = ? AND applied = ?", boardID, true).
+		Order("created_at DESC").
+		Find(&list).Error
+	if err != nil {
+		return nil, fmt.Errorf("list applied board reviews: %w", err)
 	}
 	return list, nil
 }

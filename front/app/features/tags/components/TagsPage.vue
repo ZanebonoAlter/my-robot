@@ -50,7 +50,7 @@ const {
   upgradePersistedSuggestions, upgradePersistedLoading, upgradePersistedGenerating,
   matchingConfig, matchingConfigLoading,
   // Methods - board
-  loadBoards: _lb, loadComposition, handleSelectBoard,
+  loadBoards, loadComposition, handleSelectBoard,
   openEditBoard, closeEditBoard, handleSaveBoardEdit,
   handleAddBoard, handleDeleteBoard, handleRemoveComposition,
   // Methods - timeline
@@ -198,6 +198,8 @@ onMounted(() => { void loadWatchCount() })
           <BoardEnrichmentPanel
             v-if="contentTab === 'enrichment'"
             :board-id="selectedBoardId"
+            :enrichment-enabled="boards.find((b) => b.id === selectedBoardId)?.enrichment_enabled ?? false"
+            @enrichment-toggled="loadBoards()"
           />
 
           <BoardDailyReportTimeline

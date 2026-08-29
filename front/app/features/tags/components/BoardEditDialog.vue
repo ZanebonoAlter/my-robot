@@ -75,7 +75,7 @@ function toggleLayer(layer: string) {
             />
             <span class="enrichment-toggle-text">
               <span class="enrichment-toggle-label">开启数据增强</span>
-              <span class="enrichment-toggle-hint">关闭时「数据增强」tab 不能触发循环 B</span>
+              <span class="enrichment-toggle-hint">关闭时不能触发循环 B 分析（聚焦/板块级），可在工作台面板一键开启</span>
             </span>
           </label>
 

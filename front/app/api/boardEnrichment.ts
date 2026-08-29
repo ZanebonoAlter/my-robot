@@ -120,19 +120,23 @@ export interface ResultDetailRow {
 	created_at: string;
 }
 
-/** POST .../results/trigger 的响应。 */
-export interface TriggerEnrichmentResponse {
-	result: {
-		id: number;
-		evolution_assessment: string;
-		/** 字段名不变；内容为 AnalyzeOutput（按 form 多态）。 */
-		sectors: AnalyzeOutput | null;
-		causal_chain: string | null;
-		tool_calls_count: number;
-		session_id: string;
-		created_at: string;
-	};
-	review_generated: boolean;
+/** POST .../results/trigger 的异步响应（fix-board-analysis-material：
+ * 触发立即返回，分析后台跑，轮询 getAnalysisStatus 拿结果）。 */
+export interface TriggerStartedResponse {
+	status: "started";
+	scope: "board" | "topic";
+	target_id: number;
+}
+
+/** GET /enrichment/analysis-status 的响应（scope=board|topic）。 */
+export interface AnalysisStatusRow {
+	scope: "board" | "topic";
+	target_id: number;
+	running: boolean;
+	started_at?: string;
+	finished?: boolean;
+	error?: string;
+	result_id?: number;
 }
 
 // ── Table 3: topic_enrichment_review ────────────────────────────────────────
@@ -271,15 +275,19 @@ export interface RegimeShift {
 	[key: string]: unknown;
 }
 
-/** 可核查证据链条目：news=分层新闻 / web=web_search 网页 / page=fetch_page 正文。web/page 带 url+quote+institution+date。 */
+/** 可核查证据链条目：news=分层新闻 / web=web_search 网页 / page=fetch_page 正文 / lane=板块内泳道。web/page 带 url+quote+institution+date；lane 带 ref=lane_id。 */
 export interface EvidenceChainItem {
-	source_type: "news" | "web" | "page" | string;
+	source_type: "news" | "web" | "page" | "lane" | string;
 	ref?: string;
 	url?: string;
 	/** 原文摘录（非 AI 转述）。 */
 	quote?: string;
 	institution?: string;
 	date?: string;
+	/** 可选两级分类：quote=原文摘录 / series=数据序列 / chart=图表。 */
+	kind?: string;
+	/** lane 证据的论据说明（该泳道贡献了什么）。 */
+	lane_note?: string;
 	[key: string]: unknown;
 }
 
@@ -296,6 +304,70 @@ export interface AnalyzeDepth {
 	/** 反过度解读边界：明确"目前还不能下结论"的范围（后端校验非空）。 */
 	boundary: string;
 	evidence_chain: EvidenceChainItem[];
+	[key: string]: unknown;
+}
+
+// ── Board-level analysis（board-level-deep-analysis D8：scope=board 五字段）──
+
+/** board_interpret 候选命题：钩子（近期真实异常）升维成结构命题。 */
+export interface BoardCandidate {
+	thesis: string;
+	hook: string;
+	angle: string;
+	[key: string]: unknown;
+}
+
+/** 论证层（层级递进机制层的一层：表层现象逐层向下挖到结构性根因）。 */
+export interface BoardArgumentLayer {
+	layer: string;
+	deep_logic: string;
+	basis: string;
+	[key: string]: unknown;
+}
+
+/** 论文式论证骨架：intro 定调 → layers 层级递进 → boundary 边界 → conclusion 收束。 */
+export interface BoardArgument {
+	intro: string;
+	layers: BoardArgumentLayer[];
+	boundary: string;
+	conclusion: { cert: string; judgment: string; [key: string]: unknown };
+	[key: string]: unknown;
+}
+
+/** 版块档 sectors：{scope, thesis, candidates, argument, depth, lane_refs} + interpret 元信息。 */
+export interface BoardSectors {
+	scope: "board";
+	/** board=正常结构分析 / sparse=素材不足诚实降级。 */
+	form: "board" | "sparse" | string;
+	thesis: string;
+	angle?: string;
+	candidates: BoardCandidate[];
+	chosen_index: number;
+	reason?: string;
+	/** 论证骨架（sparse 档可能缺席，前端降级渲染）。 */
+	argument?: BoardArgument;
+	/** 深度层（旧结果无此字段则降级不渲染）。 */
+	depth?: AnalyzeDepth;
+	lane_refs: Array<{ lane_id: number; note?: string; [key: string]: unknown }>;
+	/** interpret 元信息：degraded=LLM 不可用机械降级 / all_sparse=全部泳道素材不足。 */
+	interpret_meta?: {
+		degraded?: boolean;
+		degraded_why?: string;
+		all_sparse?: boolean;
+		[key: string]: unknown;
+	};
+	[key: string]: unknown;
+}
+
+/** 版块档 result 行（列表/详情同构，后端 serializeBoardResult）。 */
+export interface BoardAnalysisResultRow {
+	id: number;
+	analysis_scope: "board";
+	sectors: BoardSectors | null;
+	tool_calls?: unknown;
+	input_snapshot?: unknown;
+	session_id?: string;
+	created_at?: string;
 	[key: string]: unknown;
 }
 
@@ -540,9 +612,45 @@ export function useBoardEnrichmentApi() {
 
 	async function triggerEnrichment(
 		topicId: number,
-	): Promise<ApiResponse<TriggerEnrichmentResponse>> {
+		/** D8 下钻：版块报告 lane 引用点击后预填视角（可选）。 */
+		prefillLens?: string,
+	): Promise<ApiResponse<TriggerStartedResponse>> {
 		return apiClient.post(
 			`/persistent-topics/${topicId}/enrichment/results/trigger`,
+			prefillLens ? { prefill_lens: prefillLens } : undefined,
+		);
+	}
+
+	// ── Board-level analysis（board-level-deep-analysis D8）─────────────────
+	async function triggerBoardAnalysis(
+		boardId: number,
+	): Promise<ApiResponse<TriggerStartedResponse>> {
+		return apiClient.post(
+			`/semantic-boards/${boardId}/enrichment/analysis/trigger`,
+		);
+	}
+
+	async function getAnalysisStatus(
+		scope: "board" | "topic",
+		id: number,
+	): Promise<ApiResponse<AnalysisStatusRow>> {
+		return apiClient.get(`/enrichment/analysis-status?scope=${scope}&id=${id}`);
+	}
+
+	async function listBoardAnalysisResults(
+		boardId: number,
+	): Promise<ApiResponse<BoardAnalysisResultRow[]>> {
+		return apiClient.get(
+			`/semantic-boards/${boardId}/enrichment/analysis/results`,
+		);
+	}
+
+	async function getBoardAnalysisResult(
+		boardId: number,
+		id: number,
+	): Promise<ApiResponse<BoardAnalysisResultRow>> {
+		return apiClient.get(
+			`/semantic-boards/${boardId}/enrichment/analysis/results/${id}`,
 		);
 	}
 
@@ -667,6 +775,11 @@ export function useBoardEnrichmentApi() {
 		listResults,
 		getResult,
 		triggerEnrichment,
+		// board-level analysis (board-level-deep-analysis)
+		triggerBoardAnalysis,
+		getAnalysisStatus,
+		listBoardAnalysisResults,
+		getBoardAnalysisResult,
 		listReviews,
 		createReview,
 		updateReviewDeviation,

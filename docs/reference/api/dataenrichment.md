@@ -368,3 +368,78 @@
 ```json
 { "success": true, "data": { "deleted": true } }
 ```
+
+
+## 板块级深度分析 Board Analysis（board-level-deep-analysis）
+
+> 跨泳道命题论证：态势卡 → 命题生成 → 多方向 agent 探索 → 论文式分析，sectors 载五字段 `{thesis, candidates, argument, depth, lane_refs}`。详情见 [flow/data-enrichment.md](../flow/data-enrichment.md) §版块级深度分析。
+
+### POST /api/semantic-boards/:id/enrichment/analysis/trigger
+
+手动触发版块级分析。需板块开启 `enrichment_enabled`（未启用返回 `400`，含 `not enabled` 可区分）；装配前自动跑新鲜度门补齐滞后 lifeline（失败降级不阻塞）。
+
+**响应示例**
+
+```json
+{
+  "success": true,
+  "data": {
+    "result": {
+      "id": 205,
+      "analysis_scope": "board",
+      "sectors": { "scope": "board", "form": "board", "thesis": "……", "candidates": [...], "argument": {...}, "depth": {...}, "lane_refs": [{"lane_id": 7, "note": "……"}] },
+      "session_id": "data_enrichment_board_9_ab12cd34",
+      "created_at": "2026-08-26T10:00:00Z"
+    },
+    "review_generated": true,
+    "freshness_report": { "checked": 3, "refreshed": 1, "skipped": 2, "failed": 0 }
+  }
+}
+```
+
+### GET /api/semantic-boards/:id/enrichment/analysis/results
+
+版块档分析历史列表（scope=board，最新在前）。只含该板块的版块档 result，不含单泳道档/他板块。
+
+### GET /api/semantic-boards/:id/enrichment/analysis/results/:rid
+
+单份版块档 result 详情。请求不属于该板块的 rid（或单泳道档）返回 `404`。
+
+## 参考角色 Reference Roles（方法论画像）
+
+> `reference_roles` 表的 CRUD。画像内容注入循环 B 三环节（interpret/analyze/agentLoop）system prompt——只注入分析方法不注入事实。单条正文 >4000 字符（rune 计）注入时整条丢弃；启停即时生效（后端现查 DB）。
+
+### GET /api/reference-roles
+
+列出全部参考角色。
+
+**响应示例**
+
+```json
+{
+  "success": true,
+  "data": [
+    { "id": 1, "name": "inside-america", "title": "内部看美国 · 分析基因画像", "content": "……", "enabled": true, "created_at": "2026-08-26T09:00:00Z", "updated_at": "2026-08-26T09:00:00Z" }
+  ]
+}
+```
+
+### POST /api/reference-roles
+
+创建参考角色。body：`{ "name": "inside-america", "title": "……", "content": "……", "enabled": true }`（name 唯一，重复返回 `409`）。
+
+### GET /api/reference-roles/:id
+
+单条详情；不存在返回 `404`。
+
+### PUT /api/reference-roles/:id
+
+更新（`name`/`title`/`content`/`enabled` 任意子集；enabled 启停即时生效）。
+
+### DELETE /api/reference-roles/:id
+
+删除；不存在返回 `404`。
+
+## 单泳道 trigger 扩展：prefill_lens
+
+`POST /api/persistent-topics/:topicId/enrichment/results/trigger` 新增可选 body `{ "prefill_lens": "供需错配的深层机制" }`——版块报告泳道引用点击下钻时预填视角，后端 `EnrichTopicLens` 用它覆盖默认 lens 候选（candidates[0]）；空/缺省走原逻辑。

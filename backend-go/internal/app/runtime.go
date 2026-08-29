@@ -239,16 +239,22 @@ func StartRuntime() *Runtime {
 	lifelineSvc := dataenrichment.GetLifelineService()
 	lister := dataenrichment.GetTopicLister()
 
-	// Weekly lifeline: every Monday 03:00 Asia/Shanghai.
-	weeklyNextRun := dataenrichment.NextWeeklyLifelineTime
-	registry.Register("lifeline_weekly", scheduler.New(scheduler.Config{
-		Name:        "Lifeline Weekly Refresh",
-		Description: "每周一刷新所有活跃话题的周度新闻汇总（循环A，含历史回填）",
-		NextRun:     weeklyNextRun,
-		Job:         scheduler.PauseAware(dataenrichment.WeeklyLifelineJob(lifelineSvc, lister)),
-		Persistence: admin.NewTaskPersistenceWithNextRun("lifeline_weekly",
-			"每周一刷新所有活跃话题的周度新闻汇总上下文", weeklyNextRun),
-	}))
+	// Weekly lifeline: DISABLED (fix-board-analysis-material 7.3). Near-
+	// horizon memory is served by the 14-day section window injected with
+	// every analysis; long-horizon memory by month/year archives maintained
+	// by the monthly/yearly jobs + the analysis-time completeness gate. The
+	// weekly fleet-wide heal was also a burst risk (hundreds of LLM calls).
+	// Registration stays commented for reference; existing week rows remain
+	// consumable via the situation-card chain.
+	_ = dataenrichment.NextWeeklyLifelineTime // keep helper referenced
+	// registry.Register("lifeline_weekly", scheduler.New(scheduler.Config{
+	// 	Name:        "Lifeline Weekly Refresh",
+	// 	Description: "每周一刷新所有活跃话题的周度新闻汇总（循环A，含历史回填）",
+	// 	NextRun:     dataenrichment.NextWeeklyLifelineTime,
+	// 	Job:         scheduler.PauseAware(dataenrichment.WeeklyLifelineJob(lifelineSvc, lister)),
+	// 	Persistence: admin.NewTaskPersistenceWithNextRun("lifeline_weekly",
+	// 		"每周一刷新所有活跃话题的周度新闻汇总上下文", dataenrichment.NextWeeklyLifelineTime),
+	// }))
 
 	// Monthly lifeline: every 1st of month 03:30 Asia/Shanghai.
 	monthlyNextRun := dataenrichment.NextMonthlyLifelineTime

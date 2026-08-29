@@ -1,102 +1,231 @@
 ## Purpose
 
-以语义版块为分析对象、N 条泳道素材为论据的深度剖析能力：产出带一句话命题（thesis）、层级递进机制论证（argument）、深度层（depth）的版块级分析报告，泳道素材作为论据织入论证链（而非并列态势条目），并以一等公民引用（lane_refs）支撑可下钻核查。
+以语义版块为对象的两阶段认知能力：默认生成可扫描的版块简报，帮助用户看清关键变化、泳道关系与不确定项；用户选择具体问题后，再通过多假设、支持与反证生成可核查的深度调查。系统不得预设同版块泳道必然构成统一因果系统。
 
 ## ADDED Requirements
 
-### Requirement: 版块级分析触发
+### Requirement: 版块简报手动触发
 
-版块级分析 SHALL 以单个语义版块为触发对象（`EnrichBoard(boardID)`），MUST 复用既有板块级开关 `enrichment_enabled` 门槛（默认关闭）。用户可随时手动触发；本期不挂定时调度（定时节奏后置独立决策）。
+系统 SHALL 以单个语义版块为对象手动生成版块简报，MUST 复用版块 `enrichment_enabled` 门槛。本期 SHALL NOT 定时生成。默认触发只读取内部态势卡与历史认知记录，MUST NOT 自动调用外部搜索，也 MUST NOT 自动继续生成深度调查。
 
-#### Scenario: 板块未开启增强时拒绝
+#### Scenario: 版块未开启增强时拒绝
 
-- **WHEN** 板块 `enrichment_enabled=false` 时用户触发版块级分析
-- **THEN** 请求被拒绝并返回与单泳道分析一致的错误语义，不产生任何分析产物
+- **WHEN** 版块 `enrichment_enabled=false` 时用户触发版块简报
+- **THEN** 请求被拒绝且不产生任何结果
 
-#### Scenario: 手动触发生成一份完整分析
+#### Scenario: 默认触发只生成简报
 
-- **WHEN** 用户对开启增强的板块触发版块级分析
-- **THEN** 系统执行三角色编排并产出一份版块级分析报告（thesis/argument/depth/lane_refs 齐全），同板块多次触发各自产出独立报告（append-only 快照，不覆盖旧报告）
+- **WHEN** 用户点击“分析板块”
+- **THEN** 系统生成一份 `board_brief` 快照，不调用 web 搜索、不产生 `board_investigation`，并向用户展示可继续调查的问题
 
-### Requirement: 命题生成（用户不指定分析方向）
+#### Scenario: 多次触发保留独立简报
 
-版块级分析的 interpret 阶段 SHALL 读取全板块素材（各泳道态势卡 + 近期 section 事实指纹），提炼 2-3 个候选命题并自动选定最有时效性的一个深挖。系统 MUST NOT 要求用户在分析前指定分析方向或选择视角候选（生成式负担留在系统侧）。
+- **WHEN** 用户对同一版块再次生成简报
+- **THEN** 新旧简报均作为不可变快照保留，新简报不覆盖旧简报
 
-#### Scenario: 候选命题自动选定
+### Requirement: 简报与调查异步任务可区分
 
-- **WHEN** interpret 阶段完成素材读取
-- **THEN** 产出 2-3 个候选命题（含候选清单与选定理由），报告记录候选清单供用户查看，分析以选定命题展开
+版块简报和调查 SHALL 脱离触发 HTTP 请求在后台运行，每次触发 SHALL 返回唯一 job id、job kind 与 board id，前端 SHALL 可按 job id 轮询 running/finished/error/result_id。同一版块的简报与调查 MUST 串行：已有任一任务运行时，新触发返回 409 并携带当前任务身份；不同版块可并行。客户端断连 MUST NOT 取消后台任务。
 
-#### Scenario: 素材稀薄的板块诚实降级
+#### Scenario: 简报触发立即返回
 
-- **WHEN** 板块活跃泳道稀少、素材不足以支撑立论
-- **THEN** 分析产出诚实标注信息不足（类似单泳道 `sparse` 语义），不硬造命题与机制层
+- **WHEN** 用户触发简报后立即离开页面
+- **THEN** 接口返回 `job_kind=board_brief` 的任务身份，后台继续完成，用户重进页面可恢复该 job 的轮询
 
-### Requirement: 跨泳道素材为论证论据
+#### Scenario: 调查状态不冒充简报状态
 
-版块级分析的论证 SHALL 将多条泳道的素材织入同一论证链（传导/递进/对照关系），MUST NOT 退化为各泳道态势的并列罗列（周报式数据堆砌）。内部探索工具（列版块/列泳道/泳道详情）在版块级编排中 SHALL 为主路径素材获取手段，agent 需要论据细节时经泳道详情下钻。
+- **WHEN** 用户触发某问题调查
+- **THEN** 状态返回 `job_kind=board_investigation` 与独立 job id，完成后 result_id 指向调查子结果，前端不把它当作新简报
 
-#### Scenario: 论证段引用多条泳道
+#### Scenario: 同版块任务防重入
 
-- **WHEN** 版块级分析产出报告
-- **THEN** argument 的每个机制层至少可挂载其论据来源（泳道引用与/或外部 web 证据），跨泳道素材在论证中呈现因果或层级关系而非并列清单
+- **WHEN** 同一版块已有简报或调查运行时再次触发任一种任务
+- **THEN** 新任务不启动，接口返回 409 及当前 job id/job kind，前端恢复当前任务轮询
 
-#### Scenario: agent 主路径下钻泳道
+### Requirement: 简报反映观察而非强制立论
 
-- **WHEN** 编排执行探索阶段
-- **THEN** agent 可用工具集包含内部泳道工具，且编排对其的引导优先级不低于外部检索工具
+版块简报 SHALL 包含：`summary`、`observations`、`relationships`、`uncertainties`、`research_questions`、`lane_refs`。简报 MUST NOT 强制包含 thesis、固定反转句式、机制层、历史类比或系统重定位。每条 observation SHALL 指向相关泳道并标明依据或截止时间。
 
-### Requirement: 产物 schema 与泳道引用一等公民
+#### Scenario: 有素材但没有统一关系
 
-版块级分析报告 SHALL 包含：`thesis`（一句话命题）、`argument`（层级递进机制层，每层挂证据）、`depth`（深度层：系统重定位/多层机制/历史类比/边界限定/可核查证据链，非 sparse 形态强制）、`lane_refs`（本次分析织入的泳道 id 列表）、候选命题清单。证据 `source_type` 枚举 SHALL 扩展 `lane` 值；前端 SHALL 可由 lane 引用点击下钻到对应泳道/背景记忆。
+- **WHEN** 多条泳道均有近期素材，但没有足够证据证明共同驱动或因果传导
+- **THEN** 简报照常生成关键观察，并明确写“暂未发现统一关系”或等价结论，不硬造跨泳道命题，也不降级为 sparse
 
-#### Scenario: 泳道证据可点击核查
+#### Scenario: 存在多个并行趋势
 
-- **WHEN** 报告的论证段挂有 lane 类型证据
-- **THEN** 前端渲染可点击引用，跳转到对应泳道（其背景记忆/近期 section），引用不得只存在于工具调用日志中
+- **WHEN** 板块内同时存在方向不同且互不从属的变化
+- **THEN** 简报分别展示这些趋势及其分化关系，不把它们压缩成单一底层原因
 
-#### Scenario: 旧报告无 lane 证据时降级渲染
+#### Scenario: 全部素材稀薄
 
-- **WHEN** 读取不含 lane 证据的历史单泳道报告
-- **THEN** 前端按既有渲染降级处理，不报错
+- **WHEN** 所有活跃泳道均缺少可用近期观察
+- **THEN** 简报诚实展示素材不足，不生成研究问题，不自动启动调查
 
-### Requirement: 态势卡素材装配
+### Requirement: 泳道关系有类型、有依据、可为空
 
-版块级分析的素材注入 SHALL 以每泳道「态势卡」形态压缩（近期滚动摘要 + 命中统计 + 质量信号），MUST NOT 将全部泳道的各粒度背景记忆全文拼接注入（防 token 爆炸）。agent 需要某泳道论据细节时经泳道详情工具下钻获取。
+系统 SHALL 仅在内部素材支持时声明跨泳道关系。关系类型 SHALL 为 `common_driver | possible_causal | divergent | context_only | unclear`；每条关系 SHALL 带相关 lane id、解释、置信度与观察依据。同期发生 MUST NOT 自动等同于因果关系。
 
-#### Scenario: 泳道多时素材仍可控
+#### Scenario: 仅语义相关
 
-- **WHEN** 板块活跃泳道数量较多（如 ≥10 条）
-- **THEN** 分析照常执行，注入素材总量受态势卡形态约束，不因泳道数量线性膨胀为全文拼接
+- **WHEN** 两条泳道只因属于同一概念版块而相关，缺少共同驱动或传导证据
+- **THEN** 系统标为 `context_only` 或不建立关系，MUST NOT 标为 `possible_causal`
 
-### Requirement: 泳道质量信号作素材权重
+#### Scenario: 因果证据不足
 
-系统 SHALL 为版块分析提供泳道质量信号（活跃度：近期命中；信息密度：背景记忆丰满度；分析历史：曾产出 sparse 形态），用作态势卡注入排序与 agent 下钻引导权重。本期 MUST NOT 产出泳道治理建议（归档/合并建议后置）。
+- **WHEN** 素材显示两条泳道可能存在传导但中间环节缺失
+- **THEN** 系统最多标为 `possible_causal` 且低/中置信，并把缺失环节写入 uncertainties
 
-#### Scenario: 低质泳道不占用主要注入预算
+#### Scenario: 关系引用幽灵泳道
 
-- **WHEN** 某泳道长期无命中或历史分析均为 sparse
-- **THEN** 其态势卡在注入中降权（排序靠后/内容更短），但不被静默排除（用户主权，取舍留给分析）
+- **WHEN** LLM 返回不属于当前版块活跃集合的 lane id
+- **THEN** 该关系与引用被拒绝或清理，其余合法内容继续保留
 
-### Requirement: 单泳道分析降级为聚焦下钻
+### Requirement: 简报提供可选择的研究问题
 
-单泳道分析（既有 EnrichTopic 链路）SHALL 保留全量行为（result 不可变、review 对比、追问），并新增「从版块分析下钻触发」入口：用户在版块报告的论证段/泳道引用上发起聚焦分析时，lens SHALL 预填自所在论证段命题。独立手动入口保留不删。3c 的「手动 lens 候选选择 UI」不再实现（视角选择下沉到版块级 interpret）。
+系统 SHALL 从观察、关系与未知项中生成 0-4 个具体问题式研究候选；每个候选 SHALL 包含问题、为什么值得调查及相关泳道。问题 MUST 可由证据支持或削弱，MUST NOT 只是抽象方法名。用户 MAY 自填问题替代候选。
 
-#### Scenario: 从版块报告下钻单泳道
+#### Scenario: 用户选择候选问题
 
-- **WHEN** 用户在版块报告某论证段的泳道引用上发起聚焦分析
-- **THEN** 单泳道分析以预填 lens 启动（用户可改），其余编排行为与既有单泳道分析完全一致
+- **WHEN** 用户在简报中选择一个研究问题并点击“深入调查”
+- **THEN** 调查以该问题及父简报为输入启动，不要求用户先接受任何预设命题
 
-#### Scenario: 独立单泳道入口不受影响
+#### Scenario: 用户自填问题
 
-- **WHEN** 用户绕过版块报告直接对某泳道发起分析
-- **THEN** 行为与既有 EnrichTopic 一致（不要求先有版块分析）
+- **WHEN** 用户输入一个自定义问题并触发调查
+- **THEN** 系统记录问题来源为 custom，并按与生成问题相同的调查链处理
 
-### Requirement: 版块分析报告的 review 对比复用
+#### Scenario: 没有值得调查的问题
 
-版块级分析报告 SHALL 复用既有认知演进机制（review judge）：同板块新报告生成后自动与上一份对比，产出增量判断；review 永不回写背景记忆的红线同样适用于版块级。
+- **WHEN** 简报只发现普通、彼此独立的变化且无关键未知项
+- **THEN** `research_questions` 可为空，系统不把空列表视为失败
 
-#### Scenario: 第二份版块分析自动 review
+### Requirement: 深度调查必须评估竞争假设
 
-- **WHEN** 同板块第二次版块级分析完成
-- **THEN** 自动产出与上一份的对比 review（新增发现/推翻/置信变化），用户可采纳但采纳不回写任何背景记忆
+调查 SHALL 在检索前生成 2-4 个竞争假设，且 MUST 至少包含一个 `is_null=true` 的零假设，用于表达“没有统一机制、各变化可分别解释”或与问题等价的朴素解释。每个假设 SHALL 先声明支持它需要什么证据、什么证据会削弱它以及适用范围；此阶段 MUST NOT 预先选定赢家。
+
+#### Scenario: 零假设不可缺席
+
+- **WHEN** 调查问题涉及多个泳道是否存在共同机制
+- **THEN** 假设集合中至少有一个零假设；缺少零假设的 LLM 输出不得直接进入研究阶段
+
+#### Scenario: 候选假设都很宏大
+
+- **WHEN** LLM 只返回多个宏大结构解释而没有普通解释
+- **THEN** 系统要求重试或机械补入零假设，MUST NOT 在原集合上直接研究
+
+### Requirement: 调研同时寻找支持与反证
+
+研究阶段 SHALL 使用内部泳道工具与可用外部工具，围绕全部假设统一搜集基础事实、支持证据、反证、替代解释与关键缺口。对于每个非零假设，系统 SHALL 至少尝试一次削弱该假设的检索或核查；工具不可用或无命中时 SHALL 记录 gap，不得伪造证据。证据质量与问题相关性优先于证据类型数量。
+
+#### Scenario: 搜索词不得只有既定结论
+
+- **WHEN** 研究 agent 生成检索计划
+- **THEN** 计划同时包含中性事实查询和反证/替代解释查询，MUST NOT 只把某一假设的结论词拼进全部搜索词
+
+#### Scenario: 只有同向材料
+
+- **WHEN** 检索只获得支持某假设的新闻转述，未获得一手材料或反证
+- **THEN** 该假设不得标为高置信 supported，结果明确记录证据偏向与缺口
+
+#### Scenario: 外部工具不可用
+
+- **WHEN** web_search 或 fetch_page 未配置或失败
+- **THEN** 调查继续使用内部材料并标记外部核查缺口，不影响父简报
+
+### Requirement: 调查结论可改写、拆分或放弃假设
+
+最终综合 SHALL 根据研究结果为每个假设标记 `supported | plausible | insufficient | weakened | refuted`，并产出带 confidence、scope 与 boundary 的有限结论。综合阶段 MAY 修改、合并或拆分初始假设，也 MAY 判定所有非零假设证据不足。系统 MUST NOT 强制输出反转句式、历史类比、固定机制层数或宏大系统结论。
+
+#### Scenario: 零假设最符合材料
+
+- **WHEN** 研究只证明多条变化同期出现，未找到统一传导机制
+- **THEN** 零假设可成为最可信解释，结论用直白语言说明各变化目前应分别理解
+
+#### Scenario: 所有假设证据不足
+
+- **WHEN** 支持与反证均不足以区分候选假设
+- **THEN** 调查结论标为低置信/证据不足，列出下一步需要的材料，不强选赢家
+
+#### Scenario: 初始假设被研究推翻
+
+- **WHEN** 反证直接否定初始最显眼的解释
+- **THEN** 最终结果将其标为 weakened/refuted，并允许结论与初始候选方向不同
+
+### Requirement: 调查产物可核查且易读
+
+`board_investigation` SHALL 包含父简报 id、问题、hypotheses、conclusion、evidence_chain、lane_refs 与 method_refs。报告首屏 SHALL 先展示问题、当前判断、置信度、适用范围和边界；支持证据、反证、缺口与来源详情 SHALL 可展开查看。抽象概念首次出现时 SHALL 说明其对应的具体行为、规则、数据或事件。
+
+#### Scenario: 支持与反证分开显示
+
+- **WHEN** 用户展开某个假设
+- **THEN** 前端分别展示 support_evidence、counter_evidence 和 gaps，不把相反材料埋入同一段长文
+
+#### Scenario: 避免重复机制长文
+
+- **WHEN** 调查包含多个假设和结论
+- **THEN** 前端不再连续重复渲染 argument.layers 与 depth.mechanism_layers；同一论点只在一个主位置表达
+
+### Requirement: 简报与调查形成父子不可变快照
+
+每份调查 SHALL 关联同版块的一份 `board_brief`，并持久化由规范化问题文本生成的 `question_key`；一份简报 MAY 派生多份调查。简报与调查均 append-only，不得因后续调查或追问被改写；追问继续以附属记录沉淀。
+
+#### Scenario: 一份简报派生多份调查
+
+- **WHEN** 用户分别调查同一简报中的两个问题
+- **THEN** 系统产生两份独立 `board_investigation`，二者 parent 均指向该简报，互不覆盖
+
+#### Scenario: 跨版块父结果被拒绝
+
+- **WHEN** 调查请求引用另一个版块的简报 id
+- **THEN** 请求被拒绝，不产生调查结果
+
+### Requirement: 态势卡、新鲜度与质量信号继续作为内部输入
+
+简报 SHALL 使用每活跃泳道一张态势卡并带 as_of 与质量信号；事实摘要取材顺序 SHALL 为 week lifeline → month lifeline → 有实质内容的近期 section 指纹 → 泳道描述 → 空，MUST NOT 拼接全部泳道全文。分析前 SHALL 对 month/year 有数据周期执行补全：缺行含首份先建、最后写入超过 72h 则重算；week 不参与补全检查，单次补全受限额约束且失败降级。质量信号只用于排序与详略，MUST NOT 直接证明泳道关系。需要细节的调查经泳道工具下钻并可读取 month/year 历史背景。
+
+#### Scenario: 泳道多时简报素材受控
+
+- **WHEN** 版块包含 ≥10 条活跃泳道
+- **THEN** 输入仍按态势卡预算控制，输出只保留最重要观察，不按泳道逐条生成长文
+
+#### Scenario: 低质量泳道不被静默删除
+
+- **WHEN** 某泳道长期无命中或历史稀疏
+- **THEN** 其卡片降权和缩短但仍可追溯，系统不得仅因质量低便从版块成员中删除
+
+### Requirement: lane 引用与单泳道下钻
+
+简报和调查中的 lane 引用 SHALL 为一等公民并校验属于当前版块。用户可从观察、关系、研究问题、假设证据处下钻对应泳道；下钻预填具体观察或研究问题，用户可修改。独立单泳道入口继续可用。
+
+#### Scenario: 从简报观察下钻
+
+- **WHEN** 用户点击某条 observation 的 lane 引用
+- **THEN** 系统打开对应泳道聚焦入口，并以该 observation 作为可修改的预填问题
+
+#### Scenario: 从调查证据下钻
+
+- **WHEN** 用户点击某假设下的 lane 证据
+- **THEN** 系统打开对应泳道并预填当前调查问题/证据说明，不把版块结论锁死为单泳道 lens
+
+### Requirement: review 按结果种类隔离
+
+新简报 SHALL 只与同版块上一份简报比较，记录观察、关系和不确定性的变化；调查只有在 `parent_result_id + question_key` 相同的重跑之间才自动比较。review SHALL NOT 在不同问题之间比较，也 SHALL NOT 回写新闻记忆。
+
+#### Scenario: 第二份简报自动对比
+
+- **WHEN** 同版块生成第二份 `board_brief`
+- **THEN** review 对比两份简报的观察与关系变化，不读取 legacy thesis 作为上一份
+
+#### Scenario: 不同问题调查不互比
+
+- **WHEN** 同一简报下先后完成两个不同问题的调查
+- **THEN** 系统不自动把二者作为前后认知版本比较
+
+### Requirement: 旧论文式版块报告兼容
+
+既有 thesis/argument/depth 形态的版块结果 SHALL 标记为 `legacy_board_analysis` 并保持只读可访问。新触发 SHALL NOT 再生成该形态；迁移 MUST NOT 重写或删除旧 JSON。
+
+#### Scenario: 查看旧报告
+
+- **WHEN** 用户从历史列表打开 legacy 版块结果
+- **THEN** 前端使用兼容视图正常渲染并标注“旧版分析”，不要求它符合新简报/调查 schema

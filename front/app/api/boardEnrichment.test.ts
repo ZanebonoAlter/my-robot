@@ -100,11 +100,21 @@ describe("useBoardEnrichmentApi — endpoint contracts (data-enrichment P6)", ()
 			);
 		});
 
-		it("triggerEnrichment → POST .../results/trigger", async () => {
+		it("triggerEnrichment → POST .../results/trigger（无 body）", async () => {
 			const api = useBoardEnrichmentApi();
 			await api.triggerEnrichment(7);
 			expect(postMock).toHaveBeenCalledWith(
 				"/persistent-topics/7/enrichment/results/trigger",
+				undefined,
+			);
+		});
+
+		it("triggerEnrichment(prefillLens) → POST with {prefill_lens}（D8 下钻）", async () => {
+			const api = useBoardEnrichmentApi();
+			await api.triggerEnrichment(7, "供需错配");
+			expect(postMock).toHaveBeenCalledWith(
+				"/persistent-topics/7/enrichment/results/trigger",
+				{ prefill_lens: "供需错配" },
 			);
 		});
 	});
@@ -201,6 +211,33 @@ describe("useBoardEnrichmentApi — endpoint contracts (data-enrichment P6)", ()
 			await api.deleteDataSource(1974, "etf_quote");
 			expect(deleteMock).toHaveBeenCalledWith(
 				"/semantic-boards/1974/data-sources/etf_quote",
+			);
+		});
+	});
+
+	// ── Board-level analysis (board-level-deep-analysis D8) ─────────────────
+	describe("board — analysis", () => {
+		it("triggerBoardAnalysis → POST /semantic-boards/:id/enrichment/analysis/trigger", async () => {
+			const api = useBoardEnrichmentApi();
+			await api.triggerBoardAnalysis(31);
+			expect(postMock).toHaveBeenCalledWith(
+				"/semantic-boards/31/enrichment/analysis/trigger",
+			);
+		});
+
+		it("listBoardAnalysisResults → GET .../analysis/results", async () => {
+			const api = useBoardEnrichmentApi();
+			await api.listBoardAnalysisResults(31);
+			expect(getMock).toHaveBeenCalledWith(
+				"/semantic-boards/31/enrichment/analysis/results",
+			);
+		});
+
+		it("getBoardAnalysisResult → GET .../analysis/results/:rid", async () => {
+			const api = useBoardEnrichmentApi();
+			await api.getBoardAnalysisResult(31, 88);
+			expect(getMock).toHaveBeenCalledWith(
+				"/semantic-boards/31/enrichment/analysis/results/88",
 			);
 		});
 	});

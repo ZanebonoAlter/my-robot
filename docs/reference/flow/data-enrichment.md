@@ -136,6 +136,19 @@ SessionID 规则：
 - 个股辩论提炼：`data_enrichment_debate_{topic_id}_{result_id}`
 - 报告追问：`data_enrichment_qa_{result_id}_{uuid8}`，每次询问唯一（基于 result，同一报告多轮追问各自独立 session）
 
+### 版块级深度分析（board-level-deep-analysis：跨泳道命题论证）
+
+单泳道分析回答「这条泳道怎么回事」；版块级分析回答「这个板块作为一个系统怎么了」——跨泳道提命题、论文式论证。入口 `EnrichBoard(boardID)`：
+
+1. **门槛**：板块 `enrichment_enabled`（同单泳道开关）。
+2. **新鲜度门**（D9）：活跃泳道 week/month/year 三档 lifeline 滞后 >72h（严格大于）者串行补齐；无记录≠落后；失败降级不阻塞分析。
+3. **态势卡装配**：每活跃泳道一卡（lifeline week→section 指纹→描述三级降级）；质量分=活跃度+密度−3×sparse 历史排序定详略；SparseHistory≥2 强制 brief；上限 12 卡。
+4. **命题生成**（`board_interpret` Operation）：候选（钩子×切角）×3 + chosen + reason；LLM 烂两次机械降级（标 degraded）；全 sparse 诚实降级不硬编。
+5. **探索 + 分析**：每方向 `runBoardAgentLoop`（内部工具优先，maxLoops=6）→ `boardAnalyzeCall` 产论文式论证（intro→层级递进 layers→boundary→conclusion 含确定性分级）+ 强制深度层 + 泳道引用。
+6. **落库**：scope=board 五字段 `{thesis, candidates, argument, depth, lane_refs}`；自动 review 对比上一份 board 档（不回写 lifeline）。
+
+参考角色（`reference_roles` 表）注入 interpret/analyze/agentLoop 三环节 system prompt 提供方法论参照系（只注入方法不注入事实）；证据多样性纪律要求 evidence_chain 尽量覆盖 ≥3 类证据。前端：`BoardAnalysisReport.vue` 论文式渲染 + lane 引用点击下钻（`prefill_lens` 透传 `EnrichTopicLens` 触发单泳道聚焦分析，单泳道报告渲染保持不变）。
+
 ### 报告追问（causal-analysis-agent D9，可选追问）
 
 报告（`topic_enrichment_result`）生成后保持**不可变**（业务约束：result 不可变）。用户可对同一报告发起多轮追问，复用循环 B 的工具循环（4 个探索工具：`list_boards` / `list_lanes` / `get_lane_detail` / `web_search`），但把报告快照（`{form, lens, analysis}`）植入系统提示而非重新研究主题。
@@ -191,13 +204,23 @@ flowchart TB
 10. **web_search 真接通 + 降级**（data-enrichment-structural-depth）：`web_search` 首个真实后端为博查 Bocha（`api.bochaai.com`，**只用通搜原始网页结果模式 `summary:false`，禁用 AI 总结模式**——AI summary 有幻觉风险不可作可核查证据）。**API key 界面可配 + 动态读**：存 `ai_settings` 表 `bocha_config`（照 Firecrawl），`BochaWebSearcher` 每次 `Search` 现读，优先级 **DB(界面) > env(`BOCHA_API_KEY`) > config.yaml(`bocha.*`) > 空**——界面改即时生效不重启；全空→返回 not configured，`executeWebSearch` 降级错误 JSON，agent 自判、不阻断主流程。`WebSearcher` 接口可扩展（未来换 Tavily 零改动编排）。落地点：`service/web_search.go` / `wire.go` / `aisettings/config_store.go`（`bocha_config`）/ 设置页「博查搜索」section。
 11. **形态判断 + 视角机制**（data-enrichment-structural-depth）：解读员 `interpret` 输出 `form`（**五形态枚举** `event_chain`/`theme_vein`/`single_point`/`structural`/`sparse`，可扩展）+ `lens_candidates[]`（具体问题式视角，结构/系统题）；当前选定 lens 默认取 candidates[0]，手动选择交互待 3c。落地点：`service/orchestrator.go` interpret / `service/lens_source.go`。
 12. **深度层强制 + fetch_page 可核查原文**（data-enrichment-structural-depth）：非 sparse 形态分析强制产出 `depth` 块，`system_reframe`/`boundary` 非空、`mechanism_layers`≥1、`evidence_chain`≥1，缺则 analyze 重试一次；`sparse` 禁深度层。`evidence_chain` 中 `web`/`page` 类必须带 `url`+`quote`(原文摘录，非 AI 转述)+`institution`+`date` 供前端点击核查。新增 `fetch_page` 工具复用 `reader` 域 `readability_crawler` 抓正文（超长截断），单工具失败返回错误 JSON 不阻断 agent loop。旧 result（无 depth）读取时降级渲染不崩。落地点：`service/orchestrator.go` `validateDepth` / `service/fetch_page.go` / 前端 `CausalAnalysisReport.vue`。
+13. **参考角色 = 方法非事实**（board-level-deep-analysis）：`reference_roles` 表存方法论画像（如「内部看美国」分析基因），注入 interpret/analyze/agentLoop 三环节 system prompt——只注入**分析方法**（概念考古/举证责任门/机制保质期等），不注入事实观点；画像不提供新闻事实，事实一律来自 lifeline/工具检索。单条 >4000 字符（rune 计）注入时整条丢弃（不截断，防止断章取义）；enabled 现查 DB 即时生效。落地点：`service/reference_roles.go` / `platform/database/reference_role_seed.go`（首份画像 seed）。
+14. **版块档分析 scope 隔离**（board-level-deep-analysis）：`topic_enrichment_result.analysis_scope` ∈ topic|board；board 档 result 挂 `semantic_board_id`，sectors 载五字段 `{thesis, candidates, argument, depth, lane_refs}`；查询/列表/详情按 board+scope 过滤，他板块 result 404；版块档 review 只对比上一份 board 档快照（topic 档不参与）。review 不回写 lifeline 红线同样适用于版块级。落地点：`service/enrich_board.go` / `handler/board_enrichment_handler.go`。
+15. **lane 证据 lane_id 必属活跃集**（board-level-deep-analysis）：`evidence_chain` 中 `source_type=lane` 的 `ref` 与 `lane_refs[].lane_id` 必须属于本次分析的活跃泳道集——LLM 幻觉出的不存在泳道（幽灵引用）在落库前被 `sanitizeEvidenceChain`/解析器逐条剔除，单条剔除不拒整份。落地点：`service/evidence.go` / `service/enrich_board.go` boardAnalyzeCall。
+16. **单泳道降级定位**（board-level-deep-analysis）：版块级分析不是单泳道分析的替代——前端单泳道分析收拢为「聚焦分析」折叠区（下钻入口）；版块报告 lane 引用点击 → 聚焦分析预填 lens（`prefill_lens` 透传 `EnrichTopicLens`）触发单泳道深挖。单泳道报告渲染（CausalAnalysisReport）保持不变。落地点：前端 `BoardEnrichmentPanel.vue` / `BoardAnalysisReport.vue`。
+17. **补全门替代保鲜门**（fix-board-analysis-material）：EnrichBoard/EnrichTopic 装配前对活跃泳道 **month/year 档**执行补全——从 section 数据推有料周期集，无行→补建（含首份，首建归分析路径）、行最后写于 72h 前→重算覆盖（修复历史半月档）；全局限额 40 次 LLM、溢出降级留日志；失败降级不阻塞；串行限流；任何写入 `as_of_date` 钳制 ≤ now（周期边界未来日期属脏数据）。**week 档退出分析路径**（近期记忆归 14 天窗口详情，长期归 month/year；`lifeline_weekly` 定时任务停用，存量 week 行保留可被取材链消费）。落地点：`service/freshness_gate.go` / `service/lifeline_context.go`。
+18. **证据多样性纪律**（board-level-deep-analysis）：analyze prompt 约束 `evidence_chain` 尽量覆盖 ≥3 类证据（数据序列/报告文献/历史对照/新闻网页）+ 一手源检索引导；某类检索不到时在 boundary 诚实标注，不编造。落地点：`service/board_analysis.go` / `orchestrator.go` analyzePrompt。
+19. **态势卡取材链含 month 兜底**（fix-board-analysis-material）：`laneFactsDigest` 取材链为 **week → month → section 指纹 → description → none**——week 缺失时 month 档压缩摘要（最新 2 期）为主要事实源（生产形态：month 全量维护、week 滞后）；指纹降级携带 thread 标题实质内容（前 3 条拼接，无 thread 退 cluster_label），MUST NOT 输出「泳道名 (N篇)」同义反复；密度信号计入 lifeline 可用性（month/week 在库 +2）；`facts_source` 枚举含 `lifeline_month` 可追溯。落地点：`service/situation_cards.go`。
+20. **get_lane_detail 附带历史背景记忆**（fix-board-analysis-material）：`RenderLifelineForAgent` 在逐日演进后追加「历史背景记忆（月/年档案）」段——month 最新 2 期 + year 最新 1 期，总预算 4000 rune、超限标注 `[档案截断]`、无归档如实标注「（无背景记忆归档）」不静默省略。落地点：`service/lifeline_renderer.go`（接口 `GetTopicLifelineArchive`，生产实现 `dataenrichment/production_wiring.go` 查 `topic_lifeline_context`）。
+21. **分析触发异步化**（fix-board-analysis-material）：循环 B trigger（板块档+单泳道档）立即返回，分析在 detached ctx 后台跑完落库——MUST NOT 把 request-context 传进分析链（客户端断连 = context canceled = 整次分析作废，含补全门备料）；同目标在跑 → 409 防重入；前端轮询 `/enrichment/analysis-status` 拿 running/finished/error/result_id；未开启板块同步预检 400 语义保留；后台单次上限 30min。内存 job 表（单实例单用户），进程重启=空闲态。落地点：`handler/analysis_runner.go` / `handler/handler.go` / `handler/board_enrichment_handler.go` / 前端 `useBoardEnrichment.ts` 轮询。
 
 ## 代码入口
 
 - **后端编排**：`backend-go/internal/dataenrichment/`（`handler/` 14 条 REST API + `enrichment_enabled` 门槛、`service/orchestrator.go` 循环B 三角色编排、`service/lifeline_context.go` 循环A 汇总 + 自愈、`service/review_judge.go` review 对比、`service/debate_service.go` + `fingenius_client.go` + `debate_distill.go` 个股辩论、`service/tool_registry.go` 数据源工具、`service/airouter_client.go`、`repository/` 三表持久化）。
 - **后端调度**：`backend-go/internal/dataenrichment/scheduler_jobs.go`（lifeline_weekly/monthly/yearly 注册）+ `scheduler_next_run.go`（`NextWeeklyLifelineTime` 等）。
 - **后端熔接**：`backend-go/internal/app/runtime.go`（注册 scheduler + handler + 15s check interval）。
-- **前端**：`front/app/features/tags/components/BoardEnrichmentPanel.vue`（板块详情页「数据增强」认知工作台 tab）、`front/app/features/tags/components/DebateSection.vue`（FinGenius 个股辩论）、`front/app/features/tags/composables/useBoardEnrichment.ts`（debate 四态 / trigger / review 持有）。
+- **后端版块级分析**（board-level-deep-analysis）：`service/enrich_board.go`（EnrichBoard 编排）、`service/situation_cards.go`（态势卡装配）、`service/board_interpret.go`（命题生成）、`service/board_analysis.go`（探索/分析 prompt + agent loop 分支）、`service/freshness_gate.go`（新鲜度门）、`service/evidence.go`（证据链清洗/多样性）、`service/reference_roles.go`（参考角色注入）、`handler/board_enrichment_handler.go`（版块分析 API）。
+- **前端**：`front/app/features/tags/components/BoardEnrichmentPanel.vue`（板块详情页「数据增强」工作台：版块分析主视图 + 聚焦分析折叠区）、`BoardAnalysisReport.vue`（版块报告论文式渲染 + lane 下钻）、`DebateSection.vue`（FinGenius 个股辩论）、`composables/useBoardEnrichment.ts`（trigger/review/board analysis 状态）、设置页 `ReferenceRolePanel.vue`（参考角色管理）。
 
 ### REST API 路由
 
@@ -244,6 +267,25 @@ flowchart TB
 | PUT | `/semantic-boards/:id/data-sources` | 创建/更新数据源绑定 |
 | DELETE | `/semantic-boards/:id/data-sources/:sourceType` | 删除数据源绑定 |
 
+**版块级深度分析**（board-level-deep-analysis）
+
+| 方法 | 路径 | 说明 |
+| ------ | ------ | ------ |
+| POST | `/semantic-boards/:id/enrichment/analysis/trigger` | 手动触发版块级分析（需板块开启 enrichment_enabled；响应含 result + review_generated + freshness_report） |
+| GET | `/semantic-boards/:id/enrichment/analysis/results` | 版块档分析历史列表（scope=board，最新在前） |
+| GET | `/semantic-boards/:id/enrichment/analysis/results/:rid` | 单份版块档 result 详情（他板块/单泳道档 404） |
+
+**参考角色（方法论画像）**
+
+| 方法 | 路径 | 说明 |
+| ------ | ------ | ------ |
+| GET | `/reference-roles` | 列出全部参考角色 |
+| POST | `/reference-roles` | 创建（body: `{name, title?, content, enabled?}`） |
+| GET | `/reference-roles/:id` | 单条详情 |
+| PUT | `/reference-roles/:id` | 更新（含 enabled 启停，即时生效） |
+| DELETE | `/reference-roles/:id` | 删除 |
+
+单泳道 trigger（`POST /persistent-topics/:topicId/enrichment/results/trigger`）新增可选 body `{prefill_lens}`——版块报告下钻预填视角，透传 `EnrichTopicLens` 覆盖默认 lens 候选。
 ## 变更溯源
 
 | 日期 | 变更 | 摘要 | 归档位置 |
@@ -251,5 +293,7 @@ flowchart TB
 | 2026-07-23 | data-enrichment-orchestration | 两独立循环（A新闻记忆 + B分析认知）+ 三表关注点分离 + FinGenius 可选辩论；6 个 LLM Operation + 2 个 Capability；stock_debate_result 表 + debate_distill 提炼；详见本 flow 文档及 DATABASE_FIELDS.md §16 / ai-logging.md | [`openspec/changes/archive/2026-07-23-data-enrichment-orchestration`](../../../openspec/changes/archive/2026-07-23-data-enrichment-orchestration) |
 | 2026-07-23 | causal-analysis-agent | 分析主线重做：推翻 orch 的「演进定位」主线为「探索判断 agent」——话题形态判断（event_chain/theme_vein/single_point/sparse）+ 视角候选与选择 + 探索工具集（list_boards/list_lanes/get_lane_detail/web_search）+ 分层见解（事实层/见解层 + 确定性分级 high/medium/low/question）+ 报告追问（topic_enrichment_qa 多轮 + 手动沉淀）；骨架（三表/agent loop 三防御/可观测/循环A）复用 | [`openspec/changes/archive/2026-07-23-causal-analysis-agent`](../../../openspec/changes/archive/2026-07-23-causal-analysis-agent) |
 | 2026-08-19 | data-enrichment-structural-depth | 数据增强从「A 股产业点评」改造为「结构化深度剖析」：接通博查 web_search 真后端（通搜原始结果模式，key 空→Noop 降级）+ 新增 fetch_page 工具（复用 reader readability 取可核查原文）+ 新增 `structural` 形态（五形态枚举）+ 分析产物新增**深度层**（system_reframe/mechanism_layers/historical_analogy/regime_shift/boundary/evidence_chain，非 sparse 强制）+ 三角色 prompt 去「A 股/产业」硬编码 + 清除 spec 残留旧「走向预测」主线；**BREAKING** 删除金融方向（list_etf_by_keyword/get_etf_quote/list_sectors 工具 + etf_quote/exchange_rate/gdelt_event source_type 枚举）；追补：博查 key 界面可配（DB>env>config.yaml 动态读）+ 能力路由 UI 显式化 data_enrichment_news/analysis | [`openspec/changes/archive/2026-08-19-data-enrichment-structural-depth`](../../../openspec/changes/archive/2026-08-19-data-enrichment-structural-depth) |
+| 2026-08-26 | board-level-deep-analysis | 版块级深度分析：EnrichBoard 跨泳道编排（态势卡装配→命题生成→多方向 agent 探索→论文式分析）+ 新鲜度门（>72h 补齐，幂等钳制）+ 证据多样性纪律 + 参考角色库（方法论画像注入，首份「内部看美国」画像 seed）+ evidence lane/kind 两级分类 + 幽灵泳道引用清洗 + 前端版块分析主视图/聚焦分析折叠区/参考角色设置页 + scope 隔离（analysis_scope 列迁移） | 本 change |
+| 2026-08-27 | fix-board-analysis-material | 素材断供修复：态势卡取材链插 month 兜底（生产形态 week 97% 缺失→month 全量在库却无人消费）+ section 指纹改带 thread 标题实质内容（去「泳道名 (N篇)」同义反复）+ get_lane_detail 附带月/年背景记忆档案段（4000 rune 预算）+ 密度信号计入 lifeline 可用性 + 前端工作台收口（删旧话题选择条/单一下拉/新闻背景折叠化） | 本 change |
 
 > 资料来源：架构设计 `openspec/changes/data-enrichment-orchestration/design.md`（§0 两循环 + §4.2b 个股辩论 + §11 六决策）；概要设计 `openspec/changes/data-enrichment-orchestration/overview.md`（mermaid 流程图 + 6 Operation 速查）。

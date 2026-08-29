@@ -101,6 +101,14 @@ func Init(db *gorm.DB) {
 		boardConfigReader,
 		CapabilityAnalysis,
 	)
+	// D9 freshness gate: board/topic enrichment borrows cycle-A's refresh
+	// methods (lifelineSvc) so pre-analysis catch-up works out of the box.
+	orchestrator.SetFreshnessRefresher(lifelineSvc)
+	// Board config gate (M5.1): EnrichBoard resolves enrichment_enabled by
+	// board ID via a post-construction setter. Without this the first gate
+	// 500s with "board config resolver not wired" in production while unit
+	// tests pass (they wire the resolver themselves).
+	orchestrator.SetBoardConfigResolver(service.NewDBBoardConfigResolver(db))
 
 	// Cycle B (optional): FinGenius stock debate (submit → poll → distill → persist).
 	fingeniusClient := service.NewFinGeniusHTTPClient()

@@ -1,6 +1,7 @@
 package database
 
 import (
+	"encoding/json"
 	"fmt"
 	"strconv"
 	"strings"
@@ -92,6 +93,115 @@ func withLockTimeout(db *gorm.DB, timeout string, fn func(*gorm.DB) error) error
 	// leakage on pooled/bare connections if this helper is ever reused there).
 	_ = db.Exec("SET LOCAL lock_timeout = DEFAULT").Error
 	return nil
+}
+
+// preMigrateEmbeddingCacheBytea converts ai_embedding_cache.embedding from
+// jsonb to bytea BEFORE RunAutoMigrate touches the table. AutoMigrate would
+// issue ALTER COLUMN ... TYPE bytea on its own, which fails with "cannot cast
+// type jsonb to bytea" (no implicit cast) and aborts startup — so the column
+// must already be bytea when AutoMigrate compares types.
+//
+// The conversion is NON-destructive: legacy jsonb float arrays are decoded
+// and re-encoded as float32 LE binary (see models/embedding_codec.go), so
+// cached rows keep serving hits. No MIGRATIONS_ALLOW_DESTRUCTIVE gate needed
+// (no data loss; malformed legacy rows degrade to NULL with a warn).
+// Idempotent: tables/columns already in the target shape are left alone.
+func preMigrateEmbeddingCacheBytea(db *gorm.DB) error {
+	if !tableExists(db, "ai_embedding_cache") {
+		return nil // fresh DB: AutoMigrate will create the table with bytea
+	}
+	var dataType string
+	err := db.Raw(`SELECT a.atttypid::regtype::text
+		FROM pg_attribute a
+		JOIN pg_class c ON c.oid = a.attrelid
+		JOIN pg_namespace n ON n.oid = c.relnamespace
+		WHERE c.relname = 'ai_embedding_cache'
+		  AND a.attname = 'embedding'
+		  AND n.nspname = 'public'`).Scan(&dataType).Error
+	if err != nil {
+		return fmt.Errorf("check ai_embedding_cache.embedding type: %w", err)
+	}
+	if dataType != "jsonb" {
+		return nil // already converted (or never was jsonb): nothing to do
+	}
+
+	// Stage 1 (short tx): add the target column. Re-running after an aborted
+	// conversion finds it already there — tolerate that.
+	var hasNewCol int64
+	if err := db.Raw(`SELECT count(*) FROM pg_attribute a
+		JOIN pg_class c ON c.oid = a.attrelid
+		JOIN pg_namespace n ON n.oid = c.relnamespace
+		WHERE c.relname = 'ai_embedding_cache' AND a.attname = 'embedding_bytea'
+		  AND n.nspname = 'public'`).Scan(&hasNewCol).Error; err != nil {
+		return fmt.Errorf("check embedding_bytea column: %w", err)
+	}
+	if hasNewCol == 0 {
+		if err := db.Exec(`ALTER TABLE ai_embedding_cache ADD COLUMN embedding_bytea bytea`).Error; err != nil {
+			return fmt.Errorf("add embedding_bytea: %w", err)
+		}
+	}
+
+	// Stage 2 (batched, autocommit per batch): stream legacy rows through the
+	// codec in keyset pages so memory stays constant — a full legacy table is
+	// 50k+ rows x 31KB jsonb and holding all payloads at once gets the
+	// process OOM-killed. Idempotent: rows already converted are re-written
+	// with identical bytes, so an aborted conversion just resumes.
+	const batchSize = 500
+	lastKey := ""
+	for {
+		type legacyRow struct {
+			CacheKey  string
+			Embedding string
+		}
+		var rows []legacyRow
+		if err := db.Raw(`SELECT cache_key, embedding::text FROM ai_embedding_cache
+			WHERE embedding IS NOT NULL AND cache_key > $1
+			ORDER BY cache_key LIMIT $2`, lastKey, batchSize).Scan(&rows).Error; err != nil {
+			return fmt.Errorf("read legacy ai_embedding_cache rows: %w", err)
+		}
+		if len(rows) == 0 {
+			break
+		}
+		for _, r := range rows {
+			var vectors [][]float64
+			payload := []byte(nil)
+			if err := json.Unmarshal([]byte(r.Embedding), &vectors); err != nil {
+				// Malformed legacy row degrades to NULL: warn, keep going.
+				logging.Warnf("preMigrate ai_embedding_cache: malformed legacy row %s left as NULL: %v", r.CacheKey, err)
+			} else {
+				payload = models.EncodeEmbeddingVectors(vectors)
+			}
+			if err := db.Exec(`UPDATE ai_embedding_cache SET embedding_bytea = $1 WHERE cache_key = $2`, payload, r.CacheKey).Error; err != nil {
+				return fmt.Errorf("backfill cache row %s: %w", r.CacheKey, err)
+			}
+			lastKey = r.CacheKey
+		}
+		logging.Infof("preMigrate ai_embedding_cache: converted through cache_key %s", lastKey)
+	}
+
+	// Stage 3: refuse to drop the legacy column while unconverted rows exist
+	// (an aborted Stage 2 must resume, not lose data).
+	var pending int64
+	if err := db.Raw(`SELECT count(*) FROM ai_embedding_cache
+		WHERE embedding IS NOT NULL AND embedding_bytea IS NULL`).Scan(&pending).Error; err != nil {
+		return fmt.Errorf("count pending rows: %w", err)
+	}
+	if pending > 0 {
+		return fmt.Errorf("ai_embedding_cache conversion incomplete: %d rows pending (re-run startup to resume)", pending)
+	}
+
+	// Stage 4 (short tx): swap columns.
+	return db.Transaction(func(tx *gorm.DB) error {
+		return withLockTimeout(tx, "5s", func(tx *gorm.DB) error {
+			if err := tx.Exec(`ALTER TABLE ai_embedding_cache DROP COLUMN embedding`).Error; err != nil {
+				return fmt.Errorf("drop legacy embedding column: %w", err)
+			}
+			if err := tx.Exec(`ALTER TABLE ai_embedding_cache RENAME COLUMN embedding_bytea TO embedding`).Error; err != nil {
+				return fmt.Errorf("rename embedding_bytea: %w", err)
+			}
+			return nil
+		})
+	})
 }
 
 // postgresMigrations returns versioned migrations for operations that GORM AutoMigrate
@@ -2007,6 +2117,267 @@ ON CONFLICT (route_id, param_name, value) DO NOTHING`,
 					return nil
 				}); err != nil {
 					return err
+				}
+				return nil
+			},
+		},
+
+		// ── board-level-deep-analysis ──────────────────────────────
+		// Topic-scoped rows keep persistent_topic_id; board-scoped rows carry
+		// semantic_board_id + analysis_scope='board' and leave topic NULL.
+		// AutoMigrate adds the new columns/table, but it cannot DROP an existing
+		// NOT NULL — that needs explicit DDL.
+		{
+			Version:     "20260826_0001",
+			Description: "board-level-deep-analysis: backfill topic_enrichment_result.analysis_scope='topic', drop NOT NULL on persistent_topic_id (board-scope rows are NULL).",
+			Up: func(db *gorm.DB) error {
+				if !tableExists(db, "topic_enrichment_result") {
+					return nil
+				}
+				// Backfill scope for pre-existing rows (AutoMigrate adds the column
+				// with DEFAULT 'topic'; explicit backfill covers NULL edge from raw
+				// SQL inserts).
+				if err := db.Exec(`UPDATE topic_enrichment_result SET analysis_scope = 'topic' WHERE analysis_scope IS NULL OR analysis_scope = ''`).Error; err != nil {
+					return fmt.Errorf("backfill analysis_scope: %w", err)
+				}
+				// Drop NOT NULL on both enrichment id columns (board-scope rows are
+				// NULL). Guarded by withLockTimeout — constraint DDL takes
+				// AccessExclusiveLock (per db-migration-execution).
+				if err := withLockTimeout(db, "5s", func(tx *gorm.DB) error {
+					if err := tx.Exec(`ALTER TABLE topic_enrichment_result ALTER COLUMN persistent_topic_id DROP NOT NULL`).Error; err != nil {
+						return fmt.Errorf("drop NOT NULL topic_enrichment_result.persistent_topic_id: %w", err)
+					}
+					if tableExists(tx, "topic_enrichment_review") {
+						if err := tx.Exec(`ALTER TABLE topic_enrichment_review ALTER COLUMN persistent_topic_id DROP NOT NULL`).Error; err != nil {
+							return fmt.Errorf("drop NOT NULL topic_enrichment_review.persistent_topic_id: %w", err)
+						}
+					}
+					return nil
+				}); err != nil {
+					return err
+				}
+				return nil
+			},
+		},
+
+		// Seed the first reference role: 《内部看美国·方法论画像 v2》 extracted
+		// from 7 full-video transcripts (docs/research/board-analysis-reference-role/).
+		// Idempotent ON CONFLICT: re-runs and user edits survive; the row is a
+		// starting point for the library, owned by the user from then on.
+		{
+			Version:     "20260826_0002",
+			Description: "board-level-deep-analysis: seed first reference role (内部看美国·方法论画像 v2).",
+			Up: func(db *gorm.DB) error {
+				if !tableExists(db, "reference_roles") {
+					return nil
+				}
+				if err := db.Exec(`INSERT INTO reference_roles (name, title, content, enabled, created_at, updated_at)
+					VALUES ('inside-america-v2', '内部看美国·方法论画像（v2）', $1, true, now(), now())
+					ON CONFLICT (name) DO NOTHING`, insideAmericaMethodologyProfile).Error; err != nil {
+					return fmt.Errorf("seed reference role: %w", err)
+				}
+				return nil
+			},
+		},
+
+		// ── board-level-deep-analysis revision: explicit result kinds ──
+		// AutoMigrate owns the three pure ADD COLUMN operations. This migration
+		// defensively repeats them for direct migration tests/upgrades, then owns
+		// historical backfill, defaults, NOT NULL, CHECK/FK and cross-row parent
+		// validation. It is forward-only; the migration runner has no Down path.
+		{
+			Version:     "20260828_0001",
+			Description: "board-level-deep-analysis: classify result_kind and add immutable board brief/investigation parent linkage without rewriting sectors.",
+			Up: func(db *gorm.DB) error {
+				if !tableExists(db, "topic_enrichment_result") {
+					return nil
+				}
+				if err := withLockTimeout(db, "5s", func(tx *gorm.DB) error {
+					for _, statement := range []string{
+						`ALTER TABLE topic_enrichment_result ADD COLUMN IF NOT EXISTS result_kind VARCHAR(32)`,
+						`ALTER TABLE topic_enrichment_result ADD COLUMN IF NOT EXISTS parent_result_id BIGINT`,
+						`ALTER TABLE topic_enrichment_result ADD COLUMN IF NOT EXISTS question_key VARCHAR(64)`,
+					} {
+						if err := tx.Exec(statement).Error; err != nil {
+							return fmt.Errorf("add result-kind column: %w", err)
+						}
+					}
+					return nil
+				}); err != nil {
+					return err
+				}
+
+				// Owner columns are an exclusive union. Refuse mixed historical rows
+				// before classification so a migration can never hide data corruption by
+				// clearing or reassigning an owner.
+				var invalidOwnerRows int64
+				if err := db.Raw(`SELECT count(*) FROM topic_enrichment_result
+					WHERE CASE
+						WHEN analysis_scope = 'topic' THEN persistent_topic_id IS NULL OR semantic_board_id IS NOT NULL
+						WHEN analysis_scope = 'board' THEN semantic_board_id IS NULL OR persistent_topic_id IS NOT NULL
+						ELSE true
+					END`).Scan(&invalidOwnerRows).Error; err != nil {
+					return fmt.Errorf("check topic_enrichment_result owner shape: %w", err)
+				}
+				if invalidOwnerRows > 0 {
+					return fmt.Errorf("topic_enrichment_result has %d mixed or missing owner row(s); refusing result-kind migration", invalidOwnerRows)
+				}
+
+				// Every pre-existing board row is the old thesis/argument/depth report.
+				// Only classifier columns change; sectors JSON is deliberately untouched.
+				if err := db.Exec(`UPDATE topic_enrichment_result
+					SET result_kind = CASE
+						WHEN analysis_scope = 'board' THEN 'legacy_board_analysis'
+						ELSE 'topic_analysis'
+					END
+					WHERE result_kind IS NULL OR result_kind = ''
+					   OR (analysis_scope = 'board' AND result_kind = 'topic_analysis')`).Error; err != nil {
+					return fmt.Errorf("backfill topic_enrichment_result.result_kind: %w", err)
+				}
+				var invalidInvestigationParents int64
+				if err := db.Raw(`SELECT count(*)
+					FROM topic_enrichment_result child
+					LEFT JOIN topic_enrichment_result parent ON parent.id = child.parent_result_id
+					WHERE child.result_kind = 'board_investigation'
+					  AND (parent.id IS NULL
+						OR parent.result_kind <> 'board_brief'
+						OR parent.semantic_board_id IS DISTINCT FROM child.semantic_board_id)`).Scan(&invalidInvestigationParents).Error; err != nil {
+					return fmt.Errorf("check board investigation parents: %w", err)
+				}
+				if invalidInvestigationParents > 0 {
+					return fmt.Errorf("topic_enrichment_result has %d board investigation(s) without a same-board board_brief parent; refusing migration", invalidInvestigationParents)
+				}
+
+				if err := withLockTimeout(db, "5s", func(tx *gorm.DB) error {
+					if err := tx.Exec(`ALTER TABLE topic_enrichment_result ALTER COLUMN result_kind SET DEFAULT 'topic_analysis'`).Error; err != nil {
+						return fmt.Errorf("set topic_enrichment_result.result_kind default: %w", err)
+					}
+					if err := ensureNotNullDefault(tx, "topic_enrichment_result", "result_kind", "'topic_analysis'"); err != nil {
+						return fmt.Errorf("topic_enrichment_result.result_kind NOT NULL: %w", err)
+					}
+					if err := tx.Exec(`DO $$ BEGIN
+						IF NOT EXISTS (
+							SELECT 1 FROM information_schema.table_constraints
+							WHERE table_schema = 'public'
+							  AND table_name = 'topic_enrichment_result'
+							  AND constraint_name = 'chk_topic_enrichment_result_kind'
+						) THEN
+							ALTER TABLE topic_enrichment_result
+								ADD CONSTRAINT chk_topic_enrichment_result_kind
+								CHECK (result_kind IN ('topic_analysis', 'board_brief', 'board_investigation', 'legacy_board_analysis'));
+						END IF;
+					END $$`).Error; err != nil {
+						return fmt.Errorf("add result_kind CHECK: %w", err)
+					}
+					if err := tx.Exec(`ALTER TABLE topic_enrichment_result
+						DROP CONSTRAINT IF EXISTS chk_topic_enrichment_result_parent_shape`).Error; err != nil {
+						return fmt.Errorf("drop stale result parent-shape CHECK: %w", err)
+					}
+					if err := tx.Exec(`ALTER TABLE topic_enrichment_result
+						ADD CONSTRAINT chk_topic_enrichment_result_parent_shape CHECK (
+							(result_kind = 'topic_analysis'
+								AND analysis_scope = 'topic'
+								AND persistent_topic_id IS NOT NULL AND semantic_board_id IS NULL
+								AND parent_result_id IS NULL AND question_key IS NULL)
+							OR (result_kind IN ('board_brief', 'legacy_board_analysis')
+								AND analysis_scope = 'board'
+								AND semantic_board_id IS NOT NULL AND persistent_topic_id IS NULL
+								AND parent_result_id IS NULL AND question_key IS NULL)
+							OR (result_kind = 'board_investigation'
+								AND analysis_scope = 'board'
+								AND semantic_board_id IS NOT NULL AND persistent_topic_id IS NULL
+								AND parent_result_id IS NOT NULL
+								AND question_key IS NOT NULL
+								AND question_key ~ '^[0-9a-f]{64}$')
+						)`).Error; err != nil {
+						return fmt.Errorf("add result parent-shape CHECK: %w", err)
+					}
+					if err := tx.Exec(`DO $$ BEGIN
+						IF NOT EXISTS (
+							SELECT 1 FROM information_schema.table_constraints
+							WHERE table_schema = 'public'
+							  AND table_name = 'topic_enrichment_result'
+							  AND constraint_name = 'uq_topic_enrichment_result_id_board'
+						) THEN
+							ALTER TABLE topic_enrichment_result
+								ADD CONSTRAINT uq_topic_enrichment_result_id_board
+								UNIQUE (id, semantic_board_id);
+						END IF;
+					END $$`).Error; err != nil {
+						return fmt.Errorf("add result parent target unique constraint: %w", err)
+					}
+					if err := tx.Exec(`DO $$ BEGIN
+						IF NOT EXISTS (
+							SELECT 1 FROM information_schema.table_constraints
+							WHERE table_schema = 'public'
+							  AND table_name = 'topic_enrichment_result'
+							  AND constraint_name = 'fk_topic_enrichment_result_parent_board'
+						) THEN
+							ALTER TABLE topic_enrichment_result
+								ADD CONSTRAINT fk_topic_enrichment_result_parent_board
+								FOREIGN KEY (parent_result_id, semantic_board_id)
+								REFERENCES topic_enrichment_result(id, semantic_board_id)
+								ON DELETE RESTRICT;
+						END IF;
+					END $$`).Error; err != nil {
+						return fmt.Errorf("add same-board result parent FK: %w", err)
+					}
+					if err := tx.Exec(`CREATE OR REPLACE FUNCTION validate_topic_enrichment_result_parent()
+						RETURNS trigger LANGUAGE plpgsql AS $$
+						BEGIN
+							IF NEW.result_kind = 'board_investigation' AND NOT EXISTS (
+								SELECT 1 FROM topic_enrichment_result parent
+								WHERE parent.id = NEW.parent_result_id
+								  AND parent.result_kind = 'board_brief'
+								  AND parent.analysis_scope = 'board'
+								  AND parent.semantic_board_id = NEW.semantic_board_id
+							) THEN
+								RAISE EXCEPTION 'board_investigation parent must be a board_brief on the same board'
+									USING ERRCODE = '23514';
+							END IF;
+							IF TG_OP = 'UPDATE' THEN
+								IF OLD.result_kind = 'board_brief'
+								   AND (NEW.result_kind IS DISTINCT FROM 'board_brief'
+									OR NEW.semantic_board_id IS DISTINCT FROM OLD.semantic_board_id)
+								   AND EXISTS (
+									SELECT 1 FROM topic_enrichment_result child
+									WHERE child.parent_result_id = OLD.id
+									  AND child.result_kind = 'board_investigation'
+								   ) THEN
+									RAISE EXCEPTION 'cannot change a board_brief parent while investigations reference it'
+										USING ERRCODE = '23514';
+								END IF;
+							END IF;
+							RETURN NEW;
+						END;
+						$$`).Error; err != nil {
+						return fmt.Errorf("create board investigation parent validation function: %w", err)
+					}
+					if err := tx.Exec(`DROP TRIGGER IF EXISTS trg_validate_topic_enrichment_result_parent ON topic_enrichment_result`).Error; err != nil {
+						return fmt.Errorf("drop board investigation parent validation trigger: %w", err)
+					}
+					if err := tx.Exec(`CREATE TRIGGER trg_validate_topic_enrichment_result_parent
+						BEFORE INSERT OR UPDATE OF result_kind, parent_result_id, semantic_board_id
+						ON topic_enrichment_result
+						FOR EACH ROW EXECUTE FUNCTION validate_topic_enrichment_result_parent()`).Error; err != nil {
+						return fmt.Errorf("create board investigation parent validation trigger: %w", err)
+					}
+					return nil
+				}); err != nil {
+					return err
+				}
+
+				// The composite FK enforces parent existence and same-board identity.
+				// Parent kind=board_brief is a cross-row semantic invariant enforced by
+				// repository validation; PostgreSQL CHECK constraints cannot query rows.
+
+				for _, statement := range []string{
+					`CREATE INDEX IF NOT EXISTS idx_topic_enrichment_result_board_kind_id ON topic_enrichment_result (semantic_board_id, result_kind, id DESC)`,
+					`CREATE INDEX IF NOT EXISTS idx_topic_enrichment_result_parent_question_id ON topic_enrichment_result (parent_result_id, question_key, id DESC) WHERE parent_result_id IS NOT NULL`,
+				} {
+					if err := db.Exec(statement).Error; err != nil {
+						return fmt.Errorf("create result-kind index: %w", err)
+					}
 				}
 				return nil
 			},

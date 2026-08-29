@@ -115,7 +115,7 @@ func LoadConfig(configPath string) error {
 	viper.SetDefault("log.file.max_age_days", 30)
 	viper.SetDefault("log.file.compress", true)
 
-	viper.SetDefault("tracing.sample_ratio", 1.0)
+	viper.SetDefault("tracing.sample_ratio", 0.05)
 	viper.SetDefault("tracing.instrument_gorm", true)
 	viper.SetDefault("tracing.instrument_http", true)
 
@@ -171,10 +171,15 @@ func applyEnvOverrides(cfg *Config) {
 	// Defaults to false: production never sets this, refusing destructive migrations.
 	cfg.Database.AllowDestructiveMigrations = os.Getenv("MIGRATIONS_ALLOW_DESTRUCTIVE") == "1"
 
-	// Tracing (defaults via viper SetDefault above; env overrides when set)
+	// Tracing (defaults via viper SetDefault above; env overrides when set).
+	// Invalid or out-of-range values fall back to the default with a warning:
+	// full sampling kept otel_spans at a steady ~4.3GB (820k spans/day), so the
+	// safe fallback is the low default, never the caller's bad value.
 	if v := strings.TrimSpace(os.Getenv("TRACE_SAMPLE_RATIO")); v != "" {
-		if r, err := strconv.ParseFloat(v, 64); err == nil {
+		if r, err := strconv.ParseFloat(v, 64); err == nil && r >= 0.0 && r <= 1.0 {
 			cfg.Tracing.SampleRatio = r
+		} else {
+			fmt.Printf("Config: invalid TRACE_SAMPLE_RATIO %q (want 0.0-1.0), keeping default %.2f\n", v, cfg.Tracing.SampleRatio)
 		}
 	}
 	if v := os.Getenv("TRACE_INSTRUMENT_GORM"); v != "" {

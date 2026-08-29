@@ -75,8 +75,13 @@ type semanticBoardDTO struct {
 	Source       string   `json:"source"`
 	Status       string   `json:"status"`
 	Protected    bool     `json:"protected"`
-	CreatedAt    any      `json:"created_at"`
-	UpdatedAt    any      `json:"updated_at"`
+	// 循环 B 配置（fix-board-analysis-material：DTO 丢字段导致前端开关永远显示
+	// 关，且编辑弹窗保存会把已开开关覆盖回 false）。
+	EnrichmentEnabled bool     `json:"enrichment_enabled"`
+	WindowDays        int      `json:"window_days"`
+	ContextLayers     []string `json:"context_layers"`
+	CreatedAt         any      `json:"created_at"`
+	UpdatedAt         any      `json:"updated_at"`
 }
 
 type semanticBoardAuxiliaryDTO struct {
@@ -870,7 +875,7 @@ func insertBoardComposition(tx *gorm.DB, boardID uint, auxiliaryIDs []uint) erro
 }
 
 func semanticBoardToDTO(label models.SemanticLabel, tagCount int64) semanticBoardDTO {
-	return semanticBoardDTO{ID: label.ID, Label: label.Label, Slug: label.Slug, Aliases: label.Aliases, RefCount: label.RefCount, TagCount: tagCount, Description: label.Description, DisplayOrder: label.DisplayOrder, Source: label.Source, Status: label.Status, Protected: label.Protected, CreatedAt: label.CreatedAt, UpdatedAt: label.UpdatedAt}
+	return semanticBoardDTO{ID: label.ID, Label: label.Label, Slug: label.Slug, Aliases: label.Aliases, RefCount: label.RefCount, TagCount: tagCount, Description: label.Description, DisplayOrder: label.DisplayOrder, Source: label.Source, Status: label.Status, Protected: label.Protected, EnrichmentEnabled: label.EnrichmentEnabled, WindowDays: label.WindowDays, ContextLayers: label.ContextLayers, CreatedAt: label.CreatedAt, UpdatedAt: label.UpdatedAt}
 }
 
 func auxiliaryToDTO(label models.SemanticLabel) semanticBoardAuxiliaryDTO {

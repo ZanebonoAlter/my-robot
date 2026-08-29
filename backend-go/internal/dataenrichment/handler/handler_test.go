@@ -1,6 +1,7 @@
 package handler_test
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -95,8 +96,34 @@ func (m *mockLifelineService) RefreshPeriod(ctx context.Context, topicID uint, g
 // mockOrchestrator is a mock for handler.Orchestrator.
 type mockOrchestrator struct {
 	lastTopicID uint
+	lastLens    string
 	shouldFail  bool
 	output      *service.EnrichmentOutput
+	boardOut    *service.BoardEnrichmentOutput
+	boardErr    error
+	block       chan struct{} // non-nil → EnrichBoard waits until closed (re-entry tests)
+}
+
+func (m *mockOrchestrator) BoardEnrichmentEnabled(ctx context.Context, boardID uint) error {
+	return m.boardErr
+}
+
+func (m *mockOrchestrator) EnrichTopicLens(ctx context.Context, topicID uint, prefillLens string) (*service.EnrichmentOutput, error) {
+	m.lastLens = prefillLens
+	return m.EnrichTopic(ctx, topicID)
+}
+
+func (m *mockOrchestrator) EnrichBoard(ctx context.Context, boardID uint) (*service.BoardEnrichmentOutput, error) {
+	if m.block != nil {
+		<-m.block
+	}
+	if m.boardErr != nil {
+		return nil, m.boardErr
+	}
+	if m.boardOut != nil {
+		return m.boardOut, nil
+	}
+	return nil, fmt.Errorf("mock EnrichBoard: not configured")
 }
 
 func (m *mockOrchestrator) EnrichTopic(ctx context.Context, topicID uint) (*service.EnrichmentOutput, error) {
@@ -319,10 +346,10 @@ func TestListResults(t *testing.T) {
 	ctx := context.Background()
 
 	r1 := &repository.TopicEnrichmentResult{
-		PersistentTopicID: 1, EvolutionAssessment: "first", SessionID: "s1",
+		PersistentTopicID: repository.TopicIDPtr(1), EvolutionAssessment: "first", SessionID: "s1",
 	}
 	r2 := &repository.TopicEnrichmentResult{
-		PersistentTopicID: 1, EvolutionAssessment: "second", SessionID: "s2",
+		PersistentTopicID: repository.TopicIDPtr(1), EvolutionAssessment: "second", SessionID: "s2",
 	}
 	_ = repository.Repo.CreateTopicEnrichmentResult(ctx, r1)
 	_ = repository.Repo.CreateTopicEnrichmentResult(ctx, r2)
@@ -349,7 +376,7 @@ func TestGetResult(t *testing.T) {
 	ctx := context.Background()
 
 	result := &repository.TopicEnrichmentResult{
-		PersistentTopicID:   1,
+		PersistentTopicID:   repository.TopicIDPtr(1),
 		EvolutionAssessment: "test assessment",
 		SessionID:           "session-123",
 	}
@@ -387,7 +414,7 @@ func TestGetResultIDORProtection(t *testing.T) {
 
 	// Create result for topic 1.
 	result1 := &repository.TopicEnrichmentResult{
-		PersistentTopicID:   1,
+		PersistentTopicID:   repository.TopicIDPtr(1),
 		EvolutionAssessment: "topic 1 result",
 		SessionID:           "session-1",
 	}
@@ -417,7 +444,7 @@ func TestTriggerEnrichmentSuccess(t *testing.T) {
 
 	// Seed a result that the orchestrator mock will "create".
 	result := &repository.TopicEnrichmentResult{
-		PersistentTopicID:   1,
+		PersistentTopicID:   repository.TopicIDPtr(1),
 		EvolutionAssessment: "mock enrichment result",
 		SessionID:           "mock-session",
 	}
@@ -436,8 +463,38 @@ func TestTriggerEnrichmentSuccess(t *testing.T) {
 	w := doRequest(t, r, "POST", "/api/persistent-topics/1/enrichment/results/trigger", "")
 	expectJSONSuccess(t, w, nil)
 
+	// Async: poll status until finished, then assert the persisted id and
+	// that EnrichTopic really ran (with the right topic).
+	st := pollAnalysisStatus(t, r, "topic", 1)
+	if errStr, _ := st["error"].(string); errStr != "" {
+		t.Fatalf("analysis failed: %v", errStr)
+	}
+	if got, ok := st["result_id"].(float64); !ok || uint(got) != result.ID {
+		t.Fatalf("result_id = %v, want %d", st["result_id"], result.ID)
+	}
 	if mockOrch.lastTopicID != 1 {
 		t.Fatalf("EnrichTopic called with %d, want 1", mockOrch.lastTopicID)
+	}
+}
+
+// pollAnalysisStatus hits GET /enrichment/analysis-status until the job is
+// finished (or times out — background goroutine must complete quickly in tests).
+func pollAnalysisStatus(t *testing.T, r *gin.Engine, scope string, id uint) map[string]any {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		w := doRequest(t, r, "GET", fmt.Sprintf("/api/enrichment/analysis-status?scope=%s&id=%d", scope, id), "")
+		var resp struct {
+			Data map[string]any `json:"data"`
+		}
+		_ = json.Unmarshal(w.Body.Bytes(), &resp)
+		if finished, _ := resp.Data["finished"].(bool); finished {
+			return resp.Data
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("analysis not finished in 5s: %v", resp.Data)
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 }
 
@@ -462,10 +519,10 @@ func TestListReviews(t *testing.T) {
 	ctx := context.Background()
 
 	rv1 := &repository.TopicEnrichmentReview{
-		PersistentTopicID: 1, CurrResultID: 10, DeviationSummary: "review 1",
+		PersistentTopicID: repository.TopicIDPtr(1), CurrResultID: 10, DeviationSummary: "review 1",
 	}
 	rv2 := &repository.TopicEnrichmentReview{
-		PersistentTopicID: 1, CurrResultID: 20, DeviationSummary: "review 2",
+		PersistentTopicID: repository.TopicIDPtr(1), CurrResultID: 20, DeviationSummary: "review 2",
 	}
 	_ = repository.Repo.CreateTopicEnrichmentReview(ctx, rv1)
 	_ = repository.Repo.CreateTopicEnrichmentReview(ctx, rv2)
@@ -486,7 +543,7 @@ func TestUpdateReviewDeviation(t *testing.T) {
 	ctx := context.Background()
 
 	rv := &repository.TopicEnrichmentReview{
-		PersistentTopicID: 1, CurrResultID: 10, DeviationSummary: "original",
+		PersistentTopicID: repository.TopicIDPtr(1), CurrResultID: 10, DeviationSummary: "original",
 	}
 	if err := repository.Repo.CreateTopicEnrichmentReview(ctx, rv); err != nil {
 		t.Fatalf("seed: %v", err)
@@ -509,7 +566,7 @@ func TestApplyReview(t *testing.T) {
 	ctx := context.Background()
 
 	rv := &repository.TopicEnrichmentReview{
-		PersistentTopicID: 1, CurrResultID: 10, DeviationSummary: "needs apply", Applied: false,
+		PersistentTopicID: repository.TopicIDPtr(1), CurrResultID: 10, DeviationSummary: "needs apply", Applied: false,
 	}
 	if err := repository.Repo.CreateTopicEnrichmentReview(ctx, rv); err != nil {
 		t.Fatalf("seed: %v", err)
@@ -739,7 +796,7 @@ func TestAskQA(t *testing.T) {
 	ctx := context.Background()
 
 	result := &repository.TopicEnrichmentResult{
-		PersistentTopicID: 1,
+		PersistentTopicID: repository.TopicIDPtr(1),
 		SessionID:         "session-qa",
 	}
 	if err := repository.Repo.CreateTopicEnrichmentResult(ctx, result); err != nil {
@@ -775,7 +832,7 @@ func TestAskQA_IDORProtection(t *testing.T) {
 	ctx := context.Background()
 
 	// Result belongs to topic 1.
-	result := &repository.TopicEnrichmentResult{PersistentTopicID: 1, SessionID: "s"}
+	result := &repository.TopicEnrichmentResult{PersistentTopicID: repository.TopicIDPtr(1), SessionID: "s"}
 	if err := repository.Repo.CreateTopicEnrichmentResult(ctx, result); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
@@ -797,7 +854,7 @@ func TestAskQA_MissingQuestion(t *testing.T) {
 	db := setupHandlerTestDB(t)
 	ctx := context.Background()
 
-	result := &repository.TopicEnrichmentResult{PersistentTopicID: 1, SessionID: "s"}
+	result := &repository.TopicEnrichmentResult{PersistentTopicID: repository.TopicIDPtr(1), SessionID: "s"}
 	if err := repository.Repo.CreateTopicEnrichmentResult(ctx, result); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
@@ -813,7 +870,7 @@ func TestListQA(t *testing.T) {
 	db := setupHandlerTestDB(t)
 	ctx := context.Background()
 
-	result := &repository.TopicEnrichmentResult{PersistentTopicID: 1, SessionID: "s"}
+	result := &repository.TopicEnrichmentResult{PersistentTopicID: repository.TopicIDPtr(1), SessionID: "s"}
 	if err := repository.Repo.CreateTopicEnrichmentResult(ctx, result); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
@@ -850,7 +907,7 @@ func TestSedimentQA(t *testing.T) {
 	db := setupHandlerTestDB(t)
 	ctx := context.Background()
 
-	result := &repository.TopicEnrichmentResult{PersistentTopicID: 1, SessionID: "s"}
+	result := &repository.TopicEnrichmentResult{PersistentTopicID: repository.TopicIDPtr(1), SessionID: "s"}
 	if err := repository.Repo.CreateTopicEnrichmentResult(ctx, result); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
@@ -895,7 +952,7 @@ func TestUpdateReviewDeviation_IDORProtection(t *testing.T) {
 
 	// Review belongs to topic 1.
 	rv := &repository.TopicEnrichmentReview{
-		PersistentTopicID: 1, CurrResultID: 10, DeviationSummary: "original",
+		PersistentTopicID: repository.TopicIDPtr(1), CurrResultID: 10, DeviationSummary: "original",
 	}
 	if err := repository.Repo.CreateTopicEnrichmentReview(ctx, rv); err != nil {
 		t.Fatalf("seed: %v", err)
@@ -929,7 +986,7 @@ func TestApplyReview_IDORProtection(t *testing.T) {
 	ctx := context.Background()
 
 	rv := &repository.TopicEnrichmentReview{
-		PersistentTopicID: 1, CurrResultID: 10, DeviationSummary: "x", Applied: false,
+		PersistentTopicID: repository.TopicIDPtr(1), CurrResultID: 10, DeviationSummary: "x", Applied: false,
 	}
 	if err := repository.Repo.CreateTopicEnrichmentReview(ctx, rv); err != nil {
 		t.Fatalf("seed: %v", err)
@@ -961,7 +1018,7 @@ func TestSedimentQA_IDORProtection(t *testing.T) {
 	ctx := context.Background()
 
 	// Result (and its QA) belong to topic 1.
-	result := &repository.TopicEnrichmentResult{PersistentTopicID: 1, SessionID: "s"}
+	result := &repository.TopicEnrichmentResult{PersistentTopicID: repository.TopicIDPtr(1), SessionID: "s"}
 	if err := repository.Repo.CreateTopicEnrichmentResult(ctx, result); err != nil {
 		t.Fatalf("seed result: %v", err)
 	}
@@ -990,5 +1047,112 @@ func TestSedimentQA_IDORProtection(t *testing.T) {
 	expectJSONSuccess(t, w2, &got)
 	if !got.Sedimented {
 		t.Fatal("expected sedimented=true after same-topic sediment")
+	}
+}
+
+// ── Reference roles CRUD (board-level-deep-analysis, tasks 2.1) ─────────────
+
+func TestReferenceRoleRoutes(t *testing.T) {
+	db := setupHandlerTestDB(t)
+	h := newTestHandler(db, &mockLifelineService{}, &mockOrchestrator{}, &alwaysEnabledBoardConfig{})
+
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	h.RegisterRoutes(r.Group("/api"))
+
+	do := func(method, path string, body any) (*httptest.ResponseRecorder, map[string]any) {
+		var buf *bytes.Buffer
+		if body != nil {
+			raw, _ := json.Marshal(body)
+			buf = bytes.NewBuffer(raw)
+		} else {
+			buf = bytes.NewBuffer(nil)
+		}
+		req := httptest.NewRequest(method, path, buf)
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+		var resp map[string]any
+		_ = json.Unmarshal(w.Body.Bytes(), &resp)
+		return w, resp
+	}
+
+	// Create (enabled defaults to true when omitted).
+	w, resp := do("POST", "/api/reference-roles", map[string]any{
+		"name": "inside-america", "title": "方法论画像", "content": "辩论流水线…",
+	})
+	if w.Code != http.StatusOK {
+		t.Fatalf("create: want 200, got %d (%v)", w.Code, resp)
+	}
+	data := resp["data"].(map[string]any)
+	roleID := int(data["id"].(float64))
+	if data["enabled"] != true {
+		t.Fatalf("create: enabled should default true, got %v", data["Enabled"])
+	}
+
+	// Create with enabled=false must NOT be flipped (GORM zero-value pitfall).
+	w, resp = do("POST", "/api/reference-roles", map[string]any{
+		"name": "disabled-role", "content": "x", "enabled": false,
+	})
+	if w.Code != http.StatusOK {
+		t.Fatalf("create disabled: want 200, got %d (%v)", w.Code, resp)
+	}
+	if resp["data"].(map[string]any)["enabled"] != false {
+		t.Fatalf("create disabled: enabled must stay false")
+	}
+
+	// Duplicate name → 409.
+	w, resp = do("POST", "/api/reference-roles", map[string]any{"name": "inside-america", "content": "dup"})
+	if w.Code != http.StatusConflict {
+		t.Fatalf("dup name: want 409, got %d", w.Code)
+	}
+
+	// Missing fields → 400.
+	w, _ = do("POST", "/api/reference-roles", map[string]any{"name": "no-content"})
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("missing content: want 400, got %d", w.Code)
+	}
+
+	// List.
+	w, resp = do("GET", "/api/reference-roles", nil)
+	if w.Code != http.StatusOK {
+		t.Fatalf("list: want 200, got %d", w.Code)
+	}
+	if len(resp["data"].([]any)) != 2 {
+		t.Fatalf("list: want 2 roles, got %v", resp["data"])
+	}
+
+	// Toggle enable/disable via PUT (settings UI path) — effective next run.
+	w, resp = do("PUT", fmt.Sprintf("/api/reference-roles/%d", roleID), map[string]any{"enabled": false})
+	if w.Code != http.StatusOK {
+		t.Fatalf("toggle: want 200, got %d (%v)", w.Code, resp)
+	}
+	if resp["data"].(map[string]any)["enabled"] != false {
+		t.Fatalf("toggle: enabled must be false")
+	}
+
+	// Get by id reflects the toggle.
+	w, resp = do("GET", fmt.Sprintf("/api/reference-roles/%d", roleID), nil)
+	if w.Code != http.StatusOK || resp["data"].(map[string]any)["enabled"] != false {
+		t.Fatalf("get after toggle: wrong state (%d, %v)", w.Code, resp)
+	}
+
+	// Update content.
+	w, resp = do("PUT", fmt.Sprintf("/api/reference-roles/%d", roleID), map[string]any{"content": "v2 内容"})
+	if w.Code != http.StatusOK || resp["data"].(map[string]any)["content"] != "v2 内容" {
+		t.Fatalf("update content failed: %d %v", w.Code, resp)
+	}
+
+	// Delete → gone.
+	w, _ = do("DELETE", fmt.Sprintf("/api/reference-roles/%d", roleID), nil)
+	w2, _ := do("GET", fmt.Sprintf("/api/reference-roles/%d", roleID), nil)
+	if w2.Code != http.StatusNotFound {
+		t.Fatalf("get after delete: want 404, got %d", w2.Code)
+	}
+
+	// 404 on unknown id.
+	w, _ = do("PUT", "/api/reference-roles/99999", map[string]any{"enabled": true})
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("unknown id: want 404, got %d", w.Code)
 	}
 }

@@ -13,6 +13,7 @@ import {
 	type UpsertDataSourceBody,
 	type TopicEnrichmentQA,
 	type AskQAResponse,
+	type BoardAnalysisResultRow,
 } from "~/api/boardEnrichment";
 import {
 	useDailyReportsApi,
@@ -83,6 +84,19 @@ export function useBoardEnrichment() {
 	// ④辩论四态依赖的最新 result 详情（sectors 原始 + 辩论归属）
 	const latestResultDetail = ref<ResultDetailRow | null>(null);
 	const latestResultDetailLoading = ref(false);
+
+	// ── board-level analysis（board-level-deep-analysis D2/D8：版块档分析）─
+	const boardResults = ref<BoardAnalysisResultRow[]>([]);
+	const boardResultsLoading = ref(false);
+	const boardAnalysisTriggering = ref(false);
+	// 当前展示的版块报告 id（默认最新；点历史可切换）
+	const selectedBoardResultId = ref<number | null>(null);
+	const selectedBoardResult = computed<BoardAnalysisResultRow | null>(() => {
+		const list = boardResults.value;
+		if (!list.length) return null;
+		const id = selectedBoardResultId.value;
+		return list.find((r) => r.id === id) ?? list[0] ?? null;
+	});
 
 	const error = ref<string | null>(null);
 
@@ -288,26 +302,154 @@ export function useBoardEnrichment() {
 	}
 
 	// ── table 2 actions ─────────────────────────────────────────────────────
-	async function triggerEnrichment(topicId: number): Promise<boolean> {
+	// 异步轮询（fix-board-analysis-material 8.x）：trigger 立即返回，分析
+	// 后台跑；这里定时轮询 status，完成后拉新结果。离开页面只停轮询，
+	// 后台分析不受影响（回来时 sync 恢复显示）。
+	let boardPollTimer: ReturnType<typeof setInterval> | null = null;
+	let topicPollTimer: ReturnType<typeof setInterval> | null = null;
+	const POLL_INTERVAL_MS = 3000;
+
+	function stopBoardPoll() {
+		if (boardPollTimer) {
+			clearInterval(boardPollTimer);
+			boardPollTimer = null;
+		}
+		boardAnalysisTriggering.value = false;
+	}
+
+	function startBoardPoll(boardId: number) {
+		stopBoardPoll();
+		boardAnalysisTriggering.value = true;
+		boardPollTimer = setInterval(() => {
+			void pollBoardOnce(boardId);
+		}, POLL_INTERVAL_MS);
+	}
+
+	async function pollBoardOnce(boardId: number) {
+		const res = await api.getAnalysisStatus("board", boardId);
+		if (!res.success || !res.data) return; // transient error — keep polling
+		if (res.data.running) return;
+		stopBoardPoll();
+		if (res.data.error) {
+			notifyError(`版块分析失败：${res.data.error}`);
+			return;
+		}
+		notifySuccess("版块分析完成");
+		await loadBoardAnalysisResults(boardId);
+		if (res.data.result_id) selectedBoardResultId.value = res.data.result_id;
+	}
+
+	/** 进入面板时同步一次状态：后台在跑则恢复轮询显示。 */
+	async function syncBoardAnalysisStatus(boardId: number) {
+		const res = await api.getAnalysisStatus("board", boardId);
+		if (res.success && res.data?.running) startBoardPoll(boardId);
+	}
+
+	function stopTopicPoll() {
+		if (topicPollTimer) {
+			clearInterval(topicPollTimer);
+			topicPollTimer = null;
+		}
+		triggering.value = false;
+	}
+
+	function startTopicPoll(topicId: number) {
+		stopTopicPoll();
+		triggering.value = true;
+		topicPollTimer = setInterval(() => {
+			void pollTopicOnce(topicId);
+		}, POLL_INTERVAL_MS);
+	}
+
+	async function pollTopicOnce(topicId: number) {
+		const res = await api.getAnalysisStatus("topic", topicId);
+		if (!res.success || !res.data) return;
+		if (res.data.running) return;
+		stopTopicPoll();
+		if (res.data.error) {
+			notifyError(`增强失败：${res.data.error}`);
+			return;
+		}
+		notifySuccess("增强完成");
+		await loadResults(topicId);
+		await loadReviews(topicId);
+		await loadLatestResultDetail(topicId);
+	}
+
+	async function triggerEnrichment(
+		topicId: number,
+		prefillLens?: string,
+	): Promise<boolean> {
 		triggering.value = true;
 		try {
-			const res = await api.triggerEnrichment(topicId);
+			const res = await api.triggerEnrichment(topicId, prefillLens);
 			if (res.success) {
-				notifySuccess(
-					res.data?.review_generated ? "增强完成，已生成新 review" : "增强完成",
-				);
-				await loadResults(topicId);
-				await loadReviews(topicId);
-				await loadLatestResultDetail(topicId);
+				notifySuccess("分析已在后台开始，可离开页面");
+				startTopicPoll(topicId);
+				return true;
+			}
+			// 409 = 已在跑：恢复轮询显示即可
+			if (res.error?.includes("already running")) {
+				startTopicPoll(topicId);
 				return true;
 			}
 			// 400 = 板块未开启增强
 			notifyError(res.error || "触发失败：需先在板块编辑开启增强开关");
-			return false;
-		} finally {
 			triggering.value = false;
+			return false;
+		} catch {
+			triggering.value = false;
+			return false;
 		}
 	}
+
+	// ── board-level analysis actions（board-level-deep-analysis D2/D8）───
+	async function loadBoardAnalysisResults(boardId: number) {
+		boardResultsLoading.value = true;
+		try {
+			const res = await api.listBoardAnalysisResults(boardId);
+			if (res.success && res.data) {
+				boardResults.value = res.data;
+				selectedBoardResultId.value = res.data[0]?.id ?? null;
+			} else {
+				boardResults.value = [];
+			}
+		} finally {
+			boardResultsLoading.value = false;
+		}
+	}
+
+	async function triggerBoardAnalysis(boardId: number): Promise<boolean> {
+		boardAnalysisTriggering.value = true;
+		try {
+			const res = await api.triggerBoardAnalysis(boardId);
+			if (res.success) {
+				notifySuccess("版块分析已在后台开始，可离开页面");
+				startBoardPoll(boardId);
+				return true;
+			}
+			if (res.error?.includes("already running")) {
+				startBoardPoll(boardId);
+				return true;
+			}
+			notifyError(res.error || "版块分析触发失败");
+			boardAnalysisTriggering.value = false;
+			return false;
+		} catch {
+			boardAnalysisTriggering.value = false;
+			return false;
+		}
+	}
+
+	/** 选历史报告（null = 回最新）。 */
+	function selectBoardResult(id: number | null) {
+		selectedBoardResultId.value = id;
+	}
+
+	onUnmounted(() => {
+		stopBoardPoll();
+		stopTopicPoll();
+	});
 
 	// ── table 3 actions ─────────────────────────────────────────────────────
 	async function saveReviewDeviation(
@@ -592,6 +734,16 @@ export function useBoardEnrichment() {
 		latestResultDetail,
 		latestResultDetailLoading,
 		loadLatestResultDetail,
+		// board-level analysis (board-level-deep-analysis)
+		boardResults,
+		boardResultsLoading,
+		boardAnalysisTriggering,
+		selectedBoardResult,
+		selectedBoardResultId,
+		loadBoardAnalysisResults,
+		triggerBoardAnalysis,
+		syncBoardAnalysisStatus,
+		selectBoardResult,
 		// misc
 		error,
 		loadAllTopicTables,

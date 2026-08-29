@@ -852,7 +852,9 @@ label 类 AI 或 keyword 类文本匹配得到的 Watch 与日报分区的匹配
 | 字段名 | 类型 | 约束/默认/索引 | 用途 |
 | -------- | ------ | ------ | ------ |
 | `id` | BIGSERIAL | PK | 主键 |
-| `persistent_topic_id` | BIGINT | NOT NULL; index | 持久话题 ID |
+| `persistent_topic_id` | BIGINT | NULL; index（board 档为 NULL） | 持久话题 ID（board-level-deep-analysis 迁移 `20260826_0001` 起 NOT NULL 放宽） |
+| `analysis_scope` | VARCHAR(20) | NOT NULL; DEFAULT 'topic'（迁移 `20260826_0001`） | 分析档位：`topic`=单泳道 / `board`=版块级（board 档 sectors 载五字段 `{thesis,candidates,argument,depth,lane_refs}`） |
+| `semantic_board_id` | BIGINT | NULL; index | 版块级 result 所属板块（board 档必填，topic 档 NULL） |
 | `evolution_assessment` | TEXT | — | ⚠️ causal-analysis-agent 起弃用（旧演进定位产物）；字段保留对齐后端 JSON，新分析产出存 `sectors.{form,lens,analysis}` |
 | `sectors` | JSONB | — | 复合对象 `{form, lens, analysis}`：`form`=话题形态（`event_chain`/`theme_vein`/`single_point`/`sparse`）；`lens`=选定的分析视角；`analysis`=按 `form` 多态的分层见解（如 `event_chain`={fact_layer,timeline,insight_layer}）。免 DDL 复用列，schema 由 `form` 决定 |
 | `causal_chain` | TEXT | — | ⚠️ causal-analysis-agent 起弃用（旧演进定位产物）；字段保留对齐后端 JSON |
@@ -879,6 +881,7 @@ label 类 AI 或 keyword 类文本匹配得到的 Watch 与日报分区的匹配
 | `source` | VARCHAR(12) | NOT NULL DEFAULT 'llm_assisted' | 来源：`llm_assisted` / `manual` |
 | `created_at` | TIMESTAMPTZ | — | 创建时间 |
 | `updated_at` | TIMESTAMPTZ | — | 更新时间 |
+
 
 ### 10.5 stock_debate_result（FinGenius 个股辩论结果）
 
@@ -923,6 +926,19 @@ FinGenius 多角色辩论输出，按 `(result_id, sector, code)` 维度 append-
 **不变量**：`sediment` 仅翻转 `sedimented` flag，`topic_enrichment_result` 表永不重写（业务约束：result 不可变）。`sedimented` 列由迁移 `20260723_xxxx` 补齐（幂等 `ADD COLUMN IF NOT EXISTS`）。
 
 ---
+### 10.7 reference_roles（参考角色/方法论画像，board-level-deep-analysis）
+
+方法论画像库（如「内部看美国」分析基因），注入循环 B 三环节 system prompt——只注入分析方法不注入事实。首份画像由迁移 `20260826_0002` seed（幂等 ON CONFLICT）。
+
+| 字段名 | 类型 | 约束/默认/索引 | 用途 |
+| -------- | ------ | ------ | ------ |
+| `id` | BIGSERIAL | PK | 主键 |
+| `name` | VARCHAR(120) | NOT NULL; UNIQUE | 唯一短名（如 inside-america） |
+| `title` | VARCHAR(200) | — | 展示标题 |
+| `content` | TEXT | NOT NULL | 画像正文（注入 prompt；单条 >4000 字符 rune 计注入时整条丢弃） |
+| `enabled` | BOOLEAN | NOT NULL | 启用即注入；启停即时生效（后端现查 DB） |
+| `created_at` / `updated_at` | TIMESTAMPTZ | — | 时间戳 |
+
 
 ## §11 用户行为与偏好发现域
 

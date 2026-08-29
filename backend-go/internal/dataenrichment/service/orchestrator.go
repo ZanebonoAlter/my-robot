@@ -52,14 +52,16 @@ type EnrichmentOutput struct {
 // OrchestratorService runs the cycle-B data enrichment flow (探索判断 agent 编排).
 // See design.md §3 and spec under causal-analysis-agent.
 type OrchestratorService struct {
-	airouter          AirRouter
-	repo              *repository.Repository
-	lifelineReader    LifelineReader
-	renderer          *LifelineRenderer
-	toolRegistry      *Registry
-	boardConfigReader BoardConfigReader
-	lensSource        LensSource // 视角来源（默认 AgentLensSource，可注入外部源）
-	capability        airouter.Capability
+	airouter           AirRouter
+	repo               *repository.Repository
+	lifelineReader     LifelineReader
+	renderer           *LifelineRenderer
+	toolRegistry       *Registry
+	boardConfigReader  BoardConfigReader
+	lensSource         LensSource // 视角来源（默认 AgentLensSource，可注入外部源）
+	capability         airouter.Capability
+	freshnessRefresher FreshnessRefresher  // D9 新鲜度门（nil=禁用；wire.go 注入循环 A 服务）
+	boardResolver      BoardConfigResolver // 版块级配置解析（EnrichBoard 用；wire.go 注入）
 }
 
 // NewOrchestratorService creates a new orchestrator with required dependencies.
@@ -93,6 +95,17 @@ func NewOrchestratorService(
 // EnrichTopic runs the full cycle-B flow for a persistent topic.
 // Returns the immutable result snapshot and optionally a review.
 func (o *OrchestratorService) EnrichTopic(ctx context.Context, topicID uint) (*EnrichmentOutput, error) {
+	return o.enrichTopic(ctx, topicID, "")
+}
+
+// EnrichTopicLens runs the same flow with a caller-provided lens (D8 下钻入口
+// prefill_lens): the lens overrides the first proposed candidate, focusing the
+// agent loop and analyze on the drilled-down question.
+func (o *OrchestratorService) EnrichTopicLens(ctx context.Context, topicID uint, prefillLens string) (*EnrichmentOutput, error) {
+	return o.enrichTopic(ctx, topicID, prefillLens)
+}
+
+func (o *OrchestratorService) enrichTopic(ctx context.Context, topicID uint, prefillLens string) (*EnrichmentOutput, error) {
 	ctx, span := otel.Tracer(tracing.ServiceName).Start(ctx, "OrchestratorService.EnrichTopic")
 	defer span.End()
 	// 1. Generate session ID.
@@ -107,7 +120,11 @@ func (o *OrchestratorService) EnrichTopic(ctx context.Context, topicID uint) (*E
 		return nil, fmt.Errorf("enrich topic %d: enrichment not enabled for this board", topicID)
 	}
 
-	// 3. Render lifeline (14-day detail).
+	// 3. D9 freshness gate — top up this lane's stale lifelines before the
+	// analysis reads them (same gate as EnrichBoard; M4.9).
+	_ = o.ensureLaneFreshness(ctx, []uint{topicID})
+
+	// 4. Render lifeline (14-day detail).
 	lifelineText, err := o.renderer.RenderLifelineForAgent(o.lifelineReader, topicID, cfg.WindowDays)
 	if err != nil {
 		return nil, fmt.Errorf("enrich topic %d: render lifeline: %w", topicID, err)
@@ -150,6 +167,11 @@ func (o *OrchestratorService) EnrichTopic(ctx context.Context, topicID uint) (*E
 		return nil, fmt.Errorf("enrich topic %d: lens propose: %w", topicID, err)
 	}
 	selectedLens := lenses[0]
+	if prefillLens != "" {
+		// D8 prefill: drilled-down lens wins over the first proposal.
+		selectedLens = Lens{Name: prefillLens, Description: "prefill_lens（版块报告下钻）"}
+		logging.Infof("enrich topic %d: prefill_lens overrides lens proposal: %s", topicID, prefillLens)
+	}
 
 	// 8. Step 2: Agent loop per topic (selected lens focuses research).
 	// Exploration entry points (list_boards/list_lanes/get_lane_detail),
@@ -196,7 +218,7 @@ func (o *OrchestratorService) EnrichTopic(ctx context.Context, topicID uint) (*E
 	snapJSON, _ := json.Marshal(inputSnap)
 
 	result := &repository.TopicEnrichmentResult{
-		PersistentTopicID:   topicID,
+		PersistentTopicID:   repository.TopicIDPtr(topicID),
 		EvolutionAssessment: "", // vestigial column; new schema lives in Sectors
 		Sectors:             sectorsJSON,
 		ToolCalls:           toolCallsJSON,
@@ -238,7 +260,7 @@ func (o *OrchestratorService) EnrichTopic(ctx context.Context, topicID uint) (*E
 				}
 				verdictJSON, _ := json.Marshal(verdictObj)
 				review = &repository.TopicEnrichmentReview{
-					PersistentTopicID: topicID,
+					PersistentTopicID: repository.TopicIDPtr(topicID),
 					PrevResultID:      &prevResult.ID,
 					CurrResultID:      result.ID,
 					Verdict:           verdictJSON,
@@ -340,6 +362,7 @@ const interpretPrompt = `你是一位结构化分析编辑。下面是一个持�
 
 func (o *OrchestratorService) interpret(ctx context.Context, ictx interpretContext) (*interpretResult, error) {
 	prompt := interpretPrompt + "\n\n---\n"
+	prompt += o.referenceRoleAppendix(ctx)
 	if ictx.ContextText != "" {
 		prompt += "分层新闻上下文:\n" + ictx.ContextText + "\n\n"
 	}
@@ -439,6 +462,7 @@ const agentLoopSystemPrompt = `你是一位研究助理 / 事实核查员。背�
 func (o *OrchestratorService) runAgentLoop(ctx context.Context, sessionID, topic, lens, lifelineText string, allowedTools []string) (*AgentLoopResult, error) {
 	toolsDesc := buildToolsDesc(o.toolRegistry, allowedTools)
 	system := fmt.Sprintf(agentLoopSystemPrompt, lens, toolsDesc, lifelineText)
+	system += o.referenceRoleAppendix(ctx)
 	return runToolLoop(ctx, o.airouter, o.toolRegistry, o.capability, toolLoopParams{
 		sessionID:    sessionID,
 		systemPrompt: system,
@@ -689,15 +713,21 @@ type RegimeShift struct {
 	Evidence string `json:"evidence"` // 依据
 }
 
-// EvidenceChainItem is one verifiable-evidence entry. source_type ∈ news|web|page;
-// web/page entries must carry a clickable url + a direct quote (not an AI paraphrase).
+// EvidenceChainItem is one verifiable-evidence entry. source_type ∈
+// news|web|page|lane (lane = board-scope lane reference, Ref carries lane_id);
+// web/page entries must carry a clickable url + a direct quote (not an AI
+// paraphrase). Kind is the orthogonal two-level classification (quote 文段引用
+// / series 数字序列 / chart 图表; empty = legacy behaviour, board-level-deep-
+// analysis D4).
 type EvidenceChainItem struct {
-	SourceType  string `json:"source_type"`           // news|web|page
-	Ref         string `json:"ref,omitempty"`         // news 引用 id
+	SourceType  string `json:"source_type"`           // news|web|page|lane
+	Ref         string `json:"ref,omitempty"`         // news 引用 id / lane 泳道 id
 	URL         string `json:"url,omitempty"`         // web/page 可核查 URL
 	Quote       string `json:"quote,omitempty"`       // 原文摘录（非转述）
 	Institution string `json:"institution,omitempty"` // 来源机构
 	Date        string `json:"date,omitempty"`        // 日期
+	Kind        string `json:"kind,omitempty"`        // quote|series|chart（可选两级分类）
+	LaneNote    string `json:"lane_note,omitempty"`   // lane 证据的论据说明
 }
 
 // EventChainAnalysis is the body for form=event_chain.
@@ -867,6 +897,9 @@ depth 块字段（映射结构化深度分析基因）：
 - boundary：★反过度解读边界——明确写出“目前还不能下结论的边界”，不可空泛，不可省略
 - evidence_chain：可核查证据链，source_type ∈ news(分层新闻)|web(web_search 网页)|page(fetch_page 正文)；web/page 必须带 url + quote(原文摘录，非转述) + institution(来源机构) + date
 
+【证据多样性纪律】
+evidence_chain 尽量覆盖 ≥3 类证据：数据序列（机构统计/长序列数字）、报告文献（一手报告/论文/官方文件）、历史对照（可核查历史事件/机制）、新闻网页（时效性事件）。检索引导：优先一手源（机构名 + 数据关键词组合，而非事件转述关键词）；某类确实检索不到时，在 boundary 里诚实标注，不要编造。
+
 【引用格式】source_type ∈ news（来自分层新闻上下文）| web（web_search 网页结果）| page（fetch_page 正文）；news 的 ref 指向具体 id，web/page 带 url；quote 直接摘录原话/原文
 
 输出严格 JSON（不要 markdown 包裹）：
@@ -884,6 +917,7 @@ func (o *OrchestratorService) analyze(ctx context.Context, sessionID, form, lens
 	}
 
 	prompt := fmt.Sprintf(analyzePrompt, form, lens, form, lens)
+	prompt += o.referenceRoleAppendix(ctx)
 	if contextText != "" {
 		prompt += "\n\n---\n分层新闻上下文:\n" + contextText
 	}
@@ -1172,6 +1206,8 @@ func parseDepth(m map[string]any) Depth {
 				Quote:       getString(vm, "quote"),
 				Institution: getString(vm, "institution"),
 				Date:        getString(vm, "date"),
+				Kind:        normalizeEvidenceKind(getString(vm, "kind")),
+				LaneNote:    getString(vm, "lane_note"),
 			})
 		}
 	}

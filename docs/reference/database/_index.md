@@ -19,6 +19,7 @@ Syntopica 数据库全景概览与索引/约束权威清单。
 | 枢纽表 | `topic_tags` | 被多表引用（`article_topic_tags` / `topic_tag_embeddings` / `topic_tag_semantic_labels` / `topic_tag_board_labels` / `topic_tag_analyses` / `topic_tag_relations` / `embedding_queues` / `merge_reembedding_queues` 等） |
 | 向量表（pgvector） | `topic_tag_embeddings`(固定 vector(4096))、`semantic_labels`(embedding + merge_embedding)、`daily_report_sections`、`daily_report_threads`、`board_persistent_topics`、`preference_vectors`、`route_embeddings` | 维度运行时决定，HNSW 索引仅在维度 ≤ 2000 时创建（`preference_vectors`/`route_embeddings` 同维不强制 HNSW，粗筛走顺序扫描） |
 | 全文搜索 | `articles.search_vector` | GIN 索引 + 触发器 `articles_search_vector_trigger` |
+| 向量缓存（非 pgvector） | `ai_embedding_cache.embedding` | bytea 二进制（float32 小端，`models/embedding_codec.go` 编解码，~10KB/2560维，仅字节回读不做相似度检索）。jsonb→bytea 由启动时 pre-migrate 非破坏转换（optimize-pg-storage，须先于 AutoMigrate 避免 GORM ALTER 报 cannot cast） |
 | 预留/已废弃表 | 4 | `ai_summaries` / `ai_summary_feeds` / `ai_summary_topics` / `topic_analysis_jobs` / `digest_configs`：无对应 model、无 Go 代码引用 |
 
 ---

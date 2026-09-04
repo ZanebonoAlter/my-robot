@@ -168,6 +168,18 @@ func TestSemanticBoardHandlerAddComposition(t *testing.T) {
 	// Case 5: Missing body
 	badBody := performJSON(t, router, http.MethodPost, fmt.Sprintf("/api/semantic-boards/%d/composition", board.ID), nil)
 	require.Equal(t, http.StatusBadRequest, badBody.Code)
+
+	// Case 6 (add-composite-labels): composite label 可挂载 composition（spec：版块 composition 挂载组合标签）
+	composite := createHandlerSemanticLabel(t, db, "美债收益率", "mei-zhai-shou-yi-lu", "composite", "active", 0, []float64{0.5, 0.5, 0.5})
+	respComp := performJSON(t, router, http.MethodPost, fmt.Sprintf("/api/semantic-boards/%d/composition", board.ID), map[string]any{"auxiliary_label_id": composite.ID})
+	require.Equal(t, http.StatusOK, respComp.Code)
+	require.NoError(t, db.Model(&models.BoardComposition{}).Where("board_id = ? AND auxiliary_label_id = ?", board.ID, composite.ID).Count(&count).Error)
+	require.Equal(t, int64(1), count)
+
+	// Case 7: disabled composite 拒绝挂载
+	disabledComposite := createHandlerSemanticLabel(t, db, "旧组合", "old-comp", "composite", "disabled", 0, nil)
+	respDisabled := performJSON(t, router, http.MethodPost, fmt.Sprintf("/api/semantic-boards/%d/composition", board.ID), map[string]any{"auxiliary_label_id": disabledComposite.ID})
+	require.Equal(t, http.StatusBadRequest, respDisabled.Code)
 }
 
 func TestSemanticBoardHandlerCRUDAndComposition(t *testing.T) {

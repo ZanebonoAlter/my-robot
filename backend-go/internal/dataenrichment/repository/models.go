@@ -9,6 +9,8 @@ import (
 	"sync"
 	"time"
 
+	"gorm.io/gorm"
+
 	"syntopica-backend/internal/platform/database"
 )
 
@@ -251,6 +253,60 @@ type ReferenceRole struct {
 
 func (ReferenceRole) TableName() string { return "reference_roles" }
 
+// AnalysisMethodSelectionMeta declares when a method is suitable, when it must
+// not be selected, which evidence it needs, and its known failure modes. The
+// concrete type keeps JSONB payloads validated and avoids unstructured maps.
+type AnalysisMethodSelectionMeta struct {
+	ApplicableWhen   []string `json:"applicable_when"`
+	AvoidWhen        []string `json:"avoid_when"`
+	RequiredEvidence []string `json:"required_evidence"`
+	FailureModes     []string `json:"failure_modes"`
+}
+
+func (m *AnalysisMethodSelectionMeta) normalize() {
+	if m.ApplicableWhen == nil {
+		m.ApplicableWhen = []string{}
+	}
+	if m.AvoidWhen == nil {
+		m.AvoidWhen = []string{}
+	}
+	if m.RequiredEvidence == nil {
+		m.RequiredEvidence = []string{}
+	}
+	if m.FailureModes == nil {
+		m.FailureModes = []string{}
+	}
+}
+
+// AnalysisMethod is a globally managed process/checklist card. It is never
+// injected globally: future investigation selection loads summaries first and
+// full Content only for explicitly selected IDs.
+type AnalysisMethod struct {
+	ID            uint                        `gorm:"primarykey" json:"id"`
+	Name          string                      `gorm:"size:120;uniqueIndex;not null" json:"name"`
+	Title         string                      `gorm:"size:200" json:"title"`
+	Summary       string                      `gorm:"type:text" json:"summary"`
+	SelectionMeta AnalysisMethodSelectionMeta `gorm:"type:jsonb;serializer:json;not null;default:'{}'" json:"selection_meta"`
+	Content       string                      `gorm:"type:text;not null" json:"content"`
+	Enabled       bool                        `gorm:"not null" json:"enabled"`
+	Legacy        bool                        `gorm:"not null;default:false" json:"legacy"`
+	DeletedAt     gorm.DeletedAt              `gorm:"index" json:"deleted_at,omitempty"`
+	CreatedAt     time.Time                   `json:"created_at"`
+	UpdatedAt     time.Time                   `json:"updated_at"`
+}
+
+func (AnalysisMethod) TableName() string { return "analysis_methods" }
+
+func (m *AnalysisMethod) BeforeSave(_ *gorm.DB) error {
+	m.SelectionMeta.normalize()
+	return nil
+}
+
+func (m *AnalysisMethod) AfterFind(_ *gorm.DB) error {
+	m.SelectionMeta.normalize()
+	return nil
+}
+
 func init() {
 	database.RegisterModels(
 		&BoardDataSource{},
@@ -260,5 +316,8 @@ func init() {
 		&StockDebateResult{},
 		&TopicEnrichmentQA{},
 		&ReferenceRole{},
+		&AnalysisMethod{},
+		&CrossBoardRelationRun{},
+		&CrossBoardRelation{},
 	)
 }

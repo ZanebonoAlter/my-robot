@@ -209,6 +209,16 @@ func StartRuntime() *Runtime {
 	// Loosely coupled fixed-time trigger (default 06:30), not chained to the
 	// daily report. Manual trigger via POST /upgrade-suggestions/generate.
 	boardUpgradeNextRunFn := scheduler.NextBoardUpgradeSuggestTime
+	registry.Register("relation_expire", scheduler.New(scheduler.Config{
+		Name:         "Cross-Board Relation Expire",
+		Description:  "Batch-mark expired confirmed cross-board relations",
+		Interval:     3600 * time.Second,
+		StartupDelay: 30 * time.Minute,
+		Job:          dataenrichment.RelationExpireJob(dataenrichment.GetRepo()),
+		Persistence: admin.NewTaskPersistence("relation_expire",
+			"批量标记过期的已确认跨版块关系"),
+	}))
+
 	registry.Register("board_upgrade_suggest", scheduler.New(scheduler.Config{
 		Name:        "Board Upgrade Suggest",
 		Description: "每日生成版块升级建议 + 观察池 watch GC",

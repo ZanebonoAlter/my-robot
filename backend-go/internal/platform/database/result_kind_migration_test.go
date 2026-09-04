@@ -75,23 +75,125 @@ func TestResultKindMigrationBackfillPreservesSectors(t *testing.T) {
 		(98101, NULL, 'topic', NULL, ?::jsonb, 'result-kind-mig-topic', now()),
 		(NULL, 98201, 'board', 'topic_analysis', ?::jsonb, 'result-kind-mig-board', now())`, topicSectors, boardSectors).Error)
 
-	migration := runResultKindMigration(t, db)
-	// Re-running Up is idempotent and must not rewrite legacy JSON.
-	require.NoError(t, db.Transaction(func(tx *gorm.DB) error { return migration.Up(tx) }))
-
 	type row struct {
 		SessionID  string
 		ResultKind string
 		Sectors    string
 	}
-	var rows []row
+	var before []row
+	require.NoError(t, db.Raw(`SELECT session_id, COALESCE(result_kind, '') AS result_kind, sectors::text AS sectors
+		FROM topic_enrichment_result WHERE session_id LIKE 'result-kind-mig-%' ORDER BY session_id`).Scan(&before).Error)
+	require.Len(t, before, 2)
+
+	migration := runResultKindMigration(t, db)
+	// Re-running Up is idempotent and must not rewrite legacy JSON.
+	require.NoError(t, db.Transaction(func(tx *gorm.DB) error { return migration.Up(tx) }))
+
+	var after []row
 	require.NoError(t, db.Raw(`SELECT session_id, result_kind, sectors::text AS sectors
-		FROM topic_enrichment_result WHERE session_id LIKE 'result-kind-mig-%' ORDER BY session_id`).Scan(&rows).Error)
-	require.Len(t, rows, 2)
-	require.Equal(t, "legacy_board_analysis", rows[0].ResultKind)
-	require.JSONEq(t, boardSectors, rows[0].Sectors)
-	require.Equal(t, "topic_analysis", rows[1].ResultKind)
-	require.JSONEq(t, topicSectors, rows[1].Sectors)
+		FROM topic_enrichment_result WHERE session_id LIKE 'result-kind-mig-%' ORDER BY session_id`).Scan(&after).Error)
+	require.Len(t, after, 2)
+	for i := range after {
+		require.Equal(t, before[i].SessionID, after[i].SessionID)
+		require.Equal(t, before[i].Sectors, after[i].Sectors, "migration must preserve the exact sectors::text database value")
+	}
+	require.Equal(t, "legacy_board_analysis", after[0].ResultKind)
+	require.JSONEq(t, boardSectors, after[0].Sectors)
+	require.Equal(t, "topic_analysis", after[1].ResultKind)
+	require.JSONEq(t, topicSectors, after[1].Sectors)
+}
+
+func TestResultKindAutoMigratePreservesDatabaseContract(t *testing.T) {
+	if testing.Short() {
+		t.Skip("integration test: requires testcontainer Postgres")
+	}
+	db := testutil.OpenTestDB(t)
+	prepareResultKindLegacyShape(t, db)
+	runResultKindMigration(t, db)
+
+	// This is the regression: future startup AutoMigrate runs must preserve the
+	// explicit migration's NOT NULL/default/CHECK contract.
+	require.NoError(t, database.RunAutoMigrate(db))
+
+	type columnMetadata struct {
+		IsNullable    string
+		ColumnDefault string
+	}
+	var metadata columnMetadata
+	require.NoError(t, db.Raw(`SELECT is_nullable, column_default
+		FROM information_schema.columns
+		WHERE table_schema = 'public'
+		  AND table_name = 'topic_enrichment_result'
+		  AND column_name = 'result_kind'`).Scan(&metadata).Error)
+	require.Equal(t, "NO", metadata.IsNullable)
+	require.True(t, strings.Contains(metadata.ColumnDefault, "'topic_analysis'"), metadata.ColumnDefault)
+
+	var defaultKind string
+	require.NoError(t, db.Raw(`INSERT INTO topic_enrichment_result
+		(persistent_topic_id, analysis_scope, session_id, created_at)
+		VALUES (98231, 'topic', 'result-kind-mig-default', now())
+		RETURNING result_kind`).Scan(&defaultKind).Error)
+	require.Equal(t, repository.ResultKindTopicAnalysis, defaultKind)
+
+	err := db.Exec(`INSERT INTO topic_enrichment_result
+		(persistent_topic_id, analysis_scope, result_kind, session_id, created_at)
+		VALUES (98232, 'topic', 'invalid_kind', 'result-kind-mig-invalid-kind', now())`).Error
+	require.Error(t, err, "result_kind CHECK must remain effective after AutoMigrate")
+}
+
+func TestResultKindOwnerShapeConstraint(t *testing.T) {
+	if testing.Short() {
+		t.Skip("integration test: requires testcontainer Postgres")
+	}
+	db := testutil.OpenTestDB(t)
+	prepareResultKindLegacyShape(t, db)
+	runResultKindMigration(t, db)
+
+	invalidStatements := map[string]string{
+		"topic-missing-owner": `INSERT INTO topic_enrichment_result
+			(analysis_scope, result_kind, session_id, created_at)
+			VALUES ('topic', 'topic_analysis', 'result-kind-mig-owner-topic-missing', now())`,
+		"topic-mixed-owner": `INSERT INTO topic_enrichment_result
+			(persistent_topic_id, semantic_board_id, analysis_scope, result_kind, session_id, created_at)
+			VALUES (98241, 98242, 'topic', 'topic_analysis', 'result-kind-mig-owner-topic-mixed', now())`,
+		"board-missing-owner": `INSERT INTO topic_enrichment_result
+			(analysis_scope, result_kind, session_id, created_at)
+			VALUES ('board', 'board_brief', 'result-kind-mig-owner-board-missing', now())`,
+		"board-mixed-owner": `INSERT INTO topic_enrichment_result
+			(persistent_topic_id, semantic_board_id, analysis_scope, result_kind, session_id, created_at)
+			VALUES (98243, 98244, 'board', 'legacy_board_analysis', 'result-kind-mig-owner-board-mixed', now())`,
+	}
+	for name, statement := range invalidStatements {
+		t.Run(name, func(t *testing.T) {
+			require.Error(t, db.Exec(statement).Error)
+		})
+	}
+}
+
+func TestResultKindMigrationRejectsMixedHistoricalOwnerWithoutRepair(t *testing.T) {
+	if testing.Short() {
+		t.Skip("integration test: requires testcontainer Postgres")
+	}
+	db := testutil.OpenTestDB(t)
+	prepareResultKindLegacyShape(t, db)
+	require.NoError(t, db.Exec(`INSERT INTO topic_enrichment_result
+		(persistent_topic_id, semantic_board_id, analysis_scope, result_kind, session_id, created_at)
+		VALUES (98251, 98252, 'topic', NULL, 'result-kind-mig-dirty-owner', now())`).Error)
+
+	migration := resultKindMigration(t)
+	err := db.Transaction(func(tx *gorm.DB) error { return migration.Up(tx) })
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "mixed or missing owner")
+
+	type ownerRow struct {
+		PersistentTopicID uint
+		SemanticBoardID   uint
+	}
+	var row ownerRow
+	require.NoError(t, db.Raw(`SELECT persistent_topic_id, semantic_board_id
+		FROM topic_enrichment_result WHERE session_id = 'result-kind-mig-dirty-owner'`).Scan(&row).Error)
+	require.Equal(t, uint(98251), row.PersistentTopicID)
+	require.Equal(t, uint(98252), row.SemanticBoardID)
 }
 
 func TestBoardInvestigationParentConstraint(t *testing.T) {
@@ -116,26 +218,41 @@ func TestBoardInvestigationParentConstraint(t *testing.T) {
 		VALUES (98211, 'board', 'legacy_board_analysis', 'result-kind-mig-legacy', now()) RETURNING id`).Scan(&legacyID).Error)
 
 	validKey := "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
-	require.NoError(t, db.Exec(`INSERT INTO topic_enrichment_result
+	var validChildID uint
+	require.NoError(t, db.Raw(`INSERT INTO topic_enrichment_result
 		(semantic_board_id, analysis_scope, result_kind, parent_result_id, question_key, session_id, created_at)
-		VALUES (98211, 'board', 'board_investigation', ?, ?, 'result-kind-mig-valid-child', now())`, briefID, validKey).Error)
+		VALUES (98211, 'board', 'board_investigation', ?, ?, 'result-kind-mig-valid-child', now()) RETURNING id`, briefID, validKey).Scan(&validChildID).Error)
 
 	err := db.Exec(`INSERT INTO topic_enrichment_result
 		(semantic_board_id, analysis_scope, result_kind, parent_result_id, question_key, session_id, created_at)
 		VALUES (98211, 'board', 'board_investigation', ?, ?, 'result-kind-mig-invalid-cross-board', now())`, otherBoardBriefID, validKey).Error
-	require.Error(t, err, "composite FK must reject a parent from another board")
+	require.Error(t, err, "database must reject a parent from another board")
 
-	// Parent kind is a cross-row semantic check (not expressible by PostgreSQL
-	// CHECK); repository validation rejects a same-board non-brief parent.
+	err = db.Exec(`INSERT INTO topic_enrichment_result
+		(semantic_board_id, analysis_scope, result_kind, parent_result_id, question_key, session_id, created_at)
+		VALUES (98211, 'board', 'board_investigation', ?, ?, 'result-kind-mig-invalid-legacy-parent', now())`, legacyID, validKey).Error
+	require.Error(t, err, "trigger must reject a same-board legacy parent")
+
 	keyCopy := validKey
-	invalidParent := &repository.TopicEnrichmentResult{
+	invalidInvestigationParent := &repository.TopicEnrichmentResult{
 		SemanticBoardID: repository.BoardIDPtr(98211),
 		AnalysisScope:   "board",
-		ParentResultID:  repository.TopicIDPtr(legacyID),
+		ResultKind:      repository.ResultKindBoardInvestigation,
+		ParentResultID:  repository.TopicIDPtr(validChildID),
 		QuestionKey:     &keyCopy,
-		SessionID:       "result-kind-mig-invalid-non-brief",
+		SessionID:       "result-kind-mig-invalid-investigation-parent",
 	}
-	require.Error(t, repository.NewRepository(db).CreateBoardInvestigationResult(context.Background(), invalidParent))
+	require.Error(t, db.Create(invalidInvestigationParent).Error, "trigger must reject an investigation parent through GORM")
+
+	err = db.Model(&repository.TopicEnrichmentResult{}).
+		Where("id = ?", validChildID).
+		Update("parent_result_id", legacyID).Error
+	require.Error(t, err, "trigger must validate parent changes on UPDATE")
+
+	err = db.Model(&repository.TopicEnrichmentResult{}).
+		Where("id = ?", briefID).
+		Update("result_kind", repository.ResultKindLegacyBoardAnalysis).Error
+	require.Error(t, err, "a referenced brief cannot change kind and invalidate existing children")
 
 	err = db.Exec(`INSERT INTO topic_enrichment_result
 		(semantic_board_id, analysis_scope, result_kind, parent_result_id, question_key, session_id, created_at)

@@ -166,7 +166,7 @@ export function useTagsPage() {
 
   // 持久化建议确认执行：携带 row.id 作为 suggestion_id，后端事务内置 confirmed 联动 (§6.4)
   async function handleConfirmUpgradeRow(row: UpgradeSuggestionRow) {
-    if (row.decision !== 'create_new' && row.decision !== 'merge_into_existing') return
+    if (row.decision !== 'create_new' && row.decision !== 'merge_into_existing' && row.decision !== 'compose') return
     const res = await sbApi.executeUpgrade({
       decision: row.decision,
       board_label: row.board_label,
@@ -245,11 +245,13 @@ export function useTagsPage() {
     boardsLoading: boardCRUD.boardsLoading,
     boardsError: boardCRUD.boardsError,
     compositionLabels: boardCRUD.compositionLabels,
+    compositionComposites: boardCRUD.compositionComposites,
     compositionLoading: boardCRUD.compositionLoading,
     editingBoard: boardCRUD.editingBoard,
     editLabel: boardCRUD.editLabel,
     editDescription: boardCRUD.editDescription,
     editEnrichmentEnabled: boardCRUD.editEnrichmentEnabled,
+    editRelationAutoDiscoveryEnabled: boardCRUD.editRelationAutoDiscoveryEnabled,
     editWindowDays: boardCRUD.editWindowDays,
     editContextLayers: boardCRUD.editContextLayers,
     editSaving: boardCRUD.editSaving,

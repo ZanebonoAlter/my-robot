@@ -150,6 +150,8 @@ Syntopica 数据库全景概览与索引/约束权威清单。
 | `topic_enrichment_result` | 单列 [gorm]：persistent_topic_id |
 | `topic_enrichment_review` | 单列 [gorm]：persistent_topic_id、prev_result_id、curr_result_id |
 | `stock_debate_result` | 单列 [gorm]：topic_enrichment_result_id、persistent_topic_id |
+| `cross_board_relation_runs` | 单列 [migration 20260901_0001]：source_board_id；CHECK（source_kind/trigger_kind/status） |
+| `cross_board_relations` | `uq_cross_board_relations_open(suggestion_hash) WHERE status IN ('unresolved','proposed')` **部分唯一** [migration]；单列：source_board_id/target_board_id/run_id；CHECK（relation_type/verification_verdict/quality_grade/status） |
 
 ### Tracing
 

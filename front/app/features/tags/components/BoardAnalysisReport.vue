@@ -25,7 +25,11 @@ const emit = defineEmits<{
   (e: 'drill-lane', payload: { laneId: number; lens: string }): void
 }>()
 
-const sectors = computed<BoardSectors | null>(() => props.result?.sectors ?? null)
+/* 本组件只承接 legacy_board_analysis / 旧无 kind 行（面板 5.5 分派），
+ * sectors 此时必为旧五字段形状；联合类型在此显式收窄。 */
+const sectors = computed<BoardSectors | null>(() =>
+  (props.result?.sectors as BoardSectors | null) ?? null,
+)
 const isSparse = computed(() => sectors.value?.form === 'sparse')
 const arg = computed(() => sectors.value?.argument ?? null)
 const depth = computed(() => sectors.value?.depth ?? null)

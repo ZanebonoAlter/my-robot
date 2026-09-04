@@ -9,16 +9,16 @@
 ## 阅读约定（全局事实）
 
 1. **表名**：GORM 未自定义 `NamingStrategy`，默认蛇形 + 复数；非默认表名由 struct 的 `TableName()` 显式指定。本文档每张表的真实表名以迁移 SQL 与 struct 为准。
-2. **外键（FK）几乎不存在于 DB 层**：`gorm.Config` 设了 `DisableForeignKeyConstraintWhenMigrating: true`，且迁移 `20260601_0001` 主动 drop 了历史上全部 `fk_*`。**全库唯一真实 DB FK** 是 `topic_tags_merged_into_id_fkey`（`merged_into_id → topic_tags(id) ON DELETE CASCADE`）。本文档中凡是写「关联 / FK」的地方，除特别注明外均为 GORM 逻辑关联，**不**对应 DB 级外键约束。
+2. **外键（FK）几乎不存在于 DB 层**：`gorm.Config` 设了 `DisableForeignKeyConstraintWhenMigrating: true`，且迁移 `20260601_0001` 主动 drop 了历史上全部 `fk_*`。**全库真实 DB FK 仅 3 处**：`topic_tags_merged_into_id_fkey`（`merged_into_id → topic_tags(id) ON DELETE CASCADE`）、`topic_tag_embeddings` 的 `topic_tag_id → topic_tags(id) ON DELETE CASCADE`（迁移 `20260820_0001`）、「`fk_topic_enrichment_result_parent_board`（复合 FK，见 §10.3，迁移 `20260828_0001`）。本文档中凡是写「关联 / FK」的地方，除特别注明外均为 GORM 逻辑关联，**不**对应 DB 级外键约束。
 3. **向量列维度运行时决定**：除 `topic_tag_embeddings.embedding` 由迁移固定为 `vector(4096)` 外，其余向量列 gorm tag 仅声明 `type:vector`，实际维度由运行时 `embedding_config.embedding_dimension` / `ensureXxxEmbeddingDimension` 设置；HNSW 索引仅当维度 ≤ 2000 时创建。
 4. **字段表列含义**：「类型」= DB 列类型；「约束/默认/索引」= NOT NULL / DEFAULT / 索引 / 唯一 / CHECK 等；「用途」= 业务含义。`string` 无 `size` 时 GORM 默认 256。
 5. **枚举**：除非特别注明「+ CHECK」，枚举取值均为代码层约定，DB 层不强制。
 
 ---
 
-## 完整表清单（48 张业务表 + 5 张废弃表 + 1 张框架表）
+## 完整表清单（50 张业务表 + 5 张废弃表 + 1 张框架表）
 
-### 业务表（45 张，代码权威）
+### 业务表（50 张，代码权威）
 
 | 表名 | 说明 | 对应模型 | 域 |
 | ------ | ------ | ---------- | ------ |
@@ -42,7 +42,8 @@
 | `semantic_labels` | 语义标签统一表（辅助标签 + SemanticBoard） | `models.SemanticLabel` | 语义标签/板块 |
 | `topic_tag_semantic_labels` | tag-辅助标签关联（中间表） | `models.TopicTagSemanticLabel` | 语义标签/板块 |
 | `topic_tag_board_labels` | tag-SemanticBoard 匹配结果（中间表） | `models.TopicTagBoardLabel` | 语义标签/板块 |
-| `board_composition` | board 构成（中间表） | `models.BoardComposition` | 语义标签/板块 |
+| `board_composition` | board 构成（中间表；挂载单元可为 aux 或 composite，`auxiliary_label_id` 列复用） | `models.BoardComposition` | 语义标签/板块 |
+| `composite_components` | 组合标签组件序列（composite→auxiliary，position 有序） | `models.CompositeComponent` | 语义标签/板块 |
 | `board_upgrade_suggestions` | 板块升级建议 | `models.BoardUpgradeSuggestion` | 语义标签/板块 |
 | `embedding_config` | 向量配置（键值对） | `models.EmbeddingConfig` | 向量 |
 | `embedding_queues` | 向量生成队列 | `models.EmbeddingQueue` | 向量 |
@@ -62,6 +63,8 @@
 | `topic_enrichment_review` | 数据增强认知演进反思 | `dataenrichment.TopicEnrichmentReview` | 数据增强 |
 | `stock_debate_result` | FinGenius 个股辩论结果 | `dataenrichment.StockDebateResult` | 数据增强 |
 | `topic_enrichment_qa` | 报告追问记录（多轮 append-only） | `dataenrichment.TopicEnrichmentQA` | 数据增强 |
+| `reference_roles` | 旧参考角色/方法论画像（已退役，只读兼容一版本） | `dataenrichment.ReferenceRole` | 数据增强 |
+| `analysis_methods` | 分析方法卡库（调查链按问题选卡注入） | `dataenrichment.AnalysisMethod` | 数据增强 |
 | `reading_behaviors` | 阅读行为 | `models.ReadingBehavior` | 用户行为 |
 | `preference_vectors` | 偏好向量画像（按 SemanticBoard 聚合） | `models.PreferenceVector` | 偏好/发现 |
 | `rsshub_routes` | RSSHub 路由目录 | `models.RSSHubRoute` | 偏好/发现 |
@@ -470,7 +473,7 @@
 | `slug` | VARCHAR(**160**) | NOT NULL; **单列唯一** `idx_semantic_labels_slug` | 稳定标识 |
 | `embedding` | vector | —（运行时维度） | 语义向量（struct `*string`，列名 `embedding`） |
 | `merge_embedding` | vector | —（运行时维度） | 合并去重用向量（struct `*string`，列名 `merge_embedding`） |
-| `label_type` | VARCHAR(20) | NOT NULL; index `idx_semantic_labels_label_type` | 类型：`auxiliary` / `board`（约定，无 CHECK） |
+| `label_type` | VARCHAR(20) | NOT NULL; index `idx_semantic_labels_label_type` | 类型：`auxiliary` / `board` / `composite`（约定，无 CHECK） |
 | `aliases` | JSONB | DEFAULT '[]'（serializer:json） | 别名列表 |
 | `ref_count` | INTEGER | NOT NULL DEFAULT 0 | 引用计数（辅助标签被 tag 引用次数） |
 | `description` | TEXT | — | 描述 |
@@ -526,11 +529,24 @@
 | 字段名 | 类型 | 约束/默认/索引 | 用途 |
 | -------- | ------ | ------ | ------ |
 | `board_id` | BIGINT | PK; NOT NULL | 关联 board ID（`label_type=board`） |
-| `auxiliary_label_id` | BIGINT | PK; NOT NULL | 关联辅助标签 ID（`label_type=auxiliary`） |
+| `auxiliary_label_id` | BIGINT | PK; NOT NULL | 挂载单元 ID：`label_type=auxiliary` 辅助标签 或 `label_type=composite` 组合标签（add-composite-labels 起列语义复用） |
 
 主键：`(board_id, auxiliary_label_id)`。索引：`idx_board_composition_board_id`、`idx_board_composition_auxiliary_label_id`（迁移 `20260521_0001`）。
 
 > ⚠️ 旧文档曾列 `id BIGSERIAL PK`：代码无 `id`，复合主键。
+
+
+### 5.4.1 composite_components（组合标签组件序列，中间表）
+
+add-composite-labels 引入。纯关联表，复合主键，组件按 `position` 有序（顺序决定组合方向，如「美国国债×收益率」≠「收益率×美国国债」的语义侧重）。组件删除时经 FK ON DELETE CASCADE 级联清理。
+
+| 字段名 | 类型 | 约束/默认/索引 | 用途 |
+| -------- | ------ | ------ | ------ |
+| `composite_id` | BIGINT | PK; NOT NULL; FK→semantic_labels(id) ON DELETE CASCADE | 组合标签 ID（`label_type=composite`） |
+| `component_label_id` | BIGINT | PK; NOT NULL; FK→semantic_labels(id) ON DELETE CASCADE | 组件辅助标签 ID（`label_type=auxiliary`，active） |
+| `position` | INTEGER | NOT NULL | 组件序号（1 起，有序） |
+
+主键：`(composite_id, component_label_id)`。表由 AutoMigrate 从 `models.CompositeComponent` 创建，迁移 `20260902_0001` 兜底确保 FK 约束（cascade ensure）并 seed 三个 ai_settings（`composite_label_dedupe_sim=0.95`、`semantic_board_match_direct_hit_score_factor=0.7`、`semantic_board_upgrade_composite_min_cooccurrence=10`）。
 
 ### 5.5 board_upgrade_suggestions（板块升级建议）
 
@@ -541,13 +557,13 @@
 | `id` | SERIAL | PK | 主键 |
 | `batch_id` | VARCHAR(64) | NOT NULL; index | 生成批次 |
 | `mode` | VARCHAR(32) | NOT NULL | 模式 |
-| `decision` | VARCHAR(32) | NOT NULL | 决策：`create_new` / `merge_into_existing` / `watch` |
+| `decision` | VARCHAR(32) | NOT NULL | 决策：`create_new` / `merge_into_existing` / `watch` / `compose`（add-composite-labels） |
 | `board_label` | VARCHAR(160) | NOT NULL | 板块标签 |
 | `description` | TEXT | — | 描述 |
 | `target_board_id` | INTEGER | —（`*uint`，可空） | 目标板块 ID（merge_into_existing 时） |
 | `auxiliary_label_ids` | JSONB | DEFAULT '[]'（serializer:json） | 辅助标签 ID 列表 |
 | `confidence` | VARCHAR(16) | NOT NULL DEFAULT 'llm' | 置信度：`high` / `llm` |
-| `evidence` | JSONB | —（serializer:json） | 证据快照 `{shortlist, margins, cotag_events, lane_briefs}` |
+| `evidence` | JSONB | —（serializer:json） | 证据快照 `{shortlist, margins, cotag_events, lane_briefs}`；compose 建议带 `{source, compose_cooccurrence, compose_window_days, compose_representative_titles}` |
 | `status` | VARCHAR(16) | NOT NULL DEFAULT 'pending'; index `idx_board_upgrade_suggestions_status` | 状态：`pending` / `confirmed` / `dismissed` |
 | `dismiss_reason` | TEXT | —（`*string`，可空） | 驳回原因 |
 | `suggestion_hash` | VARCHAR(64) | NOT NULL | 稳定指纹 `(mode, decision, target_board_id, sorted_auxiliary_label_ids)` |
@@ -853,15 +869,27 @@ label 类 AI 或 keyword 类文本匹配得到的 Watch 与日报分区的匹配
 | -------- | ------ | ------ | ------ |
 | `id` | BIGSERIAL | PK | 主键 |
 | `persistent_topic_id` | BIGINT | NULL; index（board 档为 NULL） | 持久话题 ID（board-level-deep-analysis 迁移 `20260826_0001` 起 NOT NULL 放宽） |
-| `analysis_scope` | VARCHAR(20) | NOT NULL; DEFAULT 'topic'（迁移 `20260826_0001`） | 分析档位：`topic`=单泳道 / `board`=版块级（board 档 sectors 载五字段 `{thesis,candidates,argument,depth,lane_refs}`） |
-| `semantic_board_id` | BIGINT | NULL; index | 版块级 result 所属板块（board 档必填，topic 档 NULL） |
+| `analysis_scope` | VARCHAR(20) | NOT NULL; DEFAULT 'topic'（迁移 `20260826_0001`） | 分析档位：`topic`=单泳道 / `board`=版块级 |
+| `result_kind` | VARCHAR(32) | NOT NULL; DEFAULT 'topic_analysis'（迁移 `20260828_0001`） | 结果种类：`topic_analysis` / `board_brief`（版块简报）/ `board_investigation`（问题调查）/ `legacy_board_analysis`（v1 论文式存量回填）；CHECK `chk_topic_enrichment_result_kind` + 形状约束见下 |
+| `semantic_board_id` | BIGINT | NULL; index; 复合唯一 `uq_topic_enrichment_result_id_board (id, semantic_board_id)`（复合 FK 靶） | 版块级 result 所属板块（board 档必填，topic 档 NULL） |
+| `parent_result_id` | BIGINT | NULL（`*uint`）；复合 FK 见下 | 调查的父简报 result ID（仅 board_investigation 非空） |
+| `question_key` | VARCHAR(64) | NULL（`*string`）；CHECK `~ '^[0-9a-f]{64}$'` | 调查问题的规范化 hash（trim+空白折叠后 SHA-256；generated/custom 同算法；仅 board_investigation 非空） |
 | `evolution_assessment` | TEXT | — | ⚠️ causal-analysis-agent 起弃用（旧演进定位产物）；字段保留对齐后端 JSON，新分析产出存 `sectors.{form,lens,analysis}` |
-| `sectors` | JSONB | — | 复合对象 `{form, lens, analysis}`：`form`=话题形态（`event_chain`/`theme_vein`/`single_point`/`sparse`）；`lens`=选定的分析视角；`analysis`=按 `form` 多态的分层见解（如 `event_chain`={fact_layer,timeline,insight_layer}）。免 DDL 复用列，schema 由 `form` 决定 |
+| `sectors` | JSONB | — | 复合对象，按 `result_kind` 多态：topic 档 `{form, lens, analysis}`；`board_brief` 载 `{summary, observations, relationships, uncertainties, research_questions, lane_refs, degraded?, retry_reason?}`；`board_investigation` 载 `{question, hypotheses, conclusion, evidence_chain, lane_refs, method_refs, retry_reason?}`（lane evidence 持久化统一使用十进制字符串 `ref`；provider 的安全数值 `lane_id` 别名只在 parser 内归一，不落双字段）；legacy 原样透传 v1 五字段。免 DDL 复用列 |
 | `causal_chain` | TEXT | — | ⚠️ causal-analysis-agent 起弃用（旧演进定位产物）；字段保留对齐后端 JSON |
-| `tool_calls` | JSONB | — | 工具调用记录（名/参数/返回摘要/耗时） |
-| `input_snapshot` | JSONB | — | 编排元数据（读的 context 层 / as_of / section 范围 / 引用 review ID） |
+| `tool_calls` | JSONB | — | 工具调用记录（名/参数/返回摘要/耗时；调查档为共享研究循环完整有序记录） |
+| `input_snapshot` | JSONB | — | 编排元数据（读的 context 层 / as_of / section 范围 / 引用 review ID；调查档含父简报投影/方法选择 trace/假设重试码/研究覆盖，以及综合 generation 的 `attempts`/`retry_reason`/窄修复 `repair_reason=terminal_root_delimiter` 等） |
 | `session_id` | VARCHAR(120) | — | 编排分组键，关联 `ai_call_logs.session_id` |
 | `created_at` | TIMESTAMPTZ | — | 创建时间 |
+
+**result_kind 约束体系（迁移 `20260828_0001`，全库唯三真实 DB FK 之一在此）**：
+
+- **形状约束** `chk_topic_enrichment_result_parent_shape`：`topic_analysis` = scope topic + topic owner + 无父无 key；`board_brief`/`legacy_board_analysis` = scope board + board owner + 无父无 key；`board_investigation` = scope board + board owner + 父非空 + 64-hex key 非空（owner 互斥，scope 与 owner 不符的脏行无法落库）。
+- **复合 FK** `fk_topic_enrichment_result_parent_board (parent_result_id, semantic_board_id) → (id, semantic_board_id)` `ON DELETE RESTRICT`（靶靠唯一约束 `uq_topic_enrichment_result_id_board` 存在）：父必存在且同板块。
+- **触发器** `trg_validate_topic_enrichment_result_parent`（`BEFORE INSERT OR UPDATE OF result_kind, parent_result_id, semantic_board_id`，函数 `validate_topic_enrichment_result_parent`）：调查父必须是同板块 `board_brief`；有子调查的 brief 不得改 kind/换板块——直写 SQL/GORM 也被拦。
+- **索引**：`idx_topic_enrichment_result_board_kind_id (semantic_board_id, result_kind, id DESC)`（kind 列表/上一份同 kind 查询）；`idx_topic_enrichment_result_parent_question_id (parent_result_id, question_key, id DESC)` partial `WHERE parent_result_id IS NOT NULL`（同父同题重跑对比）。
+- **回填与拒绝**：升级时旧 board 行回填 `legacy_board_analysis`、旧 topic 行回填 `topic_analysis`，sectors JSON 原样不动；存在 mixed/missing owner 行或非法调查父行则**拒绝迁移**（不掩盖数据损坏）；迁移仅向上（无 Down）。
+- `EffectiveResultKind`（代码层兼容）：空 kind 的内存历史 fixture 按 scope 兑底（board→legacy，topic→topic_analysis），与 DB 默认一致。
 
 ### 10.4 topic_enrichment_review（数据增强认知演进反思）
 
@@ -910,7 +938,7 @@ FinGenius 多角色辩论输出，按 `(result_id, sector, code)` 维度 append-
 
 ### 10.6 topic_enrichment_qa（报告追问记录，多轮 append-only）
 
-报告（`topic_enrichment_result`）生成后保持不可变。用户对同一报告发起的多轮追问，每轮追加一行（`source="qa"`），报告本身从不被改写。`sedimented` 标记用户手动 pin 的持久笔记，仅翻转 qa 行 flag，不回写 result。
+报告（`topic_enrichment_result`）生成后保持不可变。用户对同一报告发起的多轮追问，每轮追加一行（`source="qa"`），报告本身从不被改写。`sedimented` 标记用户手动 pin 的持久笔记，仅翻转 qa 行 flag，不回写 result。话题档（`/results/:id/qa`）与板块档（`/semantic-boards/:id/.../results/:rid/qa`）共用本表，按 `topic_enrichment_result_id` 归属（board 档三种 kind——简报/调查/legacy——均可追问）。
 
 | 字段名 | 类型 | 约束/默认/索引 | 用途 |
 | -------- | ------ | ------ | ------ |
@@ -926,19 +954,92 @@ FinGenius 多角色辩论输出，按 `(result_id, sector, code)` 维度 append-
 **不变量**：`sediment` 仅翻转 `sedimented` flag，`topic_enrichment_result` 表永不重写（业务约束：result 不可变）。`sedimented` 列由迁移 `20260723_xxxx` 补齐（幂等 `ADD COLUMN IF NOT EXISTS`）。
 
 ---
-### 10.7 reference_roles（参考角色/方法论画像，board-level-deep-analysis）
+### 10.7 reference_roles（旧参考角色/方法论画像，已退役只读）
 
-方法论画像库（如「内部看美国」分析基因），注入循环 B 三环节 system prompt——只注入分析方法不注入事实。首份画像由迁移 `20260826_0002` seed（幂等 ON CONFLICT）。
+v1 方法论画像库（如「内部看美国」分析基因），**已退役**：所有 topic/board prompt 均不再注入本表内容。GET API 保留一版本供迁移查看；写 API（POST/PUT/DELETE）一律 410，指向 `analysis_methods`（见 §10.8）。
 
 | 字段名 | 类型 | 约束/默认/索引 | 用途 |
 | -------- | ------ | ------ | ------ |
 | `id` | BIGSERIAL | PK | 主键 |
 | `name` | VARCHAR(120) | NOT NULL; UNIQUE | 唯一短名（如 inside-america） |
 | `title` | VARCHAR(200) | — | 展示标题 |
-| `content` | TEXT | NOT NULL | 画像正文（注入 prompt；单条 >4000 字符 rune 计注入时整条丢弃） |
-| `enabled` | BOOLEAN | NOT NULL | 启用即注入；启停即时生效（后端现查 DB） |
+| `content` | TEXT | NOT NULL | 画像正文（退役前注入 prompt；>4000 字符 rune 计整条丢弃） |
+| `enabled` | BOOLEAN | NOT NULL | 历史启停位（现无 prompt 调用方，仅历史状态展示） |
 | `created_at` / `updated_at` | TIMESTAMPTZ | — | 时间戳 |
 
+**退役迁移**：`20260828_0002` 将全部旧角色按原文字节复制为 `analysis_methods` 的 `enabled=false`/`legacy=true` 行（`ON CONFLICT(name) DO NOTHING`，不覆盖用户编辑）；`20260831_0001` 将未被用户编辑过的系统 seed 画像（identity 钉死 name+seeded title+frozen content 字节）翻 `enabled=false`，**用户编辑过的行不动**（已无调用方，无论如何都不再注入）。原表与原文字节保留，不删除。
+
+### 10.8 analysis_methods（分析方法卡库，board-level-deep-analysis）
+
+全局方法卡库：声明适用/禁用/证据/失败模式边界，仅在调查链（board_method_select）按问题选中 0-2 张、经清洗后注入 hypothesize/synthesize；简报/事实阶段永不注入。设置页「分析方法」section 即本表。
+
+| 字段名 | 类型 | 约束/默认/索引 | 用途 |
+| -------- | ------ | ------ | ------ |
+| `id` | BIGSERIAL | PK | 主键 |
+| `name` | VARCHAR(120) | NOT NULL; UNIQUE | 唯一短名（重名创建/改名 → 409） |
+| `title` | VARCHAR(200) | — | 展示标题 |
+| `summary` | TEXT | — | 摘要 |
+| `selection_meta` | JSONB | NOT NULL DEFAULT '{}' | 强类型选择元数据：`{applicable_when[], avoid_when[], required_evidence[], failure_modes[]}`（保存时 normalize；选择器只看本字段不读正文） |
+| `content` | TEXT | NOT NULL | 方法卡正文（注入前经 `method_sanitizer` 清洗固定修辞；原始字节参与 content_hash） |
+| `enabled` | BOOLEAN | NOT NULL（默认 false） | 启停，即时生效（每次调查现查 enabled 卡） |
+| `legacy` | BOOLEAN | NOT NULL DEFAULT false | 旧参考角色迁移标记（默认停用，提示人工整理后启用） |
+| `deleted_at` | TIMESTAMPTZ | NULL; index（GORM 软删除） | 软删除；历史调查 `method_refs`（含 content_hash）仍可追溯 |
+| `created_at` / `updated_at` | TIMESTAMPTZ | — | 时间戳 |
+
+**迁移**：`20260828_0002` 从 `reference_roles` 按原文字节复制（summary 固定迁移提示语、selection_meta 四空数组、enabled=false、legacy=true），`ON CONFLICT(name) DO NOTHING` 幂等——同名新方法（用户已建）存在时跳过，不覆盖用户编辑。
+
+
+### 10.9 cross_board_relation_runs（跨版块关系发现 run 审计，add-evidence-backed-cross-board-relations）
+
+一次发现运行的不可变审计快照（source 原文冻结、预算快照、全部工具调用与 gap）。run 只增不改；relation 生命周期的溯源入口。
+
+| 字段名 | 类型 | 约束/默认/索引 | 用途 |
+| -------- | ------ | ------ | ------ |
+| `id` | BIGSERIAL | PK | 主键 |
+| `semantic_board_id`/`source_board_id` | BIGINT | NOT NULL; index `idx_cbr_runs_board` | 发起板块 |
+| `parent_result_id` | BIGINT | NOT NULL | 父简报 result ID（跨表引用 topic_enrichment_result，逻辑外键） |
+| `source_kind` | VARCHAR(20) | NOT NULL; CHECK ∈ observation/question | 来源类型 |
+| `source_key` | VARCHAR(40) | NOT NULL | 父简报内的观察/问题 id（如 o1/q1） |
+| `source_text` | TEXT | NOT NULL | 冻结的来源原文（父简报不可变，双保险） |
+| `trigger_kind` | VARCHAR(10) | NOT NULL; CHECK ∈ manual/auto | 手动按钮 or 简报落库自动 |
+| `status` | VARCHAR(20) | NOT NULL; CHECK ∈ running/succeeded/failed | run 终态（失败也不删，审计保留） |
+| `budget_snapshot` | JSONB | DEFAULT '{}' | 预算快照（搜索/抓取/loop/timeout 与 skipped 记录） |
+| `tool_calls` | JSONB | DEFAULT '[]' | 全部工具调用留痕（可追溯要求） |
+| `gaps` | JSONB | DEFAULT '[]' | 诚实降级记录（search_budget_exhausted/web_search_error 等） |
+| `error` | TEXT | — | 失败原因（成功为空） |
+| `created_at`/`updated_at` | TIMESTAMPTZ | — | 时间戳 |
+
+### 10.10 cross_board_relations（跨版块关系生命周期）
+
+关系行本体 + 证据。生命周期 `unresolved → proposed → confirmed/dismissed`；confirmed 到期转 `expired`（读取路径即时判 + `relation_expire` 每小时批量转）。
+
+| 字段名 | 类型 | 约束/默认/索引 | 用途 |
+| -------- | ------ | ------ | ------ |
+| `id` | BIGSERIAL | PK | 主键 |
+| `run_id` | BIGINT | NULL; index | 产生本行的 run（rejected 只留 run 无 relation） |
+| `source_board_id` | BIGINT | NOT NULL; index `idx_cbr_source`/`idx_cbr_target` | 关系起点版块 |
+| `target_board_id` | BIGINT | NULL | 解析成功的目标版块（unresolved 为 NULL——外部概念暂无内部目标） |
+| `target_lane_id` | BIGINT | NULL | 可选进一步定位的泳道 |
+| `target_concept` | TEXT | NOT NULL | 外部检索提到的目标概念原文（如「日债收益率」） |
+| `relation_type` | VARCHAR(30) | NOT NULL; CHECK ∈ causal/common_driver/divergence/correlated/contextual/unclear | 关系类型枚举 |
+| `claim` | TEXT | NOT NULL | 关系主张（一句话） |
+| `mechanism` | TEXT | — | 传导机制说明 |
+| `verification_verdict` | VARCHAR(20) | NOT NULL; CHECK ∈ supported/contested/insufficient/rejected | 盲验结论 |
+| `quality_grade` | VARCHAR(10) | NOT NULL DEFAULT 'none'; CHECK ∈ high/medium/low/none | 机械质量分级（程序计算，非模型自评） |
+| `evidence` | JSONB | DEFAULT '[]' | 支持证据（url/quote/institution/date/verified；quote 与工具原文保守 substring 核对） |
+| `counterevidence` | JSONB | DEFAULT '[]' | 反证（verifier 反证检索所得） |
+| `status` | VARCHAR(20) | NOT NULL; CHECK ∈ unresolved/proposed/confirmed/dismissed/expired | 生命周期状态 |
+| `suggestion_hash` | VARCHAR(32) | NOT NULL; **部分唯一索引** `uq_cross_board_relations_open (suggestion_hash) WHERE status IN ('unresolved','proposed')` | 幂等指纹（mode+source+target 概念归一）——open 态防重复，终态后可重生 |
+| `evidence_version` | VARCHAR(20) | — | 证据版本（quote 核对通过标记） |
+| `expires_at` | TIMESTAMPTZ | NULL | confirmed 有效期（TTL 默认 720h） |
+| `confirmed_at`/`confirmed_by` | TIMESTAMPTZ/VARCHAR(20) | NULL | 用户确认时间/操作者（"user"） |
+| `dismissed_at`/`dismiss_reason`/`dismissed_by` | TIMESTAMPTZ/TEXT/VARCHAR(20) | NULL | 驳回留痕（reason 必填；同 hash 冷却默认 14 天防重现） |
+| `expired_at` | TIMESTAMPTZ | NULL | 批量过期时间戳 |
+| `created_at`/`updated_at` | TIMESTAMPTZ | — | 时间戳 |
+
+**迁移**：`20260901_0001`（CHECK 枚举 + 部分唯一索引 + 两个 board 索引）。
+
+**关联**：`semantic_labels.relation_auto_discovery_enabled` BOOLEAN DEFAULT false——板级自动发现开关（同迁移加列）。
 
 ## §11 用户行为与偏好发现域
 
@@ -1259,6 +1360,11 @@ UNIQUE(route_id, param_name, value) 复合唯一索引防同参数重复录入�
 ---
 
 ## 更新日志
+### 2026-09-02（add-evidence-backed-cross-board-relations）
+
+- 新增 `cross_board_relation_runs` / `cross_board_relations` 两表（迁移 `20260901_0001`：CHECK 枚举 + 部分唯一索引 `uq_cross_board_relations_open`）。
+- `semantic_labels` 加列 `relation_auto_discovery_enabled`（默认 false）。
+- §10.9 / §10.10 完整字段表。
 
 ### 2026-07-30（feed-param-options）
 

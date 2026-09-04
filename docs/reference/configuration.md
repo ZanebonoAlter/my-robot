@@ -217,15 +217,15 @@ AI 相关配置不存储在文件或环境变量中 — 通过 Web UI 管理并�
 | capability | 路由建议名 | 说明 |
 |------------|-----------|------|
 | `data_enrichment_news` | `data-enrichment-news` | 循环A新闻汇总（`summarize_context`），量大可配便宜模型 |
-| `data_enrichment_analysis` | `data-enrichment-analysis` | 循环B分析认知（`interpret` / `tool_use` / `analyze` / `review_judge`） |
+| `data_enrichment_analysis` | `data-enrichment-analysis` | 循环B分析认知（`interpret` / `tool_use` / `analyze` / `review_judge`）与版块链（`board_brief` / `board_method_select` / `board_hypothesize` / `board_synthesize`；调查共享研究循环复用 `tool_use`） |
 
 两条路由均需在 `ai_routes` 表 seed 为启用状态，并绑定到 `ai_route_providers` 中的至少一个 provider。
 
-#### 2. Provider 需配 `enable_thinking=false`
+#### 2. Qwen3 / Qwythos Provider 需配 `enable_thinking=false`
 
-根据设计决策（design.md §11 决策①），`data_enrichment_news` 和 `data_enrichment_analysis` 路由指向的 provider 必须设置 `enable_thinking=false`。Qwen3 等带思考模板的模型在 thinking 模式下会烧光 token 导致 `content` 为空——当前 agent loop 的 system prompt + 低 max_tokens 设计不兼容 thinking 模式。
+根据设计决策（design.md §11 决策①），`data_enrichment_news` 和 `data_enrichment_analysis` 路由中使用 Qwen3 / Qwythos 模板的本地 provider 必须设置 `enable_thinking=false`。这类模型在 thinking 模式下可能烧光 token 并导致 `content` 为空，当前 agent loop 的 system prompt + max_tokens 预算不兼容这种隐式思考模板。其他兼容供应商按各自协议与模型配置决定，不要为了处理响应慢而一刀切修改 thinking 开关。
 
-> **注意**：此配置是 provider 级别的（`ai_providers` 表 `enable_thinking` 字段），不是 per-request 参数。domain 代码不做特殊处理，照常调用 `airouter.Router.Chat`。airouter 请求层始终透传 `chat_template_kwargs.enable_thinking = provider.EnableThinking`（参见 `openai_compatible.go:206` `buildPayload`）。
+> **注意**：此配置是 provider 级别的（`ai_providers` 表 `enable_thinking` 字段），不是 per-request 参数。domain 代码不做特殊处理，照常调用 `airouter.Router.Chat`。airouter 请求层始终透传 `chat_template_kwargs.enable_thinking = provider.EnableThinking`（参见 `openai_compatible.go` 的 `buildPayload`）。
 
 #### 3. 板块编辑需开 `enrichment_enabled=true`
 
@@ -244,6 +244,41 @@ AI 相关配置不存储在文件或环境变量中 — 通过 Web UI 管理并�
 - **配 key（首选·设置界面）**：设置页「博查搜索」section（`GET/POST /api/settings/bocha`，存 `ai_settings` 表 `bocha_config`，照 Firecrawl）。界面改**即时生效、无需重启**（`BochaWebSearcher` 每次 `Search` 动态读 DB）。GET 返回脱敏 key（不回显完整值）；保存时 api_key 留空=不改、输入新值才覆盖。
 - **配 key（兜底·无界面/部署）**：`configs/config.yaml` 的 `bocha.api_key` 或环境变量 `BOCHA_API_KEY`。优先级 **界面 DB > env > config.yaml > 空**。
 - 无 key 时：`web_search`/`fetch_page` 降级，深度层仍产出但证据链弱（仅靠分层新闻 context）。
+
+#### 5. Provider 超时（`ai_providers.timeout_seconds`，慢模型必调）
+
+`data_enrichment_analysis` 路由指向的 provider 每次调用可设 HTTP 超时（`ai_providers.timeout_seconds`，DB 默认 120 秒；设置页 AI 供应商面板 / `PUT /api/ai/providers/:id` 可改）。**没有专用环境变量**，这是纯 DB 配置。
+
+- **慢供应商建议 600 秒（10 分钟）**：版块调查链（`board_hypothesize` → 共享研究循环多轮 `tool_use` → `board_synthesize`）单次 LLM 调用在慢速模型上实测可达 6 分半（glm-5.3-flash 两次 HTTP 200 均在 358-389 秒），默认 120 秒会把这类调用拦腰截断。按 2026-08-31 用户决定：慢速 `data_enrichment_analysis` 供应商建议/当前操作口径调到 600 秒。
+- **总 job 上限不变**：单次分析（简报/调查/单泳道）后台 job 硬上限 30 分钟（`analysisJobTimeout`），provider 超时只影响单次 LLM 调用，不动总预算。
+- **修改即时生效、无需重启**：airouter 每次调用经 `LoadRouteWithProviders` 现查路由与 provider（`openai_compatible.go` 按当次 `provider.TimeoutSeconds` 建 client 超时）。
+- 另：HTTP 成功但 assistant content 为空的响应会被 airouter 统一规范化为可重试失败（`error_code=empty_response`）并走 ordered fallback，不会把空文本当成功结果消费（board-level-deep-analysis 2026-08-31 修复，见 flow/ai-summary 与 standard/backend/ai-logging）。
+
+#### 6. 分析方法卡（UI 管理，无配置文件项）
+
+方法卡（`analysis_methods` 表）经设置页「分析方法」section 或 `/api/analysis-methods` CRUD 管理（创建默认停用，启停即时生效）；仅调查链按问题选中 0-2 张注入，不进简报/事实阶段。旧参考角色（`reference_roles`）已退役只读。详见 [api/dataenrichment.md](api/dataenrichment.md)。
+
+#### 6. 跨版块关系发现（add-evidence-backed-cross-board-relations，默认关闭）
+
+全局预算/门槛存 `configs/config.yaml` 的 `cross_board_rel` 段（`CrossBoardRelationConfig`，代码默认值兜底见 `config.EffectiveCrossBoardRelationConfig`）：
+
+| 键 | 默认 | 说明 |
+| ---- | ---- | ---- |
+| `auto_max_sources_per_brief` | 3 | 自动发现：每份新简报最多取几个 observation 发起发现。**-1 = 全局显式禁用**（effective 0）；未配置/0 = 用默认 3。**自动发现整体默认关闭**——板级开关不开启就永不自动跑 |
+| `max_searches_per_run` | 4 | 单次发现 run 的 web_search 调用上限（scout 2-4 query + verifier 反证共享口径按阶段分别计数） |
+| `max_fetches_per_run` | 2 | 单次 run 的 fetch_page 上限 |
+| `max_loops_per_run` | 6 | scout loop 轮数上限 |
+| `run_timeout_seconds` | 300 | 单次 run 整体超时 |
+| `resolve_threshold` | 0.62 | 目标解析 top-1 最低分（embedding cosine 或词法归一分） |
+| `resolve_margin` | 0.08 | top1-top2 最小差距——不足则 ambiguous（unresolved 不硬选） |
+| `dismiss_cooldown_days` | 14 | 被驳回关系的同 suggestion_hash 冷却期 |
+| `confirmed_ttl_hours` | 720 | confirmed 关系有效期（30 天，到期转 expired 不再注入简报） |
+| `brief_max_relations` | 3 | 单份简报最多注入几条 confirmed 关系 |
+| `brief_max_relation_runes` | 1200 | 简报注入块字符预算（超限截断并在快照记 truncated） |
+
+**板级开关**（DB，非 yaml）：`semantic_labels.relation_auto_discovery_enabled`（默认 false，板块编辑弹窗可切）。层级关系：板级开关关 → 永不自动；开关开但全局 `auto_max_sources_per_brief` ≤ 0 → 仍不自动。手动「发现关联」不受这两个开关限制（按 source 互斥 + hash 幂等防重）。
+
+博查 key 复用上文「数据增强 §4」同一配置（界面 > env > config.yaml）——跨版块发现的 Scout/Verify 检索走同一 web_search 后端；无 key 时诚实降级（gap 记录 `web_search_error`，不阻断）。
 
 ### 出站代理（`http_proxy_config`）
 

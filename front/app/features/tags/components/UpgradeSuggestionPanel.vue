@@ -40,12 +40,13 @@ const mergeSearchByRow = ref<Record<number, string>>({})
 const selectedAuxByRow = ref<Record<number, Set<number>>>({})
 
 // ---- 持久化建议过滤（主数据源） ----
-type PersistedFilter = 'all' | 'merge_into_existing' | 'create_new' | 'watch'
+type PersistedFilter = 'all' | 'merge_into_existing' | 'create_new' | 'watch' | 'compose'
 const persistedFilter = ref<PersistedFilter>('all')
 const filterTabs: { key: PersistedFilter; label: string }[] = [
   { key: 'all', label: '全部' },
   { key: 'merge_into_existing', label: '合并' },
   { key: 'create_new', label: '新建' },
+  { key: 'compose', label: '组合' },
   { key: 'watch', label: '观察池' },
 ]
 
@@ -139,6 +140,20 @@ function rowOffShortlist(row: UpgradeSuggestionRow): boolean {
   return row.evidence?.target_off_shortlist === true
 }
 
+// ---- compose 建议证据（安全读取，缺 key 降级） ----
+function composeCooccurrence(row: UpgradeSuggestionRow): number | null {
+  const v = row.evidence?.compose_cooccurrence
+  return typeof v === 'number' ? v : null
+}
+function composeWindowDays(row: UpgradeSuggestionRow): number | null {
+  const v = row.evidence?.compose_window_days
+  return typeof v === 'number' ? v : null
+}
+function composeRepresentTitles(row: UpgradeSuggestionRow): string[] {
+  const v = row.evidence?.compose_representative_titles
+  return Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : []
+}
+
 // 某行下拉的关键字（双向绑定用）。
 function mergeSearch(rowId: number): string {
   return mergeSearchByRow.value[rowId] ?? ''
@@ -173,6 +188,11 @@ function handleConfirmCreateRow(row: UpgradeSuggestionRow) {
   emit('confirmRow', { ...row, auxiliary_label_ids: selectedAuxIds(row) })
 }
 
+// compose 行确认：创建组合标签（带勾选组件子集）。
+function handleConfirmComposeRow(row: UpgradeSuggestionRow) {
+  emit('confirmRow', { ...row, decision: 'compose', auxiliary_label_ids: selectedAuxIds(row) })
+}
+
 // ---- 手动合并（内存建议，保留现状，§6.3 不动） ----
 function toggleMerge(index: number) {
   openMergeIndex.value = openMergeIndex.value === index ? null : index
@@ -190,6 +210,7 @@ function decisionLabel(d: string): string {
   switch (d) {
     case 'create_new': return '创建新板块'
     case 'merge_into_existing': return '合并到已有板块'
+    case 'compose': return '创建组合标签'
     case 'watch': return '观察池'
     case 'skip': return '跳过'
     default: return d
@@ -200,6 +221,7 @@ function decisionStyle(d: string): { border: string; bg: string; color: string }
   switch (d) {
     case 'create_new': return { border: 'var(--color-success-border, rgba(61,138,74,0.3))', bg: 'var(--color-success-bg, rgba(61,138,74,0.08))', color: 'var(--color-success)' }
     case 'merge_into_existing': return { border: 'var(--color-link-border)', bg: 'var(--color-link-subtle)', color: 'var(--color-link)' }
+    case 'compose': return { border: 'var(--color-accent-border, rgba(120,80,200,0.3))', bg: 'var(--color-accent-subtle)', color: 'var(--color-accent)' }
     case 'watch': return { border: 'var(--color-warning-border, rgba(180,140,40,0.3))', bg: 'var(--color-warning-bg, rgba(180,140,40,0.08))', color: 'var(--color-warning, #b48c28)' }
     case 'skip': return { border: 'var(--color-border-medium)', bg: 'var(--color-bg-sunken)', color: 'var(--color-text-muted)' }
     default: return { border: 'var(--color-border-subtle)', bg: 'var(--color-bg-hover)', color: 'var(--color-text-secondary)' }
@@ -310,6 +332,13 @@ function decisionStyle(d: string): { border: string; bg: string; color: string }
                 <span class="usp-evidence-label">共现：</span>
                 <span v-for="(e, ei) in cotagEvents(row)" :key="'ce' + ei" class="usp-evidence-chip">{{ e }}</span>
               </div>
+              <div v-if="row.decision === 'compose' && (composeCooccurrence(row) !== null || composeRepresentTitles(row).length > 0)" class="usp-evidence" data-testid="compose-evidence">
+                <span class="usp-evidence-label">组合证据：</span>
+                <span v-if="composeCooccurrence(row) !== null" class="usp-evidence-chip" data-testid="compose-cooccurrence">
+                  共现 {{ composeCooccurrence(row) }} 篇<template v-if="composeWindowDays(row)"> / {{ composeWindowDays(row) }} 天窗口</template>
+                </span>
+                <span v-for="(title, ti) in composeRepresentTitles(row)" :key="'rt' + ti" class="usp-evidence-chip" :title="title">{{ title }}</span>
+              </div>
               <div v-if="shortlist(row).length > 0" class="usp-evidence">
                 <span class="usp-evidence-label">候选版块：</span>
                 <span v-for="(s, si) in shortlist(row)" :key="'sl' + si" class="usp-evidence-chip">{{ s.board_label || ('板块 #' + s.board_id) }}</span>
@@ -379,6 +408,18 @@ function decisionStyle(d: string): { border: string; bg: string; color: string }
                 >
                   <Icon icon="mdi:check" width="12" />
                   创建新版块
+                </button>
+                <button
+                  v-if="row.decision === 'compose'"
+                  type="button"
+                  class="usp-item-btn usp-item-btn--primary"
+                  :disabled="selectedAuxCount(row) < 2"
+                  :title="selectedAuxCount(row) < 2 ? '组合标签至少需要 2 个组件' : undefined"
+                  data-testid="compose-confirm"
+                  @click="handleConfirmComposeRow(row)"
+                >
+                  <Icon icon="mdi:check" width="12" />
+                  创建组合
                 </button>
                 <button
                   type="button"

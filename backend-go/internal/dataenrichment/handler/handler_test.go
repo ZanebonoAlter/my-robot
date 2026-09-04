@@ -1,7 +1,6 @@
 package handler_test
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -102,6 +101,29 @@ type mockOrchestrator struct {
 	boardOut    *service.BoardEnrichmentOutput
 	boardErr    error
 	block       chan struct{} // non-nil → EnrichBoard waits until closed (re-entry tests)
+
+	// investigation mock (D9 5.x): investBlock gates the background run;
+	// investCalls counts entries (0-call assertions for sync rejections).
+	investOut        *service.BoardInvestigationOutput
+	investErr        error
+	investBlock      chan struct{}
+	investCalls      int
+	lastInvestBoard  uint
+	lastInvestParent uint
+	lastInvestQ      *service.BoardInvestigationQuestion
+
+	// relation discovery mock (add-evidence-backed-cross-board-relations):
+	// relationBlock gates the background run; relationCalls counts entries.
+	relationOut     *service.RelationDiscoveryOutput
+	relationErr     error
+	relationBlock   chan struct{}
+	relationCalls   int
+	lastRelationIn  *service.RelationDiscoveryInput
+	relationInputs  []service.RelationDiscoveryInput
+	reResolveOut    *service.RelationReResolveOutput
+	reResolveErr    error
+	reResolveCalls  int
+	lastReResolveID uint
 }
 
 func (m *mockOrchestrator) BoardEnrichmentEnabled(ctx context.Context, boardID uint) error {
@@ -134,6 +156,24 @@ func (m *mockOrchestrator) EnrichTopic(ctx context.Context, topicID uint) (*serv
 	return m.output, nil
 }
 
+func (m *mockOrchestrator) InvestigateBoardQuestion(ctx context.Context, boardID uint, parentBriefID uint, question service.BoardInvestigationQuestion) (*service.BoardInvestigationOutput, error) {
+	m.investCalls++
+	m.lastInvestBoard = boardID
+	m.lastInvestParent = parentBriefID
+	q := question
+	m.lastInvestQ = &q
+	if m.investBlock != nil {
+		<-m.investBlock
+	}
+	if m.investErr != nil {
+		return nil, m.investErr
+	}
+	if m.investOut != nil {
+		return m.investOut, nil
+	}
+	return nil, fmt.Errorf("mock InvestigateBoardQuestion: not configured")
+}
+
 func newTestHandler(db *gorm.DB, lifelineSvc handler.LifelineService, orch handler.Orchestrator, cfg service.BoardConfigReader) *handler.EnrichmentHandler {
 	return handler.NewHandler(repository.Repo, lifelineSvc, orch, cfg, nil, nil, db)
 }
@@ -164,8 +204,20 @@ func doRequest(t *testing.T, r *gin.Engine, method, path string, body string) *h
 // expectJSONSuccess asserts the response has success=true and parses data into v.
 func expectJSONSuccess(t *testing.T, w *httptest.ResponseRecorder, v any) {
 	t.Helper()
-	if w.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	expectJSONStatus(t, w, http.StatusOK, v)
+}
+
+// expectJSONAccepted asserts the async-trigger envelope: 202 + success payload
+// (D9: trigger endpoints are "started", not "done").
+func expectJSONAccepted(t *testing.T, w *httptest.ResponseRecorder, v any) {
+	t.Helper()
+	expectJSONStatus(t, w, http.StatusAccepted, v)
+}
+
+func expectJSONStatus(t *testing.T, w *httptest.ResponseRecorder, status int, v any) {
+	t.Helper()
+	if w.Code != status {
+		t.Fatalf("expected %d, got %d: %s", status, w.Code, w.Body.String())
 	}
 	var resp struct {
 		Success bool            `json:"success"`
@@ -461,7 +513,16 @@ func TestTriggerEnrichmentSuccess(t *testing.T) {
 	r := newTestRouter(h)
 
 	w := doRequest(t, r, "POST", "/api/persistent-topics/1/enrichment/results/trigger", "")
-	expectJSONSuccess(t, w, nil)
+	var started struct {
+		JobID   string `json:"job_id"`
+		JobKind string `json:"job_kind"`
+		Status  string `json:"status"`
+		Scope   string `json:"scope"`
+	}
+	expectJSONAccepted(t, w, &started)
+	if started.JobID == "" || started.JobKind != "topic_analysis" || started.Status != "started" || started.Scope != "topic" {
+		t.Fatalf("trigger envelope: %+v", started)
+	}
 
 	// Async: poll status until finished, then assert the persisted id and
 	// that EnrichTopic really ran (with the right topic).
@@ -1050,109 +1111,66 @@ func TestSedimentQA_IDORProtection(t *testing.T) {
 	}
 }
 
-// ── Reference roles CRUD (board-level-deep-analysis, tasks 2.1) ─────────────
+// ── Reference roles read-only compatibility (design D6) ────────────────────
 
 func TestReferenceRoleRoutes(t *testing.T) {
 	db := setupHandlerTestDB(t)
 	h := newTestHandler(db, &mockLifelineService{}, &mockOrchestrator{}, &alwaysEnabledBoardConfig{})
-
-	gin.SetMode(gin.TestMode)
-	r := gin.New()
-	h.RegisterRoutes(r.Group("/api"))
-
-	do := func(method, path string, body any) (*httptest.ResponseRecorder, map[string]any) {
-		var buf *bytes.Buffer
-		if body != nil {
-			raw, _ := json.Marshal(body)
-			buf = bytes.NewBuffer(raw)
-		} else {
-			buf = bytes.NewBuffer(nil)
-		}
-		req := httptest.NewRequest(method, path, buf)
-		req.Header.Set("Content-Type", "application/json")
-		w := httptest.NewRecorder()
-		r.ServeHTTP(w, req)
-		var resp map[string]any
-		_ = json.Unmarshal(w.Body.Bytes(), &resp)
-		return w, resp
+	role := &repository.ReferenceRole{Name: "compat-role", Title: "旧画像", Content: "原文", Enabled: true}
+	if err := repository.Repo.CreateReferenceRole(context.Background(), role); err != nil {
+		t.Fatalf("seed role: %v", err)
 	}
+	r := newTestRouter(h)
 
-	// Create (enabled defaults to true when omitted).
-	w, resp := do("POST", "/api/reference-roles", map[string]any{
-		"name": "inside-america", "title": "方法论画像", "content": "辩论流水线…",
-	})
-	if w.Code != http.StatusOK {
-		t.Fatalf("create: want 200, got %d (%v)", w.Code, resp)
-	}
-	data := resp["data"].(map[string]any)
-	roleID := int(data["id"].(float64))
-	if data["enabled"] != true {
-		t.Fatalf("create: enabled should default true, got %v", data["Enabled"])
-	}
-
-	// Create with enabled=false must NOT be flipped (GORM zero-value pitfall).
-	w, resp = do("POST", "/api/reference-roles", map[string]any{
-		"name": "disabled-role", "content": "x", "enabled": false,
-	})
-	if w.Code != http.StatusOK {
-		t.Fatalf("create disabled: want 200, got %d (%v)", w.Code, resp)
-	}
-	if resp["data"].(map[string]any)["enabled"] != false {
-		t.Fatalf("create disabled: enabled must stay false")
-	}
-
-	// Duplicate name → 409.
-	w, resp = do("POST", "/api/reference-roles", map[string]any{"name": "inside-america", "content": "dup"})
-	if w.Code != http.StatusConflict {
-		t.Fatalf("dup name: want 409, got %d", w.Code)
-	}
-
-	// Missing fields → 400.
-	w, _ = do("POST", "/api/reference-roles", map[string]any{"name": "no-content"})
-	if w.Code != http.StatusBadRequest {
-		t.Fatalf("missing content: want 400, got %d", w.Code)
-	}
-
-	// List.
-	w, resp = do("GET", "/api/reference-roles", nil)
-	if w.Code != http.StatusOK {
+	if w := doRequest(t, r, http.MethodGet, "/api/reference-roles", ""); w.Code != http.StatusOK {
 		t.Fatalf("list: want 200, got %d", w.Code)
 	}
-	if len(resp["data"].([]any)) != 2 {
-		t.Fatalf("list: want 2 roles, got %v", resp["data"])
+	if w := doRequest(t, r, http.MethodGet, fmt.Sprintf("/api/reference-roles/%d", role.ID), ""); w.Code != http.StatusOK {
+		t.Fatalf("get: want 200, got %d", w.Code)
 	}
+	for _, tc := range []struct{ method, path, body string }{
+		{http.MethodPost, "/api/reference-roles", `{"name":"new","content":"x"}`},
+		{http.MethodPut, fmt.Sprintf("/api/reference-roles/%d", role.ID), `{"enabled":false}`},
+		{http.MethodDelete, fmt.Sprintf("/api/reference-roles/%d", role.ID), ""},
+	} {
+		if w := doRequest(t, r, tc.method, tc.path, tc.body); w.Code != http.StatusGone {
+			t.Fatalf("%s %s: want 410, got %d", tc.method, tc.path, w.Code)
+		}
+	}
+	unchanged, err := repository.Repo.GetReferenceRoleByID(context.Background(), role.ID)
+	if err != nil || !unchanged.Enabled || unchanged.Content != "原文" {
+		t.Fatalf("legacy write changed stored role: role=%+v err=%v", unchanged, err)
+	}
+}
 
-	// Toggle enable/disable via PUT (settings UI path) — effective next run.
-	w, resp = do("PUT", fmt.Sprintf("/api/reference-roles/%d", roleID), map[string]any{"enabled": false})
-	if w.Code != http.StatusOK {
-		t.Fatalf("toggle: want 200, got %d (%v)", w.Code, resp)
+// RunRelationDiscovery implements the relation-discovery arm of the mock
+// (blocks on relationBlock when set, mirroring investBlock semantics).
+func (m *mockOrchestrator) RunRelationDiscovery(ctx context.Context, in service.RelationDiscoveryInput) (*service.RelationDiscoveryOutput, error) {
+	m.relationCalls++
+	snapshot := in
+	m.lastRelationIn = &snapshot
+	m.relationInputs = append(m.relationInputs, in)
+	if m.relationBlock != nil {
+		<-m.relationBlock
 	}
-	if resp["data"].(map[string]any)["enabled"] != false {
-		t.Fatalf("toggle: enabled must be false")
+	if m.relationErr != nil {
+		return nil, m.relationErr
 	}
+	if m.relationOut != nil {
+		return m.relationOut, nil
+	}
+	return &service.RelationDiscoveryOutput{Status: "succeeded"}, nil
+}
 
-	// Get by id reflects the toggle.
-	w, resp = do("GET", fmt.Sprintf("/api/reference-roles/%d", roleID), nil)
-	if w.Code != http.StatusOK || resp["data"].(map[string]any)["enabled"] != false {
-		t.Fatalf("get after toggle: wrong state (%d, %v)", w.Code, resp)
+// ReResolveRelation implements the relation re-resolve arm of the mock.
+func (m *mockOrchestrator) ReResolveRelation(ctx context.Context, boardID, relationID uint) (*service.RelationReResolveOutput, error) {
+	m.reResolveCalls++
+	m.lastReResolveID = relationID
+	if m.reResolveErr != nil {
+		return nil, m.reResolveErr
 	}
-
-	// Update content.
-	w, resp = do("PUT", fmt.Sprintf("/api/reference-roles/%d", roleID), map[string]any{"content": "v2 内容"})
-	if w.Code != http.StatusOK || resp["data"].(map[string]any)["content"] != "v2 内容" {
-		t.Fatalf("update content failed: %d %v", w.Code, resp)
+	if m.reResolveOut != nil {
+		return m.reResolveOut, nil
 	}
-
-	// Delete → gone.
-	w, _ = do("DELETE", fmt.Sprintf("/api/reference-roles/%d", roleID), nil)
-	w2, _ := do("GET", fmt.Sprintf("/api/reference-roles/%d", roleID), nil)
-	if w2.Code != http.StatusNotFound {
-		t.Fatalf("get after delete: want 404, got %d", w2.Code)
-	}
-
-	// 404 on unknown id.
-	w, _ = do("PUT", "/api/reference-roles/99999", map[string]any{"enabled": true})
-	if w.Code != http.StatusNotFound {
-		t.Fatalf("unknown id: want 404, got %d", w.Code)
-	}
+	return &service.RelationReResolveOutput{RelationID: relationID, NewStatus: "unresolved", Outcome: "no_match"}, nil
 }

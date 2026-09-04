@@ -215,7 +215,7 @@ describe("useBoardEnrichmentApi — endpoint contracts (data-enrichment P6)", ()
 		});
 	});
 
-	// ── Board-level analysis (board-level-deep-analysis D8) ─────────────────
+	// ── Board-level analysis (board-level-deep-analysis D8 + 5.x) ─────────
 	describe("board — analysis", () => {
 		it("triggerBoardAnalysis → POST /semantic-boards/:id/enrichment/analysis/trigger", async () => {
 			const api = useBoardEnrichmentApi();
@@ -225,11 +225,51 @@ describe("useBoardEnrichmentApi — endpoint contracts (data-enrichment P6)", ()
 			);
 		});
 
-		it("listBoardAnalysisResults → GET .../analysis/results", async () => {
+		it("getAnalysisStatusByJobId → GET /enrichment/analysis-status?job_id=…（按 job_id 精确轮询）", async () => {
+			const api = useBoardEnrichmentApi();
+			await api.getAnalysisStatusByJobId("abc123 def");
+			expect(getMock).toHaveBeenCalledWith(
+				"/enrichment/analysis-status?job_id=abc123%20def",
+			);
+		});
+
+		it("triggerBoardInvestigation(generated) → POST investigations/trigger with {briefing_result_id, question_id}", async () => {
+			const api = useBoardEnrichmentApi();
+			await api.triggerBoardInvestigation(31, {
+				briefing_result_id: 88,
+				question_id: "q1",
+			});
+			expect(postMock).toHaveBeenCalledWith(
+				"/semantic-boards/31/enrichment/analysis/investigations/trigger",
+				{ briefing_result_id: 88, question_id: "q1" },
+			);
+		});
+
+		it("triggerBoardInvestigation(custom) → POST investigations/trigger with {briefing_result_id, question}", async () => {
+			const api = useBoardEnrichmentApi();
+			await api.triggerBoardInvestigation(31, {
+				briefing_result_id: 88,
+				question: "两条泳道是否同一驱动？",
+			});
+			expect(postMock).toHaveBeenCalledWith(
+				"/semantic-boards/31/enrichment/analysis/investigations/trigger",
+				{ briefing_result_id: 88, question: "两条泳道是否同一驱动？" },
+			);
+		});
+
+		it("listBoardAnalysisResults → GET .../analysis/results（无 kind = 全部）", async () => {
 			const api = useBoardEnrichmentApi();
 			await api.listBoardAnalysisResults(31);
 			expect(getMock).toHaveBeenCalledWith(
 				"/semantic-boards/31/enrichment/analysis/results",
+			);
+		});
+
+		it("listBoardAnalysisResults(kind) → GET .../analysis/results?kind=board_brief", async () => {
+			const api = useBoardEnrichmentApi();
+			await api.listBoardAnalysisResults(31, "board_brief");
+			expect(getMock).toHaveBeenCalledWith(
+				"/semantic-boards/31/enrichment/analysis/results?kind=board_brief",
 			);
 		});
 
@@ -266,6 +306,34 @@ describe("useBoardEnrichmentApi — endpoint contracts (data-enrichment P6)", ()
 			await api.sedimentQA(7, 99);
 			expect(postMock).toHaveBeenCalledWith(
 				"/persistent-topics/7/enrichment/qa/99/sediment",
+			);
+		});
+	});
+
+	// ── Board QA: 版块报告追问（board-level-deep-analysis 6.2，design D5）──
+	describe("board qa — 版块报告追问（三 kind 均可，result 不可变 + QA append-only）", () => {
+		it("askBoardQA → POST /semantic-boards/:id/enrichment/analysis/results/:rid/qa with {question}", async () => {
+			const api = useBoardEnrichmentApi();
+			await api.askBoardQA(31, 88, "旧结论还成立吗");
+			expect(postMock).toHaveBeenCalledWith(
+				"/semantic-boards/31/enrichment/analysis/results/88/qa",
+				{ question: "旧结论还成立吗" },
+			);
+		});
+
+		it("listBoardQA → GET 同路径（多轮历史）", async () => {
+			const api = useBoardEnrichmentApi();
+			await api.listBoardQA(31, 88);
+			expect(getMock).toHaveBeenCalledWith(
+				"/semantic-boards/31/enrichment/analysis/results/88/qa",
+			);
+		});
+
+		it("sedimentBoardQA → POST .../results/:rid/qa/:qid/sediment（按 result+qa 双定位）", async () => {
+			const api = useBoardEnrichmentApi();
+			await api.sedimentBoardQA(31, 88, 99);
+			expect(postMock).toHaveBeenCalledWith(
+				"/semantic-boards/31/enrichment/analysis/results/88/qa/99/sediment",
 			);
 		});
 	});

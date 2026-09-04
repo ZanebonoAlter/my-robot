@@ -103,7 +103,7 @@ evidence_chain 尽量覆盖 ≥3 类证据：数据序列（机构统计/长序�
 
 // assembleBoardAnalyzePrompt builds the board analyze prompt (single assembly
 // point so the board branch is unit-testable without an LLM).
-func (o *OrchestratorService) assembleBoardAnalyzePrompt(ctx context.Context, thesis, angle, cardsMD string, topicsData []map[string]any) string {
+func (o *OrchestratorService) assembleBoardAnalyzePrompt(_ context.Context, thesis, angle, cardsMD string, topicsData []map[string]any) string {
 	topicsBlock := ""
 	for _, td := range topicsData {
 		topic, _ := td["topic"].(string)
@@ -115,7 +115,6 @@ func (o *OrchestratorService) assembleBoardAnalyzePrompt(ctx context.Context, th
 	}
 
 	prompt := fmt.Sprintf(boardAnalyzePrompt, thesis, angle, thesis, angle)
-	prompt += o.referenceRoleAppendix(ctx)
 	prompt += "\n\n---\n板块泳道态势卡:\n" + cardsMD + "\n\n各研究方向论据:\n" + topicsBlock
 	return prompt
 }
@@ -138,10 +137,9 @@ func MaxAgentLoopsForTest() int { return maxAgentLoops }
 
 // AssembleSingleLaneAnalyzePromptForTest exposes the single-lane analyze prompt
 // assembly (D10 applies to both scopes).
-func (o *OrchestratorService) AssembleSingleLaneAnalyzePromptForTest(ctx context.Context, form, lens, lifelineText, contextText string, topicsData []map[string]any) string {
+func (o *OrchestratorService) AssembleSingleLaneAnalyzePromptForTest(_ context.Context, form, lens, lifelineText, contextText string, topicsData []map[string]any) string {
 	// Mirrors analyze()'s assembly without the LLM call.
 	prompt := fmt.Sprintf(analyzePrompt, form, lens, form, lens)
-	prompt += o.referenceRoleAppendix(ctx)
 	if contextText != "" {
 		prompt += "\n\n---\n分层新闻上下文:\n" + contextText
 	}

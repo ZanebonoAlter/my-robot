@@ -6,6 +6,7 @@ import { useOnboarding } from '~/composables/useOnboarding'
 import AddSemanticBoardDialog from './AddSemanticBoardDialog.vue'
 import BoardCompositionPanel from './BoardCompositionPanel.vue'
 import AuxiliaryLabelPool from './AuxiliaryLabelPool.vue'
+import CompositeLabelPool from './CompositeLabelPool.vue'
 import UpgradeSuggestionPanel from './UpgradeSuggestionPanel.vue'
 import BackfillProgress from './BackfillProgress.vue'
 import MatchingConfigDialog from './MatchingConfigDialog.vue'
@@ -24,12 +25,15 @@ import { WATCH_PANEL_KEY } from './topic-watch/watchPanelInject'
 import { useTopicWatchesApi } from '~/api/topicWatches'
 import { useTagsPage } from '~/features/tags/composables/useTagsPage'
 
+// 标签池视图切换（未选板块时）：辅助标签 / 组合标签
+const poolTab = ref<'aux' | 'composite'>('aux')
+
 const {
   // Board CRUD
   boards, selectedBoardId, boardsLoading, boardsError,
-  compositionLabels, compositionLoading,
+  compositionLabels, compositionComposites, compositionLoading,
   editingBoard, editLabel, editDescription,
-  editEnrichmentEnabled, editWindowDays, editContextLayers,
+  editEnrichmentEnabled, editRelationAutoDiscoveryEnabled, editWindowDays, editContextLayers,
   editSaving, editError,
   showAddDialog,
   // Timeline
@@ -113,6 +117,12 @@ async function loadWatchCount() {
   watchCount.value = res.success && res.data ? res.data.length : 0
 }
 watch(selectedBoardId, () => { void loadWatchCount() })
+
+/** 跨版块关系跳转（5.3）：切换选中版块；目标不在列表（如已停用）时如实提示。 */
+function handleOpenBoard(boardId: number) {
+  if (boardId === selectedBoardId.value) return
+  selectedBoardId.value = boardId
+}
 onMounted(() => { void loadWatchCount() })
 </script>
 
@@ -189,6 +199,8 @@ onMounted(() => { void loadWatchCount() })
             v-if="contentTab === 'composition'"
             :board-id="selectedBoardId"
             :labels="compositionLabels"
+            :composites="compositionComposites"
+            :board-label="selectedBoardLabel"
             :loading="compositionLoading"
             @remove="handleRemoveComposition"
             @refresh="() => loadComposition(selectedBoardId!)"
@@ -200,6 +212,7 @@ onMounted(() => { void loadWatchCount() })
             :board-id="selectedBoardId"
             :enrichment-enabled="boards.find((b) => b.id === selectedBoardId)?.enrichment_enabled ?? false"
             @enrichment-toggled="loadBoards()"
+            @open-board="handleOpenBoard"
           />
 
           <BoardDailyReportTimeline
@@ -261,7 +274,12 @@ onMounted(() => { void loadWatchCount() })
         </div>
 
         <div v-else>
+          <div class="tags-pool-tabs">
+            <button type="button" class="tags-pool-tab" :class="{ 'is-active': poolTab === 'aux' }" @click="poolTab = 'aux'">辅助标签</button>
+            <button type="button" class="tags-pool-tab" :class="{ 'is-active': poolTab === 'composite' }" data-testid="pool-tab-composite" @click="poolTab = 'composite'">组合标签</button>
+          </div>
           <AuxiliaryLabelPool
+            v-if="poolTab === 'aux'"
             :labels="auxiliaryLabels"
             :clusters="auxClusters"
             :unclustered-count="auxUnclusteredCount"
@@ -277,6 +295,7 @@ onMounted(() => { void loadWatchCount() })
             @refresh="loadAuxiliaryLabels"
             @select-cluster="() => {}"
           />
+          <CompositeLabelPool v-if="poolTab === 'composite'" @changed="loadAuxiliaryLabels()" />
         </div>
       </main>
     </div>
@@ -297,6 +316,7 @@ onMounted(() => { void loadWatchCount() })
       :edit-label="editLabel"
       :edit-description="editDescription"
       :edit-enrichment-enabled="editEnrichmentEnabled"
+      :edit-relation-auto-discovery-enabled="editRelationAutoDiscoveryEnabled"
       :edit-window-days="editWindowDays"
       :edit-context-layers="editContextLayers"
       :edit-saving="editSaving"
@@ -304,6 +324,7 @@ onMounted(() => { void loadWatchCount() })
       @update:edit-label="(v: string) => editLabel = v"
       @update:edit-description="(v: string) => editDescription = v"
       @update:edit-enrichment-enabled="(v: boolean) => editEnrichmentEnabled = v"
+      @update:edit-relation-auto-discovery-enabled="(v: boolean) => editRelationAutoDiscoveryEnabled = v"
       @update:edit-window-days="(v: number) => editWindowDays = v"
       @update:edit-context-layers="(v: string[]) => editContextLayers = v"
       @save="handleSaveBoardEdit"
@@ -372,5 +393,10 @@ onMounted(() => { void loadWatchCount() })
 .tags-watch-chip--nowrap { white-space: nowrap; }
 .tags-watch-chip:hover { border-color: var(--color-accent); color: var(--color-accent); }
 .tags-watch-chip__n { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 0.66rem; color: var(--color-text-muted); background: var(--color-bg-hover); border-radius: 8px; padding: 0 0.15rem; }
+.tags-pool-tabs { display: flex; gap: 0.25rem; padding: 0 0 0.75rem; margin-bottom: 0.75rem; border-bottom: 1px solid var(--color-border-subtle); }
+.tags-pool-tab { display: flex; align-items: center; gap: 0.35rem; padding: 0.4rem 0.75rem; border: none; border-radius: 8px 8px 0 0; background: none; color: var(--color-text-muted); font-size: 0.75rem; cursor: pointer; transition: all 0.12s ease; position: relative; }
+.tags-pool-tab:hover { color: var(--color-text-secondary); background: var(--color-bg-hover); }
+.tags-pool-tab.is-active { color: var(--color-accent); background: var(--color-accent-subtle); }
+.tags-pool-tab.is-active::after { content: ''; position: absolute; bottom: -1px; left: 0; right: 0; height: 2px; background: var(--color-accent); border-radius: 1px; }
 .tags-bottombar { position: fixed; bottom: 0; left: 0; right: 0; z-index: 40; display: flex; align-items: center; justify-content: flex-end; gap: 0.75rem; padding: 0.45rem 1.25rem; border-top: 1px solid var(--color-border-subtle); background: var(--color-bg-elevated); backdrop-filter: blur(12px); }
 </style>

@@ -15,6 +15,8 @@ export interface SemanticBoard {
   protected: boolean
   /** 循环 B 增强开关（板块级，默认 false）。 */
   enrichment_enabled: boolean
+  /** 跨版块关系自动发现开关（add-evidence-backed-cross-board-relations；旧数据缺省 false）。 */
+  relation_auto_discovery_enabled?: boolean
   /** 循环 B 实时详情窗口（默认 14）。 */
   window_days: number
   /** 解读员读取的上下文层（默认 week/month/year/all）。 */
@@ -36,8 +38,19 @@ export interface AuxiliaryLabelItem {
   protected: boolean
 }
 
+/** 版块挂载的组合标签条目（add-composite-labels：composition 列复用）。 */
+export interface BoardCompositeMount {
+  id: number
+  label: string
+  slug: string
+  status: string
+  ref_count: number
+  components: string[]
+}
+
 export interface BoardCompositionResponse {
   items: AuxiliaryLabelItem[]
+  composites?: BoardCompositeMount[]
   total: number
 }
 
@@ -189,6 +202,7 @@ export interface MatchDetailConfig {
   direct_max_sim_min_hit_rate: number
   direct_hit_min_overlap: number
   direction_sim_threshold: number
+  direct_hit_score_factor?: number
   weight_sim: number
   weight_density: number
   weighted_threshold: number
@@ -210,6 +224,19 @@ export interface MatchDetailPair {
   is_hit: boolean
 }
 
+export interface CompositeHitComponent {
+  id: number
+  label: string
+  position: number
+}
+
+/** composite_hit 命中的组合标签（label + 有序组件序列）。 */
+export interface CompositeHit {
+  id: number
+  label: string
+  components: CompositeHitComponent[]
+}
+
 export interface MatchDetailResponse {
   topic_tag_id: number
   topic_tag_label: string
@@ -217,10 +244,12 @@ export interface MatchDetailResponse {
   match_reason: string
   score: number
   downgraded: boolean
+  direction_mismatch?: boolean
   direction_sim: number | null
   effective_min_hits: number
   config: MatchDetailConfig
   direct_hit_auxiliaries: DirectHitAuxiliary[]
+  composite_hits?: CompositeHit[]
   tag_auxiliary_count: number
   hits: number
   hit_rate: number
@@ -306,6 +335,7 @@ export function useSemanticBoardsApi() {
     protected?: boolean
     status?: string
     enrichment_enabled?: boolean
+    relation_auto_discovery_enabled?: boolean
     window_days?: number
     context_layers?: string[]
   }): Promise<ApiResponse<{ id: number }>> {
@@ -340,14 +370,14 @@ export function useSemanticBoardsApi() {
   }
 
   async function executeUpgrade(data: {
-    decision: 'create_new' | 'merge_into_existing'
+    decision: 'create_new' | 'merge_into_existing' | 'compose'
     board_label?: string
     description?: string
     target_board_id?: number
     auxiliary_label_ids: number[]
     /** 携带持久化建议 id：后端在同一事务内置为 confirmed（spec: confirm 联动）。 */
     suggestion_id?: number
-  }): Promise<ApiResponse<{ semantic_board_id: number; auxiliary_label_ids: number[] }>> {
+  }): Promise<ApiResponse<{ semantic_board_id: number; auxiliary_label_ids: number[]; composite_label_id?: number }>> {
     return apiClient.post('/semantic-boards/upgrade-execute', data)
   }
 

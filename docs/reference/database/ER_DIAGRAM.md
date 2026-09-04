@@ -80,7 +80,7 @@
 ```
 
 - 实线箭头 → 表示 **GORM 逻辑引用**（源表字段指向目标表 `id`）；除 `topic_tags.merged_into_id` 外均无 DB 级 FK。
-- `semantic_labels` 是语义标签中心表，辅助标签（`label_type=auxiliary`）和 SemanticBoard（`label_type=board`）共存于此表。
+- `semantic_labels` 是语义标签中心表，辅助标签（`label_type=auxiliary`）、SemanticBoard（`label_type=board`）与组合标签（`label_type=composite`，add-composite-labels）共存于此表。
 - `topic_tags` 通过 `topic_tag_semantic_labels` 和 `topic_tag_board_labels` 两张桥接表与 `semantic_labels` 关联。
 - `board_daily_reports` / `board_persistent_topics` / `board_topic_watches` / `board_data_sources` 均通过 `semantic_board_id` 逻辑引用 `semantic_labels`。
 - 「AI Summaries」域（`ai_summaries` 等）已废弃（无对应 model，见下文该域说明）。
@@ -237,6 +237,8 @@ erDiagram
     semantic_labels ||--o{ topic_tag_semantic_labels : "auxiliary label side"
     semantic_labels ||--o{ topic_tag_board_labels : "board side"
     semantic_labels ||--o{ board_composition : "board side"
+    semantic_labels ||--o{ composite_components : "composite side (FK CASCADE)"
+    semantic_labels ||--o{ composite_components : "component side (FK CASCADE)"
     semantic_labels ||--o{ board_upgrade_suggestions : "target_board_id (可空)"
     topic_tags ||--o{ topic_tag_semantic_labels : "tag side"
     topic_tags ||--o{ topic_tag_board_labels : "tag side"
@@ -382,7 +384,7 @@ erDiagram
 
 ### Data Enrichment（数据增强面）
 
-> 5 张表（`dataenrichment/repository/models.go`，由 `RegisterModels` 注册）。所有 `semantic_board_id` / `persistent_topic_id` 引用均为**逻辑关联，无 DB FK，无 OnDelete 声明**。
+> 7 张表（`dataenrichment/repository`，由 `RegisterModels` 注册；10.9/10.10 两表为 add-evidence-backed-cross-board-relations 新增）。所有 `semantic_board_id` / `persistent_topic_id` 引用均为**逻辑关联，无 DB FK，无 OnDelete 声明**。
 
 ```mermaid
 erDiagram
@@ -394,6 +396,38 @@ erDiagram
     topic_enrichment_result ||--o{ topic_enrichment_review : "prev_result_id (可空)"
     topic_enrichment_result ||--o{ stock_debate_result : "topic_enrichment_result_id"
     board_persistent_topics ||--o{ stock_debate_result : "persistent_topic_id"
+
+    semantic_labels ||--o{ cross_board_relation_runs : "source_board_id (逻辑)"
+    cross_board_relation_runs ||--o{ cross_board_relations : "run_id (可空)"
+    semantic_labels ||--o{ cross_board_relations : "source_board_id / target_board_id (逻辑)"
+
+    cross_board_relation_runs {
+        SERIAL id PK
+        INTEGER source_board_id
+        INTEGER parent_result_id "父简报 result 逻辑引用"
+        VARCHAR source_kind "observation|question"
+        TEXT source_text "冻结原文"
+        VARCHAR trigger_kind "manual|auto"
+        VARCHAR status "running|succeeded|failed"
+        JSONB budget_snapshot
+        JSONB tool_calls
+        JSONB gaps
+    }
+    cross_board_relations {
+        SERIAL id PK
+        INTEGER run_id "可空"
+        INTEGER source_board_id
+        INTEGER target_board_id "可空 unresolved 为 NULL"
+        TEXT target_concept
+        VARCHAR relation_type "六枚举"
+        VARCHAR verification_verdict "四枚举"
+        VARCHAR quality_grade "high|medium|low|none"
+        VARCHAR status "unresolved|proposed|confirmed|dismissed|expired"
+        VARCHAR suggestion_hash "部分唯一索引 open 态幂等"
+        JSONB evidence
+        JSONB counterevidence
+        TIMESTAMPTZ expires_at "confirmed TTL"
+    }
 
     board_data_sources {
         SERIAL id PK

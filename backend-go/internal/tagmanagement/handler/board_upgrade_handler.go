@@ -99,6 +99,10 @@ func (h *semanticBoardHandler) executeUpgrade(c *gin.Context) {
 		respondError(c, http.StatusBadRequest, err)
 		return
 	}
+	if result.CompositeLabelID != nil {
+		respondOK(c, gin.H{"semantic_board_id": result.SemanticBoardID, "auxiliary_label_ids": result.AuxiliaryLabelIDs, "composite_label_id": *result.CompositeLabelID})
+		return
+	}
 	respondOK(c, gin.H{"semantic_board_id": result.SemanticBoardID, "auxiliary_label_ids": result.AuxiliaryLabelIDs})
 }
 

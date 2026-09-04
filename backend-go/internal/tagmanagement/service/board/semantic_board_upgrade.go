@@ -43,6 +43,10 @@ type SemanticBoardUpgradeConfig struct {
 	// merge bypass (§4.3): both composition and lane top1-top2 distance gaps must
 	// be ≥ this for the LLM to be skipped. Default 0.05, ai_settings-configurable.
 	MergeConfidenceMargin float64
+	// CompositeCoTagMinCooccurrence is the minimum number of co-occurring
+	// articles (same-article aux pair/triple) for a compose candidate
+	// (ai_settings semantic_board_upgrade_composite_min_cooccurrence, default 10).
+	CompositeCoTagMinCooccurrence int
 }
 
 type SemanticBoardUpgradeCandidate struct {
@@ -138,6 +142,9 @@ type ConfirmSemanticBoardUpgradeRequest struct {
 type ConfirmSemanticBoardUpgradeResult struct {
 	SemanticBoardID   uint
 	AuxiliaryLabelIDs []uint
+	// CompositeLabelID is set for decision=compose confirms: the created (or
+	// dedupe-reused) composite label id.
+	CompositeLabelID *uint
 }
 
 type semanticBoardContext struct {
@@ -172,7 +179,13 @@ func (s *SemanticBoardUpgradeService) GenerateSuggestions(ctx context.Context, m
 		return nil, nil, err
 	}
 	if len(candidates) < config.RefCountThreshold {
-		return []SemanticBoardUpgradeSuggestion{}, []SemanticBoardUpgradeCluster{}, nil
+		// 聚类输入不足：仅跑 compose 段——co-tag 共现候选不依赖聚类规模，
+		// 冷启动期（aux 池小于阈值）高频共现对仍应产出 compose 建议。
+		composeSuggestions, composeErr := s.generateComposeSuggestions(ctx, config)
+		if composeErr != nil {
+			logging.Warnf("[semantic-board-upgrade] compose candidates skipped this round: %v", composeErr)
+		}
+		return composeSuggestions, []SemanticBoardUpgradeCluster{}, nil
 	}
 	clusters, err := s.ClusterCandidates(ctx, candidates, config)
 	if err != nil {
@@ -233,7 +246,83 @@ func (s *SemanticBoardUpgradeService) GenerateSuggestions(ctx context.Context, m
 			suggestions = append(suggestions, sug)
 		}
 	}
+
+	// compose 轮：co-tag 共现候选独立进 LLM 裁决（D4）。LLM 坏 JSON/超时降级跳过
+	// 本轮 compose 段（不崩、不产半成品，错误留痕），cluster 建议照常返回。
+	composeSuggestions, err := s.generateComposeSuggestions(ctx, config)
+	if err != nil {
+		logging.Warnf("[semantic-board-upgrade] compose candidates skipped this round: %v", err)
+	} else {
+		suggestions = append(suggestions, composeSuggestions...)
+	}
 	return suggestions, clusters, nil
+}
+
+// generateComposeSuggestions runs the compose candidate pipeline: collect
+// co-occurrence pairs/triples, adjudicate via LLM (mode "compose"), and return
+// valid compose suggestions (skip decisions are dropped here — they are never
+// persisted).
+func (s *SemanticBoardUpgradeService) generateComposeSuggestions(ctx context.Context, config SemanticBoardUpgradeConfig) ([]SemanticBoardUpgradeSuggestion, error) {
+	candidates, err := s.collectComposeCandidates(ctx, config)
+	if err != nil {
+		return nil, err
+	}
+	if len(candidates) == 0 {
+		return nil, nil
+	}
+	componentIDs := make([]uint, 0)
+	for _, candidate := range candidates {
+		componentIDs = append(componentIDs, candidate.ComponentIDs...)
+	}
+	labels, err := s.loadComponentLabels(ctx, UniqueUintSlice(componentIDs))
+	if err != nil {
+		return nil, err
+	}
+	raw, err := s.llm.SuggestSemanticBoardUpgrades(ctx, buildComposeCandidatesPrompt(candidates, labels), string(SemanticBoardUpgradeDecisionCompose))
+	if err != nil {
+		return nil, err
+	}
+	componentUniverse := make(map[uint]struct{}, len(labels))
+	for id := range labels {
+		componentUniverse[id] = struct{}{}
+	}
+	filtered := filterComposeSuggestions(raw, componentUniverse)
+	// Enrich evidence with the candidate's co-occurrence stats for the
+	// suggestion card (spec: 共现证据——频次+窗口+代表事件标题).
+	candidateByComponents := make(map[string]ComposeCandidate, len(candidates))
+	for _, candidate := range candidates {
+		candidateByComponents[composeComponentKey(candidate.ComponentIDs)] = candidate
+	}
+	for i := range filtered {
+		if filtered[i].Confidence == "" {
+			filtered[i].Confidence = "llm"
+		}
+		filtered[i].Evidence = map[string]any{
+			"source":                        "compose",
+			"compose_window_days":           config.CoTagWindowDays,
+			"compose_representative_titles": representativeTitlesOf(candidateByComponents, filtered[i].AuxiliaryLabelIDs),
+		}
+		if candidate, ok := candidateByComponents[composeComponentKey(filtered[i].AuxiliaryLabelIDs)]; ok {
+			filtered[i].Evidence["compose_cooccurrence"] = candidate.Cooccurrence
+		}
+	}
+	return filtered, nil
+}
+
+func composeComponentKey(ids []uint) string {
+	sorted := UniqueUintSlice(ids)
+	parts := make([]string, 0, len(sorted))
+	for _, id := range sorted {
+		parts = append(parts, strconv.FormatUint(uint64(id), 10))
+	}
+	return strings.Join(parts, ",")
+}
+
+func representativeTitlesOf(candidates map[string]ComposeCandidate, ids []uint) []string {
+	if candidate, ok := candidates[composeComponentKey(ids)]; ok {
+		return candidate.RepresentativeTitles
+	}
+	return nil
 }
 
 func (s *SemanticBoardUpgradeService) ConfirmSuggestion(ctx context.Context, req ConfirmSemanticBoardUpgradeRequest) (*ConfirmSemanticBoardUpgradeResult, error) {
@@ -299,16 +388,36 @@ func (s *SemanticBoardUpgradeService) ConfirmSuggestion(ctx context.Context, req
 				return fmt.Errorf("active target board not found")
 			}
 			boardID = *req.TargetBoardID
+		case SemanticBoardUpgradeDecisionCompose:
+			// 组件已由上方 FilterActiveAuxiliaryLabels 软过滤为 active。同一事务内
+			// 创建组合标签（含 L1/L2 去重复用路径）；embedder 失败等任何错误回滚，
+			// 建议保持 pending（spec: compose 建议确认执行）。
+			if len(auxiliaryIDs) < auxlabel.CompositeMinComponents || len(auxiliaryIDs) > auxlabel.CompositeMaxComponents {
+				return fmt.Errorf("组合建议需要 %d-%d 个组件，当前 %d 个", auxlabel.CompositeMinComponents, auxlabel.CompositeMaxComponents, len(auxiliaryIDs))
+			}
+			label := strings.TrimSpace(req.BoardLabel)
+			if label == "" {
+				return fmt.Errorf("composite label is required")
+			}
+			compositeService := auxlabel.NewCompositeLabelService(tx, s.embedder)
+			createResult, createErr := compositeService.CreateCompositeLabel(ctx, label, req.Description, auxiliaryIDs, "upgrade_suggest")
+			if createErr != nil {
+				return createErr
+			}
+			result.CompositeLabelID = &createResult.Label.ID
+			boardID = 0 // compose creates a composite label, not a board
 		default:
 			return fmt.Errorf("unsupported decision: %s", req.Decision)
 		}
 
-		rows := make([]models.BoardComposition, 0, len(auxiliaryIDs))
-		for _, auxiliaryID := range auxiliaryIDs {
-			rows = append(rows, models.BoardComposition{BoardID: boardID, AuxiliaryLabelID: auxiliaryID})
-		}
-		if err := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&rows).Error; err != nil {
-			return err
+		if req.Decision != SemanticBoardUpgradeDecisionCompose {
+			rows := make([]models.BoardComposition, 0, len(auxiliaryIDs))
+			for _, auxiliaryID := range auxiliaryIDs {
+				rows = append(rows, models.BoardComposition{BoardID: boardID, AuxiliaryLabelID: auxiliaryID})
+			}
+			if err := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&rows).Error; err != nil {
+				return err
+			}
 		}
 		// Link the confirm to a pending suggestion inside the same transaction: a
 		// board_composition write failure above already returned, and any error
@@ -318,7 +427,7 @@ func (s *SemanticBoardUpgradeService) ConfirmSuggestion(ctx context.Context, req
 				return err
 			}
 		}
-		result = ConfirmSemanticBoardUpgradeResult{SemanticBoardID: boardID, AuxiliaryLabelIDs: auxiliaryIDs}
+		result = ConfirmSemanticBoardUpgradeResult{SemanticBoardID: boardID, AuxiliaryLabelIDs: auxiliaryIDs, CompositeLabelID: result.CompositeLabelID}
 		return nil
 	})
 	if err != nil {
@@ -521,14 +630,15 @@ func (s *SemanticBoardUpgradeService) loadCoTagEventContext(ctx context.Context,
 
 func (s *SemanticBoardUpgradeService) LoadUpgradeConfig(ctx context.Context) SemanticBoardUpgradeConfig {
 	config := SemanticBoardUpgradeConfig{
-		RefCountThreshold:        5,
-		ClusterDistanceThreshold: 0.35,
-		CoTagWindowDays:          30,
-		CoTagTopN:                20,
-		CoTagDedupeSimThreshold:  0.85,
-		CoTagHardLimit:           15,
-		ClusterMethod:            "average_link",
-		MergeConfidenceMargin:    0.05,
+		RefCountThreshold:             5,
+		ClusterDistanceThreshold:      0.35,
+		CoTagWindowDays:               30,
+		CoTagTopN:                     20,
+		CoTagDedupeSimThreshold:       0.85,
+		CoTagHardLimit:                15,
+		ClusterMethod:                 "average_link",
+		MergeConfidenceMargin:         0.05,
+		CompositeCoTagMinCooccurrence: 10,
 	}
 	var settings []models.AISettings
 	if err := s.db.WithContext(ctx).Where("key IN ?", []string{
@@ -540,6 +650,7 @@ func (s *SemanticBoardUpgradeService) LoadUpgradeConfig(ctx context.Context) Sem
 		"semantic_board_upgrade_cotag_hard_limit",
 		"semantic_board_upgrade_cluster_method",
 		"semantic_board_upgrade_merge_confidence_margin",
+		"semantic_board_upgrade_composite_min_cooccurrence",
 	}).Find(&settings).Error; err != nil {
 		return config
 	}
@@ -563,6 +674,8 @@ func (s *SemanticBoardUpgradeService) LoadUpgradeConfig(ctx context.Context) Sem
 			}
 		case "semantic_board_upgrade_merge_confidence_margin":
 			config.MergeConfidenceMargin = parseSemanticBoardUpgradeFloat(setting.Value, config.MergeConfidenceMargin)
+		case "semantic_board_upgrade_composite_min_cooccurrence":
+			config.CompositeCoTagMinCooccurrence = parseSemanticBoardUpgradeInt(setting.Value, config.CompositeCoTagMinCooccurrence)
 		}
 	}
 	return config

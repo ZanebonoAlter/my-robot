@@ -91,6 +91,7 @@ func Init(db *gorm.DB) {
 		service.WithBoardLister(boardLister),
 		service.WithLaneLister(laneLister),
 		service.WithLaneDetailRenderer(laneDetailRenderer),
+		service.WithInternalContextSearcher(NewDBInternalContextSearcher(db)),
 	)
 	orchestrator := service.NewOrchestratorService(
 		airouter.NewRouter(),

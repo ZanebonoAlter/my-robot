@@ -96,13 +96,39 @@ func TestBoardSessionID_Format(t *testing.T) {
 	}
 }
 
-// 3.7-b 单泳道 analyze prompt 同样携带证据多样性纪律（D10 双分支）。
-func TestSingleLaneAnalyzePrompt_DiversityDiscipline(t *testing.T) {
+// 4.8 单泳道 analyze prompt 携带证据纪律（D7）：问题相关一手优先 + 可核查 +
+// 反证保留 + boundary 诚实降级；MUST NOT 含类型数量配额与 board 调查 schema。
+func TestSingleLaneAnalyzePrompt_EvidenceDiscipline(t *testing.T) {
 	orch, _ := newBoardAnalysisOrch(t)
-	prompt := orch.AssembleSingleLaneAnalyzePromptForTest(context.Background(), "structural", "测试视角", "脉络", "", nil)
-	for _, want := range []string{"证据多样性纪律", "≥3 类", "优先一手源", "诚实标注"} {
+	prompt := orch.AssembleSingleLaneAnalyzePromptForTest(context.Background(), "structural", "测试视角", "脉络", "上下文", nil)
+
+	for _, want := range []string{
+		"证据纪律",           // D7 纪律节（取代旧“证据多样性纪律”）
+		"一手依据",           // 与问题直接相关的一手依据优先
+		"机构名 + 数据关键词",    // 一手源检索引导
+		"四要素缺一不可",        // web/page url+quote+institution+date 可核查
+		"原文摘录",           // 核查的是原文非转述
+		"反证",             // 冲突/反证材料保留
+		"不得因不符合主解释而丢弃",   // 反证不因不符主解释被丢弃
+		"boundary 里诚实标注", // 材料不足诚实降级
+		"不要编造",           // 不编造证据
+		"分层新闻上下文",        // 装配仍带 context 层（回归）
+	} {
 		if !strings.Contains(prompt, want) {
 			t.Fatalf("single-lane analyze prompt missing %q", want)
+		}
+	}
+
+	// 数量配额哨兵：旧“≥3 类”及任何变体不得回流（不得换成另一种固定数量）。
+	for _, bad := range []string{"≥3 类", "三类证据", "3 类证据", "至少三类", "证据多样性"} {
+		if strings.Contains(prompt, bad) {
+			t.Fatalf("single-lane analyze prompt must not carry evidence type quota %q", bad)
+		}
+	}
+	// board 调查 schema 不进单泳道 prompt；旧作者画像已退役（2.5/4.8）。
+	for _, bad := range []string{"hypotheses", "question_key", "parent_briefing_id", "作者画像", "reference_role"} {
+		if strings.Contains(prompt, bad) {
+			t.Fatalf("single-lane analyze prompt must not contain %q", bad)
 		}
 	}
 }

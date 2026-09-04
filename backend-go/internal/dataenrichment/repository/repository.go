@@ -394,6 +394,29 @@ func (r *Repository) GetPrevLatestBoardEnrichmentResultByKind(ctx context.Contex
 	return &result, nil
 }
 
+// GetPrevBoardInvestigationByQuestion returns the newest board_investigation
+// rerun of the SAME brief parent and question key before beforeID (task 4.7:
+// 调查 review 只比较同 parent_result_id + question_key 链上的重跑).
+// Rows of other kinds (brief/legacy/topic), other parents, other keys, other
+// boards, and pre-backfill rows (question_key NULL) can never match — NULL
+// never equals a non-NULL key in SQL, so legacy rows are excluded by the key
+// predicate itself.
+func (r *Repository) GetPrevBoardInvestigationByQuestion(ctx context.Context, boardID, parentResultID uint, questionKey string, beforeID uint) (*TopicEnrichmentResult, error) {
+	if !IsValidQuestionKey(questionKey) {
+		return nil, fmt.Errorf("invalid question key: %s", questionKey)
+	}
+	var result TopicEnrichmentResult
+	err := r.db.WithContext(ctx).
+		Where("semantic_board_id = ? AND analysis_scope = ? AND result_kind = ? AND parent_result_id = ? AND question_key = ? AND id < ?",
+			boardID, "board", ResultKindBoardInvestigation, parentResultID, questionKey, beforeID).
+		Order("id DESC").
+		First(&result).Error
+	if err != nil {
+		return nil, fmt.Errorf("get prev board investigation by question: %w", err)
+	}
+	return &result, nil
+}
+
 // ListBoardEnrichmentResultsByParent returns all investigation children of one
 // immutable brief, newest first.
 func (r *Repository) ListBoardEnrichmentResultsByParent(ctx context.Context, parentResultID uint) ([]TopicEnrichmentResult, error) {
@@ -461,6 +484,96 @@ func (r *Repository) DeleteReferenceRole(ctx context.Context, id uint) error {
 	return r.db.WithContext(ctx).Delete(&ReferenceRole{}, id).Error
 }
 
+// ── AnalysisMethod (global method-card library; design D6) ─────────────────
+
+func (r *Repository) CreateAnalysisMethod(ctx context.Context, method *AnalysisMethod) error {
+	return r.db.WithContext(ctx).Create(method).Error
+}
+
+func (r *Repository) GetAnalysisMethodByID(ctx context.Context, id uint) (*AnalysisMethod, error) {
+	var method AnalysisMethod
+	if err := r.db.WithContext(ctx).First(&method, id).Error; err != nil {
+		return nil, fmt.Errorf("get analysis method: %w", err)
+	}
+	return &method, nil
+}
+
+func (r *Repository) ListAnalysisMethods(ctx context.Context) ([]AnalysisMethod, error) {
+	var list []AnalysisMethod
+	if err := r.db.WithContext(ctx).Order("updated_at DESC, id DESC").Find(&list).Error; err != nil {
+		return nil, fmt.Errorf("list analysis methods: %w", err)
+	}
+	return list, nil
+}
+
+// ListEnabledAnalysisMethodSummaries returns selector-safe metadata without
+// loading Content. Soft-deleted rows are excluded by GORM's default scope.
+func (r *Repository) ListEnabledAnalysisMethodSummaries(ctx context.Context) ([]AnalysisMethod, error) {
+	var list []AnalysisMethod
+	if err := r.db.WithContext(ctx).
+		Select("id", "name", "title", "summary", "selection_meta", "enabled", "legacy", "created_at", "updated_at").
+		Where("enabled = ?", true).
+		Order("updated_at DESC, id DESC").
+		Find(&list).Error; err != nil {
+		return nil, fmt.Errorf("list enabled analysis method summaries: %w", err)
+	}
+	return list, nil
+}
+
+// GetAnalysisMethodsByIDs loads full method cards while preserving the caller's
+// relevance order. Missing or soft-deleted IDs are omitted.
+func (r *Repository) GetAnalysisMethodsByIDs(ctx context.Context, ids []uint) ([]AnalysisMethod, error) {
+	if len(ids) == 0 {
+		return []AnalysisMethod{}, nil
+	}
+	var rows []AnalysisMethod
+	if err := r.db.WithContext(ctx).Where("id IN ?", ids).Find(&rows).Error; err != nil {
+		return nil, fmt.Errorf("get analysis methods by ids: %w", err)
+	}
+	byID := make(map[uint]AnalysisMethod, len(rows))
+	for _, row := range rows {
+		byID[row.ID] = row
+	}
+	ordered := make([]AnalysisMethod, 0, len(rows))
+	seen := make(map[uint]bool, len(ids))
+	for _, id := range ids {
+		if seen[id] {
+			continue
+		}
+		if row, ok := byID[id]; ok {
+			ordered = append(ordered, row)
+			seen[id] = true
+		}
+	}
+	return ordered, nil
+}
+
+func (r *Repository) UpdateAnalysisMethod(ctx context.Context, method *AnalysisMethod) error {
+	return r.db.WithContext(ctx).Save(method).Error
+}
+
+func (r *Repository) SetAnalysisMethodEnabled(ctx context.Context, id uint, enabled bool) error {
+	res := r.db.WithContext(ctx).Model(&AnalysisMethod{}).Where("id = ?", id).Update("enabled", enabled)
+	if res.Error != nil {
+		return fmt.Errorf("set analysis method enabled: %w", res.Error)
+	}
+	if res.RowsAffected == 0 {
+		return fmt.Errorf("set analysis method enabled: %w", gorm.ErrRecordNotFound)
+	}
+	return nil
+}
+
+func (r *Repository) DeleteAnalysisMethod(ctx context.Context, id uint) error {
+	res := r.db.WithContext(ctx).Delete(&AnalysisMethod{}, id)
+	if res.Error != nil {
+		return fmt.Errorf("delete analysis method: %w", res.Error)
+	}
+	if res.RowsAffected == 0 {
+		return fmt.Errorf("delete analysis method: %w", gorm.ErrRecordNotFound)
+	}
+	return nil
+}
+
 // ── TopicEnrichmentReview ───────────────────────────────────────────────────
 
 // CreateTopicEnrichmentReview inserts a new review.
@@ -503,6 +616,33 @@ func (r *Repository) ListAppliedBoardEnrichmentReviews(ctx context.Context, boar
 		Find(&list).Error
 	if err != nil {
 		return nil, fmt.Errorf("list applied board reviews: %w", err)
+	}
+	return list, nil
+}
+
+// ListAppliedBoardEnrichmentReviewsByKind returns applied=true board reviews
+// whose CURRENT result (curr_result_id) is a same-board result of the given
+// kind. The result join enforces strict kind isolation (task 3.5 / design
+// D11): only board_brief-chain applied reviews may feed the next brief's
+// digest — legacy_board_analysis, investigation and other-board reviews never
+// leak in. Ordered created_at DESC with an id DESC tie-break so same-second
+// writes (bulk seeds, clock granularity) keep a deterministic newest-first
+// order for the bounded digest. The unfiltered method above stays as the
+// legacy-chain API.
+func (r *Repository) ListAppliedBoardEnrichmentReviewsByKind(ctx context.Context, boardID uint, kind string) ([]TopicEnrichmentReview, error) {
+	if !isBoardResultKind(kind) {
+		return nil, fmt.Errorf("invalid board result_kind: %s", kind)
+	}
+	var list []TopicEnrichmentReview
+	err := r.db.WithContext(ctx).
+		Table("topic_enrichment_review AS r").
+		Select("r.*").
+		Joins("JOIN topic_enrichment_result AS res ON res.id = r.curr_result_id").
+		Where("r.semantic_board_id = ? AND r.applied = ? AND res.result_kind = ? AND res.semantic_board_id = ?", boardID, true, kind, boardID).
+		Order("r.created_at DESC, r.id DESC").
+		Find(&list).Error
+	if err != nil {
+		return nil, fmt.Errorf("list applied board reviews by kind: %w", err)
 	}
 	return list, nil
 }

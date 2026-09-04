@@ -211,7 +211,7 @@ func preMigrateEmbeddingCacheBytea(db *gorm.DB) error {
 // automatically on every startup via RunAutoMigrate(). Only operations requiring explicit SQL
 // are kept here.
 func postgresMigrations() []Migration {
-	return []Migration{
+	migrations := []Migration{
 		// ── Extensions ──────────────────────────────────────────────
 		{
 			Version:     "20260403_0001",
@@ -2367,20 +2367,185 @@ ON CONFLICT (route_id, param_name, value) DO NOTHING`,
 					return err
 				}
 
-				// The composite FK enforces parent existence and same-board identity.
-				// Parent kind=board_brief is a cross-row semantic invariant enforced by
-				// repository validation; PostgreSQL CHECK constraints cannot query rows.
-
-				for _, statement := range []string{
-					`CREATE INDEX IF NOT EXISTS idx_topic_enrichment_result_board_kind_id ON topic_enrichment_result (semantic_board_id, result_kind, id DESC)`,
-					`CREATE INDEX IF NOT EXISTS idx_topic_enrichment_result_parent_question_id ON topic_enrichment_result (parent_result_id, question_key, id DESC) WHERE parent_result_id IS NOT NULL`,
-				} {
-					if err := db.Exec(statement).Error; err != nil {
-						return fmt.Errorf("create result-kind index: %w", err)
+				// The composite FK enforces parent existence/same-board identity; the
+				// trigger adds the cross-row parent-kind invariant for direct SQL/GORM.
+				if err := withLockTimeout(db, "5s", func(tx *gorm.DB) error {
+					for _, statement := range []string{
+						`CREATE INDEX IF NOT EXISTS idx_topic_enrichment_result_board_kind_id ON topic_enrichment_result (semantic_board_id, result_kind, id DESC)`,
+						`CREATE INDEX IF NOT EXISTS idx_topic_enrichment_result_parent_question_id ON topic_enrichment_result (parent_result_id, question_key, id DESC) WHERE parent_result_id IS NOT NULL`,
+					} {
+						if err := tx.Exec(statement).Error; err != nil {
+							return fmt.Errorf("create result-kind index: %w", err)
+						}
 					}
+					return nil
+				}); err != nil {
+					return err
 				}
 				return nil
 			},
+		},
+	}
+	migrations = append(migrations, analysisMethodLegacyCopyMigration(), referenceRoleSeedRetireMigration())
+	migrations = append(migrations, crossBoardRelationMigration())
+	return append(migrations, compositeComponentsMigration())
+}
+
+// compositeComponentsMigration implements 20260902_0001: composite label
+// support (add-composite-labels). AutoMigrate owns composite_components table
+// creation from the model (PK + FK CASCADE tags); this migration owns the
+// idempotent belt-and-braces FK ensure for deployments where AutoMigrate tags
+// did not apply, plus seeding the three ai_settings knobs the feature reads.
+func compositeComponentsMigration() Migration {
+	return Migration{
+		Version:     "20260902_0001",
+		Description: "add-composite-labels: composite_components FK cascade ensure + seed composite_label_dedupe_sim / semantic_board_match_direct_hit_score_factor / semantic_board_upgrade_composite_min_cooccurrence.",
+		Up: func(db *gorm.DB) error {
+			if !tableExists(db, "composite_components") {
+				return nil // model not registered on this deployment
+			}
+			if err := withLockTimeout(db, "5s", func(tx *gorm.DB) error {
+				if err := tx.Exec(`DO $$ BEGIN
+					IF NOT EXISTS (
+						SELECT 1 FROM information_schema.table_constraints
+						WHERE constraint_name = 'fk_composite_components_composite'
+						  AND table_name = 'composite_components'
+					) THEN
+						ALTER TABLE composite_components
+							ADD CONSTRAINT fk_composite_components_composite
+							FOREIGN KEY (composite_id) REFERENCES semantic_labels(id)
+							ON DELETE CASCADE;
+					END IF;
+				END $$`).Error; err != nil {
+					return fmt.Errorf("add fk_composite_components_composite: %w", err)
+				}
+				return nil
+			}); err != nil {
+				return err
+			}
+
+			seeds := []models.AISettings{
+				{Key: "composite_label_dedupe_sim", Value: "0.95", Description: "组合标签 L2 去重阈值（cosine similarity，组合 embedding），高于等于此值追加 alias 而非新建（add-composite-labels）"},
+				{Key: "semantic_board_match_direct_hit_score_factor", Value: "0.7", Description: "单标签重叠 direct_hit 降级折扣分（0-1，乘在原 score=1.0 上）；composite_hit 保持 1.0 不折扣（add-composite-labels）"},
+				{Key: "semantic_board_upgrade_composite_min_cooccurrence", Value: "10", Description: "compose 建议候选共现对的最小共现次数（co-tag 窗口内），低于此值不进 LLM 裁决（add-composite-labels）"},
+			}
+			for _, s := range seeds {
+				var existing models.AISettings
+				if err := db.Where("key = ?", s.Key).First(&existing).Error; err != nil {
+					if err := db.Create(&s).Error; err != nil {
+						logging.Warnf("Migration 20260902_0001: failed to seed ai_settings key %s: %v", s.Key, err)
+					}
+				}
+			}
+			return nil
+		},
+	}
+}
+
+// crossBoardRelationMigration implements 20260901_0001: enum CHECKs and the
+// partial unique index for cross-board relation discovery. AutoMigrate owns
+// table/column creation; this migration owns the constraints AutoMigrate
+// cannot express (add-evidence-backed-cross-board-relations design D4).
+func crossBoardRelationMigration() Migration {
+	return Migration{
+		Version:     "20260901_0001",
+		Description: "add-evidence-backed-cross-board-relations: CHECK enums + partial unique index for cross_board_relations and cross_board_relation_runs.",
+		Up: func(db *gorm.DB) error {
+			if !tableExists(db, "cross_board_relations") {
+				return nil
+			}
+			if err := withLockTimeout(db, "5s", func(tx *gorm.DB) error {
+				statements := []string{
+					`ALTER TABLE cross_board_relations ADD CONSTRAINT ck_cross_board_relations_status CHECK (status IN ('unresolved','proposed','confirmed','dismissed','expired'))`,
+					`ALTER TABLE cross_board_relations ADD CONSTRAINT ck_cross_board_relations_type CHECK (relation_type IN ('causal','common_driver','divergence','correlated','contextual','unclear'))`,
+					`ALTER TABLE cross_board_relations ADD CONSTRAINT ck_cross_board_relations_verdict CHECK (verification_verdict IN ('supported','contested','insufficient','rejected'))`,
+					`ALTER TABLE cross_board_relations ADD CONSTRAINT ck_cross_board_relations_grade CHECK (quality_grade IN ('high','medium','low'))`,
+					`ALTER TABLE cross_board_relation_runs ADD CONSTRAINT ck_cross_board_relation_runs_status CHECK (status IN ('queued','running','succeeded','partial','failed'))`,
+					`ALTER TABLE cross_board_relation_runs ADD CONSTRAINT ck_cross_board_relation_runs_trigger CHECK (trigger_kind IN ('manual','auto'))`,
+					// Idempotent open-row uniqueness: one pending suggestion per hash.
+					`CREATE UNIQUE INDEX IF NOT EXISTS uq_cross_board_relations_open ON cross_board_relations (suggestion_hash) WHERE status IN ('unresolved','proposed')`,
+					`CREATE INDEX IF NOT EXISTS idx_cross_board_relations_confirmed_active ON cross_board_relations (source_board_id, target_board_id, quality_grade DESC, confirmed_at DESC) WHERE status = 'confirmed'`,
+				}
+				for _, stmt := range statements {
+					// CREATE INDEX IF NOT EXISTS is idempotent; ADD CONSTRAINT is not,
+					// so drop-then-add keeps re-runs safe (constraint content is frozen).
+					if err := tx.Exec(stmt).Error; err != nil {
+						if strings.Contains(err.Error(), "already exists") {
+							// tolerate re-run on a constraint that already exists
+							continue
+						}
+						return fmt.Errorf("cross-board relation migration: %w", err)
+					}
+				}
+				return nil
+			}); err != nil {
+				return err
+			}
+			return nil
+		},
+	}
+}
+
+// referenceRoleSeedRetireMigration disables the system's pristine seed
+// author profile (board-level-deep-analysis tasks 6.3): the retired write
+// chain no longer injects reference roles into any prompt, so the seeded
+// enabled=true default must flip off. Identity is pinned to name + seeded
+// title + the frozen embedded content bytes — a row the user actually
+// edited (content or title drifted) is deliberately left untouched (it is
+// user content now; it stays inert anyway because no prompt caller reads
+// the table anymore). The old table and original bytes are preserved.
+
+// analysisMethodLegacyCopyMigration copies every old reference role into the
+// new method-card library once, disabled and marked legacy. Name conflicts are
+// deliberately skipped so a user-edited method is never overwritten.
+func analysisMethodLegacyCopyMigration() Migration {
+	return Migration{
+		Version:     "20260828_0002",
+		Description: "board-level-deep-analysis: non-destructively copy reference_roles into disabled legacy analysis_methods.",
+		Up: func(db *gorm.DB) error {
+			if !tableExists(db, "reference_roles") || !tableExists(db, "analysis_methods") {
+				return nil
+			}
+			selectionMeta := `{"applicable_when":[],"avoid_when":[],"required_evidence":[],"failure_modes":[]}`
+			if err := db.Exec(`INSERT INTO analysis_methods
+				(name, title, summary, selection_meta, content, enabled, legacy, created_at, updated_at)
+				SELECT rr.name, rr.title,
+					'从旧参考角色迁移；需补齐适用边界并人工启用。',
+					?::jsonb, rr.content, false, true, rr.created_at, rr.updated_at
+				FROM reference_roles rr
+				ON CONFLICT (name) DO NOTHING`, selectionMeta).Error; err != nil {
+				return fmt.Errorf("copy legacy reference roles to analysis methods: %w", err)
+			}
+			return nil
+		},
+	}
+}
+
+// referenceRoleSeedRetireMigration implements 20260831_0001: flip the pristine
+// system seed (enabled=true by 20260826_0002) to disabled. Identity is pinned
+// to the frozen bytes (seeded name + title + embedded content) so a row the
+// user actually edited is never touched — see the append-site comment.
+func referenceRoleSeedRetireMigration() Migration {
+	return Migration{
+		Version:     "20260831_0001",
+		Description: "board-level-deep-analysis: disable the untouched system seed reference role (author profiles retired from all prompts).",
+		Up: func(db *gorm.DB) error {
+			if !tableExists(db, "reference_roles") {
+				return nil
+			}
+			// Only a row still byte-identical to the embedded seed (name + seeded
+			// title + original content) is flipped; the 20260826_0002 seed history
+			// is never rewritten. User-edited rows stay as-is (user content, and
+			// inert regardless — no prompt caller reads the table anymore).
+			if err := db.Exec(`UPDATE reference_roles
+				SET enabled = false, updated_at = now()
+				WHERE name = 'inside-america-v2'
+				  AND title = '内部看美国·方法论画像（v2）'
+				  AND content = $1
+				  AND enabled`, insideAmericaMethodologyProfile).Error; err != nil {
+				return fmt.Errorf("disable seed reference role: %w", err)
+			}
+			return nil
 		},
 	}
 }

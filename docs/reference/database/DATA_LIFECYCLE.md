@@ -283,6 +283,12 @@ DATA_LIFECYCLE.md  = "数据怎么变的"（哪些表被写入、状态字段怎
 
 ---
 
+### 跨版块关系（add-evidence-backed-cross-board-relations）
+
+- `cross_board_relation_runs`：**append-only 审计**，不清理不修改（可追溯要求；体量随发现频率线性、单用户场景可控）。
+- `cross_board_relations`：生命周期行。`confirmed` 行到期由 `relation_expire` 定时任务（每小时）批量转 `expired`（读取路径也即时判过期，双保险）；`dismissed` 永久保留（同 `suggestion_hash` 冷却期默认 14 天内拦截重生，期满允许新 run 再提出）；`unresolved`/`proposed` 无 TTL，等用户裁决或 re-resolve。部分唯一索引保证 open 态幂等，终态行不删除。
+- 证据 JSONB（`evidence`/`counterevidence`）与 run 留痕共同满足「每条关系可重建」的追溯要求。
+
 ## 配置要求
 
 ### Firecrawl 全文抓取

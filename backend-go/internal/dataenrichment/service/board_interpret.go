@@ -69,7 +69,6 @@ const boardInterpretSparseNote = "\n\n注意：该板块所有泳道的素材信
 // a mechanical single candidate from the top card (degraded, never silent).
 func (o *OrchestratorService) boardInterpret(ctx context.Context, bctx boardInterpretInput) (*boardInterpretOutput, error) {
 	prompt := boardInterpretPrompt
-	prompt += o.referenceRoleAppendix(ctx)
 	if bctx.ReviewTxt != "" {
 		prompt += "\n\n历史认知记录(避免重蹈已知偏差):\n" + bctx.ReviewTxt + "\n"
 	}

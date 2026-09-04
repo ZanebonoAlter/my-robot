@@ -30,6 +30,10 @@ type Orchestrator interface {
 	EnrichTopicLens(ctx context.Context, topicID uint, prefillLens string) (*service.EnrichmentOutput, error)
 	EnrichBoard(ctx context.Context, boardID uint) (*service.BoardEnrichmentOutput, error)
 	BoardEnrichmentEnabled(ctx context.Context, boardID uint) error
+	InvestigateBoardQuestion(ctx context.Context, boardID uint, parentBriefID uint, question service.BoardInvestigationQuestion) (*service.BoardInvestigationOutput, error)
+	// Cross-board relation discovery (add-evidence-backed-cross-board-relations).
+	RunRelationDiscovery(ctx context.Context, in service.RelationDiscoveryInput) (*service.RelationDiscoveryOutput, error)
+	ReResolveRelation(ctx context.Context, boardID, relationID uint) (*service.RelationReResolveOutput, error)
 }
 
 // DebateRunner abstracts DebateService.RunDebate for handler testing.
@@ -159,12 +163,26 @@ func (h *EnrichmentHandler) RegisterRoutes(rg *gin.RouterGroup) {
 		reviews.POST("/:id/apply", h.applyReview)
 	}
 
-	// ── Board-level analysis (board dimension; board-level-deep-analysis D8) ─
+	// ── Board-level analysis (board dimension; board-level-deep-analysis D9) ─
 	boardAnalysis := rg.Group("/semantic-boards/:id/enrichment/analysis")
 	{
 		boardAnalysis.POST("/trigger", h.triggerBoardEnrichment)
+		boardAnalysis.POST("/investigations/trigger", h.triggerBoardInvestigation)
 		boardAnalysis.GET("/results", h.listBoardResults)
 		boardAnalysis.GET("/results/:rid", h.getBoardResult)
+
+		// Board report follow-up Q&A (design D5: QA keeps working by result id;
+		// all three board kinds incl. legacy — result stays immutable, QA rows
+		// are independent append-only rows).
+		boardAnalysis.POST("/relations/discover", h.triggerRelationDiscovery)
+		boardAnalysis.GET("/relations", h.listBoardRelations)
+		boardAnalysis.GET("/relations/:rid", h.getBoardRelation)
+		boardAnalysis.POST("/relations/:rid/confirm", h.confirmBoardRelation)
+		boardAnalysis.POST("/relations/:rid/dismiss", h.dismissBoardRelation)
+		boardAnalysis.POST("/relations/:rid/re-resolve", h.reResolveBoardRelation)
+		boardAnalysis.POST("/results/:rid/qa", h.askBoardQA)
+		boardAnalysis.GET("/results/:rid/qa", h.listBoardQA)
+		boardAnalysis.POST("/results/:rid/qa/:qid/sediment", h.sedimentBoardQA)
 	}
 
 	// ── Board data source bindings (board dimension) ────────────────────────
@@ -175,7 +193,18 @@ func (h *EnrichmentHandler) RegisterRoutes(rg *gin.RouterGroup) {
 		dataSources.DELETE("/:sourceType", h.deleteDataSource)
 	}
 
-	// ── Reference roles (methodology profiles; board-level-deep-analysis) ──
+	// ── Analysis methods (global method-card library; design D6) ───────────
+	methods := rg.Group("/analysis-methods")
+	{
+		methods.GET("", h.listAnalysisMethods)
+		methods.POST("", h.createAnalysisMethod)
+		methods.GET("/:id", h.getAnalysisMethod)
+		methods.PUT("/:id", h.updateAnalysisMethod)
+		methods.PUT("/:id/enable", h.setAnalysisMethodEnabled)
+		methods.DELETE("/:id", h.deleteAnalysisMethod)
+	}
+
+	// ── Legacy reference roles: one-version read-only compatibility ────────
 	roles := rg.Group("/reference-roles")
 	{
 		roles.GET("", h.listReferenceRoles)
@@ -190,6 +219,18 @@ func (h *EnrichmentHandler) RegisterRoutes(rg *gin.RouterGroup) {
 
 func respondOK(c *gin.Context, data any) {
 	c.JSON(http.StatusOK, gin.H{"success": true, "data": data})
+}
+
+// respondAccepted is the async-trigger envelope (D9): 202, not 200 — the job
+// has been started, not completed.
+func respondAccepted(c *gin.Context, data any) {
+	c.JSON(http.StatusAccepted, gin.H{"success": true, "data": data})
+}
+
+// respondErrorWithData keeps the {success,error} shape but attaches a data
+// payload — 409s carry the currently running job's identity for recovery.
+func respondErrorWithData(c *gin.Context, status int, msg string, data any) {
+	c.JSON(status, gin.H{"success": false, "error": msg, "data": data})
 }
 
 func respondError(c *gin.Context, status int, msg string) {
@@ -472,7 +513,7 @@ func (h *EnrichmentHandler) triggerEnrichment(c *gin.Context) {
 
 	// Trigger is fire-and-forget (fix-board-analysis-material 8.x): the run
 	// survives client disconnects; poll /enrichment/analysis-status for result.
-	err = h.analysis.Start(AnalysisScopeTopic, topicID, analysisJobTimeout, func(ctx context.Context) (uint, error) {
+	st, err := h.analysis.Start(AnalysisScopeTopic, topicID, AnalysisJobKindTopic, analysisJobTimeout, func(ctx context.Context) (uint, error) {
 		var output *service.EnrichmentOutput
 		var err error
 		if body.PrefillLens != "" {
@@ -486,14 +527,21 @@ func (h *EnrichmentHandler) triggerEnrichment(c *gin.Context) {
 		return output.Result.ID, nil
 	})
 	if err != nil {
-		if errors.Is(err, ErrAlreadyRunning) {
-			respondError(c, http.StatusConflict, "topic analysis already running")
+		var runErr *RunningJobError
+		if errors.As(err, &runErr) {
+			respondErrorWithData(c, http.StatusConflict, "topic analysis already running", runErr.Current)
 			return
 		}
 		respondError(c, http.StatusInternalServerError, fmt.Sprintf("enrichment failed: %v", err))
 		return
 	}
-	respondOK(c, gin.H{"status": "started", "scope": AnalysisScopeTopic, "target_id": topicID})
+	respondAccepted(c, gin.H{
+		"status":    "started",
+		"job_id":    st.JobID,
+		"job_kind":  st.JobKind,
+		"scope":     AnalysisScopeTopic,
+		"target_id": topicID,
+	})
 }
 
 // ── Stock Debate (FinGenius) ───────────────────────────────────────────────
@@ -619,9 +667,27 @@ func (h *EnrichmentHandler) askQA(c *gin.Context) {
 
 // listQA returns the multi-round follow-up history for a report, oldest first.
 // GET /persistent-topics/:topicId/enrichment/results/:id/qa
+// IDOR protection mirrors askQA: the result must belong to this topic
+// (board-scope rows never match a topic id — use the board QA routes).
 func (h *EnrichmentHandler) listQA(c *gin.Context) {
+	topicID, ok := parseTopicID(c)
+	if !ok {
+		return
+	}
+
 	resultID, ok := parseIDParam(c, "id")
 	if !ok {
+		return
+	}
+
+	// IDOR protection: validate the result belongs to this topic.
+	result, err := h.repo.GetTopicEnrichmentResultByID(c.Request.Context(), resultID)
+	if err != nil {
+		respondError(c, http.StatusNotFound, err.Error())
+		return
+	}
+	if !repository.TopicIDMatches(result.PersistentTopicID, topicID) {
+		respondError(c, http.StatusNotFound, "result not found for this topic")
 		return
 	}
 

@@ -80,11 +80,16 @@ func seedGranRow(t *testing.T, repo *repository.Repository, topicID uint, gran, 
 	}
 }
 
-// monthDates builds section dates spanning the last n months (day 10 of each).
+// monthDates builds section dates spanning the last n months (day 10 of
+// each). Anchoring to day 10 is load-bearing: time.AddDate normalizes
+// month-end overflow (e.g. 2026-08-31 minus two months becomes 2026-07-01,
+// not 2026-06-31), which would silently collapse the derived period set
+// when the test happens to run on a 29th–31st.
 func monthDates(n int, end time.Time) []time.Time {
-	out := make([]time.Time, 0, n)
+	base := time.Date(end.Year(), end.Month(), 10, 0, 0, 0, 0, end.Location())
+	out := make([]time.Time, 0, n+1)
 	for i := n; i >= 0; i-- {
-		out = append(out, end.AddDate(0, -i, 0))
+		out = append(out, base.AddDate(0, -i, 0))
 	}
 	return out
 }

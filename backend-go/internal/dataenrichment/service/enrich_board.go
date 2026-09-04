@@ -2,23 +2,29 @@ package service
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 
 	"gorm.io/gorm"
 
 	"syntopica-backend/internal/dataenrichment/repository"
-	"syntopica-backend/internal/platform/airouter"
+	"syntopica-backend/internal/platform/config"
 	"syntopica-backend/internal/platform/logging"
 )
 
-// ── EnrichBoard：版块级分析编排入口（tasks 3.4 / M5）─────────────────────────
+// ── EnrichBoard：版块简报编排入口（board-level-deep-analysis tasks 3.3，D2）───
 //
-// 流程：enrichment_enabled 门槛 → D9 新鲜度门（先补齐滞后 lifeline）→ 态势卡
-// 装配 → board_interpret（命题生成）→ 每研究方向 board agent loop → board
-// analyze（层级递进论证）→ evidence lane 幽灵引用清洗 → result 写入（scope=board）
-// → 自动 review judge（对比上一份 board 档快照；review 不回写 lifeline，红线）。
+// 默认触发只走简报链：enrichment_enabled 门槛 → 活跃泳道 → D10 补全门 →
+// 态势卡装配 → board_brief 单次 LLM（坏 JSON 重试一次→机械降级，永不失败）
+// → 持久化不可变 board_brief 快照（tool_calls 恒空数组；review judge 留待
+// 3.5 按 kind 隔离接入）。
+//
+// 旧论文链（board_interpret → 研究方向 agent loop → board analyze →
+// legacy 持久化）已整体退场（tasks 6.1）：生产不再有任何编排入口能跑通
+// 该链。board_interpret / runBoardAgentLoop / board analyze prompt 的单步
+// 实现保留在各自文件中仅供历史单测与阅读（*ForTest 包装），不再有落库
+// 调用方；历史 legacy 结果只读兼容见 handler 的 list/detail 路由。
 
 // BoardEnrichmentOutput mirrors EnrichmentOutput for the board scope.
 type BoardEnrichmentOutput struct {
@@ -27,25 +33,14 @@ type BoardEnrichmentOutput struct {
 	Freshness *FreshnessGateReport              `json:"freshness_report,omitempty"`
 }
 
-// boardResultPayload is the sectors jsonb shape for scope=board (D1):
-// {scope, thesis, candidates, argument, depth, lane_refs}.
-type boardResultPayload struct {
-	Scope       string                `json:"scope"` // always "board"
-	Form        string                `json:"form"`  // board|sparse
-	Thesis      string                `json:"thesis"`
-	Angle       string                `json:"angle,omitempty"`
-	Candidates  []boardCandidate      `json:"candidates"`
-	ChosenIndex int                   `json:"chosen_index"`
-	Reason      string                `json:"reason,omitempty"`
-	Argument    json.RawMessage       `json:"argument,omitempty"`
-	Depth       Depth                 `json:"depth"`
-	LaneRefs    []laneRef             `json:"lane_refs"`
-	Interpret   *boardInterpretOutput `json:"interpret_meta,omitempty"` // degraded/all_sparse 透出
-}
-
+// laneRef is one board-sector lane citation (shared by the brief payload;
+// legacy reports carry the same shape inside sectors jsonb).
 type laneRef struct {
-	LaneID uint   `json:"lane_id"`
-	Note   string `json:"note,omitempty"`
+	LaneID uint `json:"lane_id"`
+	// BoardID carries the owning board for cross-board references
+	// (add-evidence-backed-cross-board-relations); 0/omitted = this board.
+	BoardID uint   `json:"board_id,omitempty"`
+	Note    string `json:"note,omitempty"`
 }
 
 // BoardConfigResolver reads a board's enrichment config by board ID (the
@@ -67,11 +62,12 @@ func NewDBBoardConfigResolver(db *gorm.DB) BoardConfigResolver { return &dbBoard
 func (r *dbBoardConfigResolver) GetBoardConfigByBoardID(ctx context.Context, boardID uint) (*BoardEnrichmentConfig, error) {
 	var enabled bool
 	var windowDays int
+	var relationAuto bool
 	if err := r.db.WithContext(ctx).
 		Table("semantic_labels").
-		Select("enrichment_enabled, COALESCE(window_days, 14)").
+		Select("enrichment_enabled, COALESCE(window_days, 14), COALESCE(relation_auto_discovery_enabled, false)").
 		Where("id = ? AND label_type = ?", boardID, "board").
-		Row().Scan(&enabled, &windowDays); err != nil {
+		Row().Scan(&enabled, &windowDays, &relationAuto); err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return DefaultBoardConfig(), nil
 		}
@@ -82,13 +78,15 @@ func (r *dbBoardConfigResolver) GetBoardConfigByBoardID(ctx context.Context, boa
 	if windowDays > 0 {
 		cfg.WindowDays = windowDays
 	}
+	cfg.RelationAutoDiscoveryEnabled = relationAuto
 	return cfg, nil
 }
 
 // SetBoardConfigResolver wires the resolver post-construction (nil = default deny).
 func (o *OrchestratorService) SetBoardConfigResolver(r BoardConfigResolver) { o.boardResolver = r }
 
-// EnrichBoard runs the full board-level cycle-B flow (manual trigger only).
+// EnrichBoard runs the default board cycle-B flow: a board_brief only
+// (manual trigger; no auto investigation, no tools, no thesis chain).
 func (o *OrchestratorService) EnrichBoard(ctx context.Context, boardID uint) (*BoardEnrichmentOutput, error) {
 	// 0. Board config gate (M5.1).
 	if o.boardResolver == nil {
@@ -102,18 +100,18 @@ func (o *OrchestratorService) EnrichBoard(ctx context.Context, boardID uint) (*B
 		return nil, fmt.Errorf("enrich board %d: enrichment not enabled for this board", boardID)
 	}
 
-	sessionID := generateBoardSessionID(boardID) // M5.6
+	sessionID := generateBoardSessionID(boardID)
 
-	// 1. Active lanes of this board (also the lane-evidence whitelist).
+	// 1. Active lanes of this board (also the lane whitelist).
 	laneIDs, err := o.boardActiveLaneIDs(ctx, boardID)
 	if err != nil {
 		return nil, fmt.Errorf("enrich board %d: list lanes: %w", boardID, err)
 	}
 
-	// 2. D9 freshness gate — top up stale lifelines BEFORE assembly.
+	// 2. D10 completeness gate — top up month/year lifelines BEFORE assembly.
 	freshness := o.ensureLaneFreshness(ctx, laneIDs)
 
-	// 3. Situation cards.
+	// 3. Situation cards (sorted by quality; the material budget).
 	cards, err := o.assembleSituationCards(ctx, boardID)
 	if err != nil {
 		return nil, fmt.Errorf("enrich board %d: situation cards: %w", boardID, err)
@@ -122,229 +120,66 @@ func (o *OrchestratorService) EnrichBoard(ctx context.Context, boardID uint) (*B
 		return nil, fmt.Errorf("enrich board %d: no active lanes to analyze", boardID)
 	}
 	cardsMD := RenderSituationCardsMarkdown(cards)
-	activeLanes := make(map[uint]bool, len(cards))
-	for _, c := range cards {
-		activeLanes[c.LaneID] = true
-	}
-	allSparse := true
-	for _, c := range cards {
-		if c.FactsSource != "none" && c.Signals.SparseHistory < situationCardSparseDegraded {
-			allSparse = false
-			break
-		}
-	}
+	allSparse := boardCardsAllSparse(cards)
 
-	// 4. Board-level applied review digest.
-	reviewText, err := o.boardAppliedReviewDigest(ctx, boardID)
-	if err != nil {
-		// Non-fatal: reviews are advisory context.
-		logging.Warnf("enrich board %d: list applied reviews: %v", boardID, err)
+	// 4. board_brief：一次 LLM（重试一次→机械降级），仅态势卡输入。
+	//    3.5: 同 kind（board_brief）applied review digest 在生成【前】读取
+	//    注入（advisory 偏差提醒，不当本次事实）；读取失败降级为空不阻塞。
+	reviewDigest, digestErr := o.boardBriefReviewDigest(ctx, boardID)
+	if digestErr != nil {
+		logging.Warnf("enrich board %d: same-kind review digest unavailable (skipped): %v", boardID, digestErr)
 	}
-
-	// 5. board_interpret（命题生成，M2 contract）.
-	interp, err := o.boardInterpret(ctx, boardInterpretInput{
-		SessionID: sessionID,
-		CardsMD:   cardsMD,
-		ReviewTxt: reviewText,
-		AllSparse: allSparse,
-		TopCard:   &cards[0],
-	})
-	if err != nil {
-		return nil, fmt.Errorf("enrich board %d: board interpret: %w", boardID, err)
+	// 4.5 Confirmed cross-board relation background (5.x): load active
+	// confirmed relations touching this board, mechanically select within
+	// budget (quality DESC, confirmed_at DESC, id ASC) and render the block.
+	crossMD, crossRefs, crossTruncated := o.loadConfirmedRelationBackground(ctx, boardID)
+	in := boardBriefInput{
+		SessionID:        sessionID,
+		CardsMD:          cardsMD,
+		ReviewDigest:     reviewDigest,
+		AllSparse:        allSparse,
+		Cards:            cards,
+		CrossRelationsMD: crossMD,
+		CrossRelations:   crossRefs,
 	}
+	brief, meta := o.generateBoardBrief(ctx, in)
+	// Mechanical field: the server assembles the consumed relations onto the
+	// payload; the LLM never generates them (spec: 新简报消费确认关系).
+	brief.CrossBoardRelations = crossRefs
 
-	// 6. Sparse path: honest-decline result, no agent/analyze loops.
-	if interp.Form == boardInterpretFormSparse {
-		payload := boardResultPayload{
-			Scope: "board", Form: boardInterpretFormSparse,
-			Thesis: firstThesis(interp), Candidates: interp.Candidates,
-			ChosenIndex: 0, Reason: interp.Reason,
-			Depth: Depth{}, LaneRefs: []laneRef{},
-			Interpret: interp,
-		}
-		return o.persistBoardResult(ctx, boardID, sessionID, payload, nil, freshness)
-	}
-
-	chosen := interp.Candidates[interp.ChosenIndex]
-
-	// 7. Research directions: derive 2-3 from the situation cards' hot lanes
-	// (mechanical — the interpret candidates already frame the directions).
-	directions := o.boardResearchDirections(cards, chosen)
-
-	// 8. Board agent loop per direction (same loop defenses, max_loops=6).
-	allowedTools := o.buildAgentAllowedTools(cfg.AllowedTools)
-	agentResults := make([]*AgentLoopResult, 0, len(directions))
-	topicsData := make([]map[string]any, 0, len(directions))
-	for _, dir := range directions {
-		ar, aerr := o.runBoardAgentLoop(ctx, sessionID, dir, chosen.Thesis, cardsMD, allowedTools)
-		if aerr != nil || ar.Error != "" {
-			// Non-fatal per direction; record and continue.
-			logging.Warnf("enrich board %d: direction %q loop error: %v / %s", boardID, dir, aerr, ar.Error)
-		}
-		agentResults = append(agentResults, ar)
-		topicsData = append(topicsData, map[string]any{"topic": dir, "data": ar.FinalData})
-	}
-
-	// 9. Board analyze (层级递进论证骨架).
-	analyzePromptStr := o.assembleBoardAnalyzePrompt(ctx, chosen.Thesis, chosen.Angle, cardsMD, topicsData)
-	rawOut, err := o.boardAnalyzeCall(ctx, sessionID, analyzePromptStr, activeLanes)
-	if err != nil {
-		// M5.5: no partial result rows — analyze failure aborts before write.
-		return nil, fmt.Errorf("enrich board %d: analyze: %w", boardID, err)
-	}
-
-	// 10. Compose payload.
-	toolCallsJSON := boardToolCallsJSON(agentResults)
-	payload := boardResultPayload{
-		Scope: "board", Form: "board",
-		Thesis: chosen.Thesis, Angle: chosen.Angle,
-		Candidates: interp.Candidates, ChosenIndex: interp.ChosenIndex, Reason: interp.Reason,
-		Argument: rawOut.Argument, Depth: rawOut.Depth, LaneRefs: rawOut.LaneRefs,
-		Interpret: interp,
-	}
-	out, err := o.persistBoardResult(ctx, boardID, sessionID, payload, toolCallsJSON, freshness)
+	// 5. Persist the immutable brief (atomic; generation snapshot fixed).
+	out, err := o.persistBoardBriefResult(ctx, boardID, sessionID, brief, meta,
+		boardBriefPromptInput{CardsMD: cardsMD, ReviewDigest: reviewDigest, AllSparse: allSparse, CrossRelationsMD: crossMD, TruncatedCrossRelations: crossTruncated},
+		cards, freshness)
 	if err != nil {
 		return nil, err
 	}
-	_ = toolCallsJSON // used inside persistBoardResult via closure param
+
+	// 6. 3.5 review judge：仅与同 board 上一份 board_brief 比较（legacy/
+	//    investigation/topic 永不参与）；全程 non-fatal，失败只记日志，
+	//    已落库简报不回滚、lifeline 永不回写。
+	out.Review = o.judgeBoardBriefAgainstPrev(ctx, boardID, sessionID, out.Result)
+
+	// 7. Non-fatal auto relation discovery (7.1): board switch + budget +
+	// sparse gates inside; never rolls the brief back, never blocks here.
+	o.maybeAutoDiscoverRelations(cfg, boardID, out.Result.ID, brief)
 	return out, nil
 }
 
-// firstThesis safely extracts the sparse-path thesis.
-func firstThesis(interp *boardInterpretOutput) string {
-	if len(interp.Candidates) > 0 {
-		return interp.Candidates[0].Thesis
-	}
-	return interp.Reason
-}
+// EnrichBoardLegacyAnalysis（旧论文链入口）已删除（tasks 6.1）：生产不再有
+// 任何 handler/service 公开路径能运行 board_interpret → 研究方向 agent loop
+// → board analyze → legacy 持久化；历史 legacy 结果只读兼容走 handler 的
+// list/detail 路由。
 
-// boardResearchDirections derives 2-3 research directions from cards + chosen
-// thesis: the top full-detail lanes carry the hooks; directions mirror the
-// methodology (机制/数据/对照).
-func (o *OrchestratorService) boardResearchDirections(cards []LaneSituationCard, chosen boardCandidate) []string {
-	dirs := make([]string, 0, 3)
-	// Direction 1: thesis mechanism.
-	dirs = append(dirs, fmt.Sprintf("命题机制：%s", chosen.Thesis))
-	// Direction 2: top lanes' facts (hook validation).
-	if len(cards) > 0 && cards[0].FactsDigest != "" {
-		dirs = append(dirs, fmt.Sprintf("钩子核实：%s", cards[0].Label))
-	}
-	// Direction 3: cross-lane historical precedent.
-	if len(cards) > 1 {
-		dirs = append(dirs, fmt.Sprintf("跨泳道历史对照：%s 与 %s", cards[0].Label, cards[1].Label))
-	}
-	return dirs
-}
-
-// boardAnalyzeResult is the parsed board analyze output.
-type boardAnalyzeResult struct {
-	Argument json.RawMessage `json:"argument"`
-	Depth    Depth           `json:"depth"`
-	LaneRefs []laneRef       `json:"lane_refs"`
-}
-
-// boardAnalyzeCall runs the board analyze LLM call + parse + ghost-lane cleanup.
-func (o *OrchestratorService) boardAnalyzeCall(ctx context.Context, sessionID, prompt string, activeLanes map[uint]bool) (*boardAnalyzeResult, error) {
-	resp, err := o.airouter.Chat(ctx, airouter.ChatRequest{
-		Capability: o.capability, Operation: "data_enrichment.analyze", SessionID: sessionID,
-		Messages: []airouter.Message{{Role: "user", Content: prompt}}, JSONMode: true,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("board analyze chat: %w", err)
-	}
-	parsed, err := ParseJSONResponse(resp.Content)
-	if err != nil {
-		// One retry with the parse error fed back (mirrors single-lane analyze).
-		retry := prompt + "\n\n---\n上次输出解析失败：" + err.Error() + "。请重新输出完整 JSON，不要 markdown 包裹。"
-		resp2, err2 := o.airouter.Chat(ctx, airouter.ChatRequest{
-			Capability: o.capability, Operation: "data_enrichment.analyze", SessionID: sessionID,
-			Messages: []airouter.Message{{Role: "user", Content: retry}}, JSONMode: true,
-		})
-		if err2 != nil {
-			return nil, fmt.Errorf("board analyze retry chat: %w", err2)
-		}
-		parsed, err = ParseJSONResponse(resp2.Content)
-		if err != nil {
-			return nil, fmt.Errorf("board analyze parse (after retry): %w", err)
+// boardCardsAllSparse reports whether every card signals thin/no material
+// (no facts digest or a degraded sparse history) — the honest-decline input.
+func boardCardsAllSparse(cards []LaneSituationCard) bool {
+	for _, c := range cards {
+		if c.FactsSource != "none" && c.Signals.SparseHistory < situationCardSparseDegraded {
+			return false
 		}
 	}
-	arg, _ := json.Marshal(parsed["argument"])
-	out := &boardAnalyzeResult{Argument: json.RawMessage(arg)}
-	// parseDepth takes the WHOLE payload and unwraps ["depth"] itself.
-	out.Depth = parseDepth(parsed)
-	out.Depth.EvidenceChain = sanitizeEvidenceChain(out.Depth.EvidenceChain, activeLanes)
-	if lr, ok := parsed["lane_refs"].([]any); ok {
-		for _, v := range lr {
-			if vm, ok := v.(map[string]any); ok {
-				id, ok := vm["lane_id"].(float64)
-				if !ok || !activeLanes[uint(id)] {
-					continue // ghost lane ref dropped
-				}
-				note, _ := vm["note"].(string)
-				out.LaneRefs = append(out.LaneRefs, laneRef{LaneID: uint(id), Note: note})
-			}
-		}
-	}
-	if out.Depth.SystemReframe == "" || len(out.Depth.MechanismLayers) == 0 {
-		return nil, fmt.Errorf("board analyze: depth block incomplete (system_reframe/mechanism_layers)")
-	}
-	return out, nil
-}
-
-// persistBoardResult writes the immutable board-scope result, then runs the
-// review judge against the previous board-scope snapshot (M5.3/M5.4).
-func (o *OrchestratorService) persistBoardResult(ctx context.Context, boardID uint, sessionID string, payload boardResultPayload, toolCallsJSON json.RawMessage, freshness *FreshnessGateReport) (*BoardEnrichmentOutput, error) {
-	sectorsJSON, err := json.Marshal(payload)
-	if err != nil {
-		return nil, fmt.Errorf("enrich board %d: marshal payload: %w", boardID, err)
-	}
-	freshJSON, _ := json.Marshal(freshness)
-
-	result := &repository.TopicEnrichmentResult{
-		SemanticBoardID: repository.BoardIDPtr(boardID),
-		AnalysisScope:   "board",
-		Sectors:         sectorsJSON,
-		ToolCalls:       toolCallsJSON,
-		InputSnapshot:   freshJSON, // D9: freshness report in metadata
-		SessionID:       sessionID,
-	}
-	if err := o.repo.CreateTopicEnrichmentResult(ctx, result); err != nil {
-		return nil, fmt.Errorf("enrich board %d: save result: %w", boardID, err)
-	}
-
-	// Review judge vs previous board-scope result (scope-filtered query).
-	var review *repository.TopicEnrichmentReview
-	prevResult, prevErr := o.repo.GetPrevLatestBoardEnrichmentResult(ctx, boardID, result.ID)
-	if prevErr != nil && !errors.Is(prevErr, gorm.ErrRecordNotFound) {
-		logging.Warnf("enrich board %d: get prev result: %v", boardID, prevErr)
-	}
-	if prevErr == nil && prevResult != nil {
-		prevJSON, _ := json.Marshal(map[string]any{"analysis": json.RawMessage(prevResult.Sectors)})
-		currJSON, _ := json.Marshal(map[string]any{"analysis": json.RawMessage(result.Sectors)})
-		rj, rjErr := o.runReviewJudge(ctx, sessionID, string(prevJSON), string(currJSON))
-		if rjErr == nil && rj != nil && rj.ShouldReview {
-			conf := rj.Confidence
-			verdictJSON, _ := json.Marshal(map[string]any{
-				"new_findings": rj.NewFindings, "overturned": rj.Overturned, "confidence_shift": rj.ConfidenceShift,
-			})
-			review = &repository.TopicEnrichmentReview{
-				SemanticBoardID:  repository.BoardIDPtr(boardID),
-				PrevResultID:     uintPtr(prevResult.ID),
-				CurrResultID:     result.ID,
-				Verdict:          verdictJSON,
-				DeviationSummary: rj.Reason,
-				AffectedContext:  rj.AffectedContext,
-				Confidence:       &conf,
-				Applied:          false,
-				Source:           "llm_assisted",
-			}
-			if err := o.repo.CreateTopicEnrichmentReview(ctx, review); err != nil {
-				return nil, fmt.Errorf("enrich board %d: save review: %w", boardID, err)
-			}
-		}
-	}
-
-	return &BoardEnrichmentOutput{Result: result, Review: review, Freshness: freshness}, nil
+	return true
 }
 
 // boardActiveLaneIDs lists active lane IDs for the board.
@@ -378,33 +213,92 @@ func (o *OrchestratorService) boardActiveLaneIDs(ctx context.Context, boardID ui
 	return ids, nil
 }
 
-// boardAppliedReviewDigest renders applied board-scope reviews for interpret.
-func (o *OrchestratorService) boardAppliedReviewDigest(ctx context.Context, boardID uint) (string, error) {
-	reviews, err := o.repo.ListAppliedBoardEnrichmentReviews(ctx, boardID)
-	if err != nil {
-		return "", err
-	}
-	if len(reviews) == 0 {
-		return "", nil
-	}
-	out := ""
-	for _, r := range reviews {
-		out += fmt.Sprintf("- [review #%d] %s\n", r.ID, r.DeviationSummary)
-	}
-	return out, nil
-}
-
-func boardToolCallsJSON(results []*AgentLoopResult) json.RawMessage {
-	all := make([]ToolCallRecord, 0)
-	for _, ar := range results {
-		all = append(all, ar.ToolCalls...)
-	}
-	if len(all) == 0 {
-		return nil
-	}
-	b, _ := json.Marshal(all)
-	return b
-}
-
 // uintPtr returns a pointer to v (review FK columns are pointer-typed).
 func uintPtr(v uint) *uint { return &v }
+
+// loadConfirmedRelationBackground selects budgeted confirmed, unexpired
+// cross-board relations for the board (either side) and renders the prompt
+// block. Pure mechanical ordering (spec: 关系数量超过预算的确定性排序);
+// failures degrade to empty (brief generation never blocks on this).
+func (o *OrchestratorService) loadConfirmedRelationBackground(ctx context.Context, boardID uint) (string, []boardBriefCrossRelation, int) {
+	if o.repo == nil {
+		return "", nil, 0
+	}
+	rows, err := o.repo.ListActiveConfirmedRelationsForBoard(ctx, boardID)
+	if err != nil || len(rows) == 0 {
+		if err != nil {
+			logging.Warnf("enrich board %d: confirmed relations unavailable (skipped): %v", boardID, err)
+		}
+		return "", nil, 0
+	}
+	cfg := config.EffectiveCrossBoardRelationConfig()
+	refs := make([]boardBriefCrossRelation, 0, len(rows))
+	for _, r := range rows {
+		other := r.SourceBoardID
+		direction := "incoming"
+		if r.SourceBoardID == boardID {
+			if r.TargetBoardID == nil {
+				continue
+			}
+			other = *r.TargetBoardID
+			direction = "outgoing"
+		}
+		ref := boardBriefCrossRelation{
+			RelationID:   r.ID,
+			OtherBoardID: other,
+			Direction:    direction,
+			RelationType: r.RelationType,
+			Claim:        r.Claim,
+			QualityGrade: r.QualityGrade,
+		}
+		if r.ConfirmedAt != nil {
+			ref.ConfirmedAt = r.ConfirmedAt.Format("2006-01-02")
+		}
+		if r.ExpiresAt != nil {
+			ref.ExpiresAt = r.ExpiresAt.Format("2006-01-02")
+		}
+		if len(r.Evidence) > 0 {
+			ref.EvidenceURL = r.Evidence[0].URL
+			ref.EvidenceQuote = truncateRunes(r.Evidence[0].Quote, 120)
+		}
+		refs = append(refs, ref)
+	}
+	truncated := 0
+	if len(refs) > cfg.BriefMaxRelations {
+		truncated = len(refs) - cfg.BriefMaxRelations
+		refs = refs[:cfg.BriefMaxRelations]
+	}
+	if len(refs) == 0 {
+		return "", nil, 0
+	}
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "共 %d 条有效确认关系", len(refs))
+	if truncated > 0 {
+		fmt.Fprintf(&sb, "（另有 %d 条超出预算未展示）", truncated)
+	}
+	sb.WriteString("：\n")
+	var total int
+	for i, ref := range refs {
+		line := fmt.Sprintf("%d. [%s/%s] %s — 确认于 %s", i+1, ref.RelationType, ref.QualityGrade, ref.Claim, orDashDate(ref.ConfirmedAt))
+		if ref.EvidenceURL != "" {
+			line += "（证据: " + ref.EvidenceURL + "）"
+		}
+		line += "\n"
+		if total+len([]rune(line)) > cfg.BriefMaxRelationRunes {
+			// rune budget hit: drop this and everything after; count as truncated
+			truncated += len(refs) - i
+			refs = refs[:i]
+			break
+		}
+		total += len([]rune(line))
+		sb.WriteString(line)
+	}
+	return sb.String(), refs, truncated
+}
+
+func orDashDate(s string) string {
+	if s == "" {
+		return "（未知日期）"
+	}
+	return s
+}

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, watch, nextTick } from 'vue'
+import { ref, computed, watch, nextTick, onUnmounted } from 'vue'
 import { Icon } from '@iconify/vue'
 import { useBoardEnrichment } from '~/features/tags/composables/useBoardEnrichment'
 import type { ContextGranularity, DataSourceRow, AnalyzeOutput, AnalyzeRef } from '~/api/boardEnrichment'
@@ -10,15 +10,22 @@ import { renderMarkdown } from '~/utils/markdown'
 import '~/components/article/ArticleContent.css'
 import CausalAnalysisReport from './CausalAnalysisReport.vue'
 import BoardAnalysisReport from './BoardAnalysisReport.vue'
+import BoardBriefReport from './BoardBriefReport.vue'
+import BoardRelationPanel from './BoardRelationPanel.vue'
+import { useBoardRelations } from '../composables/useBoardRelations'
+import BoardInvestigationReport from './BoardInvestigationReport.vue'
 import QAPanel from './QAPanel.vue'
 import DebateSection from './DebateSection.vue'
 
 /**
- * 数据增强 · 认知工作台（board-level-deep-analysis 重排）。
+ * 数据增强 · 认知工作台（board-level-deep-analysis 5.5 重排）。
  *
- * 主视图 = 版块级深度分析（BoardAnalysisReport，论文式长文，头部带刷新与
- * 触发）；单泳道分析收拢为「聚焦分析」折叠区（唯一泳道选择点 → 触发
- * EnrichTopic / lane 下钻预填 lens）；新闻背景（循环A 新闻记忆）为折叠
+ * 主视图 = 版块简报（BoardBriefReport：关键观察/关系/不确定项/可选题调查）；
+ * 调查报告（board_investigation）走 BoardInvestigationReport（研究档案/
+ * 证据台账，问题+假设+有界结论，渐进展开）；旧论文式结果
+ * （legacy_board_analysis）走 BoardAnalysisReport 并标「旧版分析」。
+ * 单泳道分析收拢为「聚焦分析」折叠区（唯一泳道选择点 → 触发
+ * EnrichTopic / lane 下钻预填）；新闻背景（循环A 新闻记忆）为折叠
  * section（分析不回写）。
  *
  * DebateSection（FinGenius 个股辩论）作为「金融可选模块 · 独立于因果主线」
@@ -33,6 +40,8 @@ const props = defineProps<{
 const emit = defineEmits<{
   /** 开关状态被面板内一键开启修改，父组件需刷新 boards。 */
   (e: 'enrichment-toggled'): void
+  /** 跨版块关系跳转对方版块（5.3）：父组件切换选中版块。 */
+  (e: 'open-board', boardId: number): void
 }>()
 
 const {
@@ -51,11 +60,14 @@ const {
   debates, debateTriggering, debateError, debateStage, loadDebates, triggerDebate,
   // qa (causal-analysis-agent 阶段3：报告追问 + 沉淀)
   qaList, qaLoading, qaError, latestAnswer, loadQA, askQuestion, sedimentAnswer,
+  // board qa (board-level-deep-analysis 6.2：版块报告追问，独立 state)
+  boardQaList, boardQaLoading, boardQaError, boardLatestAnswer,
+  loadBoardQA, askBoardQuestion, sedimentBoardAnswer,
   // board-level analysis (board-level-deep-analysis)
-  boardResults, boardResultsLoading, boardAnalysisTriggering,
-  selectedBoardResult, selectedBoardResultId,
-  loadBoardAnalysisResults, triggerBoardAnalysis, selectBoardResult,
-  syncBoardAnalysisStatus,
+  boardResults, boardResultsLoading, boardAnalysisTriggering, activeBoardJob,
+  selectedBoardResult,
+  loadBoardAnalysisResults, triggerBoardAnalysis, triggerBoardInvestigation, selectBoardResult,
+  syncBoardAnalysisStatus, syncTopicAnalysisStatus, activateBoardContext,
   // workbench UI
   selectedGran, selectedPeriodIdx, periodList, currentContext,
   setGran, shiftPeriod, selectPeriod,
@@ -63,7 +75,41 @@ const {
   loadAllTopicTables,
 } = useBoardEnrichment()
 
-const { success: notifySuccess, error: notifyError } = useNotify()
+// ── 跨版块关系（add-evidence-backed-cross-board-relations 6.1/6.2）─────────
+const {
+  relations, relationsLoading, relationsError, loadRelations,
+  relationDetail, relationDetailLoading, loadRelationDetail,
+  triggeringSource, triggerDiscovery,
+  confirmingRelationId, dismissingRelationId, reResolvingRelationId,
+  confirmRelation, dismissRelation, reResolveRelation,
+  resetRelationView, disposeRelationView,
+} = useBoardRelations()
+onUnmounted(() => disposeRelationView())
+
+async function handleDiscoverRelation(payload: { briefing_result_id: number; source_kind: string; source_key: string }) {
+  await triggerDiscovery(props.boardId, payload as { briefing_result_id: number; source_kind: 'observation' | 'question'; source_key: string })
+}
+
+function handleRelationReload(status?: string) {
+  void loadRelations(props.boardId, status)
+}
+function handleRelationDetail(relationId: number) {
+  void loadRelationDetail(props.boardId, relationId)
+}
+function handleRelationConfirm(relationId: number) {
+  void confirmRelation(props.boardId, relationId)
+}
+function handleRelationDismiss(relationId: number, reason: string) {
+  void dismissRelation(props.boardId, relationId, reason)
+}
+function handleRelationReResolve(relationId: number) {
+  void reResolveRelation(props.boardId, relationId)
+}
+function handleOpenBoard(boardId: number) {
+  emit('open-board', boardId)
+}
+
+const { success: notifySuccess, error: notifyError, warn: notifyWarn } = useNotify()
 
 // ── 新闻背景折叠区（fix-board-analysis-material：去单 tab 导航）─────────
 /** 新闻背景（循环A 新闻记忆）折叠态，默认收起。 */
@@ -75,20 +121,65 @@ const focusOpen = ref(false)
 /** 下钻预填的 lens（来自版块报告 lane 点击；空 = 常规单泳道分析）。 */
 const prefillLens = ref('')
 
-/** lane 下钻：展开聚焦区 + 选中对应泳道 + 预填 lens + 滚动过去。 */
-function handleDrillLane(payload: { laneId: number; lens: string }) {
+/** lane 下钻（5.8）：展开聚焦区 + 选中对应泳道 + 预填具体调查问题/观察/证据
+ * 说明到可编辑 textarea + 滚动过去。lane 先校验属于当前板块泳道集——幽灵
+ * lane（不在 topics）notify 提示且不误选/不展开；简报组件 emit {laneId, prefill}；
+ * 调查报告 evidence lane 事件同样走这里；旧版分析组件 emit {laneId, lens}（兼容）。
+ * 下钻只预填不自动触发，用户可修改后自己点「聚焦分析」。 */
+function handleDrillLane(payload: { laneId: number; prefill?: string; lens?: string }) {
   const lane = topics.value.find((t) => t.id === payload.laneId)
-  if (lane) selectedTopicId.value = lane.id
-  prefillLens.value = payload.lens
+  if (!lane) {
+    notifyWarn(`报告引用的泳道 #${payload.laneId} 不在当前板块的泳道列表里（可能已被移除），无法下钻`)
+    return
+  }
+  selectedTopicId.value = lane.id
+  prefillLens.value = payload.prefill ?? payload.lens ?? ''
   focusOpen.value = true
   nextTick(() => {
     document.getElementById('focus-analysis')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
   })
 }
 
+// ── 简报主视图分派（5.5）：board_brief → 简报；legacy → 旧版分析；
+// investigation → 占位（5.6/5.7 接线，不冒充简报）──────────────────
+const selectedResultView = computed<'brief' | 'legacy' | 'investigation'>(() => {
+  const r = selectedBoardResult.value
+  if (!r) return 'brief'
+  if (r.result_kind === 'board_brief') return 'brief'
+  if (r.result_kind === 'board_investigation') return 'investigation'
+  return 'legacy' // legacy_board_analysis 或旧数据无 kind（后端已兑底 legacy）
+})
+const selectedBoardBrief = computed(() =>
+  selectedResultView.value === 'brief' ? selectedBoardResult.value : null,
+)
+
+/** 历史下拉的 kind 标签（旧数据无 kind → 旧版分析）。 */
+function resultKindLabel(kind?: string): string {
+  switch (kind) {
+    case 'board_brief': return '简报'
+    case 'board_investigation': return '调查'
+    default: return '旧版分析'
+  }
+}
+function resultDateLabel(r: { created_at?: string }): string {
+  return r.created_at ? new Date(r.created_at).toISOString().slice(0, 10) : '—'
+}
+
+// ── 深入调查（5.4 事件契约 → 5.7 接线）：简报组件的 generated/custom
+// investigate 事件接到 composable 的异步任务（同一套按 job_id 轮询 +
+// 视图守卫）；面板层绝不自动触发——只有用户点「深入调查」才发。
+async function handleInvestigate(payload: { briefing_result_id: number; question: string; question_id?: string }) {
+  await triggerBoardInvestigation(props.boardId, payload)
+}
+
+/** 调查任务在跑（禁用简报里的问题按钮/自填提交并显示「正在调查」）。 */
+const investigationRunning = computed(
+  () => boardAnalysisTriggering.value && activeBoardJob.value?.jobKind === 'board_investigation',
+)
+
 async function handleBoardAnalysisTrigger() {
   if (boardAnalysisTriggering.value) return
-  if (!confirm('触发版块级深度分析？\n（后台异步执行，可离开页面：分析前先补齐新闻背景档案，再跑态势卡 + 命题 + 多轮 agent 检索 + 论文式分析，需板块已开启增强开关）')) return
+  if (!confirm('生成版块简报？\n（后台异步执行，可离开页面：先自动补齐新闻背景档案，再汇总关键观察、跨泳道关系与不确定项；需板块已开启增强开关）')) return
   await triggerBoardAnalysis(props.boardId)
 }
 
@@ -114,18 +205,47 @@ async function enableEnrichment() {
 
 // ── lifecycle: board switch ──────────────────────────────────────────────
 async function bootstrap(boardId: number) {
-  await Promise.all([
-    loadTopics(boardId),
+  // 统一 board view context 守卫（5.4/5.5 review）：bootstrap 最前面激活新板块
+  // 上下文——内部停旧 board 轮询（gen++ 隔离在途 poll）+ viewEpoch++（隔离旧板块
+  // 在途/迟到的 trigger/sync/loader 响应）：旧板块慢响应一律静默丢弃（不 start
+  // poll、不 toast、不写列表/选中/任务态），不串台新板块；随后才加载/同步新板块。
+  activateBoardContext(boardId)
+  // board 级三件套同步启动（与 loadTopics 无依赖，保持挂载即拉）；loadTopics
+  // 先行 await 确定 selectedTopicId（5.5 最终 review：topic 档重进恢复）——
+  // activate 已 epoch++，旧板块在途的 topic sync 迟到响应全数失配丢弃，不会
+  // 写入新板块。
+  const boardLoads = Promise.all([
     loadDataSources(boardId),
     loadBoardAnalysisResults(boardId),
     syncBoardAnalysisStatus(boardId),
   ])
-  if (selectedTopicId.value !== null) {
-    await loadAllTopicTables(selectedTopicId.value)
+  await loadTopics(boardId)
+  const topicId = selectedTopicId.value
+  // Critical（5.5 review 修复）：topic 维度调用顺序必须是 loadAllTopicTables
+  // 在前、syncTopicAnalysisStatus 最后——loadAll 入口同步 stopTopicPoll（停旧
+  // topic/debate 轮询，selectTopic/watch/bootstrap 三入口兑底），若 sync 在前，
+  // 刚恢复的 running 轮询会被随后的 loadAll 误杀（poll 消失、triggering 归零，
+  // 后台任务在前端失联）。sync 放在 boardLoads 之后收尾：bootstrap 内 sync
+  // 之后不存在任何 stopTopicPoll 路径，恢复的轮询跨出 bootstrap 存活；无
+  // topic（列表空/加载失败 selectedTopicId=null）则 loadAll/sync 二者都不调。
+  if (topicId !== null) {
+    await loadAllTopicTables(topicId)
+  }
+  await boardLoads
+  if (topicId !== null) {
+    await syncTopicAnalysisStatus(topicId)
   }
 }
 void bootstrap(props.boardId)
 watch(() => props.boardId, (id) => { void bootstrap(id) })
+// watch 兑底：loadTopics 换了 selectedTopicId（首挂载 null→id / 原选中失效自动
+// 回退）时装载新 topic 表。与 bootstrap 的并发时序是安全的（Critical review）：
+// pre-flush watch 在 ref 写入当拍的微任务里执行，必然先于 bootstrap 越过
+// `await loadTopics` 的续体——其 loadAll 入口的同步 stopTopicPoll 永远发生在
+// bootstrap 末尾 syncTopicAnalysisStatus 之前；sync 之后本 watch 只会因用户
+// 显式换 topic（selectTopic/lane 下钻，本就该停旧轮询装载新 topic）才再触发，
+// 不存在 sync 后再次误停恢复轮询的路径。同 topic 刷新（selectedTopicId 不变，
+// watch 不触发）由 bootstrap 自身完成「加载表 + 恢复轮询」。
 watch(selectedTopicId, (id) => { if (id !== null) void loadAllTopicTables(id) })
 
 const selectedTopic = computed(() => topics.value.find((t) => t.id === selectedTopicId.value) ?? null)
@@ -306,11 +426,15 @@ async function handleDebateRetry() {
 
 <template>
   <div class="ew-panel">
-    <!-- ── 版块级分析主视图（唯一顶层视图；刷新入口在此头部） ─────────── -->
+    <!-- ── 版块简报主视图（唯一顶层视图；刷新/生成入口在此头部） ─────── -->
     <section class="block board-analysis-main">
       <div class="block-head board-head">
-        <h2 class="serif">版块级深度分析</h2>
-        <span class="helper">跨泳道命题论证 · 论文式长文 · 新鲜度自动补齐</span>
+        <h2 class="serif">版块简报</h2>
+        <span class="helper">关键观察 · 泳道关系 · 不确定项 · 可选题调查 · 新鲜度自动补齐</span>
+        <span v-if="boardAnalysisTriggering && activeBoardJob" class="bb-job-tag">
+          <Icon icon="mdi:loading" width="13" class="spin" />
+          {{ activeBoardJob.jobKind === 'board_investigation' ? '正在调查…可离开' : '正在生成简报…可离开' }}
+        </span>
         <span class="ew-spacer" />
         <button type="button" class="ew-ghost-btn" title="刷新（重拉泳道/数据源/历史报告）" @click="bootstrap(boardId)">
           <Icon icon="mdi:refresh" width="14" />
@@ -318,16 +442,17 @@ async function handleDebateRetry() {
         <select
           v-if="boardResults.length > 1"
           class="ew-select board-history"
-          :value="selectedBoardResultId ?? boardResults[0]?.id"
+          aria-label="历史报告"
+          :value="selectedBoardResult?.id"
           @change="selectBoardResult(Number(($event.target as HTMLSelectElement).value))"
         >
           <option v-for="r in boardResults" :key="r.id" :value="r.id">
-            {{ r.id }} · {{ r.created_at ? new Date(r.created_at).toISOString().slice(0, 10) : '—' }}{{ r.sectors?.form === 'sparse' ? '（素材不足）' : '' }}
+            {{ r.id }} · {{ resultDateLabel(r) }} · {{ resultKindLabel(r.result_kind) }}
           </option>
         </select>
         <button type="button" class="btn btn-primary" :disabled="boardAnalysisTriggering || !enrichmentEnabled" @click="handleBoardAnalysisTrigger">
           <Icon icon="mdi:play" width="13" />
-          {{ boardAnalysisTriggering ? '分析中…可离开' : '▶ 分析板块' }}
+          {{ boardAnalysisTriggering ? '生成中…可离开' : '生成简报' }}
         </button>
       </div>
       <div v-if="!enrichmentEnabled" class="ew-enrichment-off">
@@ -337,10 +462,74 @@ async function handleDebateRetry() {
           {{ enrichToggling ? '开启中…' : '一键开启' }}
         </button>
       </div>
-      <BoardAnalysisReport
+      <!-- 简报主视图（board_brief） -->
+      <BoardBriefReport
+        v-if="selectedResultView === 'brief'"
+        :result="selectedBoardBrief"
+        :loading="boardResultsLoading"
+        :investigation-running="investigationRunning"
+        :relation-discovery-running="triggeringSource !== null"
+        @drill-lane="handleDrillLane"
+        @investigate="handleInvestigate"
+        @open-board="handleOpenBoard"
+        @discover-relation="handleDiscoverRelation"
+      />
+
+      <!-- 旧论文式报告（legacy_board_analysis）：只读兼容 + 标注 -->
+      <template v-else-if="selectedResultView === 'legacy'">
+        <div class="bb-legacy-banner">
+          <Icon icon="mdi:file-document-outline" width="13" />
+          旧版分析 · 论文式长文（只读兼容，新触发不再生成此形态）
+        </div>
+        <BoardAnalysisReport
+          :result="selectedBoardResult"
+          :loading="boardResultsLoading"
+          @drill-lane="handleDrillLane"
+        />
+      </template>
+
+      <!-- 调查报告（board_investigation 5.6/5.7）：问题 + 假设评估 + 有界结论
+           + 证据台账（渐进展开，无 argument/depth 长文） -->
+      <BoardInvestigationReport
+        v-else-if="selectedResultView === 'investigation'"
         :result="selectedBoardResult"
         :loading="boardResultsLoading"
         @drill-lane="handleDrillLane"
+        @open-board="handleOpenBoard"
+      />
+
+      <!-- 跨版块关系建议面板（6.2）：列表 + 详情 + confirm/dismiss/re-resolve；
+         独立于报告形态（brief/legacy/investigation 都可裁决关系） -->
+      <BoardRelationPanel
+        :relations="relations"
+        :loading="relationsLoading"
+        :error="relationsError"
+        :detail="relationDetail"
+        :detail-loading="relationDetailLoading"
+        :confirming-id="confirmingRelationId"
+        :dismissing-id="dismissingRelationId"
+        :re-resolving-id="reResolvingRelationId"
+        :active-source="triggeringSource"
+        @reload="handleRelationReload"
+        @open-detail="handleRelationDetail"
+        @confirm="handleRelationConfirm"
+        @dismiss="handleRelationDismiss"
+        @re-resolve="handleRelationReResolve"
+      />
+
+      <!-- 版块报告追问（6.2：三 kind 均可追问；QA 独立行 append-only，
+           报告本体只读；切历史报告时 resultId 变更自动重拉） -->
+      <QAPanel
+        v-if="selectedBoardResult !== null"
+        class="board-qa"
+        :result-id="selectedBoardResult?.id ?? null"
+        :qa-list="boardQaList"
+        :qa-loading="boardQaLoading"
+        :qa-error="boardQaError"
+        :latest-answer="boardLatestAnswer"
+        @ask="askBoardQuestion"
+        @sediment="sedimentBoardAnswer"
+        @load="loadBoardQA"
       />
     </section>
 
@@ -363,11 +552,12 @@ async function handleDebateRetry() {
               <option :value="null" disabled>选择泳道…</option>
               <option v-for="t in topics" :key="t.id" :value="t.id">{{ t.label }}（{{ t.status }}）</option>
             </select>
-            <input
+            <textarea
               v-model="prefillLens"
               class="ew-input focus-lens-input"
-              placeholder="预填视角（可选，如：供需错配的深层机制）"
-            >
+              rows="2"
+              placeholder="预填视角（可选）：版块报告下钻会填入具体问题/证据说明，可修改后再发起聚焦分析"
+            />
             <button type="button" class="btn btn-primary" :disabled="triggering" @click="handleTrigger">
               <Icon icon="mdi:play" width="13" />
               {{ triggering ? '分析中…可离开' : '▶ 聚焦分析' }}
@@ -629,9 +819,23 @@ async function handleDebateRetry() {
 @keyframes ew-pulse { 0%,100%{opacity:1;} 50%{opacity:.35;} }
 .trigger-wrap { margin-left: auto; }
 
-/* ── 版块分析主视图 + 聚焦分析折叠区（board-level-deep-analysis 4.2）───── */
+/* ── 版块简报主视图 + 聚焦分析折叠区（board-level-deep-analysis 4.2 / 5.5）─ */
 .board-head { display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; }
 .board-history { max-width: 240px; font-size: 0.78rem; }
+.bb-job-tag {
+  display: inline-flex; align-items: center; gap: 0.3rem;
+  font-size: 0.72rem; color: var(--color-accent);
+  background: color-mix(in srgb, var(--color-accent) 10%, transparent);
+  padding: 0.15rem 0.55rem; border-radius: 99px; white-space: nowrap;
+}
+.bb-job-tag .spin { animation: bb-tag-spin 1s linear infinite; }
+@keyframes bb-tag-spin { to { transform: rotate(360deg); } }
+.bb-legacy-banner {
+  display: inline-flex; align-items: center; gap: 0.35rem;
+  font-size: 0.75rem; color: var(--color-text-muted);
+  padding: 0.25rem 0.6rem; border-radius: 6px; margin-bottom: 0.6rem;
+  background: var(--color-bg-sunken); border: 1px solid var(--color-border-subtle);
+}
 .focus-block { border: 1px solid var(--color-border-subtle); border-radius: 12px; background: var(--color-bg-elevated); overflow: hidden; }
 .focus-toggle {
   display: flex; align-items: center; gap: 0.5rem; width: 100%;
@@ -654,6 +858,7 @@ async function handleDebateRetry() {
   flex: 1; min-width: 200px; padding: 0.35rem 0.6rem;
   border: 1px solid var(--color-border-subtle); border-radius: 8px;
   background: var(--color-bg); color: var(--color-text-primary); font-size: 0.8rem;
+  resize: vertical; font-family: inherit; line-height: 1.55;
 }
 
 

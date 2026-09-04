@@ -80,8 +80,9 @@ func TestBoardEnrichmentRoutes_DisabledBoardRejected(t *testing.T) {
 	}
 }
 
-// M6.2 异步触发：立即返回 started，后台跑完落库，status 轮询拿 result_id，
-// 详情携带 sectors 五字段（fix-board-analysis-material 8.x 重写）。
+// M9.1 现有 trigger = 简报（board_brief）：202 帧携唯一 job_id + kind；
+// 后台跑完落库，status 轮询（按 job_id 与按 board 双入口）拿 result_id，
+// 详情携带 sectors 五字段（fix-board-analysis-material 8.x + D9）。
 func TestBoardEnrichmentRoutes_Trigger(t *testing.T) {
 	db := setupHandlerTestDB(t)
 	res := boardResultRow(t, db, 5, "命题甲")
@@ -91,17 +92,44 @@ func TestBoardEnrichmentRoutes_Trigger(t *testing.T) {
 	w := httptest.NewRecorder()
 	req, _ := http.NewRequest("POST", "/semantic-boards/5/enrichment/analysis/trigger", nil)
 	r.ServeHTTP(w, req)
-	if w.Code != http.StatusOK || !jsonContains(w.Body.String(), `"started"`) {
-		t.Fatalf("trigger: want 200 started, got %d body=%s", w.Code, w.Body.String())
+	var started struct {
+		Status   string `json:"status"`
+		JobID    string `json:"job_id"`
+		JobKind  string `json:"job_kind"`
+		Scope    string `json:"scope"`
+		TargetID uint   `json:"target_id"`
+	}
+	if w.Code != http.StatusAccepted {
+		t.Fatalf("trigger: want 202, got %d body=%s", w.Code, w.Body.String())
+	}
+	var envelope struct {
+		Data json.RawMessage `json:"data"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &envelope); err != nil {
+		t.Fatalf("parse trigger body: %v", err)
+	}
+	if err := json.Unmarshal(envelope.Data, &started); err != nil {
+		t.Fatalf("parse trigger data: %v", err)
+	}
+	if started.Status != "started" || started.JobID == "" || started.JobKind != "board_brief" || started.Scope != "board" || started.TargetID != 5 {
+		t.Fatalf("trigger envelope: %+v", started)
 	}
 
-	st := pollBoardAnalysisStatus(t, r, 5)
+	// 按 job_id 精确轮询与按 board 兼容入口均能拿到终态。
+	st := pollJobStatus(t, r, started.JobID)
 	if errStr, _ := st["error"].(string); errStr != "" {
 		t.Fatalf("background analysis failed: %s", errStr)
 	}
+	if kind, _ := st["job_kind"].(string); kind != "board_brief" {
+		t.Fatalf("status job_kind = %v, want board_brief", st["job_kind"])
+	}
+	stBoard := pollBoardAnalysisStatus(t, r, 5)
 	gotID, _ := st["result_id"].(float64)
 	if uint(gotID) != res.ID {
 		t.Fatalf("result_id = %v, want %d", st["result_id"], res.ID)
+	}
+	if bID, _ := stBoard["result_id"].(float64); uint(bID) != res.ID {
+		t.Fatalf("board-entry result_id = %v, want %d", stBoard["result_id"], res.ID)
 	}
 
 	// Detail carries the five-sector payload.
@@ -115,29 +143,76 @@ func TestBoardEnrichmentRoutes_Trigger(t *testing.T) {
 	}
 }
 
-// M8.x 防重入：同板块在跑时重复触发 → 409；跑完后可再触发。
+// M9.4 防重入：同板块在跑时重复触发 → 409 且 data 携当前 job 身份；跑完后可再触发。
 func TestBoardEnrichmentRoutes_AlreadyRunning(t *testing.T) {
 	db := setupHandlerTestDB(t)
 	block := make(chan struct{})
 	orch := &mockOrchestrator{block: block}
 	r := newBoardAnalysisRouter(t, orch, db)
 
-	do := func() int {
+	do := func() *httptest.ResponseRecorder {
 		w := httptest.NewRecorder()
 		req, _ := http.NewRequest("POST", "/semantic-boards/5/enrichment/analysis/trigger", nil)
 		r.ServeHTTP(w, req)
-		return w.Code
+		return w
 	}
-	if code := do(); code != http.StatusOK {
-		t.Fatalf("first trigger: want 200, got %d", code)
+	first := do()
+	if first.Code != http.StatusAccepted {
+		t.Fatalf("first trigger: want 202, got %d", first.Code)
 	}
-	if code := do(); code != http.StatusConflict {
-		t.Fatalf("second trigger while running: want 409, got %d", code)
+	var env struct {
+		Data struct {
+			JobID string `json:"job_id"`
+		} `json:"data"`
 	}
+	_ = json.Unmarshal(first.Body.Bytes(), &env)
+
+	second := do()
+	if second.Code != http.StatusConflict {
+		t.Fatalf("second trigger while running: want 409, got %d", second.Code)
+	}
+	var conflict struct {
+		Data map[string]any `json:"data"`
+	}
+	if err := json.Unmarshal(second.Body.Bytes(), &conflict); err != nil {
+		t.Fatalf("parse 409 body: %v", err)
+	}
+	if id, _ := conflict.Data["job_id"].(string); id != env.Data.JobID {
+		t.Fatalf("409 data.job_id = %v, want the running job %q", conflict.Data["job_id"], env.Data.JobID)
+	}
+	if kind, _ := conflict.Data["job_kind"].(string); kind != "board_brief" {
+		t.Fatalf("409 data.job_kind = %v, want board_brief", conflict.Data["job_kind"])
+	}
+	if running, _ := conflict.Data["running"].(bool); !running {
+		t.Fatalf("409 data.running must be true: %v", conflict.Data)
+	}
+
 	close(block)
 	pollBoardAnalysisStatus(t, r, 5)
-	if code := do(); code != http.StatusOK {
-		t.Fatalf("re-trigger after finish: want 200, got %d", code)
+	if code := do().Code; code != http.StatusAccepted {
+		t.Fatalf("re-trigger after finish: want 202, got %d", code)
+	}
+}
+
+// pollJobStatus polls the by-job_id status endpoint until finished (D9).
+func pollJobStatus(t *testing.T, r *gin.Engine, jobID string) map[string]any {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("GET", "/enrichment/analysis-status?job_id="+jobID, nil)
+		r.ServeHTTP(w, req)
+		var resp struct {
+			Data map[string]any `json:"data"`
+		}
+		_ = json.Unmarshal(w.Body.Bytes(), &resp)
+		if finished, _ := resp.Data["finished"].(bool); finished {
+			return resp.Data
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("job %s not finished in 5s: %v", jobID, resp.Data)
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 }
 
@@ -213,6 +288,63 @@ func TestBoardEnrichmentRoutes_ListAndDetail(t *testing.T) {
 	}
 }
 
+// 6.x review hardening：详情读路径显式要求 analysis_scope=board。造一条脏行
+// （semantic_board_id=5 但 analysis_scope='topic'，直接 GORM Create 绕过
+// repository.CreateTopicEnrichmentResult 的形状校验，模拟历史/手工写入的
+// 不一致数据）：属主校验通过但 scope 不一致 → 统一 404，不得当作 board 档
+// 报告透出；列表（repository scope 过滤）同样不泄漏，不变量未被削弱。
+func TestBoardEnrichmentRoutes_DetailScopeMismatch(t *testing.T) {
+	db := setupHandlerTestDB(t)
+	b1 := boardResultRow(t, db, 5, "命题一")
+	// 脏 fixture：板块属主 + topic scope（repository 写入路径不可能产生，
+	// 但原始/历史行可能；读路径必须自防御）。
+	dirty := &repository.TopicEnrichmentResult{
+		SemanticBoardID: repository.BoardIDPtr(5),
+		AnalysisScope:   "topic",
+		ResultKind:      "topic_analysis",
+		Sectors:         json.RawMessage(`{"form":"sparse"}`),
+		SessionID:       "scope-mismatch-fixture",
+	}
+	if err := db.Create(dirty).Error; err != nil {
+		t.Fatalf("seed dirty scope row: %v", err)
+	}
+	r := newBoardAnalysisRouter(t, &mockOrchestrator{}, db)
+
+	// 详情：同板块属主但 scope 不一致 → 404（与跨板块/不存在统一，不区分）。
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/semantic-boards/5/enrichment/analysis/results/"+itoa(dirty.ID), nil)
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("scope-mismatch detail: want 404, got %d body=%s", w.Code, w.Body.String())
+	}
+	if strings.Contains(w.Body.String(), "scope-mismatch-fixture") {
+		t.Fatalf("scope-mismatch row must not leak in body: %s", w.Body.String())
+	}
+
+	// 列表：脏行不泄漏（repository scope 过滤不变量保持）。
+	w2 := httptest.NewRecorder()
+	req2, _ := http.NewRequest("GET", "/semantic-boards/5/enrichment/analysis/results", nil)
+	r.ServeHTTP(w2, req2)
+	if w2.Code != http.StatusOK {
+		t.Fatalf("list: %d", w2.Code)
+	}
+	body := w2.Body.String()
+	if jsonContains(body, "scope-mismatch-fixture") {
+		t.Fatalf("scope-mismatch row leaked into list: %s", body)
+	}
+	if !jsonContains(body, "命题一") {
+		t.Fatal("clean board result must still be listed")
+	}
+
+	// 对照：正常 board 档行仍 200（守卫不误伤）。
+	w3 := httptest.NewRecorder()
+	req3, _ := http.NewRequest("GET", "/semantic-boards/5/enrichment/analysis/results/"+itoa(b1.ID), nil)
+	r.ServeHTTP(w3, req3)
+	if w3.Code != http.StatusOK {
+		t.Fatalf("clean board detail: want 200, got %d", w3.Code)
+	}
+}
+
 // M6.4 prefill_lens：单泳道 trigger body 可选字段透传（异步化重写：错误进
 // status，透传断言不变）。
 func TestTopicTrigger_PrefillLens(t *testing.T) {
@@ -224,8 +356,8 @@ func TestTopicTrigger_PrefillLens(t *testing.T) {
 	req, _ := http.NewRequest("POST", "/persistent-topics/501/enrichment/results/trigger", bodyReader(`{"prefill_lens":"供需错配"}`))
 	req.Header.Set("Content-Type", "application/json")
 	r.ServeHTTP(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("trigger: want 200 started, got %d", w.Code)
+	if w.Code != http.StatusAccepted {
+		t.Fatalf("trigger: want 202 started, got %d body=%s", w.Code, w.Body.String())
 	}
 
 	st := pollTopicAnalysisStatus(t, r, 501)
